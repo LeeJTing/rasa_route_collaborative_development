@@ -1,0 +1,1 @@
+class SupabaseService { const SupabaseService(); }
