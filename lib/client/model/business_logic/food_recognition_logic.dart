@@ -1,6 +1,6 @@
-import '../facades/discovery_logic_facade.dart';
-import '../../repositories/facades/recognition_repository.dart';
-import '../../repositories/facades/food_repository_facade.dart';
+import 'discovery_logic_facade.dart';
+import '../repositories/recognition_repository.dart';
+import '../repositories/food_repository_facade.dart';
 
 class FoodRecognitionLogic implements DiscoveryLogicFacade {
   final RecognitionRepository recognitionRepository;
