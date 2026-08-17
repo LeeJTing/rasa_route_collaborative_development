@@ -27,9 +27,9 @@ abstract final class Env {
   /// start-up rather than at the first network call.
   static void validate() {
     const List<String> required = <String>[
-      keySupabaseUrl,
-      keySupabasePublishableKey,
-      keyGeminiApiKey,
+      _keySupabaseUrl,
+      _keySupabasePublishableKey,
+      _keyGeminiApiKey,
     ];
     final List<String> missing = required
         .where((String key) => (_values[key] ?? '').trim().isEmpty)
@@ -47,56 +47,56 @@ abstract final class Env {
   // Keys - must match .env.example exactly.
   // ---------------------------------------------------------------------------
 
-  static const String keySupabaseUrl = 'SUPABASE_URL';
-  static const String keySupabasePublishableKey = 'SUPABASE_PUBLISHABLE_KEY';
-  static const String keyGeminiApiKey = 'GEMINI_API_KEY';
-  static const String keyGeminiModel = 'GEMINI_MODEL';
-  static const String keyOsmBaseUrl = 'OSM_BASE_URL';
-  static const String keyOsmTileUrl = 'OSM_TILE_URL';
-  static const String keyApiTimeoutSeconds = 'API_TIMEOUT_SECONDS';
-  static const String keyAppEnv = 'APP_ENV';
-  static const String keyVerboseLogging = 'ENABLE_VERBOSE_LOGGING';
-  static const String keyLocationPollSeconds = 'LOCATION_POLL_SECONDS';
-  static const String keyRestaurantSyncMinutes = 'RESTAURANT_SYNC_MINUTES';
+  static const String _keySupabaseUrl = 'SUPABASE_URL';
+  static const String _keySupabasePublishableKey = 'SUPABASE_PUBLISHABLE_KEY';
+  static const String _keyGeminiApiKey = 'GEMINI_API_KEY';
+  static const String _keyGeminiModel = 'GEMINI_MODEL';
+  static const String _keyOsmBaseUrl = 'OSM_BASE_URL';
+  static const String _keyOsmTileUrl = 'OSM_TILE_URL';
+  static const String _keyApiTimeoutSeconds = 'API_TIMEOUT_SECONDS';
+  static const String _keyAppEnv = 'APP_ENV';
+  static const String _keyVerboseLogging = 'ENABLE_VERBOSE_LOGGING';
+  static const String _keyLocationPollSeconds = 'LOCATION_POLL_SECONDS';
+  static const String _keyRestaurantSyncMinutes = 'RESTAURANT_SYNC_MINUTES';
 
   // ---------------------------------------------------------------------------
   // Getters
   // ---------------------------------------------------------------------------
 
-  static String get supabaseUrl => _read(keySupabaseUrl);
+  static String get supabaseUrl => _read(_keySupabaseUrl);
 
   static String get supabasePublishableKey =>
-      _read(keySupabasePublishableKey);
+      _read(_keySupabasePublishableKey);
 
-  static String get geminiApiKey => _read(keyGeminiApiKey);
+  static String get geminiApiKey => _read(_keyGeminiApiKey);
 
   static String get geminiModel =>
-      _read(keyGeminiModel, fallback: 'gemini-2.5-flash');
+      _read(_keyGeminiModel, fallback: 'gemini-2.5-flash');
 
   static String get osmBaseUrl =>
-      _read(keyOsmBaseUrl, fallback: 'https://overpass-api.de/api');
+      _read(_keyOsmBaseUrl, fallback: 'https://overpass-api.de/api');
 
   static String get osmTileUrl => _read(
-    keyOsmTileUrl,
+    _keyOsmTileUrl,
     fallback: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   );
 
   static Duration get apiTimeout =>
-      Duration(seconds: _readInt(keyApiTimeoutSeconds, 20));
+      Duration(seconds: _readInt(_keyApiTimeoutSeconds, 20));
 
   static Duration get locationPollInterval =>
-      Duration(seconds: _readInt(keyLocationPollSeconds, 30));
+      Duration(seconds: _readInt(_keyLocationPollSeconds, 30));
 
   static Duration get restaurantSyncInterval =>
-      Duration(minutes: _readInt(keyRestaurantSyncMinutes, 15));
+      Duration(minutes: _readInt(_keyRestaurantSyncMinutes, 15));
 
   /// One of `dev`, `staging`, `prod`.
-  static String get appEnv => _read(keyAppEnv, fallback: 'dev');
+  static String get appEnv => _read(_keyAppEnv, fallback: 'dev');
 
   static bool get isProduction => appEnv == 'prod';
 
   static bool get verboseLogging =>
-      _readBool(keyVerboseLogging, fallback: !isProduction);
+      _readBool(_keyVerboseLogging, fallback: !isProduction);
 
   // ---------------------------------------------------------------------------
   // Internals
