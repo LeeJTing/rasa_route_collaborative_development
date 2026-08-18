@@ -10,6 +10,10 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.17.2
+
+  # Connects each View to its ViewModel.
+  provider: ^6.1.2
 
 dev_dependencies:
   flutter_test:
@@ -18,5 +22,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/mockups/
