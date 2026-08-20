@@ -100,8 +100,9 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color =
-        isSelected ? AppColors.primary : AppColors.textSecondary;
+    final Color color = isSelected
+        ? AppColors.primary
+        : AppColors.textSecondary;
 
     return Semantics(
       selected: isSelected,

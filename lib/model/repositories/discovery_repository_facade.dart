@@ -1,5 +1,6 @@
 import 'recognition_repository.dart';
 import 'restaurant_repository.dart';
+import '../../domain_model/restaurant.dart';
 
 /// Everything about finding food out in the world: restaurants, menus and photo recognition.
 ///
@@ -11,4 +12,6 @@ class DiscoveryRepositoryFacade {
 
   final RestaurantRepository restaurant = RestaurantRepository();
   final RecognitionRepository recognition = RecognitionRepository();
+
+  Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 }

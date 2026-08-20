@@ -15,7 +15,15 @@ import '../model/business_logic/tourist_information_logic_facade.dart';
 class MainShellViewModel extends BaseViewModel {
   MainShellViewModel();
 
-  int currentIndex = 0;
+  int _currentIndex = 0;
+  int get currentIndex => _currentIndex;
 
-  final TouristInformationLogicFacade touristLogic = TouristInformationLogicFacade();
+  void selectTab(int index) {
+    if (index < 0 || index > 2 || index == _currentIndex) return;
+    _currentIndex = index;
+    safeNotifyListeners();
+  }
+
+  final TouristInformationLogicFacade touristLogic =
+      TouristInformationLogicFacade();
 }

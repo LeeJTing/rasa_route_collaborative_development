@@ -58,8 +58,9 @@ class LandmarkItemDataModel implements JsonModel {
       foodCategory: JsonReader.asStringOrNull(json['food_category']),
       description: JsonReader.asStringOrNull(json['description']),
       origin: JsonReader.asStringOrNull(json['origin']),
-      culturalBackground:
-          JsonReader.asStringOrNull(json['cultural_background']),
+      culturalBackground: JsonReader.asStringOrNull(
+        json['cultural_background'],
+      ),
       imageUrl: JsonReader.asStringOrNull(json['image_url']),
       imageId: JsonReader.asStringOrNull(json['image_id']),
       itemPrice: JsonReader.asDoubleOrNull(json['item_price']),

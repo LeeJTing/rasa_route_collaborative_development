@@ -56,10 +56,10 @@ class RestaurantDataModel implements JsonModel {
       phone: JsonReader.asStringOrNull(json['phone']),
       website: JsonReader.asStringOrNull(json['website']),
       openingHours: JsonReader.asStringOrNull(json['opening_hours']),
-      restaurantImageId:
-          JsonReader.asStringOrNull(json['restaurant_image_id']),
-      restaurantImageUrl:
-          JsonReader.asStringOrNull(json['restaurant_image_url']),
+      restaurantImageId: JsonReader.asStringOrNull(json['restaurant_image_id']),
+      restaurantImageUrl: JsonReader.asStringOrNull(
+        json['restaurant_image_url'],
+      ),
     );
   }
 

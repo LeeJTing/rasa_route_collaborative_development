@@ -14,7 +14,8 @@ class UpdateRestaurantFacade {
 
   static final UpdateRestaurantFacade _instance = UpdateRestaurantFacade._();
 
-  final List<RestaurantUpdateListener> _listeners = <RestaurantUpdateListener>[];
+  final List<RestaurantUpdateListener> _listeners =
+      <RestaurantUpdateListener>[];
 
   List<Restaurant> _latestNearby = const <Restaurant>[];
 

@@ -1,6 +1,8 @@
 import 'food_discovery_logic.dart';
 import 'food_recognition_logic.dart';
 import 'restaurant_discovery_logic.dart';
+import '../../domain_model/restaurant.dart';
+import '../data_models/location_data_model.dart';
 
 /// Finding food in the real world: restaurants, menus and photo recognition.
 /// Used by the RestaurantRecommendation, RestaurantDetail, RestaurantItemList
@@ -12,7 +14,18 @@ import 'restaurant_discovery_logic.dart';
 class DiscoveryLogicFacade {
   DiscoveryLogicFacade();
 
-  final RestaurantDiscoveryLogic restaurantDiscovery = RestaurantDiscoveryLogic();
+  final RestaurantDiscoveryLogic restaurantDiscovery =
+      RestaurantDiscoveryLogic();
   final FoodDiscoveryLogic foodDiscovery = FoodDiscoveryLogic();
   final FoodRecognitionLogic foodRecognition = FoodRecognitionLogic();
+
+  Future<List<Restaurant>> getQuickModeRestaurants({
+    required LocationDataModel location,
+    required double radiusKm,
+    required int limit,
+  }) => restaurantDiscovery.nearby(
+    location: location,
+    radiusKm: radiusKm,
+    limit: limit,
+  );
 }

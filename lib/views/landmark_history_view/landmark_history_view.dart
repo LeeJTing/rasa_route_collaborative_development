@@ -49,12 +49,17 @@ class _LandmarkHistoryViewState extends State<LandmarkHistoryView> {
         appBar: const AppTopBar(title: 'My contributions'),
         body: SafeArea(
           child: Consumer<LandmarkHistoryViewModel>(
-            builder: (BuildContext context, LandmarkHistoryViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('LandmarkHistoryView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  LandmarkHistoryViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('LandmarkHistoryView')),
+                  );
+                },
           ),
         ),
       ),

@@ -49,12 +49,17 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
         appBar: const AppTopBar(title: 'Landmark'),
         body: SafeArea(
           child: Consumer<LandmarkDetailViewModel>(
-            builder: (BuildContext context, LandmarkDetailViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('LandmarkDetailView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  LandmarkDetailViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('LandmarkDetailView')),
+                  );
+                },
           ),
         ),
       ),
