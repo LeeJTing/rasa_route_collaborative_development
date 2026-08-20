@@ -14,11 +14,32 @@ abstract final class Env {
 
   static const String _fileName = '.env';
 
-  static final Map<String, String> _values = <String, String>{};
+  static final Map<String, String> _values = <String, String>{
+    _keySupabaseUrl: const String.fromEnvironment('SUPABASE_URL'),
+    _keySupabasePublishableKey: const String.fromEnvironment(
+      'SUPABASE_PUBLISHABLE_KEY',
+    ),
+    _keyGeminiApiKey: const String.fromEnvironment('GEMINI_API_KEY'),
+    _keyGeminiModel: const String.fromEnvironment('GEMINI_MODEL'),
+    _keyOsmBaseUrl: const String.fromEnvironment('OSM_BASE_URL'),
+    _keyOsmTileUrl: const String.fromEnvironment('OSM_TILE_URL'),
+    _keyApiTimeoutSeconds: const String.fromEnvironment(
+      'API_TIMEOUT_SECONDS',
+    ),
+    _keyAppEnv: const String.fromEnvironment('APP_ENV'),
+    _keyVerboseLogging: const String.fromEnvironment('ENABLE_VERBOSE_LOGGING'),
+    _keyLocationPollSeconds: const String.fromEnvironment(
+      'LOCATION_POLL_SECONDS',
+    ),
+    _keyRestaurantSyncMinutes: const String.fromEnvironment(
+      'RESTAURANT_SYNC_MINUTES',
+    ),
+  };
 
   static bool _loaded = false;
 
-  /// Loads and validates `.env`. Call once, first thing in `main()`.
+  /// Marks compile-time configuration as ready. Supply values with Flutter's
+  /// `--dart-define` flags; empty values keep the app in offline preview mode.
   static Future<void> load({String fileName = _fileName}) async {
     _loaded = true;
   }
@@ -65,8 +86,7 @@ abstract final class Env {
 
   static String get supabaseUrl => _read(_keySupabaseUrl);
 
-  static String get supabasePublishableKey =>
-      _read(_keySupabasePublishableKey);
+  static String get supabasePublishableKey => _read(_keySupabasePublishableKey);
 
   static String get geminiApiKey => _read(_keyGeminiApiKey);
 

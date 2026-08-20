@@ -49,12 +49,17 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView> {
         appBar: const AppTopBar(title: 'What is this?'),
         body: SafeArea(
           child: Consumer<FoodRecognitionViewModel>(
-            builder: (BuildContext context, FoodRecognitionViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('FoodRecognitionView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  FoodRecognitionViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('FoodRecognitionView')),
+                  );
+                },
           ),
         ),
       ),

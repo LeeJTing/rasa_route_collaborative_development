@@ -19,7 +19,8 @@ import 'current_location_facade.dart';
 ///   * state goes in private fields with read-only getters; commands wrap their
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
-class DashboardViewModel extends BaseViewModel implements CurrentLocationListener {
+class DashboardViewModel extends BaseViewModel
+    implements CurrentLocationListener {
   DashboardViewModel();
 
   final LandmarkLogicFacade landmarkLogic = LandmarkLogicFacade();

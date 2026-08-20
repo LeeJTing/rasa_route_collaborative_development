@@ -15,8 +15,7 @@ class DeviceCapabilityManager {
 
   DeviceCapabilityManager._();
 
-  static final DeviceCapabilityManager _instance =
-      DeviceCapabilityManager._();
+  static final DeviceCapabilityManager _instance = DeviceCapabilityManager._();
 
   // --- location --------------------------------------------------------------
 

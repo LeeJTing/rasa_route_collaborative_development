@@ -17,5 +17,6 @@ class FavouriteCollectionViewModel extends BaseViewModel {
   FavouriteCollectionViewModel();
 
   final FoodLogicFacade foodLogic = FoodLogicFacade();
-  final TouristInformationLogicFacade touristLogic = TouristInformationLogicFacade();
+  final TouristInformationLogicFacade touristLogic =
+      TouristInformationLogicFacade();
 }

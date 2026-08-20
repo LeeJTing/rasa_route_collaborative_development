@@ -128,10 +128,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
                 // Trailing ------------------------------------------------
                 ...actions,
                 if (_hasProfile)
-                  _ProfileAvatar(
-                    imageUrl: profileImageUrl,
-                    onTap: onProfileTap,
-                  )
+                  _ProfileAvatar(imageUrl: profileImageUrl, onTap: onProfileTap)
                 else if (actions.isEmpty)
                   // Balances the leading slot so the title stays centred.
                   const SizedBox(width: AppSizes.minTapTarget),
@@ -146,11 +143,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
 
 /// Square tap target holding one app-bar icon.
 class _BarIconButton extends StatelessWidget {
-  const _BarIconButton({
-    required this.icon,
-    required this.onTap,
-    this.tooltip,
-  });
+  const _BarIconButton({required this.icon, required this.onTap, this.tooltip});
 
   final IconData icon;
   final VoidCallback onTap;

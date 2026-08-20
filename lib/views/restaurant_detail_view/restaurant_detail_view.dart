@@ -49,12 +49,17 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
         appBar: const AppTopBar(title: 'Restaurant'),
         body: SafeArea(
           child: Consumer<RestaurantDetailViewModel>(
-            builder: (BuildContext context, RestaurantDetailViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('RestaurantDetailView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  RestaurantDetailViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('RestaurantDetailView')),
+                  );
+                },
           ),
         ),
       ),

@@ -43,7 +43,9 @@ abstract final class AppRadius {
   static const double pill = 999;
 
   static const BorderRadius cardRadius = BorderRadius.all(Radius.circular(md));
-  static const BorderRadius buttonRadius = BorderRadius.all(Radius.circular(lg));
+  static const BorderRadius buttonRadius = BorderRadius.all(
+    Radius.circular(lg),
+  );
   static const BorderRadius sheetRadius = BorderRadius.vertical(
     top: Radius.circular(xl),
   );
@@ -86,4 +88,28 @@ abstract final class AppSizes {
   static const double avatarSm = 32;
   static const double avatarMd = 48;
   static const double avatarLg = 96;
+
+  /// Figma's catalogue search field.
+  static const double searchFieldHeight = 46;
+
+  /// Figma's compact Sort / Filter / Select controls.
+  static const double compactControlHeight = 44;
+
+  /// Images inside catalogue food cards.
+  static const double foodCardImage = 92;
+
+  /// Images inside restaurant cards.
+  static const double restaurantCardImage = 80;
+
+  /// Main image on the Prawn Noodle details screen.
+  static const double foodHeroImage = 164;
+
+  /// Images used in pairing rows.
+  static const double pairingImage = 60;
+
+  /// Images used in the similar-food strip.
+  static const double recommendationImage = 100;
+
+  /// Status icon used in notice and warning banners.
+  static const double bannerIcon = 30;
 }

@@ -49,12 +49,17 @@ class _ProfileSetUpViewState extends State<ProfileSetUpView> {
         appBar: const AppTopBar(title: 'Set up your taste'),
         body: SafeArea(
           child: Consumer<ProfileSetUpViewModel>(
-            builder: (BuildContext context, ProfileSetUpViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('ProfileSetUpView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  ProfileSetUpViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('ProfileSetUpView')),
+                  );
+                },
           ),
         ),
       ),

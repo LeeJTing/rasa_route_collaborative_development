@@ -39,11 +39,8 @@ abstract final class AppNavigator {
       _navigator.pushReplacementNamed<T, void>(routeName);
 
   /// Clear the whole stack and land on [routeName] - logout, for example.
-  static Future<T?> resetTo<T>(String routeName) =>
-      _navigator.pushNamedAndRemoveUntil<T>(
-        routeName,
-        (Route<dynamic> route) => false,
-      );
+  static Future<T?> resetTo<T>(String routeName) => _navigator
+      .pushNamedAndRemoveUntil<T>(routeName, (Route<dynamic> route) => false);
 
   /// Pop the top route, optionally returning [result].
   static void pop<T>([T? result]) {
