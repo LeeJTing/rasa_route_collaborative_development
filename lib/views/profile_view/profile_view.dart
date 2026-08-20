@@ -49,12 +49,13 @@ class _ProfileViewState extends State<ProfileView> {
         appBar: const AppTopBar(title: 'Profile'),
         body: SafeArea(
           child: Consumer<ProfileViewModel>(
-            builder: (BuildContext context, ProfileViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('ProfileView')),
-              );
-            },
+            builder:
+                (BuildContext context, ProfileViewModel viewModel, Widget? _) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('ProfileView')),
+                  );
+                },
           ),
         ),
       ),

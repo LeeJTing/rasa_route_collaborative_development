@@ -24,8 +24,9 @@ class FoodPreferenceDataModel implements JsonModel {
   factory FoodPreferenceDataModel.fromJson(Map<String, dynamic> json) {
     return FoodPreferenceDataModel(
       foodPreferenceId: JsonReader.asInt(json['food_preference_id']),
-      preferredCategories:
-          JsonReader.asStringOrNull(json['preferred_categories']),
+      preferredCategories: JsonReader.asStringOrNull(
+        json['preferred_categories'],
+      ),
       preferredTaste: JsonReader.asStringOrNull(json['preferred_taste']),
     );
   }

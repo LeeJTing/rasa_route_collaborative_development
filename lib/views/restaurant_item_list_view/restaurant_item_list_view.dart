@@ -49,12 +49,17 @@ class _RestaurantItemListViewState extends State<RestaurantItemListView> {
         appBar: const AppTopBar(title: 'Menu'),
         body: SafeArea(
           child: Consumer<RestaurantItemListViewModel>(
-            builder: (BuildContext context, RestaurantItemListViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('RestaurantItemListView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  RestaurantItemListViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('RestaurantItemListView')),
+                  );
+                },
           ),
         ),
       ),

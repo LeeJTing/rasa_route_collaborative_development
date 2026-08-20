@@ -98,16 +98,14 @@ abstract final class JsonReader {
     if (value is! List) return <T>[];
     return value
         .whereType<Map<Object?, Object?>>()
-        .map((Map<Object?, Object?> e) => fromJson(Map<String, dynamic>.from(e)))
+        .map(
+          (Map<Object?, Object?> e) => fromJson(Map<String, dynamic>.from(e)),
+        )
         .toList(growable: false);
   }
 
   /// Resolves an enum from its `name`, falling back when absent/unknown.
-  static T asEnum<T extends Enum>(
-    Object? value,
-    List<T> values,
-    T fallback,
-  ) {
+  static T asEnum<T extends Enum>(Object? value, List<T> values, T fallback) {
     final String raw = value?.toString() ?? '';
     for (final T candidate in values) {
       if (candidate.name == raw) return candidate;

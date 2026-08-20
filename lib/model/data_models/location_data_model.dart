@@ -23,8 +23,10 @@ class LocationDataModel implements JsonModel {
   final DateTime? capturedAt;
 
   /// Sentinel used before the first fix arrives.
-  static const LocationDataModel unknown =
-      LocationDataModel(latitude: 0, longitude: 0);
+  static const LocationDataModel unknown = LocationDataModel(
+    latitude: 0,
+    longitude: 0,
+  );
 
   bool get isKnown => latitude != 0 || longitude != 0;
 

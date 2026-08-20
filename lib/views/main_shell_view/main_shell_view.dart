@@ -50,7 +50,7 @@ class _MainShellViewState extends State<MainShellView> {
             body: IndexedStack(index: vm.currentIndex, children: _tabs),
             bottomNavigationBar: AppBottomNavBar(
               currentIndex: vm.currentIndex,
-              onTabSelected: (int index) {}, // change to func in viewmodel
+              onTabSelected: vm.selectTab,
             ),
           );
         },

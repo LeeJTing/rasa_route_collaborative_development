@@ -49,12 +49,17 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
         appBar: const AppTopBar(title: 'Add a landmark'),
         body: SafeArea(
           child: Consumer<AddLandmarkViewModel>(
-            builder: (BuildContext context, AddLandmarkViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('AddLandmarkView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  AddLandmarkViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('AddLandmarkView')),
+                  );
+                },
           ),
         ),
       ),

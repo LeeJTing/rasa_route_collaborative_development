@@ -10,6 +10,7 @@ import '../repositories/food_repository_facade.dart';
 class FoodRecognitionLogic {
   FoodRecognitionLogic();
 
-  final DiscoveryRepositoryFacade discoveryRepository = DiscoveryRepositoryFacade();
+  final DiscoveryRepositoryFacade discoveryRepository =
+      DiscoveryRepositoryFacade();
   final FoodRepositoryFacade foodRepository = FoodRepositoryFacade();
 }

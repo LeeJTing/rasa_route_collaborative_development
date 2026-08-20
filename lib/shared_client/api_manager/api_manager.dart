@@ -24,5 +24,54 @@ class APIManager {
   final GeminiService _gemini = GeminiService();
 
   SupabaseService get supabase => _supabase;
+  GeminiService get gemini => _gemini;
 
+  // ---------------------------------------------------------------------------
+  // Table names - the only place a table string is spelled out.
+  // ---------------------------------------------------------------------------
+
+  static const String tableLocalFood = 'local_food';
+  static const String tableLocalFoodImage = 'local_food_image';
+  static const String tableFavouriteFood = 'favourite_food';
+  static const String tableRestaurant = 'restaurant';
+  static const String tableRestaurantItem = 'restaurant_item';
+  static const String tableOpeningHours = 'opening_hours';
+
+  // ---------------------------------------------------------------------------
+  // Generic row access, forwarded straight to SupabaseService.
+  // ---------------------------------------------------------------------------
+
+  Future<List<Map<String, dynamic>>> selectAll(
+    String table, {
+    String columns = '*',
+    Map<String, Object?> eq = const <String, Object?>{},
+    String? orderBy,
+    bool ascending = true,
+    int? limit,
+  }) => _supabase.selectAll(
+    table,
+    columns: columns,
+    eq: eq,
+    orderBy: orderBy,
+    ascending: ascending,
+    limit: limit,
+  );
+
+  Future<Map<String, dynamic>?> selectOne(
+    String table, {
+    String columns = '*',
+    required Map<String, Object?> eq,
+  }) => _supabase.selectOne(table, columns: columns, eq: eq);
+
+  Future<void> insertRow(String table, Map<String, dynamic> values) =>
+      _supabase.insertRow(table, values);
+
+  Future<void> deleteRows(String table, {required Map<String, Object?> eq}) =>
+      _supabase.deleteRows(table, eq: eq);
+
+  /// The signed-in user's id, or `''` when nobody is signed in.
+  String get currentUserId => _supabase.currentUserId;
+
+  /// Plain-text prompt to Gemini, with the app's configured timeout + retry.
+  Future<String> askGemini(String prompt) => _gemini.generateText(prompt);
 }

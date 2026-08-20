@@ -5,10 +5,7 @@
 /// converts a data model into one of these. They travel upward unchanged from
 /// repository to logic to ViewModel to View.
 class DietaryRestriction {
-  const DietaryRestriction({
-    required this.id,
-    required this.name,
-  });
+  const DietaryRestriction({required this.id, required this.name});
 
   final int id;
   final String name;

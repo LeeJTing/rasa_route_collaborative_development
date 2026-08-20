@@ -15,5 +15,6 @@ import '../model/business_logic/tourist_information_logic_facade.dart';
 class ProfileSetUpViewModel extends BaseViewModel {
   ProfileSetUpViewModel();
 
-  final TouristInformationLogicFacade touristLogic = TouristInformationLogicFacade();
+  final TouristInformationLogicFacade touristLogic =
+      TouristInformationLogicFacade();
 }

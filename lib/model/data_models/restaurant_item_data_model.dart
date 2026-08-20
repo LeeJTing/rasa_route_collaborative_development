@@ -31,8 +31,9 @@ class RestaurantItemDataModel implements JsonModel {
       localFoodId: JsonReader.asInt(json['local_food_id']),
       seasonal: JsonReader.asStringOrNull(json['seasonal']),
       foodCategory: JsonReader.asStringOrNull(json['food_category']),
-      restaurantItemPrice:
-          JsonReader.asDoubleOrNull(json['restaurant_item_price']),
+      restaurantItemPrice: JsonReader.asDoubleOrNull(
+        json['restaurant_item_price'],
+      ),
     );
   }
 

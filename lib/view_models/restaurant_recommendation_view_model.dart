@@ -5,61 +5,100 @@ import '../model/data_models/location_data_model.dart';
 import 'current_location_facade.dart';
 import 'update_restaurant_facade.dart';
 
-/// ViewModel for `RestaurantRecommendationView`.
-///
-/// Nearby restaurants, refreshed in the background by RestaurantMonitor.
-///
-/// Implements [CurrentLocationListener] and [RestaurantUpdateListener] so a background process can
-/// push updates in through an inbound ViewModel facade. Register in `onInit`,
-/// unregister in `dispose` - forgetting the second leaks this object.
-///
-/// Rules this class follows (see `lib/core/base_view_model.dart`):
-///   * no `package:flutter/material.dart` import and no `BuildContext`;
-///   * it knows the logic facade(s) below and nothing else - never a
-///     repository, never a shared client, never Supabase or Gemini;
-///   * state goes in private fields with read-only getters; commands wrap their
-///     facade call in `runGuarded` so busy and error states behave the same on
-///     every screen.
-class RestaurantRecommendationViewModel extends BaseViewModel implements CurrentLocationListener, RestaurantUpdateListener {
-  RestaurantRecommendationViewModel();
+enum RestaurantSource { google, submitted }
 
+/// Quick Mode state: nearby restaurants, source tab and expanded menus.
+class RestaurantRecommendationViewModel extends BaseViewModel
+    implements CurrentLocationListener, RestaurantUpdateListener {
   final DiscoveryLogicFacade discoveryLogic = DiscoveryLogicFacade();
-
-  /// Inbound: `LocationMonitor` publishes here.
   final CurrentLocationFacade locationFacade = CurrentLocationFacade();
-
-  /// Inbound: `RestaurantMonitor` publishes here.
   final UpdateRestaurantFacade restaurantFacade = UpdateRestaurantFacade();
+
+  LocationDataModel _location = LocationDataModel.unknown;
+  List<Restaurant> _restaurants = const <Restaurant>[];
+  RestaurantSource _source = RestaurantSource.google;
+  final Set<int> _expandedIds = <int>{};
+  double _searchRadius = 1;
+  bool _ascending = true;
+  bool _isLoadingMore = false;
+
+  List<Restaurant> get restaurants =>
+      _source == RestaurantSource.google ? _restaurants : const <Restaurant>[];
+  RestaurantSource get source => _source;
+  double get searchRadius => _searchRadius;
+  bool get isAscending => _ascending;
+  bool get isLoadingMore => _isLoadingMore;
+  bool isExpanded(int id) => _expandedIds.contains(id);
 
   @override
   Future<void> onInit() async {
     locationFacade.register(this);
     restaurantFacade.register(this);
+    _location = locationFacade.latest;
+    await loadNearbyRestaurants();
   }
 
-  /// Pushed by `LocationMonitor` through [CurrentLocationFacade].
-  @override
-  void onCurrentLocationChanged(LocationDataModel location) {
-    _location = location;
+  Future<void> loadNearbyRestaurants() => runGuarded(() async {
+    _searchRadius = 1;
+    _restaurants = await discoveryLogic.getQuickModeRestaurants(
+      location: _location,
+      radiusKm: _searchRadius,
+      limit: 30,
+    );
+    _sort();
+  });
+
+  Future<void> loadMoreRestaurants() => runGuarded(() async {
+    if (_searchRadius >= 10) return;
+    _isLoadingMore = true;
+    _searchRadius += 1;
+    _restaurants = await discoveryLogic.getQuickModeRestaurants(
+      location: _location,
+      radiusKm: _searchRadius,
+      limit: 30,
+    );
+    _sort();
+    _isLoadingMore = false;
+  }, silent: true);
+
+  void selectSource(RestaurantSource source) {
+    _source = source;
     safeNotifyListeners();
   }
 
-  LocationDataModel _location = LocationDataModel.unknown;
+  void toggleExpanded(int id) {
+    _expandedIds.contains(id) ? _expandedIds.remove(id) : _expandedIds.add(id);
+    safeNotifyListeners();
+  }
 
-  LocationDataModel get location => _location;
+  void toggleDistanceSort() {
+    _ascending = !_ascending;
+    _sort();
+    safeNotifyListeners();
+  }
 
-  /// Pushed by `RestaurantMonitor` through [UpdateRestaurantFacade]. The list
-  /// arrives without this screen asking for it - that is the point of an
-  /// inbound ViewModel facade.
+  void _sort() {
+    _restaurants = List<Restaurant>.of(_restaurants)
+      ..sort((Restaurant a, Restaurant b) {
+        final int result = (a.distanceMetres ?? double.infinity).compareTo(
+          b.distanceMetres ?? double.infinity,
+        );
+        return _ascending ? result : -result;
+      });
+  }
+
+  @override
+  void onCurrentLocationChanged(LocationDataModel location) {
+    _location = location;
+    loadNearbyRestaurants();
+  }
+
   @override
   void onNearbyRestaurantsUpdated(List<Restaurant> restaurants) {
     _restaurants = restaurants;
-    setReady();
+    _sort();
+    safeNotifyListeners();
   }
-
-  List<Restaurant> _restaurants = const <Restaurant>[];
-
-  List<Restaurant> get restaurants => _restaurants;
 
   @override
   void dispose() {
