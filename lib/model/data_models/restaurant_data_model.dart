@@ -2,9 +2,8 @@ import '../../core/json_model.dart';
 
 /// Wire shape of `public.restaurant`.
 ///
-/// NOTE: `is_halal`, `reported_times` and `status` appear in the ERD but do not
-/// exist in the database yet (see "Supabase ERD Check Report" section 2). Add
-/// the fields here the same day the migration lands.
+/// `reported_times` and `status` shown in an earlier ERD are not present in the
+/// current database schema.
 class RestaurantDataModel implements JsonModel {
   const RestaurantDataModel({
     required this.restaurantId,

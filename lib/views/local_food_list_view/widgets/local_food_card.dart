@@ -36,7 +36,7 @@ class LocalFoodCard extends StatelessWidget {
         child: Padding(
           padding: AppSpacing.cardPadding,
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
               SizedBox.square(
                 dimension: AppSizes.foodCardImage,
@@ -68,10 +68,11 @@ class LocalFoodCard extends StatelessWidget {
                           label: food.category,
                           style: AppTagStyle.category,
                         ),
-                        AppTagChip(
-                          label: food.cookingStyle,
-                          style: AppTagStyle.taste,
-                        ),
+                        if (food.mainTaste.isNotEmpty)
+                          AppTagChip(
+                            label: food.mainTaste,
+                            style: AppTagStyle.taste,
+                          ),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.sm),

@@ -23,10 +23,12 @@ class FoodKnowledgeRepository {
     food_category,
     cooking_style,
     meal_type,
+    food_type,
     pronunciation_text,
     audio_guide_url,
     synonyms,
-    local_food_image(img_name)
+    local_food_image(img_name),
+    local_food_preference(is_main, food_preference(preferred_taste))
   ''';
 
   final Set<int> _demoFavouriteIds = <int>{1, 2};
@@ -172,6 +174,9 @@ class FoodKnowledgeRepository {
       category: 'Chinese',
       cookingStyle: 'Spicy, Savoury, Rich',
       mealType: 'All-Day Dining',
+      foodType: 'Food',
+      tastes: <String>['Spicy', 'Savoury', 'Rich'],
+      mainTaste: 'Spicy',
       pronunciationText: '[har mee]',
       synonyms: <String>['Penang Hokkien Mee', 'Har Mee'],
       imageUrl: 'assets/images/figma/local_food_01.png',
@@ -187,6 +192,9 @@ class FoodKnowledgeRepository {
       category: 'Chinese',
       cookingStyle: 'Savoury',
       mealType: 'Street Food',
+      foodType: 'Food',
+      tastes: <String>['Savoury', 'Smoky'],
+      mainTaste: 'Savoury',
       imageUrl: 'assets/images/figma/local_food_04.jpeg',
     ),
     LocalFood(
@@ -200,6 +208,9 @@ class FoodKnowledgeRepository {
       category: 'Indian',
       cookingStyle: 'Salty',
       mealType: 'Supper',
+      foodType: 'Food',
+      tastes: <String>['Salty', 'Buttery'],
+      mainTaste: 'Salty',
       imageUrl: 'assets/images/figma/local_food_02.png',
     ),
     LocalFood(
@@ -212,6 +223,9 @@ class FoodKnowledgeRepository {
       category: 'Malay',
       cookingStyle: 'Spicy',
       mealType: 'Dinner',
+      foodType: 'Food',
+      tastes: <String>['Spicy', 'Creamy'],
+      mainTaste: 'Spicy',
       imageUrl: 'assets/images/figma/local_food_06.png',
     ),
     LocalFood(
@@ -225,6 +239,9 @@ class FoodKnowledgeRepository {
       category: 'Chinese',
       cookingStyle: 'Savoury',
       mealType: 'Street Food',
+      foodType: 'Food',
+      tastes: <String>['Savoury', 'Smoky'],
+      mainTaste: 'Savoury',
       imageUrl: 'assets/images/figma/detail_09.png',
     ),
     LocalFood(
@@ -235,9 +252,12 @@ class FoodKnowledgeRepository {
       origin: 'Malaysia',
       culturalBackground: 'Malaysia’s iconic pulled tea.',
       ingredients: 'Black tea, condensed milk',
-      category: 'Beverage',
+      category: 'Malay',
       cookingStyle: 'Creamy',
       mealType: 'All-Day Dining',
+      foodType: 'Beverage',
+      tastes: <String>['Sweet', 'Creamy'],
+      mainTaste: 'Sweet',
       imageUrl: 'assets/images/figma/restaurant_04.png',
     ),
     LocalFood(
@@ -248,9 +268,12 @@ class FoodKnowledgeRepository {
       origin: 'Southeast Asia',
       culturalBackground: 'A cooling Malaysian dessert.',
       ingredients: 'Shaved ice, coconut milk, rice jelly, palm sugar',
-      category: 'Dessert',
+      category: 'Nyonya',
       cookingStyle: 'Sweet',
       mealType: 'High Tea',
+      foodType: 'Dessert',
+      tastes: <String>['Sweet', 'Refreshing'],
+      mainTaste: 'Sweet',
       imageUrl: 'assets/images/figma/detail_05.png',
     ),
     LocalFood(
@@ -262,8 +285,11 @@ class FoodKnowledgeRepository {
       culturalBackground: 'A colourful Peranakan dessert.',
       ingredients: 'Coconut milk, sweet potato, taro, sago',
       category: 'Nyonya',
-      cookingStyle: 'Sweet, Creamy',
-      mealType: 'Dessert',
+      cookingStyle: 'Stewed',
+      mealType: 'High Tea',
+      foodType: 'Dessert',
+      tastes: <String>['Sweet', 'Creamy'],
+      mainTaste: 'Sweet',
       imageUrl: 'assets/images/figma/detail_07.png',
     ),
     LocalFood(
@@ -276,6 +302,9 @@ class FoodKnowledgeRepository {
       category: 'Sarawak',
       cookingStyle: 'Savoury',
       mealType: 'Breakfast',
+      foodType: 'Food',
+      tastes: <String>['Savoury', 'Fragrant'],
+      mainTaste: 'Savoury',
       imageUrl: 'assets/images/figma/detail_03.png',
     ),
     LocalFood(
@@ -288,6 +317,9 @@ class FoodKnowledgeRepository {
       category: 'Malay',
       cookingStyle: 'Roasted, Savoury',
       mealType: 'Dinner',
+      foodType: 'Food',
+      tastes: <String>['Roasted', 'Savoury', 'Smoky'],
+      mainTaste: 'Roasted',
       imageUrl: 'assets/images/figma/detail_02.png',
     ),
   ];

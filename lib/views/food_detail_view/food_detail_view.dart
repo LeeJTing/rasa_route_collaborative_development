@@ -7,9 +7,12 @@ import '../../core/view_state.dart';
 import '../../domain_model/local_food.dart';
 import '../../view_models/food_detail_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/app_image.dart';
 import 'widgets/food_hero_card.dart';
 import 'widgets/food_notice_banner.dart';
+import 'widgets/food_overview_card.dart';
 import 'widgets/food_pairing_list.dart';
+import 'widgets/food_section_card.dart';
 import 'widgets/recommendation_strip.dart';
 
 class FoodDetailView extends StatefulWidget {
@@ -82,137 +85,135 @@ class _FoodDetailViewState extends State<FoodDetailView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          ...vm.allergyWarnings.map(
-            (String warning) => Padding(
+          if (vm.allergyWarnings.isNotEmpty)
+            Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.md),
               child: FoodNoticeBanner(
-                message: warning,
+                message: vm.allergyWarnings.join('\n'),
                 type: FoodNoticeType.allergy,
               ),
             ),
-          ),
           Center(
             child: FoodHeroCard(
               food: food,
               isLiked: vm.isLiked,
               onLike: vm.toggleLike,
+              onImageTap: () => _showEnlargedImage(context, food),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          _PronunciationCard(food: food),
-          const SizedBox(height: AppSpacing.xl),
-          _Section(title: 'Description', body: food.description),
-          _Section(title: 'Origin', body: food.origin),
-          _Section(title: 'Ingredients', body: food.ingredients),
-          _Section(title: 'Cultural Background', body: food.culturalBackground),
+          FoodOverviewCard(food: food),
+          const SizedBox(height: AppSpacing.lg),
+          FoodSectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _InformationItem(label: 'Description', body: food.description),
+                _InformationItem(label: 'Origin', body: food.origin),
+                _InformationItem(label: 'Ingredients', body: food.ingredients),
+                if (vm.isFoodInformationExpanded)
+                  _InformationItem(
+                    label: 'Cultural Background',
+                    body: food.culturalBackground,
+                  ),
+                Center(
+                  child: IconButton(
+                    tooltip: vm.isFoodInformationExpanded
+                        ? 'Hide cultural background'
+                        : 'Show cultural background',
+                    onPressed: vm.toggleFoodInformation,
+                    icon: Icon(
+                      vm.isFoodInformationExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
           if (vm.collidedFood != null) ...<Widget>[
-            FoodNoticeBanner(
-              message:
-                  '${food.name} can also refer to ${vm.collidedFood!.name}. Tap to compare the dishes.',
-              type: FoodNoticeType.caution,
-              onTap: () => vm.loadFood(vm.collidedFood!.id),
+            FoodSectionCard(
+              title: 'Collision Food',
+              child: FoodNoticeBanner(
+                message:
+                    '${food.name} can also refer to ${vm.collidedFood!.name}. Tap to compare the dishes.',
+                type: FoodNoticeType.caution,
+                onTap: () => vm.loadFood(vm.collidedFood!.id),
+              ),
             ),
-            const SizedBox(height: AppSpacing.xl),
+            const SizedBox(height: AppSpacing.lg),
           ],
-          _Heading(
-            title: 'Best Pairings',
+          FoodSectionCard(
+            title: 'Pairing Recommendations',
             subtitle: 'Flavours that complement this dish',
+            child: vm.pairingTimedOut
+                ? TextButton.icon(
+                    onPressed: vm.retryPairings,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Pairing service timed out — retry'),
+                  )
+                : FoodPairingList(pairings: vm.foodPairings),
           ),
-          if (vm.pairingTimedOut)
-            TextButton.icon(
-              onPressed: vm.retryPairings,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Pairing service timed out — retry'),
-            )
-          else
-            FoodPairingList(pairings: vm.foodPairings),
           const SizedBox(height: AppSpacing.lg),
-          const _Heading(
-            title: 'You might also like',
+          FoodSectionCard(
+            title: 'Similar Food',
             subtitle: 'Similar local favourites',
-          ),
-          RecommendationStrip(
-            foods: vm.similarFoods,
-            onTap: (LocalFood next) => vm.loadFood(next.id),
+            child: RecommendationStrip(
+              foods: vm.similarFoods,
+              onTap: (LocalFood next) => vm.loadFood(next.id),
+            ),
           ),
         ],
       ),
     );
   }
-}
 
-class _PronunciationCard extends StatelessWidget {
-  const _PronunciationCard({required this.food});
-  final LocalFood food;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: AppSpacing.cardPadding,
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      border: Border.all(color: AppColors.cardBorderWarm),
-      borderRadius: AppRadius.cardRadius,
-    ),
-    child: Row(
-      children: <Widget>[
-        const Icon(Icons.volume_up_outlined, color: AppColors.primary),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Future<void> _showEnlargedImage(BuildContext context, LocalFood food) =>
+      showDialog<void>(
+        context: context,
+        barrierColor: AppColors.scrim,
+        builder: (BuildContext dialogContext) => Dialog(
+          insetPadding: EdgeInsets.zero,
+          backgroundColor: AppColors.transparent,
+          child: Stack(
+            fit: StackFit.expand,
             children: <Widget>[
-              Text(
-                'Pronunciation',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-              Text(
-                food.pronunciationText.isEmpty
-                    ? food.name
-                    : food.pronunciationText,
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              if (food.synonyms.isNotEmpty)
-                Text(
-                  'Also known as ${food.synonyms.join(', ')}',
-                  style: Theme.of(context).textTheme.bodySmall,
+              InteractiveViewer(
+                minScale: 1,
+                maxScale: 4,
+                child: Center(
+                  child: AppImage(
+                    source: food.imageUrl,
+                    fit: BoxFit.contain,
+                    semanticLabel: food.name,
+                  ),
                 ),
+              ),
+              Positioned(
+                top: AppSpacing.lg,
+                right: AppSpacing.lg,
+                child: Material(
+                  color: AppColors.surface,
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    tooltip: 'Close image',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
-      ],
-    ),
-  );
+      );
 }
 
-class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.body});
-  final String title;
+class _InformationItem extends StatelessWidget {
+  const _InformationItem({required this.label, required this.body});
+  final String label;
   final String body;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.xl),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(color: AppColors.accentBrown),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(body, style: Theme.of(context).textTheme.bodyMedium),
-      ],
-    ),
-  );
-}
-
-class _Heading extends StatelessWidget {
-  const _Heading({required this.title, required this.subtitle});
-  final String title;
-  final String subtitle;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -221,12 +222,16 @@ class _Heading extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          title,
+          label,
           style: Theme.of(
             context,
           ).textTheme.titleMedium?.copyWith(color: AppColors.accentBrown),
         ),
-        Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          body.isEmpty ? 'Not available' : body,
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
       ],
     ),
   );

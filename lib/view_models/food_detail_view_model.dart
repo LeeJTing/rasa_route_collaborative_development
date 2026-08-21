@@ -17,6 +17,7 @@ class FoodDetailViewModel extends BaseViewModel {
   List<String> _allergyWarnings = const <String>[];
   LocalFood? _collidedFood;
   bool _pairingTimedOut = false;
+  bool _isFoodInformationExpanded = false;
 
   LocalFood? get food => _food;
   bool get isLiked => _isLiked;
@@ -25,6 +26,7 @@ class FoodDetailViewModel extends BaseViewModel {
   List<String> get allergyWarnings => _allergyWarnings;
   LocalFood? get collidedFood => _collidedFood;
   bool get pairingTimedOut => _pairingTimedOut;
+  bool get isFoodInformationExpanded => _isFoodInformationExpanded;
 
   @override
   Future<void> onInit() => loadFood(foodId);
@@ -32,6 +34,7 @@ class FoodDetailViewModel extends BaseViewModel {
   Future<void> loadFood(int id) => runGuarded(() async {
     foodId = id;
     _pairingTimedOut = false;
+    _isFoodInformationExpanded = false;
     _food = await foodLogic.getFoodDetails(id);
     _isLiked = await foodLogic.isFoodInFavourites(id);
     _collidedFood = await foodLogic.detectNameCollision(id);
@@ -47,6 +50,11 @@ class FoodDetailViewModel extends BaseViewModel {
   }, silent: true);
 
   Future<void> retryPairings() => runGuarded(_loadPairings, silent: true);
+
+  void toggleFoodInformation() {
+    _isFoodInformationExpanded = !_isFoodInformationExpanded;
+    safeNotifyListeners();
+  }
 
   Future<void> _loadPairings() async {
     _pairingTimedOut = false;

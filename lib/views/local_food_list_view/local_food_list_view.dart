@@ -71,7 +71,7 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                           const SizedBox(height: AppSpacing.md),
                           FoodFilterControls(
                             isSelecting: vm.isSelecting,
-                            hasFilters: vm.filters.isNotEmpty,
+                            hasFilters: vm.hasFilters,
                             onSort: vm.toggleSort,
                             onFilter: () => _showFilters(context, vm),
                             onSelect: vm.toggleSelectionMode,
@@ -138,40 +138,108 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
     );
   }
 
-  Future<void> _showFilters(BuildContext context, LocalFoodListViewModel vm) =>
-      showModalBottomSheet<void>(
-        context: context,
-        builder: (BuildContext context) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Filter local food',
-                  style: Theme.of(context).textTheme.titleLarge,
+  Future<void> _showFilters(
+    BuildContext context,
+    LocalFoodListViewModel vm,
+  ) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
+    builder: (BuildContext context) =>
+        ChangeNotifierProvider<LocalFoodListViewModel>.value(
+          value: vm,
+          child: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.8,
+            maxChildSize: 0.92,
+            builder: (BuildContext context, ScrollController controller) =>
+                Consumer<LocalFoodListViewModel>(
+                  builder:
+                      (
+                        BuildContext context,
+                        LocalFoodListViewModel vm,
+                        _,
+                      ) => ListView(
+                        controller: controller,
+                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        children: <Widget>[
+                          Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: Text(
+                                  'Filter local food',
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: vm.clearFilters,
+                                child: const Text('Clear'),
+                              ),
+                            ],
+                          ),
+                          ...FoodFilterGroup.values.map(
+                            (FoodFilterGroup group) => _FilterGroup(
+                              title: _filterTitle(group),
+                              values:
+                                  LocalFoodListViewModel.filterOptions[group]!,
+                              isSelected: (String value) =>
+                                  vm.isFilterSelected(group, value),
+                              onToggle: (String value) =>
+                                  vm.toggleFilter(group, value),
+                            ),
+                          ),
+                        ],
+                      ),
                 ),
-                const SizedBox(height: AppSpacing.md),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: vm.availableFilters.map((String value) {
-                    return FilterChip(
-                      label: Text(value),
-                      selected: vm.filters.contains(value),
-                      onSelected: (_) {
-                        vm.toggleFilter(value);
-                        Navigator.pop(context);
-                      },
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
           ),
         ),
-      );
+  );
+
+  String _filterTitle(FoodFilterGroup group) => switch (group) {
+    FoodFilterGroup.category => 'Food Category',
+    FoodFilterGroup.mealType => 'Meal Type',
+    FoodFilterGroup.taste => 'Taste',
+    FoodFilterGroup.foodType => 'Food Type',
+  };
+}
+
+class _FilterGroup extends StatelessWidget {
+  const _FilterGroup({
+    required this.title,
+    required this.values,
+    required this.isSelected,
+    required this.onToggle,
+  });
+
+  final String title;
+  final List<String> values;
+  final bool Function(String) isSelected;
+  final ValueChanged<String> onToggle;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: AppSpacing.lg),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(title, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: AppSpacing.sm),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: values
+              .map(
+                (String value) => FilterChip(
+                  label: Text(value),
+                  selected: isSelected(value),
+                  onSelected: (_) => onToggle(value),
+                ),
+              )
+              .toList(growable: false),
+        ),
+      ],
+    ),
+  );
 }
 
 class _ErrorState extends StatelessWidget {
