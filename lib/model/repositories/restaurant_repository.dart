@@ -35,9 +35,12 @@ class RestaurantRepository {
         if (raw is! Map) continue;
         final Map<String, dynamic> item = Map<String, dynamic>.from(raw);
         final Map<String, dynamic> food = JsonReader.asMap(item['local_food']);
-        String? image;
+        String? image = JsonReader.asStringOrNull(item['food_img_url']);
         final Object? images = food['local_food_image'];
-        if (images is List && images.isNotEmpty && images.first is Map) {
+        if (image == null &&
+            images is List &&
+            images.isNotEmpty &&
+            images.first is Map) {
           image = JsonReader.asStringOrNull(
             Map<String, dynamic>.from(images.first as Map)['img_name'],
           );
@@ -48,9 +51,13 @@ class RestaurantRepository {
             restaurantId: id,
             localFoodId: JsonReader.asInt(item['local_food_id']),
             foodName: JsonReader.asString(
-              food['food_name'],
-              fallback: 'Local food',
+              item['restaurant_item_name'],
+              fallback: JsonReader.asString(
+                food['food_name'],
+                fallback: 'Local food',
+              ),
             ),
+            ingredients: JsonReader.asStringOrNull(item['ingredients']),
             imageUrl: image,
             price: JsonReader.asDoubleOrNull(item['restaurant_item_price']),
             currency: 'RM',
@@ -91,13 +98,14 @@ class RestaurantRepository {
       imageUrl: 'assets/images/figma/restaurant_01.jpeg',
       openingHours: [],
       distanceMetres: 240,
-      isHalal: true,
       items: <RestaurantItem>[
         RestaurantItem(
           id: 1,
           restaurantId: 1,
           localFoodId: 1,
           foodName: 'Prawn Noodle',
+          ingredients:
+              'Yellow noodles and rice vermicelli in a rich prawn broth.',
           imageUrl: 'assets/images/figma/local_food_01.png',
           price: 14.9,
           currency: 'RM',
@@ -109,6 +117,8 @@ class RestaurantRepository {
           restaurantId: 1,
           localFoodId: 2,
           foodName: 'Char Kway Teow',
+          ingredients:
+              'Flat rice noodles stir-fried with prawns, egg and bean sprouts.',
           imageUrl: 'assets/images/figma/restaurant_09.png',
           price: 13.5,
           currency: 'RM',
@@ -120,6 +130,7 @@ class RestaurantRepository {
           restaurantId: 1,
           localFoodId: 6,
           foodName: 'Teh Tarik',
+          ingredients: 'Pulled black tea with creamy condensed milk.',
           imageUrl: 'assets/images/figma/restaurant_04.png',
           price: 4.5,
           currency: 'RM',
@@ -142,13 +153,13 @@ class RestaurantRepository {
       imageUrl: 'assets/images/figma/restaurant_08.jpeg',
       openingHours: [],
       distanceMetres: 480,
-      isHalal: true,
       items: <RestaurantItem>[
         RestaurantItem(
           id: 4,
           restaurantId: 2,
           localFoodId: 3,
           foodName: 'Roti Canai',
+          ingredients: 'Crispy flatbread served with curry dhal.',
           imageUrl: 'assets/images/figma/restaurant_07.png',
           price: 3.2,
           currency: 'RM',
@@ -160,6 +171,7 @@ class RestaurantRepository {
           restaurantId: 2,
           localFoodId: 4,
           foodName: 'Curry Laksa',
+          ingredients: 'Noodles served in a spicy coconut curry broth.',
           imageUrl: 'assets/images/figma/restaurant_13.png',
           price: 12.8,
           currency: 'RM',
@@ -182,13 +194,13 @@ class RestaurantRepository {
       imageUrl: 'assets/images/figma/restaurant_10.jpeg',
       openingHours: [],
       distanceMetres: 720,
-      isHalal: false,
       items: <RestaurantItem>[
         RestaurantItem(
           id: 6,
           restaurantId: 3,
           localFoodId: 8,
           foodName: 'Bubur Cha Cha',
+          ingredients: 'Sweet potato, taro and sago in creamy coconut milk.',
           imageUrl: 'assets/images/figma/detail_07.png',
           price: 7.5,
           currency: 'RM',
@@ -211,13 +223,13 @@ class RestaurantRepository {
       imageUrl: 'assets/images/figma/restaurant_12.jpeg',
       openingHours: [],
       distanceMetres: 910,
-      isHalal: true,
       items: <RestaurantItem>[
         RestaurantItem(
           id: 7,
           restaurantId: 4,
           localFoodId: 10,
           foodName: 'Satay',
+          ingredients: 'Charcoal-grilled skewers served with peanut sauce.',
           imageUrl: 'assets/images/figma/detail_12.png',
           price: 12,
           currency: 'RM',
@@ -229,6 +241,7 @@ class RestaurantRepository {
           restaurantId: 4,
           localFoodId: 6,
           foodName: 'Teh Tarik',
+          ingredients: 'Pulled black tea with creamy condensed milk.',
           imageUrl: 'assets/images/figma/restaurant_04.png',
           price: 4,
           currency: 'RM',

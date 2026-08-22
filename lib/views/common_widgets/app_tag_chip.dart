@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 
-enum AppTagStyle { meal, category, taste, neutral, halal, match }
+enum AppTagStyle { meal, category, taste, neutral, match }
 
 /// Compact colour-coded metadata pill shared by food and restaurant screens.
 class AppTagChip extends StatelessWidget {
@@ -33,11 +33,6 @@ class AppTagChip extends StatelessWidget {
         AppColors.tagTasteBackground,
         AppColors.tagTasteBorder,
         AppColors.tagTasteText,
-      ),
-      AppTagStyle.halal => (
-        AppColors.tagHalalBackground,
-        AppColors.tagHalalBorder,
-        AppColors.tagHalalText,
       ),
       AppTagStyle.neutral => (
         AppColors.tagNeutralBackground,

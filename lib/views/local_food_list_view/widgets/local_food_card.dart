@@ -26,6 +26,8 @@ class LocalFoodCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: isSelected ? AppColors.primaryContainer : AppColors.surface,
+      elevation: AppSizes.cardElevation,
+      shadowColor: AppColors.shadow,
       shape: RoundedRectangleBorder(
         borderRadius: AppRadius.cardRadius,
         side: const BorderSide(color: AppColors.cardBorder),
@@ -36,7 +38,7 @@ class LocalFoodCard extends StatelessWidget {
         child: Padding(
           padding: AppSpacing.cardPadding,
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
               SizedBox.square(
                 dimension: AppSizes.foodCardImage,
@@ -44,6 +46,7 @@ class LocalFoodCard extends StatelessWidget {
                   source: food.imageUrl,
                   semanticLabel: food.name,
                   borderRadius: AppRadius.cardRadius,
+                  fallback: const _FoodImageUnavailable(),
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
@@ -68,10 +71,11 @@ class LocalFoodCard extends StatelessWidget {
                           label: food.category,
                           style: AppTagStyle.category,
                         ),
-                        AppTagChip(
-                          label: food.cookingStyle,
-                          style: AppTagStyle.taste,
-                        ),
+                        if (food.mainTaste.isNotEmpty)
+                          AppTagChip(
+                            label: food.mainTaste,
+                            style: AppTagStyle.taste,
+                          ),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.sm),
@@ -110,4 +114,30 @@ class LocalFoodCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _FoodImageUnavailable extends StatelessWidget {
+  const _FoodImageUnavailable();
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Image unavailable',
+    image: true,
+    child: ColoredBox(
+      color: AppColors.surfaceVariant,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          const Icon(Icons.restaurant_menu, color: AppColors.accentBrown),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'No image',
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: AppColors.accentBrownMuted),
+          ),
+        ],
+      ),
+    ),
+  );
 }

@@ -21,11 +21,9 @@ class DiscoveryLogicFacade {
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required LocationDataModel location,
-    required double radiusKm,
     required int limit,
-  }) => restaurantDiscovery.nearby(
+  }) => restaurantDiscovery.nearbyWithAutomaticExpansion(
     location: location,
-    radiusKm: radiusKm,
     limit: limit,
   );
 }

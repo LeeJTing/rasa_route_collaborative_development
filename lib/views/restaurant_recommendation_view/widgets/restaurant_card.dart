@@ -4,7 +4,6 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/restaurant.dart';
 import '../../common_widgets/app_image.dart';
-import '../../common_widgets/app_tag_chip.dart';
 import 'restaurant_expanded_info.dart';
 
 class RestaurantCard extends StatelessWidget {
@@ -13,11 +12,13 @@ class RestaurantCard extends StatelessWidget {
     required this.restaurant,
     required this.expanded,
     required this.onExpand,
+    required this.onTap,
   });
 
   final Restaurant restaurant;
   final bool expanded;
   final VoidCallback onExpand;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -28,14 +29,14 @@ class RestaurantCard extends StatelessWidget {
         side: const BorderSide(color: AppColors.cardBorder),
       ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onExpand,
-        child: Column(
-          children: <Widget>[
-            Padding(
+      child: Column(
+        children: <Widget>[
+          InkWell(
+            onTap: onTap,
+            child: Padding(
               padding: AppSpacing.cardPadding,
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
                   SizedBox.square(
                     dimension: AppSizes.restaurantCardImage,
@@ -72,31 +73,28 @@ class RestaurantCard extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        Wrap(
-                          spacing: AppSpacing.xs,
-                          runSpacing: AppSpacing.xs,
-                          children: <Widget>[
-                            AppTagChip(
-                              label: restaurant.category,
-                              style: AppTagStyle.category,
-                            ),
-                            if (restaurant.isHalal == true)
-                              const AppTagChip(
-                                label: 'Halal',
-                                style: AppTagStyle.halal,
-                              ),
-                          ],
+                        Text(
+                          restaurant.category,
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                     ),
                   ),
-                  Icon(expanded ? Icons.expand_less : Icons.expand_more),
                 ],
               ),
             ),
-            if (expanded) RestaurantExpandedInfo(items: restaurant.items),
-          ],
-        ),
+          ),
+          if (expanded) RestaurantExpandedInfo(items: restaurant.items),
+          Center(
+            child: IconButton(
+              tooltip: expanded ? 'Hide local food' : 'Show local food',
+              onPressed: onExpand,
+              icon: Icon(
+                expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

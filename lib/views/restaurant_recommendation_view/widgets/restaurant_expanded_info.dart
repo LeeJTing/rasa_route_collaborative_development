@@ -14,16 +14,15 @@ class RestaurantExpandedInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: AppColors.insetSurface,
+      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
       padding: AppSpacing.cardPadding,
+      decoration: BoxDecoration(
+        color: AppColors.insetSurface,
+        borderRadius: AppRadius.cardRadius,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            'Popular local food',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: AppSpacing.sm),
           if (items.isEmpty)
             Text(
               'Menu details are not available yet.',
@@ -32,8 +31,9 @@ class RestaurantExpandedInfo extends StatelessWidget {
           else
             ...items.map(
               (RestaurantItem item) => Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                padding: const EdgeInsets.only(bottom: AppSpacing.md),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: <Widget>[
                     SizedBox.square(
                       dimension: AppSizes.pairingImage,
@@ -45,18 +45,36 @@ class RestaurantExpandedInfo extends StatelessWidget {
                     ),
                     const SizedBox(width: AppSpacing.md),
                     Expanded(
-                      child: Text(
-                        item.foodName,
-                        style: Theme.of(context).textTheme.bodyMedium,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Expanded(
+                                child: Text(
+                                  item.foodName,
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                              ),
+                              if (item.price != null)
+                                Text(
+                                  '${item.currency} ${item.price!.toStringAsFixed(2)}',
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(color: AppColors.accentRust),
+                                ),
+                            ],
+                          ),
+                          if (item.ingredients?.isNotEmpty == true) ...<Widget>[
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(
+                              item.ingredients!,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    if (item.price != null)
-                      Text(
-                        '${item.currency} ${item.price!.toStringAsFixed(2)}',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: AppColors.accentRust,
-                        ),
-                      ),
                   ],
                 ),
               ),

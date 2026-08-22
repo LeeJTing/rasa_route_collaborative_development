@@ -4,55 +4,100 @@ import '../model/business_logic/food_logic_facade.dart';
 
 enum FoodSortOrder { ascending, descending }
 
+enum FoodFilterGroup { category, mealType, taste, foodType }
+
 /// Search, filters, favourites and compare-selection state for the catalogue.
 class LocalFoodListViewModel extends BaseViewModel {
-  final FoodLogicFacade foodLogic = FoodLogicFacade();
+  LocalFoodListViewModel({FoodLogicFacade? foodLogic})
+    : foodLogic = foodLogic ?? FoodLogicFacade();
+
+  final FoodLogicFacade foodLogic;
+
+  static const Map<FoodFilterGroup, List<String>> filterOptions =
+      <FoodFilterGroup, List<String>>{
+        FoodFilterGroup.category: <String>[
+          'Malay',
+          'Chinese',
+          'Indian',
+          'Nyonya',
+          'Sabah',
+          'Sarawak',
+        ],
+        FoodFilterGroup.mealType: <String>[
+          'All-Day Dining',
+          'Breakfast',
+          'Brunch',
+          'Lunch',
+          'High Tea',
+          'Dinner',
+          'Supper',
+          'Street Food',
+        ],
+        FoodFilterGroup.taste: <String>[
+          'Sweet',
+          'Salty',
+          'Sour',
+          'Bitter',
+          'Umami',
+          'Spicy',
+          'Mild',
+          'Buttery',
+          'Peppery',
+          'Savoury',
+          'Rich',
+          'Light',
+          'Creamy',
+          'Smoky',
+          'Roasted',
+          'Fresh',
+          'Herbal',
+          'Nutty',
+          'Earthy',
+          'Fermented',
+          'Tangy',
+          'Fragrant',
+          'Refreshing',
+        ],
+        FoodFilterGroup.foodType: <String>[
+          'Food',
+          'Beverage',
+          'Fruit',
+          'Dessert',
+          'Kuih',
+        ],
+      };
 
   List<LocalFood> _foods = const <LocalFood>[];
   String _query = '';
   FoodSortOrder _sortOrder = FoodSortOrder.ascending;
-  final Set<String> _filters = <String>{};
+  final Map<FoodFilterGroup, Set<String>> _filters =
+      <FoodFilterGroup, Set<String>>{
+        for (final FoodFilterGroup group in FoodFilterGroup.values)
+          group: <String>{},
+      };
   final Set<int> _selectedIds = <int>{};
   bool _isSelecting = false;
 
   String get query => _query;
   FoodSortOrder get sortOrder => _sortOrder;
-  Set<String> get filters => Set<String>.unmodifiable(_filters);
   Set<int> get selectedIds => Set<int>.unmodifiable(_selectedIds);
   bool get isSelecting => _isSelecting;
+  bool get hasFilters =>
+      _filters.values.any((Set<String> values) => values.isNotEmpty);
+  int get activeFilterCount => _filters.values.fold<int>(
+    0,
+    (int total, Set<String> values) => total + values.length,
+  );
 
-  List<String> get availableFilters {
-    final Set<String> values = <String>{};
-    for (final LocalFood food in _foods) {
-      values.addAll(
-        <String>[
-          food.category,
-          food.mealType,
-          food.cookingStyle,
-        ].where((String value) => value.isNotEmpty),
-      );
-    }
-    return values.toList()..sort();
-  }
+  bool isFilterSelected(FoodFilterGroup group, String value) =>
+      _filters[group]!.contains(value);
 
   List<LocalFood> get displayedFoods {
     final String needle = _query.toLowerCase();
     final List<LocalFood> result = _foods.where((LocalFood food) {
       final bool matchesSearch =
-          needle.isEmpty ||
-          food.name.toLowerCase().contains(needle) ||
-          food.description.toLowerCase().contains(needle) ||
-          food.synonyms.any(
-            (String item) => item.toLowerCase().contains(needle),
-          );
-      final Set<String> tags = <String>{
-        food.category,
-        food.mealType,
-        food.cookingStyle,
-      };
-      final bool matchesFilters =
-          _filters.isEmpty || _filters.every(tags.contains);
-      return matchesSearch && matchesFilters;
+          needle.isEmpty || food.name.toLowerCase().contains(needle);
+      return matchesSearch && _matchesFilters(food);
     }).toList();
     result.sort(
       (LocalFood a, LocalFood b) => _sortOrder == FoodSortOrder.ascending
@@ -61,6 +106,30 @@ class LocalFoodListViewModel extends BaseViewModel {
     );
     return result;
   }
+
+  bool _matchesFilters(LocalFood food) {
+    final Map<FoodFilterGroup, Set<String>> values =
+        <FoodFilterGroup, Set<String>>{
+          FoodFilterGroup.category: _splitValues(food.category),
+          FoodFilterGroup.mealType: _splitValues(food.mealType),
+          FoodFilterGroup.taste: food.tastes.toSet(),
+          FoodFilterGroup.foodType: _splitValues(food.foodType),
+        };
+    for (final FoodFilterGroup group in FoodFilterGroup.values) {
+      final Set<String> selected = _filters[group]!;
+      if (selected.isNotEmpty &&
+          selected.intersection(values[group]!).isEmpty) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Set<String> _splitValues(String raw) => raw
+      .split(RegExp(r'[,;/|]'))
+      .map((String value) => value.trim())
+      .where((String value) => value.isNotEmpty)
+      .toSet();
 
   @override
   Future<void> onInit() => loadFoods();
@@ -81,8 +150,22 @@ class LocalFoodListViewModel extends BaseViewModel {
     safeNotifyListeners();
   }
 
-  void toggleFilter(String value) {
-    _filters.contains(value) ? _filters.remove(value) : _filters.add(value);
+  void setSortOrder(FoodSortOrder value) {
+    if (_sortOrder == value) return;
+    _sortOrder = value;
+    safeNotifyListeners();
+  }
+
+  void toggleFilter(FoodFilterGroup group, String value) {
+    final Set<String> selected = _filters[group]!;
+    selected.contains(value) ? selected.remove(value) : selected.add(value);
+    safeNotifyListeners();
+  }
+
+  void clearFilters() {
+    for (final Set<String> values in _filters.values) {
+      values.clear();
+    }
     safeNotifyListeners();
   }
 
@@ -98,21 +181,32 @@ class LocalFoodListViewModel extends BaseViewModel {
     safeNotifyListeners();
   }
 
-  Future<void> toggleFavourite(int id) => runGuarded(() async {
-    await foodLogic.toggleFavouriteFood(id);
-    _foods = _foods
-        .map(
-          (LocalFood food) => food.id == id
-              ? food.copyWith(isFavourite: !food.isFavourite)
-              : food,
-        )
-        .toList(growable: false);
-  }, silent: true);
+  Future<String?> toggleFavourite(int id) async {
+    try {
+      await foodLogic.toggleFavouriteFood(id);
+      _foods = _foods
+          .map(
+            (LocalFood food) => food.id == id
+                ? food.copyWith(isFavourite: !food.isFavourite)
+                : food,
+          )
+          .toList(growable: false);
+      safeNotifyListeners();
+      return null;
+    } catch (error) {
+      final String message = error.toString();
+      return message.startsWith('Exception: ')
+          ? message.substring('Exception: '.length)
+          : message;
+    }
+  }
 
   void reset() {
     _query = '';
     _sortOrder = FoodSortOrder.ascending;
-    _filters.clear();
+    for (final Set<String> values in _filters.values) {
+      values.clear();
+    }
     _selectedIds.clear();
     _isSelecting = false;
     safeNotifyListeners();

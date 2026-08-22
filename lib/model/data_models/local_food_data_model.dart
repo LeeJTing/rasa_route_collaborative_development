@@ -22,6 +22,9 @@ class LocalFoodDataModel implements JsonModel {
     this.foodCategory,
     this.cookingStyle,
     this.mealType,
+    this.foodType,
+    this.tastes = const <String>[],
+    this.mainTaste,
     this.pronunciationText,
     this.audioGuideUrl,
     this.synonyms,
@@ -37,6 +40,9 @@ class LocalFoodDataModel implements JsonModel {
   final String? foodCategory;
   final String? cookingStyle;
   final String? mealType;
+  final String? foodType;
+  final List<String> tastes;
+  final String? mainTaste;
   final String? pronunciationText;
   final String? audioGuideUrl;
   final String? synonyms;
@@ -65,12 +71,52 @@ class LocalFoodDataModel implements JsonModel {
       foodCategory: JsonReader.asStringOrNull(json['food_category']),
       cookingStyle: JsonReader.asStringOrNull(json['cooking_style']),
       mealType: JsonReader.asStringOrNull(json['meal_type']),
+      foodType: JsonReader.asStringOrNull(json['food_type']),
+      tastes: _extractTastes(json),
+      mainTaste:
+          _extractMainTaste(json) ??
+          JsonReader.asStringOrNull(json['main_taste']),
       pronunciationText: JsonReader.asStringOrNull(json['pronunciation_text']),
       audioGuideUrl: JsonReader.asStringOrNull(json['audio_guide_url']),
       synonyms: JsonReader.asStringOrNull(json['synonyms']),
       imageUrl: _extractImageUrl(json),
     );
   }
+
+  static List<String> _extractTastes(Map<String, dynamic> json) {
+    final Set<String> values = JsonReader.asStringList(json['tastes']).toSet();
+    final Object? links = json['local_food_preference'];
+    if (links is List) {
+      for (final Object? link in links) {
+        if (link is! Map) continue;
+        final Object? preference = link['food_preference'];
+        if (preference is! Map) continue;
+        final String? raw = JsonReader.asStringOrNull(
+          preference['preferred_taste'],
+        );
+        if (raw == null) continue;
+        values.addAll(_splitValues(raw));
+      }
+    }
+    return values.toList(growable: false);
+  }
+
+  static String? _extractMainTaste(Map<String, dynamic> json) {
+    final Object? links = json['local_food_preference'];
+    if (links is! List) return null;
+    for (final Object? link in links) {
+      if (link is! Map || !JsonReader.asBool(link['is_main'])) continue;
+      final Object? preference = link['food_preference'];
+      if (preference is! Map) continue;
+      return JsonReader.asStringOrNull(preference['preferred_taste']);
+    }
+    return null;
+  }
+
+  static Iterable<String> _splitValues(String raw) => raw
+      .split(RegExp(r'[,;/|]'))
+      .map((String value) => value.trim())
+      .where((String value) => value.isNotEmpty);
 
   /// Handles either a direct `img_name` field or the joined
   /// `local_food_image` array shape.
@@ -101,6 +147,9 @@ class LocalFoodDataModel implements JsonModel {
     'food_category': foodCategory,
     'cooking_style': cookingStyle,
     'meal_type': mealType,
+    'food_type': foodType,
+    'tastes': tastes,
+    'main_taste': mainTaste,
     'pronunciation_text': pronunciationText,
     'audio_guide_url': audioGuideUrl,
     'synonyms': synonyms,
@@ -119,6 +168,9 @@ class LocalFoodDataModel implements JsonModel {
     category: foodCategory ?? '',
     cookingStyle: cookingStyle ?? '',
     mealType: mealType ?? '',
+    foodType: foodType ?? '',
+    tastes: tastes,
+    mainTaste: mainTaste ?? '',
     pronunciationText: pronunciationText ?? '',
     audioGuideUrl: audioGuideUrl,
     synonyms: JsonReader.asStringList(synonyms),

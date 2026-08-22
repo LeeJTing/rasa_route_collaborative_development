@@ -65,26 +65,6 @@ class _RestaurantRecommendationViewState
                   children: <Widget>[
                     const _NearbyBanner(),
                     _SourceTabs(source: vm.source, onChanged: vm.selectSource),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.lg,
-                      ),
-                      child: Row(
-                        children: <Widget>[
-                          Text('${vm.restaurants.length} restaurants nearby'),
-                          const Spacer(),
-                          TextButton.icon(
-                            onPressed: vm.toggleDistanceSort,
-                            icon: const Icon(Icons.sort),
-                            label: Text(
-                              vm.isAscending
-                                  ? 'Nearest first'
-                                  : 'Farthest first',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                     Expanded(
                       child: vm.restaurants.isEmpty
                           ? const _EmptySource()
@@ -92,36 +72,21 @@ class _RestaurantRecommendationViewState
                               padding: AppSpacing.screenPadding.copyWith(
                                 bottom: AppSpacing.xl,
                               ),
-                              itemCount: vm.restaurants.length + 1,
+                              itemCount: vm.restaurants.length,
                               separatorBuilder: (_, _) =>
                                   const SizedBox(height: AppSpacing.md),
                               itemBuilder: (BuildContext context, int index) {
-                                if (index == vm.restaurants.length) {
-                                  return TextButton.icon(
-                                    onPressed: vm.isLoadingMore
-                                        ? null
-                                        : vm.loadMoreRestaurants,
-                                    icon: vm.isLoadingMore
-                                        ? const SizedBox.square(
-                                            dimension: AppSpacing.lg,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Icon(
-                                            Icons.add_location_alt_outlined,
-                                          ),
-                                    label: Text(
-                                      'Expand search to ${(vm.searchRadius + 1).clamp(1, 10).toStringAsFixed(0)} km',
-                                    ),
-                                  );
-                                }
                                 final restaurant = vm.restaurants[index];
                                 return RestaurantCard(
                                   restaurant: restaurant,
                                   expanded: vm.isExpanded(restaurant.id),
                                   onExpand: () =>
                                       vm.toggleExpanded(restaurant.id),
+                                  onTap: () => Navigator.pushNamed(
+                                    context,
+                                    AppRoutes.restaurantDetail,
+                                    arguments: restaurant.id,
+                                  ),
                                 );
                               },
                             ),
@@ -148,12 +113,30 @@ class _NearbyBanner extends StatelessWidget {
     ),
     child: const Row(
       children: <Widget>[
-        Icon(Icons.near_me_outlined, color: AppColors.bannerInfoIcon),
+        SizedBox.square(
+          dimension: AppSizes.bannerIcon,
+          child: CircleAvatar(
+            backgroundColor: AppColors.success,
+            child: Icon(Icons.check, color: AppColors.onPrimary),
+          ),
+        ),
         SizedBox(width: AppSpacing.md),
         Expanded(
-          child: Text(
-            'Showing nearby restaurants based on your current location.',
-            style: TextStyle(color: AppColors.bannerInfoText),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Showing Nearby Restaurants',
+                style: TextStyle(
+                  color: AppColors.bannerInfoText,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                'Sorted by nearest distance',
+                style: TextStyle(color: AppColors.bannerInfoText),
+              ),
+            ],
           ),
         ),
       ],
@@ -173,7 +156,7 @@ class _SourceTabs extends StatelessWidget {
       segments: const <ButtonSegment<RestaurantSource>>[
         ButtonSegment(
           value: RestaurantSource.google,
-          label: Text('Google-Sourced'),
+          label: Text('Google-Sourced Restaurant'),
         ),
         ButtonSegment(
           value: RestaurantSource.submitted,

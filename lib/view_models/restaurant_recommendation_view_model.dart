@@ -18,16 +18,10 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   List<Restaurant> _restaurants = const <Restaurant>[];
   RestaurantSource _source = RestaurantSource.google;
   final Set<int> _expandedIds = <int>{};
-  double _searchRadius = 1;
-  bool _ascending = true;
-  bool _isLoadingMore = false;
 
   List<Restaurant> get restaurants =>
       _source == RestaurantSource.google ? _restaurants : const <Restaurant>[];
   RestaurantSource get source => _source;
-  double get searchRadius => _searchRadius;
-  bool get isAscending => _ascending;
-  bool get isLoadingMore => _isLoadingMore;
   bool isExpanded(int id) => _expandedIds.contains(id);
 
   @override
@@ -39,27 +33,12 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   }
 
   Future<void> loadNearbyRestaurants() => runGuarded(() async {
-    _searchRadius = 1;
     _restaurants = await discoveryLogic.getQuickModeRestaurants(
       location: _location,
-      radiusKm: _searchRadius,
       limit: 30,
     );
     _sort();
   });
-
-  Future<void> loadMoreRestaurants() => runGuarded(() async {
-    if (_searchRadius >= 10) return;
-    _isLoadingMore = true;
-    _searchRadius += 1;
-    _restaurants = await discoveryLogic.getQuickModeRestaurants(
-      location: _location,
-      radiusKm: _searchRadius,
-      limit: 30,
-    );
-    _sort();
-    _isLoadingMore = false;
-  }, silent: true);
 
   void selectSource(RestaurantSource source) {
     _source = source;
@@ -71,19 +50,13 @@ class RestaurantRecommendationViewModel extends BaseViewModel
     safeNotifyListeners();
   }
 
-  void toggleDistanceSort() {
-    _ascending = !_ascending;
-    _sort();
-    safeNotifyListeners();
-  }
-
   void _sort() {
     _restaurants = List<Restaurant>.of(_restaurants)
       ..sort((Restaurant a, Restaurant b) {
         final int result = (a.distanceMetres ?? double.infinity).compareTo(
           b.distanceMetres ?? double.infinity,
         );
-        return _ascending ? result : -result;
+        return result;
       });
   }
 

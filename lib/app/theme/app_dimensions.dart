@@ -112,4 +112,7 @@ abstract final class AppSizes {
 
   /// Status icon used in notice and warning banners.
   static const double bannerIcon = 30;
+
+  /// Subtle catalogue-card elevation from the Figma list treatment.
+  static const double cardElevation = 1;
 }
