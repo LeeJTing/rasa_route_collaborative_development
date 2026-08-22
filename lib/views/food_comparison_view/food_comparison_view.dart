@@ -49,12 +49,17 @@ class _FoodComparisonViewState extends State<FoodComparisonView> {
         appBar: const AppTopBar(title: 'Compare'),
         body: SafeArea(
           child: Consumer<FoodComparisonViewModel>(
-            builder: (BuildContext context, FoodComparisonViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('FoodComparisonView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  FoodComparisonViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('FoodComparisonView')),
+                  );
+                },
           ),
         ),
       ),

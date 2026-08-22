@@ -49,12 +49,17 @@ class _FoodRecommendationViewState extends State<FoodRecommendationView> {
         appBar: const AppTopBar(title: 'For you'),
         body: SafeArea(
           child: Consumer<FoodRecommendationViewModel>(
-            builder: (BuildContext context, FoodRecommendationViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('FoodRecommendationView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  FoodRecommendationViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('FoodRecommendationView')),
+                  );
+                },
           ),
         ),
       ),

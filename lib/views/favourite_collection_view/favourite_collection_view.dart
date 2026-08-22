@@ -22,7 +22,8 @@ class FavouriteCollectionView extends StatefulWidget {
   const FavouriteCollectionView({super.key});
 
   @override
-  State<FavouriteCollectionView> createState() => _FavouriteCollectionViewState();
+  State<FavouriteCollectionView> createState() =>
+      _FavouriteCollectionViewState();
 }
 
 class _FavouriteCollectionViewState extends State<FavouriteCollectionView> {
@@ -49,12 +50,17 @@ class _FavouriteCollectionViewState extends State<FavouriteCollectionView> {
         appBar: const AppTopBar(title: 'Saved dishes'),
         body: SafeArea(
           child: Consumer<FavouriteCollectionViewModel>(
-            builder: (BuildContext context, FavouriteCollectionViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('FavouriteCollectionView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  FavouriteCollectionViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return const Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(child: Text('FavouriteCollectionView')),
+                  );
+                },
           ),
         ),
       ),

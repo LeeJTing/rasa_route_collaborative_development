@@ -84,4 +84,100 @@ abstract final class AppColors {
 
   /// [Derived] Card shadow.
   static const Color shadow = Color(0x1A000000);
+
+  // ---------------------------------------------------------------------------
+  // Accent text (Quick Mode / Food Detail headings)
+  // ---------------------------------------------------------------------------
+
+  /// [Figma] Warm brown used for section headings and the Food Detail /
+  /// Quick Mode app-bar titles - "Quick Mode", "Prawn Noodle", "Description".
+  static const Color accentBrown = Color(0xFFAC7F5E);
+
+  /// [Figma] Rust-brown used for prices and pairing dish names.
+  static const Color accentRust = Color(0xFFA05823);
+
+  /// [Figma] Muted brown body text on restaurant/article cards.
+  static const Color accentBrownMuted = Color(0xFF7A6A5B);
+
+  // ---------------------------------------------------------------------------
+  // Tag chips (cuisine / taste / meal-type / food-type)
+  // ---------------------------------------------------------------------------
+  // The mock-up colour-codes chips by what they describe. Reused across the
+  // Quick Mode restaurant cards and the Food Detail tag row.
+
+  /// [Figma] Cuisine / category chip, e.g. "Chinese". Also the match-score badge.
+  static const Color tagCategoryBackground = Color(0xFFE8F5E9);
+  static const Color tagCategoryBorder = Color(0xFFC8E6C9);
+  static const Color tagCategoryText = Color(0xFF1B5E20);
+
+  /// [Figma] Taste / cooking-style chip, e.g. "Spicy".
+  static const Color tagTasteBackground = Color(0xFFFFEBEE);
+  static const Color tagTasteBorder = Color(0xFFFFCDD2);
+  static const Color tagTasteText = Color(0xFFC62828);
+
+  /// [Figma] Meal-type chip, e.g. "All-Day Dining", "Street Food".
+  static const Color tagMealTypeBackground = Color(0xFFFFEACA);
+  static const Color tagMealTypeBorder = Color(0xFFFFD79B);
+  static const Color tagMealTypeText = Color(0xFFE65100);
+
+  /// [Figma] Generic food-type chip, e.g. "Food", "Beverage".
+  static const Color tagNeutralBackground = Color(0xFFF5F5F5);
+  static const Color tagNeutralBorder = Color(0xFFE0E0E0);
+  static const Color tagNeutralText = Color(0xFF424242);
+
+  // ---------------------------------------------------------------------------
+  // Banners (Quick Mode notice, allergy warning, name-collision caution)
+  // ---------------------------------------------------------------------------
+
+  /// [Figma] "Showing Nearby Restaurants" info banner.
+  static const Color bannerInfoBackground = Color(0xB39EFFB3);
+  static const Color bannerInfoIcon = Color(0xFF1F7300);
+  static const Color bannerInfoText = Color(0xFF1F7300);
+
+  /// [Figma] Allergy warning banner on Food Detail.
+  static const Color bannerWarningBackground = Color(0xB3FFA9A9);
+  static const Color bannerWarningText = Color(0xFF921616);
+
+  /// [Figma] Name-collision caution banner on Food Detail.
+  static const Color bannerCautionBackground = Color(0xB3FDFD82);
+  static const Color bannerCautionText = Color(0xFF575700);
+
+  /// [Figma] Warm card border used on Food Detail's info card.
+  static const Color cardBorderWarm = Color(0xFFFFE082);
+
+  /// [Figma] Neutral border around catalogue and restaurant cards.
+  static const Color cardBorder = Color(0xFFEEE3D5);
+
+  /// [Figma] Warm inset panel used by an expanded restaurant menu.
+  static const Color insetSurface = Color(0xFFF8F1E6);
+
+  /// [Figma] Selected source-tab background.
+  static const Color tabBackground = Color(0xFFFFEACA);
+
+  // ---------------------------------------------------------------------------
+  // UC500 (Add Landmark / recognition flow)
+  // ---------------------------------------------------------------------------
+
+  /// [Derived] 15% success - the "recognised successfully" banner.
+  static const Color successContainer = Color(0x263FA34D);
+
+  /// [Figma] Field-label colour on the food detail card - Dish, Variant,
+  /// Origin, Food Category, Meal Type, Taste, Description, Cooking Style,
+  /// Cultural Background.
+  static const Color detailLabel = Color(0xFFAC7F5E);
+
+  /// [Figma] Highlight box behind the Dish/Variant/description preview in
+  /// the recognition-result popup (`FoodRecognitionView`) - FFE082 at 40%
+  /// opacity.
+  static const Color recognitionHighlight = Color(0x66FFE082);
+
+  /// [Figma] Background for the "Taste" tags (Spicy / Sweet / Rich).
+  static const Color tasteTagBackground = Color(0xFFFFCDD2);
+
+  /// [Figma] Text colour on [tasteTagBackground].
+  static const Color tasteTagText = Color(0xFFC62828);
+
+  /// [Figma] Opening/closing time chip in the operating-hours grid
+  /// (`AddLandmarkView`).
+  static const Color timeChipBackground = Color(0xFFFFF0C5);
 }

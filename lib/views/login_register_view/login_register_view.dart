@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_dimensions.dart';
+import '../../app/routing/app_routes.dart';
 import '../../view_models/login_register_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 
@@ -49,12 +50,43 @@ class _LoginRegisterViewState extends State<LoginRegisterView> {
         appBar: const AppTopBar(title: 'Sign in'),
         body: SafeArea(
           child: Consumer<LoginRegisterViewModel>(
-            builder: (BuildContext context, LoginRegisterViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('LoginRegisterView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  LoginRegisterViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            'Welcome to Rasa Route',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            'Your local-food discovery companion.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: AppSpacing.xl),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.pushReplacementNamed(
+                                context,
+                                AppRoutes.mainShell,
+                              ),
+                              child: const Text('Explore the app'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
           ),
         ),
       ),

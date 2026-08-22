@@ -52,6 +52,7 @@ abstract final class AppRoutes {
 
   static const String landmarkHistory = '/landmark-history';
   static const String addLandmark = '/add-landmark';
+  static const String restaurantSignboard = '/restaurant-signboard';
   static const String landmarkDetail = '/landmark-detail';
 
   /// Every registered name - used by tests to assert the route table is
@@ -74,6 +75,7 @@ abstract final class AppRoutes {
     restaurantItemList,
     landmarkHistory,
     addLandmark,
+    restaurantSignboard,
     landmarkDetail,
   ];
 }

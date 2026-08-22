@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_dimensions.dart';
+import '../../app/routing/app_routes.dart';
+import '../../app/theme/app_colors.dart';
 import '../../view_models/dashboard_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 
@@ -49,15 +51,111 @@ class _DashboardViewState extends State<DashboardView> {
         appBar: const AppTopBar(title: 'Rasa Route'),
         body: SafeArea(
           child: Consumer<DashboardViewModel>(
-            builder: (BuildContext context, DashboardViewModel viewModel, Widget? _) {
-              return const Padding(
-                padding: AppSpacing.screenPadding,
-                child: Center(child: Text('DashboardView')),
-              );
-            },
+            builder:
+                (
+                  BuildContext context,
+                  DashboardViewModel viewModel,
+                  Widget? _,
+                ) {
+                  return Padding(
+                    padding: AppSpacing.screenPadding,
+                    child: ListView(
+                      children: <Widget>[
+                        Text(
+                          'Discover Malaysia through food',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          'Find nearby places or learn the stories behind local dishes.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        _DiscoveryCard(
+                          title: 'Quick Mode',
+                          subtitle: 'Restaurants near your current location',
+                          icon: Icons.near_me_outlined,
+                          onTap: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.restaurantRecommendation,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        _DiscoveryCard(
+                          title: 'All Local Food',
+                          subtitle: 'Browse, filter and save Malaysian dishes',
+                          icon: Icons.ramen_dining_outlined,
+                          onTap: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.localFoodList,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        _DiscoveryCard(
+                          title: 'Prawn Noodle',
+                          subtitle: 'Open the featured food story',
+                          icon: Icons.menu_book_outlined,
+                          onTap: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.foodDetail,
+                            arguments: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
           ),
         ),
       ),
     );
   }
+}
+
+class _DiscoveryCard extends StatelessWidget {
+  const _DiscoveryCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: AppRadius.cardRadius,
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Row(
+          children: <Widget>[
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: const BoxDecoration(
+                color: AppColors.primaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: AppColors.primary),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(title, style: Theme.of(context).textTheme.titleMedium),
+                  Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right),
+          ],
+        ),
+      ),
+    ),
+  );
 }

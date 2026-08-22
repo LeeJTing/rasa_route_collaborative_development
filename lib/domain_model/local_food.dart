@@ -1,11 +1,7 @@
-import 'dietary_restriction.dart';
-
-/// A local dish - the central entity of Rasa Route.
+/// Domain model: LocalFood.
 ///
-/// Domain models are plain data types. They carry no JSON - serialisation is
-/// the data model's job in `lib/model/data_models/`, and the repository is what
-/// converts a data model into one of these. They travel upward unchanged from
-/// repository to logic to ViewModel to View.
+/// This is what Views and ViewModels reason about - clean, immutable, shaped
+/// exactly for what the UI needs. Repository converts Supabase rows into this.
 class LocalFood {
   const LocalFood({
     required this.id,
@@ -17,27 +13,113 @@ class LocalFood {
     required this.category,
     required this.cookingStyle,
     required this.mealType,
-    required this.pronunciationText,
+    required this.foodType,
+    this.tastes = const <String>[],
+    this.mainTaste = '',
+    this.pronunciationText = '',
     this.audioGuideUrl,
-    required this.synonyms,
-    required this.imageUrls,
-    required this.dietaryRestrictions,
-    required this.isFavourite,
+    this.synonyms = const <String>[],
+    this.imageUrl,
+    this.isFavourite = false,
   });
 
+  /// Primary key: local_food_id (bigint)
   final int id;
+
+  /// food_name
   final String name;
+
+  /// description
   final String description;
+
+  /// origin
   final String origin;
+
+  /// cultural_background
   final String culturalBackground;
-  final List<String> ingredients;
+
+  /// ingredients (comma-separated or JSON - repo parses)
+  final String ingredients;
+
+  /// food_category (All-Day Dining, Chinese, Indian, etc.)
   final String category;
+
+  /// cooking_style
   final String cookingStyle;
+
+  /// meal_type
   final String mealType;
+
+  /// food_type (Food, Beverage, Fruit, Dessert or Kuih)
+  final String foodType;
+
+  /// Normalised taste preferences associated through local_food_preference.
+  final List<String> tastes;
+
+  /// The taste marked `is_main` in `local_food_preference`.
+  final String mainTaste;
+
+  /// Human-readable pronunciation from `pronunciation_text`.
   final String pronunciationText;
+
+  /// Optional remote audio guide from `audio_guide_url`.
   final String? audioGuideUrl;
+
+  /// Alternate names parsed from the `synonyms` text column.
   final List<String> synonyms;
-  final List<String> imageUrls;
-  final List<DietaryRestriction> dietaryRestrictions;
+
+  /// First image from local_food_image. null if missing.
+  final String? imageUrl;
+
+  /// Whether current user has favourited this. Set by repo from favourite_food table.
   final bool isFavourite;
+
+  // NOTE: no toJson/fromJson here - domain models carry no JSON per the
+  // developer guideline (§10). Serialisation lives on [LocalFoodDataModel]
+  // in lib/model/data_models/. If a call site needs to reconstruct a
+  // LocalFood from cache, it should read a data-model JSON blob and call
+  // LocalFoodDataModel.fromJson(...).toDomain() instead.
+
+  /// Immutable copy-with.
+  LocalFood copyWith({
+    int? id,
+    String? name,
+    String? description,
+    String? origin,
+    String? culturalBackground,
+    String? ingredients,
+    String? category,
+    String? cookingStyle,
+    String? mealType,
+    String? foodType,
+    List<String>? tastes,
+    String? mainTaste,
+    String? pronunciationText,
+    String? audioGuideUrl,
+    List<String>? synonyms,
+    String? imageUrl,
+    bool? isFavourite,
+  }) => LocalFood(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    description: description ?? this.description,
+    origin: origin ?? this.origin,
+    culturalBackground: culturalBackground ?? this.culturalBackground,
+    ingredients: ingredients ?? this.ingredients,
+    category: category ?? this.category,
+    cookingStyle: cookingStyle ?? this.cookingStyle,
+    mealType: mealType ?? this.mealType,
+    foodType: foodType ?? this.foodType,
+    tastes: tastes ?? this.tastes,
+    mainTaste: mainTaste ?? this.mainTaste,
+    pronunciationText: pronunciationText ?? this.pronunciationText,
+    audioGuideUrl: audioGuideUrl ?? this.audioGuideUrl,
+    synonyms: synonyms ?? this.synonyms,
+    imageUrl: imageUrl ?? this.imageUrl,
+    isFavourite: isFavourite ?? this.isFavourite,
+  );
+
+  @override
+  String toString() =>
+      'LocalFood(id: $id, name: $name, category: $category, isFavourite: $isFavourite)';
 }
