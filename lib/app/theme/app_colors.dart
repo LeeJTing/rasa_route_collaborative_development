@@ -100,7 +100,7 @@ abstract final class AppColors {
   static const Color accentBrownMuted = Color(0xFF7A6A5B);
 
   // ---------------------------------------------------------------------------
-  // Tag chips (cuisine / taste / meal-type / food-type / halal)
+  // Tag chips (cuisine / taste / meal-type / food-type)
   // ---------------------------------------------------------------------------
   // The mock-up colour-codes chips by what they describe. Reused across the
   // Quick Mode restaurant cards and the Food Detail tag row.
@@ -124,12 +124,6 @@ abstract final class AppColors {
   static const Color tagNeutralBackground = Color(0xFFF5F5F5);
   static const Color tagNeutralBorder = Color(0xFFE0E0E0);
   static const Color tagNeutralText = Color(0xFF424242);
-
-  /// [Figma] Halal badge. Not wired to data yet - `restaurant.is_halal` does
-  /// not exist in the schema (see guideline §12 known gaps).
-  static const Color tagHalalBackground = Color(0xFFF4E8FF);
-  static const Color tagHalalBorder = Color(0xFFE9D5FF);
-  static const Color tagHalalText = Color(0xFF6B21A8);
 
   // ---------------------------------------------------------------------------
   // Banners (Quick Mode notice, allergy warning, name-collision caution)

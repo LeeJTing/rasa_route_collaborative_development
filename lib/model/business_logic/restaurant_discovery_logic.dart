@@ -18,32 +18,73 @@ class RestaurantDiscoveryLogic {
     required int limit,
   }) async {
     final List<Restaurant> restaurants = await repository.getRestaurants();
-    final List<Restaurant> measured = restaurants
-        .map((Restaurant restaurant) {
-          if (!location.isKnown ||
-              restaurant.latitude == null ||
-              restaurant.longitude == null) {
-            return restaurant;
-          }
-          return restaurant.copyWith(
-            distanceMetres: _distanceMetres(
-              location.latitude,
-              location.longitude,
-              restaurant.latitude!,
-              restaurant.longitude!,
-            ),
-          );
-        })
-        .where((Restaurant restaurant) {
-          final double? distance = restaurant.distanceMetres;
-          return distance == null || distance <= radiusKm * 1000;
-        })
-        .toList();
-    measured.sort(
+    return _withinRadius(
+      _measure(restaurants, location),
+      radiusKm: radiusKm,
+      limit: limit,
+    );
+  }
+
+  List<Restaurant> _measure(
+    List<Restaurant> restaurants,
+    LocationDataModel location,
+  ) => restaurants
+      .map((Restaurant restaurant) {
+        if (!location.isKnown ||
+            restaurant.latitude == null ||
+            restaurant.longitude == null) {
+          return restaurant;
+        }
+        return restaurant.copyWith(
+          distanceMetres: _distanceMetres(
+            location.latitude,
+            location.longitude,
+            restaurant.latitude!,
+            restaurant.longitude!,
+          ),
+        );
+      })
+      .toList(growable: false);
+
+  List<Restaurant> _withinRadius(
+    List<Restaurant> measured, {
+    required double radiusKm,
+    required int limit,
+  }) {
+    final List<Restaurant> matches = measured.where((Restaurant restaurant) {
+      final double? distance = restaurant.distanceMetres;
+      return distance == null || distance <= radiusKm * 1000;
+    }).toList();
+    matches.sort(
       (Restaurant a, Restaurant b) => (a.distanceMetres ?? double.infinity)
           .compareTo(b.distanceMetres ?? double.infinity),
     );
-    return measured.take(limit).toList(growable: false);
+    return matches.take(limit).toList(growable: false);
+  }
+
+  /// Starts at 1 km and expands silently until the nearest results are found.
+  Future<List<Restaurant>> nearbyWithAutomaticExpansion({
+    required LocationDataModel location,
+    required int limit,
+    double initialRadiusKm = 1,
+    double radiusStepKm = 1,
+    double maximumRadiusKm = 20,
+  }) async {
+    final List<Restaurant> measured = _measure(
+      await repository.getRestaurants(),
+      location,
+    );
+    double radiusKm = initialRadiusKm;
+    while (radiusKm <= maximumRadiusKm) {
+      final List<Restaurant> results = _withinRadius(
+        measured,
+        radiusKm: radiusKm,
+        limit: limit,
+      );
+      if (results.isNotEmpty || !location.isKnown) return results;
+      radiusKm += radiusStepKm;
+    }
+    return const <Restaurant>[];
   }
 
   double _distanceMetres(double lat1, double lon1, double lat2, double lon2) {

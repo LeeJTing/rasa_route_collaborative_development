@@ -24,7 +24,6 @@ class Restaurant {
     this.distanceMetres,
     this.reviewCount,
     this.items = const <RestaurantItem>[],
-    this.isHalal,
   });
 
   final int id;
@@ -41,9 +40,6 @@ class Restaurant {
   final double? distanceMetres;
   final int? reviewCount;
   final List<RestaurantItem> items;
-
-  /// Null for live rows until the planned `restaurant.is_halal` migration.
-  final bool? isHalal;
 
   String get distanceLabel {
     final double? metres = distanceMetres;
@@ -68,6 +64,5 @@ class Restaurant {
         distanceMetres: distanceMetres ?? this.distanceMetres,
         reviewCount: reviewCount,
         items: items ?? this.items,
-        isHalal: isHalal,
       );
 }

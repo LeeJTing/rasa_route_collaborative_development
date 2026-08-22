@@ -7,7 +7,7 @@ class FoodFilterControls extends StatelessWidget {
   const FoodFilterControls({
     super.key,
     required this.isSelecting,
-    required this.hasFilters,
+    required this.activeFilterCount,
     required this.onSort,
     required this.onFilter,
     required this.onSelect,
@@ -15,7 +15,7 @@ class FoodFilterControls extends StatelessWidget {
   });
 
   final bool isSelecting;
-  final bool hasFilters;
+  final int activeFilterCount;
   final VoidCallback onSort;
   final VoidCallback onFilter;
   final VoidCallback onSelect;
@@ -31,7 +31,9 @@ class FoodFilterControls extends StatelessWidget {
         const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: _Control(
-            label: hasFilters ? 'Filter •' : 'Filter',
+            label: activeFilterCount == 0
+                ? 'Filter'
+                : 'Filter ($activeFilterCount)',
             icon: Icons.tune,
             onTap: onFilter,
           ),

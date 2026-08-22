@@ -4,7 +4,6 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/local_food.dart';
 import '../../common_widgets/app_image.dart';
-import '../../common_widgets/app_tag_chip.dart';
 
 class FoodHeroCard extends StatelessWidget {
   const FoodHeroCard({
@@ -12,19 +11,25 @@ class FoodHeroCard extends StatelessWidget {
     required this.food,
     required this.isLiked,
     required this.onLike,
+    required this.onImageTap,
   });
 
   final LocalFood food;
   final bool isLiked;
   final VoidCallback onLike;
+  final VoidCallback onImageTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Stack(
       children: <Widget>[
-        Stack(
-          children: <Widget>[
-            SizedBox.square(
+        Semantics(
+          button: true,
+          label: 'Enlarge ${food.name} image',
+          child: InkWell(
+            onTap: onImageTap,
+            borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
+            child: SizedBox.square(
               dimension: AppSizes.foodHeroImage,
               child: AppImage(
                 source: food.imageUrl,
@@ -34,36 +39,23 @@ class FoodHeroCard extends StatelessWidget {
                 semanticLabel: food.name,
               ),
             ),
-            Positioned(
-              right: AppSpacing.sm,
-              top: AppSpacing.sm,
-              child: Material(
-                color: AppColors.surface,
-                shape: const CircleBorder(),
-                child: IconButton(
-                  tooltip: isLiked
-                      ? 'Remove from favourites'
-                      : 'Add to favourites',
-                  onPressed: onLike,
-                  icon: Icon(
-                    isLiked ? Icons.favorite : Icons.favorite_border,
-                    color: isLiked ? AppColors.error : AppColors.textSecondary,
-                  ),
-                ),
+          ),
+        ),
+        Positioned(
+          right: AppSpacing.sm,
+          top: AppSpacing.sm,
+          child: Material(
+            color: AppColors.surface,
+            shape: const CircleBorder(),
+            child: IconButton(
+              tooltip: isLiked ? 'Remove from favourites' : 'Add to favourites',
+              onPressed: onLike,
+              icon: Icon(
+                isLiked ? Icons.favorite : Icons.favorite_border,
+                color: isLiked ? AppColors.error : AppColors.textSecondary,
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Wrap(
-          alignment: WrapAlignment.center,
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.xs,
-          children: <Widget>[
-            AppTagChip(label: food.mealType, style: AppTagStyle.meal),
-            AppTagChip(label: food.category, style: AppTagStyle.category),
-            AppTagChip(label: food.cookingStyle, style: AppTagStyle.taste),
-          ],
+          ),
         ),
       ],
     );

@@ -1,4 +1,4 @@
-/// A dietary restriction a tourist can hold - halal, vegetarian, no pork, ...
+/// A dietary restriction a tourist can hold, such as vegetarian or no pork.
 ///
 /// Domain models are plain data types. They carry no JSON - serialisation is
 /// the data model's job in `lib/model/data_models/`, and the repository is what

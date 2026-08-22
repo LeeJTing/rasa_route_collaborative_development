@@ -13,6 +13,9 @@ class LocalFood {
     required this.category,
     required this.cookingStyle,
     required this.mealType,
+    required this.foodType,
+    this.tastes = const <String>[],
+    this.mainTaste = '',
     this.pronunciationText = '',
     this.audioGuideUrl,
     this.synonyms = const <String>[],
@@ -47,6 +50,15 @@ class LocalFood {
   /// meal_type
   final String mealType;
 
+  /// food_type (Food, Beverage, Fruit, Dessert or Kuih)
+  final String foodType;
+
+  /// Normalised taste preferences associated through local_food_preference.
+  final List<String> tastes;
+
+  /// The taste marked `is_main` in `local_food_preference`.
+  final String mainTaste;
+
   /// Human-readable pronunciation from `pronunciation_text`.
   final String pronunciationText;
 
@@ -79,6 +91,9 @@ class LocalFood {
     String? category,
     String? cookingStyle,
     String? mealType,
+    String? foodType,
+    List<String>? tastes,
+    String? mainTaste,
     String? pronunciationText,
     String? audioGuideUrl,
     List<String>? synonyms,
@@ -94,6 +109,9 @@ class LocalFood {
     category: category ?? this.category,
     cookingStyle: cookingStyle ?? this.cookingStyle,
     mealType: mealType ?? this.mealType,
+    foodType: foodType ?? this.foodType,
+    tastes: tastes ?? this.tastes,
+    mainTaste: mainTaste ?? this.mainTaste,
     pronunciationText: pronunciationText ?? this.pronunciationText,
     audioGuideUrl: audioGuideUrl ?? this.audioGuideUrl,
     synonyms: synonyms ?? this.synonyms,
