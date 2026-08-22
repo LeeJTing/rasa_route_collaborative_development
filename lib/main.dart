@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'app/app.dart';
 import 'app/config/env.dart';
 import 'external/supabase/supabase_service.dart';
+import 'model/background_process/location_monitor.dart';
 
 /// Application entry point.
 ///
@@ -16,4 +19,8 @@ Future<void> main() async {
   await SupabaseService.initialise();
 
   runApp(const RasaRouteApp());
+
+  // Background processes - stream GPS fixes to any ViewModel that listens
+  // (e.g. AddLandmarkView's location picker).
+  unawaited(LocationMonitor().start());
 }

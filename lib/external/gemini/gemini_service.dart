@@ -18,20 +18,31 @@ class GeminiService {
   static final GeminiService _instance = GeminiService._();
 
   /// Sends [imageBytes] with [prompt] and returns the model's raw text reply.
+  ///
+  /// [apiKey]/[model] override the shared [Env.geminiApiKey]/[Env.geminiModel]
+  /// defaults - a feature-specific service (e.g. `GeminiLandmarkService`)
+  /// passes its own key here so its usage/quota is tracked separately from
+  /// whatever else calls this shared, generic service.
   Future<String> describeImage({
     required List<int> imageBytes,
     required String prompt,
     String mimeType = 'image/jpeg',
+    String? apiKey,
+    String? model,
   }) async {
-    return _generate(<Map<String, Object?>>[
-      <String, Object?>{'text': prompt},
-      <String, Object?>{
-        'inline_data': <String, Object?>{
-          'mime_type': mimeType,
-          'data': base64Encode(imageBytes),
+    return _generate(
+      <Map<String, Object?>>[
+        <String, Object?>{'text': prompt},
+        <String, Object?>{
+          'inline_data': <String, Object?>{
+            'mime_type': mimeType,
+            'data': base64Encode(imageBytes),
+          },
         },
-      },
-    ]);
+      ],
+      apiKey: apiKey,
+      model: model,
+    );
   }
 
   /// Sends [prompt] as plain text and returns the model's raw text reply.
@@ -39,13 +50,24 @@ class GeminiService {
   /// Times out after [Env.apiTimeout] (UC406 requires the caller to handle a
   /// slow/failed AI response rather than hang the screen). Retries once on
   /// timeout or transient failure before giving up.
-  Future<String> generateText(String prompt, {int retries = 1}) async {
+  ///
+  /// [apiKey]/[model] - see [describeImage]'s doc.
+  Future<String> generateText(
+    String prompt, {
+    int retries = 1,
+    String? apiKey,
+    String? model,
+  }) async {
     Object? lastError;
     for (int attempt = 0; attempt <= retries; attempt++) {
       try {
-        return await _generate(<Map<String, Object?>>[
-          <String, Object?>{'text': prompt},
-        ]).timeout(Env.apiTimeout);
+        return await _generate(
+          <Map<String, Object?>>[
+            <String, Object?>{'text': prompt},
+          ],
+          apiKey: apiKey,
+          model: model,
+        ).timeout(Env.apiTimeout);
       } catch (error) {
         lastError = error;
       }
@@ -53,11 +75,15 @@ class GeminiService {
     throw Exception('Gemini request failed: $lastError');
   }
 
-  Future<String> _generate(List<Map<String, Object?>> parts) async {
+  Future<String> _generate(
+    List<Map<String, Object?>> parts, {
+    String? apiKey,
+    String? model,
+  }) async {
     final HttpClient client = HttpClient();
     try {
       final HttpClientRequest request = await client
-          .postUrl(endpoint())
+          .postUrl(endpoint(apiKey: apiKey, model: model))
           .timeout(Env.apiTimeout);
       request.headers.set('content-type', 'application/json');
       request.add(
@@ -95,8 +121,10 @@ class GeminiService {
     }
   }
 
-  Uri endpoint() => Uri.parse(
+  /// [apiKey]/[model] override the shared [Env.geminiApiKey]/[Env.geminiModel]
+  /// defaults - see [describeImage]'s doc for why.
+  Uri endpoint({String? apiKey, String? model}) => Uri.parse(
     'https://generativelanguage.googleapis.com/v1beta/models/'
-    '${Env.geminiModel}:generateContent?key=${Env.geminiApiKey}',
+    '${model ?? Env.geminiModel}:generateContent?key=${apiKey ?? Env.geminiApiKey}',
   );
 }

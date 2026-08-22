@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:geolocator/geolocator.dart';
+
 import '../../model/data_models/location_data_model.dart';
 
 /// Access to device hardware: camera, gallery, GPS, permissions.
@@ -19,18 +21,49 @@ class DeviceCapabilityManager {
 
   // --- location --------------------------------------------------------------
 
-  Future<bool> hasLocationPermission() async => false;
+  Future<bool> hasLocationPermission() async {
+    final LocationPermission permission = await Geolocator.checkPermission();
+    return permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
+  }
 
-  Future<bool> requestLocationPermission() async => false;
+  Future<bool> requestLocationPermission() async {
+    final LocationPermission permission = await Geolocator.requestPermission();
+    return permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
+  }
 
-  /// One GPS fix.
-  Future<LocationDataModel> currentLocation() async =>
-      LocationDataModel.unknown;
+  /// One GPS fix, or `LocationDataModel.unknown` when permission is denied /
+  /// no fix is available yet.
+  Future<LocationDataModel> currentLocation() async {
+    if (!await hasLocationPermission()) return LocationDataModel.unknown;
+    final Position position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+    return _fromPosition(position);
+  }
 
-  /// Continuous fixes, consumed by `LocationMonitor`.
+  /// Continuous fixes, consumed by `LocationMonitor`. Emits a new fix when the
+  /// device moves [distanceFilter] metres (GPS streams by movement, not on a
+  /// fixed timer - the [interval] parameter is kept for call-site clarity but
+  /// the platform drives the cadence).
   Stream<LocationDataModel> locationStream({
     Duration interval = const Duration(seconds: 30),
-  }) => const Stream<LocationDataModel>.empty();
+  }) {
+    return Geolocator.getPositionStream(
+      locationSettings: LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).map(_fromPosition);
+  }
+
+  LocationDataModel _fromPosition(Position position) => LocationDataModel(
+    latitude: position.latitude,
+    longitude: position.longitude,
+    accuracyMeters: position.accuracy,
+    capturedAt: position.timestamp,
+  );
 
   // --- camera ----------------------------------------------------------------
 

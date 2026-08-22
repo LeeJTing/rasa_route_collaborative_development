@@ -115,6 +115,19 @@ class FoodKnowledgeRepository {
     }
   }
 
+  /// Looks up a catalogue entry by exact name match (case-insensitive) -
+  /// used by the UC500 two-phase recognition flow to avoid re-generating an
+  /// entry Gemini has already described once. Returns null when nothing
+  /// matches.
+  Future<LocalFood?> findByName(String name) async {
+    final String normalized = name.trim().toLowerCase();
+    final List<LocalFood> foods = await getFoods();
+    for (final LocalFood food in foods) {
+      if (food.name.toLowerCase() == normalized) return food;
+    }
+    return null;
+  }
+
   Future<Set<int>> _getFavouriteFoodIds() async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableFavouriteFood,

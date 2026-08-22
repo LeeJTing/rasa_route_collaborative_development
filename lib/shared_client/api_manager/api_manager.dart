@@ -1,3 +1,4 @@
+import '../../external/gemini/gemini_landmark_service.dart';
 import '../../external/gemini/gemini_service.dart';
 import '../../external/supabase/supabase_service.dart';
 
@@ -22,9 +23,15 @@ class APIManager {
 
   final SupabaseService _supabase = SupabaseService();
   final GeminiService _gemini = GeminiService();
+  final GeminiLandmarkService _geminiLandmark = GeminiLandmarkService();
 
   SupabaseService get supabase => _supabase;
   GeminiService get gemini => _gemini;
+
+  /// UC500's food/signboard/stall recognition prompts - see
+  /// `GeminiLandmarkService`'s doc for why these live in their own service
+  /// rather than on [gemini] directly.
+  GeminiLandmarkService get geminiLandmark => _geminiLandmark;
 
   // ---------------------------------------------------------------------------
   // Table names - the only place a table string is spelled out.
@@ -36,6 +43,10 @@ class APIManager {
   static const String tableRestaurant = 'restaurant';
   static const String tableRestaurantItem = 'restaurant_item';
   static const String tableOpeningHours = 'opening_hours';
+  static const String tableSubmittedLandmark = 'submitted_landmark';
+  static const String tableLandmarkItem = 'landmark_item';
+  static const String tableFoodPreference = 'food_preference';
+  static const String tableDietaryRestriction = 'dietary_restriction';
 
   // ---------------------------------------------------------------------------
   // Generic row access, forwarded straight to SupabaseService.
@@ -66,8 +77,22 @@ class APIManager {
   Future<void> insertRow(String table, Map<String, dynamic> values) =>
       _supabase.insertRow(table, values);
 
+  /// Insert a row and return it back - needed when the DB assigns a generated
+  /// id the caller needs (e.g. `landmark_item.landmark_item_id`).
+  Future<Map<String, dynamic>?> insertRowReturning(
+    String table,
+    Map<String, dynamic> values,
+  ) => _supabase.insertRowReturning(table, values);
+
   Future<void> deleteRows(String table, {required Map<String, Object?> eq}) =>
       _supabase.deleteRows(table, eq: eq);
+
+  /// Update the rows matching [eq], setting [values].
+  Future<void> updateRow(
+    String table,
+    Map<String, Object?> values, {
+    required Map<String, Object?> eq,
+  }) => _supabase.updateRow(table, values, eq: eq);
 
   /// The signed-in user's id, or `''` when nobody is signed in.
   String get currentUserId => _supabase.currentUserId;

@@ -87,11 +87,36 @@ class SupabaseService {
     await _client.from(table).insert(values);
   }
 
+  /// `insert` returning the inserted row back - used when the DB assigns a
+  /// generated id (identity column, e.g. `landmark_item.landmark_item_id`)
+  /// that the caller needs.
+  Future<Map<String, dynamic>?> insertRowReturning(
+    String table,
+    Map<String, dynamic> values,
+  ) async {
+    final List<dynamic> rows =
+        await _client.from(table).insert(values).select() as List<dynamic>;
+    return rows.isEmpty ? null : rows.first as Map<String, dynamic>;
+  }
+
   Future<void> deleteRows(
     String table, {
     required Map<String, Object?> eq,
   }) async {
     dynamic query = _client.from(table).delete();
+    for (final MapEntry<String, Object?> filter in eq.entries) {
+      query = query.eq(filter.key, filter.value as Object);
+    }
+    await query;
+  }
+
+  /// `update` the rows matching [eq], setting [values].
+  Future<void> updateRow(
+    String table,
+    Map<String, Object?> values, {
+    required Map<String, Object?> eq,
+  }) async {
+    dynamic query = _client.from(table).update(values);
     for (final MapEntry<String, Object?> filter in eq.entries) {
       query = query.eq(filter.key, filter.value as Object);
     }
