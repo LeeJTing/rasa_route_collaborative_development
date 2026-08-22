@@ -5,6 +5,7 @@ import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
+import '../../domain_model/local_food.dart';
 import '../../view_models/local_food_list_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 import 'widgets/food_filter_controls.dart';
@@ -12,7 +13,9 @@ import 'widgets/food_search_bar.dart';
 import 'widgets/local_food_card.dart';
 
 class LocalFoodListView extends StatefulWidget {
-  const LocalFoodListView({super.key});
+  const LocalFoodListView({super.key, @visibleForTesting this.viewModel});
+
+  final LocalFoodListViewModel? viewModel;
 
   @override
   State<LocalFoodListView> createState() => _LocalFoodListViewState();
@@ -25,7 +28,8 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
   @override
   void initState() {
     super.initState();
-    _viewModel = LocalFoodListViewModel()..onInit();
+    _viewModel = widget.viewModel ?? LocalFoodListViewModel();
+    _viewModel.onInit();
     _searchController = TextEditingController();
   }
 
@@ -49,10 +53,11 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
         body: Consumer<LocalFoodListViewModel>(
           builder:
               (BuildContext context, LocalFoodListViewModel vm, Widget? child) {
-                if (vm.state == ViewState.busy && vm.displayedFoods.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
+                final List<LocalFood> foods = vm.displayedFoods;
+                if (vm.state == ViewState.busy && foods.isEmpty) {
+                  return const _LoadingState();
                 }
-                if (vm.state == ViewState.error && vm.displayedFoods.isEmpty) {
+                if (vm.state == ViewState.error && foods.isEmpty) {
                   return _ErrorState(
                     message: vm.errorMessage,
                     onRetry: vm.loadFoods,
@@ -71,8 +76,8 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                           const SizedBox(height: AppSpacing.md),
                           FoodFilterControls(
                             isSelecting: vm.isSelecting,
-                            hasFilters: vm.hasFilters,
-                            onSort: vm.toggleSort,
+                            activeFilterCount: vm.activeFilterCount,
+                            onSort: () => _showSortOptions(context, vm),
                             onFilter: () => _showFilters(context, vm),
                             onSelect: vm.toggleSelectionMode,
                             onReset: () {
@@ -85,39 +90,59 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                     ),
                     const SizedBox(height: AppSpacing.md),
                     Expanded(
-                      child: vm.displayedFoods.isEmpty
-                          ? const Center(
-                              child: Text('No local food matches your search.'),
-                            )
-                          : ListView.separated(
-                              padding: AppSpacing.screenPadding.copyWith(
-                                bottom: AppSpacing.xl,
-                              ),
-                              itemCount: vm.displayedFoods.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: AppSpacing.md),
-                              itemBuilder: (BuildContext context, int index) {
-                                final food = vm.displayedFoods[index];
-                                return LocalFoodCard(
-                                  food: food,
-                                  isSelecting: vm.isSelecting,
-                                  isSelected: vm.selectedIds.contains(food.id),
-                                  onTap: () {
-                                    if (vm.isSelecting) {
-                                      vm.toggleSelection(food.id);
-                                    } else {
-                                      Navigator.pushNamed(
+                      child: RefreshIndicator(
+                        onRefresh: vm.loadFoods,
+                        child: foods.isEmpty
+                            ? _EmptyState(
+                                onClear: () {
+                                  _searchController.clear();
+                                  vm.updateSearch('');
+                                  vm.clearFilters();
+                                },
+                              )
+                            : ListView.separated(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: AppSpacing.screenPadding.copyWith(
+                                  bottom: AppSpacing.xl,
+                                ),
+                                itemCount: foods.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(height: AppSpacing.md),
+                                itemBuilder: (BuildContext context, int index) {
+                                  final LocalFood food = foods[index];
+                                  return LocalFoodCard(
+                                    food: food,
+                                    isSelecting: vm.isSelecting,
+                                    isSelected: vm.selectedIds.contains(
+                                      food.id,
+                                    ),
+                                    onTap: () {
+                                      if (vm.isSelecting) {
+                                        vm.toggleSelection(food.id);
+                                      } else {
+                                        Navigator.pushNamed(
+                                          context,
+                                          AppRoutes.foodDetail,
+                                          arguments: food.id,
+                                        );
+                                      }
+                                    },
+                                    onFavourite: () async {
+                                      final String? message = await vm
+                                          .toggleFavourite(food.id);
+                                      if (!context.mounted || message == null) {
+                                        return;
+                                      }
+                                      ScaffoldMessenger.of(
                                         context,
-                                        AppRoutes.foodDetail,
-                                        arguments: food.id,
+                                      ).showSnackBar(
+                                        SnackBar(content: Text(message)),
                                       );
-                                    }
-                                  },
-                                  onFavourite: () =>
-                                      vm.toggleFavourite(food.id),
-                                );
-                              },
-                            ),
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
                     ),
                     if (vm.isSelecting && vm.selectedIds.isNotEmpty)
                       Container(
@@ -137,6 +162,50 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
       ),
     );
   }
+
+  Future<void> _showSortOptions(
+    BuildContext context,
+    LocalFoodListViewModel vm,
+  ) => showModalBottomSheet<void>(
+    context: context,
+    shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
+    builder: (BuildContext context) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Sort local food',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            RadioGroup<FoodSortOrder>(
+              groupValue: vm.sortOrder,
+              onChanged: (FoodSortOrder? value) {
+                if (value == null) return;
+                vm.setSortOrder(value);
+                Navigator.pop(context);
+              },
+              child: const Column(
+                children: <Widget>[
+                  RadioListTile<FoodSortOrder>(
+                    title: Text('Name: A–Z'),
+                    value: FoodSortOrder.ascending,
+                  ),
+                  RadioListTile<FoodSortOrder>(
+                    title: Text('Name: Z–A'),
+                    value: FoodSortOrder.descending,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 
   Future<void> _showFilters(
     BuildContext context,
@@ -188,6 +257,14 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                                   vm.toggleFilter(group, value),
                             ),
                           ),
+                          const SizedBox(height: AppSpacing.xl),
+                          ElevatedButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: Text(
+                              'Show ${vm.displayedFoods.length} local food',
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
                         ],
                       ),
                 ),
@@ -242,6 +319,74 @@ class _FilterGroup extends StatelessWidget {
   );
 }
 
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
+
+  @override
+  Widget build(BuildContext context) => const Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        CircularProgressIndicator(),
+        SizedBox(height: AppSpacing.md),
+        Text('Loading local food…'),
+      ],
+    ),
+  );
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onClear});
+
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (BuildContext context, BoxConstraints constraints) => ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: <Widget>[
+        SizedBox(
+          height: constraints.maxHeight,
+          child: Center(
+            child: Padding(
+              padding: AppSpacing.screenPadding,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Icon(
+                    Icons.search_off_rounded,
+                    size: AppSizes.avatarMd,
+                    color: AppColors.accentBrown,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    'No local food found',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'Try another food name or clear the selected filters.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  OutlinedButton.icon(
+                    onPressed: onClear,
+                    icon: const Icon(Icons.restart_alt),
+                    label: const Text('Clear search and filters'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _ErrorState extends StatelessWidget {
   const _ErrorState({required this.message, required this.onRetry});
   final String? message;
@@ -254,9 +399,31 @@ class _ErrorState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Text(message ?? 'Unable to load local food.'),
+          const Icon(
+            Icons.wifi_off_rounded,
+            size: AppSizes.avatarMd,
+            color: AppColors.accentBrown,
+          ),
           const SizedBox(height: AppSpacing.md),
-          ElevatedButton(onPressed: onRetry, child: const Text('Try again')),
+          Text(
+            'Local food could not be loaded',
+            style: Theme.of(context).textTheme.titleMedium,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            message ?? 'Check your connection and try again.',
+            textAlign: TextAlign.center,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          ElevatedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Try again'),
+          ),
         ],
       ),
     ),

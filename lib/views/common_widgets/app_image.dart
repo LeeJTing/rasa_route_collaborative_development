@@ -10,36 +10,40 @@ class AppImage extends StatelessWidget {
     this.fit = BoxFit.cover,
     this.borderRadius = BorderRadius.zero,
     this.semanticLabel,
+    this.fallback,
   });
 
   final String? source;
   final BoxFit fit;
   final BorderRadius borderRadius;
   final String? semanticLabel;
+  final Widget? fallback;
 
   @override
   Widget build(BuildContext context) {
     final String value = source ?? '';
-    final Widget fallback = const ColoredBox(
-      color: AppColors.surfaceVariant,
-      child: Center(
-        child: Icon(Icons.restaurant, color: AppColors.textSecondary),
-      ),
-    );
+    final Widget effectiveFallback =
+        fallback ??
+        const ColoredBox(
+          color: AppColors.surfaceVariant,
+          child: Center(
+            child: Icon(Icons.restaurant, color: AppColors.textSecondary),
+          ),
+        );
     final Widget image = value.isEmpty
-        ? fallback
+        ? effectiveFallback
         : value.startsWith('assets/')
         ? Image.asset(
             value,
             fit: fit,
             semanticLabel: semanticLabel,
-            errorBuilder: (_, _, _) => fallback,
+            errorBuilder: (_, _, _) => effectiveFallback,
           )
         : Image.network(
             value,
             fit: fit,
             semanticLabel: semanticLabel,
-            errorBuilder: (_, _, _) => fallback,
+            errorBuilder: (_, _, _) => effectiveFallback,
           );
     return ClipRRect(borderRadius: borderRadius, child: image);
   }

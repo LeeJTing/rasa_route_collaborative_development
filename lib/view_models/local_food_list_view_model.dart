@@ -8,7 +8,10 @@ enum FoodFilterGroup { category, mealType, taste, foodType }
 
 /// Search, filters, favourites and compare-selection state for the catalogue.
 class LocalFoodListViewModel extends BaseViewModel {
-  final FoodLogicFacade foodLogic = FoodLogicFacade();
+  LocalFoodListViewModel({FoodLogicFacade? foodLogic})
+    : foodLogic = foodLogic ?? FoodLogicFacade();
+
+  final FoodLogicFacade foodLogic;
 
   static const Map<FoodFilterGroup, List<String>> filterOptions =
       <FoodFilterGroup, List<String>>{
@@ -81,6 +84,10 @@ class LocalFoodListViewModel extends BaseViewModel {
   bool get isSelecting => _isSelecting;
   bool get hasFilters =>
       _filters.values.any((Set<String> values) => values.isNotEmpty);
+  int get activeFilterCount => _filters.values.fold<int>(
+    0,
+    (int total, Set<String> values) => total + values.length,
+  );
 
   bool isFilterSelected(FoodFilterGroup group, String value) =>
       _filters[group]!.contains(value);
@@ -143,6 +150,12 @@ class LocalFoodListViewModel extends BaseViewModel {
     safeNotifyListeners();
   }
 
+  void setSortOrder(FoodSortOrder value) {
+    if (_sortOrder == value) return;
+    _sortOrder = value;
+    safeNotifyListeners();
+  }
+
   void toggleFilter(FoodFilterGroup group, String value) {
     final Set<String> selected = _filters[group]!;
     selected.contains(value) ? selected.remove(value) : selected.add(value);
@@ -168,16 +181,25 @@ class LocalFoodListViewModel extends BaseViewModel {
     safeNotifyListeners();
   }
 
-  Future<void> toggleFavourite(int id) => runGuarded(() async {
-    await foodLogic.toggleFavouriteFood(id);
-    _foods = _foods
-        .map(
-          (LocalFood food) => food.id == id
-              ? food.copyWith(isFavourite: !food.isFavourite)
-              : food,
-        )
-        .toList(growable: false);
-  }, silent: true);
+  Future<String?> toggleFavourite(int id) async {
+    try {
+      await foodLogic.toggleFavouriteFood(id);
+      _foods = _foods
+          .map(
+            (LocalFood food) => food.id == id
+                ? food.copyWith(isFavourite: !food.isFavourite)
+                : food,
+          )
+          .toList(growable: false);
+      safeNotifyListeners();
+      return null;
+    } catch (error) {
+      final String message = error.toString();
+      return message.startsWith('Exception: ')
+          ? message.substring('Exception: '.length)
+          : message;
+    }
+  }
 
   void reset() {
     _query = '';
