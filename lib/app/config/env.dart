@@ -101,7 +101,7 @@ abstract final class Env {
   static String get geminiApiKey => _read(_keyGeminiApiKey);
 
   static String get geminiModel =>
-      _read(_keyGeminiModel, fallback: 'gemini-2.5-flash');
+      _read(_keyGeminiModel, fallback: 'gemini-3.6-flash');
 
   static String get osmBaseUrl =>
       _read(_keyOsmBaseUrl, fallback: 'https://overpass-api.de/api');
@@ -112,7 +112,7 @@ abstract final class Env {
   );
 
   static Duration get apiTimeout =>
-      Duration(seconds: _readInt(_keyApiTimeoutSeconds, 20));
+      Duration(seconds: _readInt(_keyApiTimeoutSeconds, 120));
 
   static Duration get locationPollInterval =>
       Duration(seconds: _readInt(_keyLocationPollSeconds, 30));

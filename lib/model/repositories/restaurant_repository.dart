@@ -26,6 +26,17 @@ class RestaurantRepository {
     return _demoRestaurants;
   }
 
+  /// Looks up a restaurant by exact name match (case-insensitive) - UC500's
+  /// A13 "Restaurant Already Exists" check. Returns null when nothing matches.
+  Future<Restaurant?> findByName(String name) async {
+    final String normalized = name.trim().toLowerCase();
+    final List<Restaurant> restaurants = await getRestaurants();
+    for (final Restaurant restaurant in restaurants) {
+      if (restaurant.name.toLowerCase() == normalized) return restaurant;
+    }
+    return null;
+  }
+
   Restaurant _fromRow(Map<String, dynamic> row) {
     final int id = JsonReader.asInt(row['restaurant_id']);
     final List<RestaurantItem> items = <RestaurantItem>[];

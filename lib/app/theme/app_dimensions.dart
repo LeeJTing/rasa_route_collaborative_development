@@ -37,6 +37,7 @@ abstract final class AppSpacing {
 abstract final class AppRadius {
   const AppRadius._();
 
+  static const double xs = 4;
   static const double sm = 8;
   static const double md = 12;
   static const double lg = 16;
@@ -113,6 +114,71 @@ abstract final class AppSizes {
   /// Status icon used in notice and warning banners.
   static const double bannerIcon = 30;
 
+  /// Height of the captured signboard/stall image preview in the Add
+  /// Landmark image-capture row.
+  static const double capturedPhotoPreviewHeight = 160;
+
+  /// "+" icon that adds another operating-hours range row.
+  static const double addRangeIconSize = 24;
+
+  /// Short day label ("Mon"...) in the operating-hours grid.
+  static const double shortDayLabelWidth = 28;
+
+  /// Day-status toggle (dash / ? / check) box size.
+  static const double compactCheckboxSize = 24;
+
+  /// Icon inside the day-status toggle.
+  static const double compactCheckboxIconSize = 16;
+
+  /// Reserved slot for the "Open" label beside a time dropdown - wide
+  /// enough for the word itself (24 clipped it).
+  static const double openLabelSlotWidth = 36;
+
+  /// Opening/closing time dropdown width - a FIXED width wide enough to show
+  /// "00:00" on one line, so the box never resizes when the time changes.
+  static const double timeDropdownWidth = 86;
+
+  /// Recognised-food card label column (Dish/Variant/...) width.
+  static const double fieldLabelWidth = 110;
+
+  /// Compact label column for the recognition-result popup.
+  static const double fieldLabelWidthCompact = 84;
+
+  /// Max width of the recognition-result popup.
+  static const double dialogMaxWidth = 420;
+
   /// Subtle catalogue-card elevation from the Figma list treatment.
   static const double cardElevation = 1;
+}
+
+/// Camera-frame guide proportions (REQ106_1) - fractions of the viewfinder's
+/// own width/height, centred within it. Three distinct shapes, one per
+/// capture purpose (`FoodRecognitionPurpose`) - a food item, a signboard and
+/// a stall are physically different-shaped subjects, so one fixed frame
+/// doesn't suit all three. Also holds the recognition result popup's
+/// placement on screen.
+abstract final class AppLayoutRatios {
+  const AppLayoutRatios._();
+
+  /// food / additional food: a moderate rectangle, roughly matching a plated
+  /// dish.
+  static const double foodFrameWidthFactor = 0.82;
+  static const double foodFrameHeightFactor = 0.55;
+
+  /// signboard: wide and short - most signboards are a horizontal banner
+  /// shape, not square.
+  static const double signboardFrameWidthFactor = 0.9;
+  static const double signboardFrameHeightFactor = 0.3;
+
+  /// stall: large, near-full-screen - physically the biggest subject of the
+  /// three, so it needs more of the frame to fit in it.
+  static const double stallFrameWidthFactor = 0.92;
+  static const double stallFrameHeightFactor = 0.78;
+
+  /// `FoodRecognitionView`'s result popup - vertical alignment offset from
+  /// screen centre (negative = above centre).
+  static const double popupVerticalOffset = -0.3;
+
+  /// The result popup's max height as a fraction of the screen height.
+  static const double popupMaxHeightFraction = 0.8;
 }

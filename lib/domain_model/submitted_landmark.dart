@@ -1,3 +1,4 @@
+import 'local_food.dart';
 import 'opening_hour.dart';
 
 /// A food landmark contributed by a tourist, plus the dishes attached to it.
@@ -51,10 +52,12 @@ class LandmarkItem {
     required this.origin,
     required this.culturalBackground,
     this.imageUrl,
+    this.imageId,
     this.price,
     required this.seasonal,
     required this.cookingStyle,
     required this.mealType,
+    this.isFake = false,
   });
 
   final int id;
@@ -66,9 +69,43 @@ class LandmarkItem {
   final String description;
   final String origin;
   final String culturalBackground;
+
+  /// The food's own photo (as captured on `FoodRecognitionView`), once
+  /// actually uploaded somewhere - null until a real image-storage
+  /// repository exists (see `AddLandmarkViewModel._toLandmarkItem`'s note).
+  ///
+  /// `image_id` in `landmark_item` is `text` (a storage object id) - not an
+  /// integer, matching the real Supabase column.
   final String? imageUrl;
+  final String? imageId;
   final double? price;
   final String seasonal;
   final String cookingStyle;
   final String mealType;
+
+  /// Test/QA marker - `true` for "fake food" added while verifying the
+  /// Supabase insert flow. No dedicated column exists in the real
+  /// `landmark_item` table, so the repository writes the marker into the
+  /// saved dish text (`[FAKE] ...`) to keep test rows identifiable.
+  final bool isFake;
+}
+
+/// One food being submitted with a landmark - a food (already recognized)
+/// and the price the tourist entered for it. Built by
+/// `AddLandmarkViewModel`, resolved into a `LandmarkItem` by
+/// `LandmarkSubmissionLogic.submitLandmark` - lighter than the ViewModel's
+/// own `LandmarkFoodEntry` (no form-local id or captured image - Logic
+/// doesn't need either to build a `LandmarkItem`).
+class FoodSubmission {
+  const FoodSubmission({
+    required this.food,
+    required this.price,
+    this.isFake = false,
+  });
+
+  final LocalFood food;
+  final double price;
+
+  /// Test/QA marker - `true` for "fake food" (see `LandmarkItem.isFake`).
+  final bool isFake;
 }

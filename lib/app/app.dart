@@ -18,6 +18,7 @@ import '../views/profile_view/profile_view.dart';
 import '../views/restaurant_detail_view/restaurant_detail_view.dart';
 import '../views/restaurant_item_list_view/restaurant_item_list_view.dart';
 import '../views/restaurant_recommendation_view/restaurant_recommendation_view.dart';
+import '../views/restaurant_signboard_view/restaurant_signboard_view.dart';
 import 'routing/app_navigator.dart';
 import 'routing/app_routes.dart';
 import 'theme/app_theme.dart';
@@ -47,7 +48,8 @@ class RasaRouteApp extends StatelessWidget {
       theme: AppTheme.light,
 
       navigatorKey: AppNavigator.navigatorKey,
-      initialRoute: AppRoutes.loginRegister,
+      // initialRoute: AppRoutes.loginRegister,
+      initialRoute: AppRoutes.foodRecognition,
 
       // The route table. Names come from AppRoutes so no call site types a
       // string literal. Adding a screen is two edits: a constant there, an
@@ -88,6 +90,8 @@ class RasaRouteApp extends StatelessWidget {
             const LandmarkHistoryView(),
         AppRoutes.addLandmark: (BuildContext context) =>
             const AddLandmarkView(),
+        AppRoutes.restaurantSignboard: (BuildContext context) =>
+            const RestaurantSignboardView(),
         AppRoutes.landmarkDetail: (BuildContext context) =>
             const LandmarkDetailView(),
       },

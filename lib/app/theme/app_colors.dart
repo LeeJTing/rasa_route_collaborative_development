@@ -153,4 +153,31 @@ abstract final class AppColors {
 
   /// [Figma] Selected source-tab background.
   static const Color tabBackground = Color(0xFFFFEACA);
+
+  // ---------------------------------------------------------------------------
+  // UC500 (Add Landmark / recognition flow)
+  // ---------------------------------------------------------------------------
+
+  /// [Derived] 15% success - the "recognised successfully" banner.
+  static const Color successContainer = Color(0x263FA34D);
+
+  /// [Figma] Field-label colour on the food detail card - Dish, Variant,
+  /// Origin, Food Category, Meal Type, Taste, Description, Cooking Style,
+  /// Cultural Background.
+  static const Color detailLabel = Color(0xFFAC7F5E);
+
+  /// [Figma] Highlight box behind the Dish/Variant/description preview in
+  /// the recognition-result popup (`FoodRecognitionView`) - FFE082 at 40%
+  /// opacity.
+  static const Color recognitionHighlight = Color(0x66FFE082);
+
+  /// [Figma] Background for the "Taste" tags (Spicy / Sweet / Rich).
+  static const Color tasteTagBackground = Color(0xFFFFCDD2);
+
+  /// [Figma] Text colour on [tasteTagBackground].
+  static const Color tasteTagText = Color(0xFFC62828);
+
+  /// [Figma] Opening/closing time chip in the operating-hours grid
+  /// (`AddLandmarkView`).
+  static const Color timeChipBackground = Color(0xFFFFF0C5);
 }
