@@ -212,7 +212,7 @@ class _ProfileAvatar extends StatelessWidget {
                       errorBuilder: (_, _, _) => const Icon(
                         Icons.person_outline,
                         size: 20,
-                        color: AppColors.primary,
+                        color: AppColors.accentBrown,
                       ),
                     ),
             ),
