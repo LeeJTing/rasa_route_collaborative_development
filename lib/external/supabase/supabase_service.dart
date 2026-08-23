@@ -40,6 +40,16 @@ class SupabaseService {
   String get currentUserId =>
       _isReady ? Supabase.instance.client.auth.currentUser?.id ?? '' : '';
 
+  String storagePublicUrl(String bucket, String path) {
+    final String base = Env.supabaseUrl;
+    final String normalizedBase = base.endsWith('/') ? base : '$base/';
+    final String encodedPath = path
+        .split('/')
+        .map(Uri.encodeComponent)
+        .join('/');
+    return '${normalizedBase}storage/v1/object/public/$bucket/$encodedPath';
+  }
+
   // ---------------------------------------------------------------------------
   // Generic row access. Every repository goes through these - table names and
   // select strings live in the repository, error translation lives here.

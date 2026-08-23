@@ -41,9 +41,14 @@ class FoodKnowledgeRepository {
       return rows
           .map(LocalFoodDataModel.fromJson)
           .map(
-            (LocalFoodDataModel data) => data.toDomain(
-              isFavourite: favouriteIds.contains(data.localFoodId),
-            ),
+            (LocalFoodDataModel data) => data
+                .toDomain(isFavourite: favouriteIds.contains(data.localFoodId))
+                .copyWith(
+                  imageUrl: api.resolveImageUrl(
+                    data.imageUrl,
+                    bucket: APIManager.storageBucketFoodImages,
+                  ),
+                ),
           )
           .toList(growable: false);
     } catch (_) {
@@ -69,9 +74,16 @@ class FoodKnowledgeRepository {
         eq: <String, Object?>{'local_food_id': foodId},
       );
       if (row == null) return null;
-      return LocalFoodDataModel.fromJson(
-        row,
-      ).toDomain(isFavourite: await _isFavouriteSafely(foodId));
+      final LocalFoodDataModel data = LocalFoodDataModel.fromJson(row);
+      final LocalFood food = data.toDomain(
+        isFavourite: await _isFavouriteSafely(foodId),
+      );
+      return food.copyWith(
+        imageUrl: api.resolveImageUrl(
+          data.imageUrl,
+          bucket: APIManager.storageBucketFoodImages,
+        ),
+      );
     } catch (_) {
       throw Exception(
         'Unable to load this local food. Check your connection and try again.',
