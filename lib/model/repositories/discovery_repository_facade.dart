@@ -1,8 +1,19 @@
+import '../../domain_model/restaurant.dart';
+import 'location_repository.dart';
+import 'map_repository.dart';
 import 'recognition_repository.dart';
 import 'restaurant_repository.dart';
-import '../../domain_model/restaurant.dart';
 
-/// Everything about finding food out in the world: restaurants, menus and photo recognition.
+/// Everything about finding food out in the world: restaurants, menus, photo
+/// recognition, and the map the tourist finds them on.
+///
+/// `map` and `location` are also reachable through `LandmarkRepositoryFacade`.
+/// That is the same "second door to the same data" arrangement that facade
+/// already documents - every facade holds its own reference to the one
+/// `APIManager` / `DeviceCapabilityManager` singleton, so this is not a
+/// duplicate source. `MapExplorationLogic` needs them from here because the
+/// dashboard sits behind `DiscoveryLogicFacade`, and per the guideline a logic
+/// class holds one repository facade.
 ///
 /// REPOSITORY FACADE - a business-logic class holds ONE of these, not four
 /// separate repositories. It groups the repositories for one subject area and
@@ -12,6 +23,12 @@ class DiscoveryRepositoryFacade {
 
   final RestaurantRepository restaurant = RestaurantRepository();
   final RecognitionRepository recognition = RecognitionRepository();
+
+  /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
+  final MapRepository map = MapRepository();
+
+  /// REQ102_6 / REQ102_7 - GPS permission and fixes.
+  final LocationRepository location = LocationRepository();
 
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 }
