@@ -149,6 +149,100 @@ abstract final class AppSizes {
 
   /// Subtle catalogue-card elevation from the Figma list treatment.
   static const double cardElevation = 1;
+
+  // ---------------------------------------------------------------------------
+  // REQ102 - Dashboard map (measured off the Figma "Heatmap View" /
+  // "Detialed Map View" frames, both 390 x 833)
+  // ---------------------------------------------------------------------------
+
+  /// Search field on the heatmap view - narrower, because the Filter button
+  /// sits beside it.
+  static const double mapSearchFieldWidth = 264;
+
+  /// Search field / Filter button height on the heatmap view.
+  static const double mapSearchFieldHeight = 44;
+
+  /// The "Filter" pill next to the heatmap search field.
+  static const double mapFilterButtonWidth = 92;
+
+  /// Floating map control column width (zoom in/out, Find Me).
+  static const double mapControlWidth = 44;
+
+  /// Combined height of the stacked zoom-in / zoom-out control.
+  static const double mapZoomControlHeight = 73;
+
+  /// Height of the Find Me control.
+  static const double mapFindMeHeight = 38;
+
+  /// Icon inside a floating map control.
+  static const double mapControlIconSize = 20;
+
+  /// The round Quick Mode button in the bottom-left corner of the map.
+  static const double mapQuickModeButton = 50;
+
+  /// The visible height of one filter chip - 24 in the Figma frame.
+  static const double filterChipHeight = 24;
+
+  /// The chip's *tap* height. The pill stays 24 tall, but a 24pt target is
+  /// half [minTapTarget] and misses are easy - and a miss used to land on the
+  /// map behind the panel and close it, which made the filter feel like it
+  /// only accepted one choice. 40 rather than the full 48 because four rows of
+  /// 48 would make the panel taller than the map it is filtering.
+  static const double filterChipTapHeight = 40;
+
+  /// The fixed label pill ("Meal", "Category", "Taste", "Type") that opens a
+  /// filter row.
+  static const double filterGroupLabelWidth = 72;
+
+  /// Discovery Layer Bar (REQ102_10) - the centred Target Frame card.
+  static const double discoveryTargetCardWidth = 167;
+  static const double discoveryTargetCardHeight = 218;
+
+  /// Discovery Layer Bar - the cards queued either side of the Target Frame.
+  static const double discoveryQueueCardWidth = 163;
+  static const double discoveryQueueCardHeight = 143;
+
+  /// Height of the Discovery Layer Bar when the tourist has opened it.
+  static const double discoveryLayerBarHeight = 236;
+
+  /// Its resting height - a peek showing the grabber, what the map is filtered
+  /// to, and the Matches count. REQ103_1 describes the bar as a sliding
+  /// bottom-sheet, and 236pt of empty placeholder over the map is not a map.
+  static const double discoveryLayerBarCollapsedHeight = 66;
+
+  /// The "Matches" pill floating above the Discovery Layer Bar.
+  static const double matchesButtonHeight = 31;
+
+  /// "Click Map Pin" sheet - the square restaurant photo on its left.
+  static const double pinSheetImage = 102;
+
+  /// The "Serves: ..." strip under the details.
+  static const double pinSheetServesStrip = 35;
+
+  /// Marker drawn for a restaurant / landmark pin on the detailed map.
+  static const double mapPinSize = 36;
+
+  /// Maximum height of the search-suggestion dropdown.
+  static const double searchSuggestionsMaxHeight = 280;
+
+  /// Boundary line between states on the heatmap, in logical pixels. Divided
+  /// by the canvas scale when painted, so it stays this wide on screen however
+  /// far the tourist has zoomed in.
+  static const double heatmapBorderWidth = 1.1;
+
+  /// The same line for the state the tourist has selected.
+  static const double heatmapSelectedBorderWidth = 2.6;
+
+  /// The tourist's own position marker.
+  static const double currentLocationDot = 11;
+
+  /// Corner radius of the map surface, which sits as a card on the cream
+  /// scaffold rather than bleeding to the screen edge.
+  static const double mapCardRadius = 18;
+
+  /// One swatch in the availability legend.
+  static const double legendSwatch = 18;
+
 }
 
 /// Camera-frame guide proportions (REQ106_1) - fractions of the viewfinder's

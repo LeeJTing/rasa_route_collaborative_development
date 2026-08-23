@@ -1,4 +1,5 @@
 import '../model/data_models/location_data_model.dart';
+import 'dashboard_view_model.dart';
 
 /// VIEWMODEL FACADE (inbound).
 ///
@@ -6,18 +7,36 @@ import '../model/data_models/location_data_model.dart';
 /// components through one object. This one is the mirror image: it lets a
 /// background process push *up* into many ViewModels through one object.
 ///
-/// `LocationMonitor` publishes here. Any number of ViewModels implement
-/// [CurrentLocationListener] and register themselves; the monitor knows about
-/// none of them.
+/// The flow is fixed, and it runs one way only:
+///
+/// ```text
+/// LocationMonitor  ->  CurrentLocationFacade.publish()
+///                        -> DashboardViewModel.onCurrentLocationChanged()   [static]
+///                        -> every registered CurrentLocationListener
+/// ```
+///
+/// `LocationMonitor` knows this facade and nothing above it; the facade knows
+/// the ViewModels. No ViewModel is ever handed to a background process.
+///
+/// **Two ways up, on purpose.**
+///
+///   * **The static entry point.** A ViewModel exposes a `static` field for the
+///     latest fix and a `static` method the facade calls. That way the value
+///     survives the ViewModel being disposed and rebuilt - a tourist switching
+///     tabs and coming back sees the last known position immediately instead of
+///     a blank map waiting on the next GPS tick. `DashboardViewModel` works
+///     this way.
+///   * **The listener list.** The original arrangement, still used by
+///     `AddLandmarkViewModel` and `RestaurantRecommendationViewModel`. A
+///     ViewModel implements [CurrentLocationListener], registers in `onInit`
+///     and unregisters in `dispose` - forgetting the second leaks it.
 ///
 /// A singleton - `CurrentLocationFacade()` always returns the same instance, so
 /// the monitor and the ViewModels meet on the same object without anyone
 /// passing it around.
 ///
 /// Rules:
-///   * a ViewModel registers in `onInit` and unregisters in `dispose` -
-///     forgetting the second leaks the ViewModel;
-///   * listener callbacks must be cheap and must not throw;
+///   * callbacks must be cheap and must not throw;
 ///   * a background process never holds a ViewModel reference directly.
 class CurrentLocationFacade {
   factory CurrentLocationFacade() => _instance;
@@ -42,9 +61,19 @@ class CurrentLocationFacade {
   void unregister(CurrentLocationListener listener) =>
       _listeners.remove(listener);
 
-  /// Called by `LocationMonitor`. Fans out to every registered ViewModel.
+  /// Called by `LocationMonitor`. Fans out to every ViewModel that wants the
+  /// tourist's position, by whichever of the two routes it uses.
   void publish(LocationDataModel location) {
     _latest = location;
+
+    // Static entry points first - these hold the value whether or not a
+    // ViewModel instance happens to be alive right now.
+    try {
+      DashboardViewModel.onCurrentLocationChanged(location);
+    } catch (_) {
+      // One broken ViewModel must not stop the others from updating.
+    }
+
     for (final CurrentLocationListener listener
         in List<CurrentLocationListener>.of(_listeners)) {
       try {
@@ -56,7 +85,8 @@ class CurrentLocationFacade {
   }
 }
 
-/// Implemented by any ViewModel that cares where the tourist is.
+/// Implemented by any ViewModel that cares where the tourist is and has not
+/// moved to a static entry point.
 abstract interface class CurrentLocationListener {
   void onCurrentLocationChanged(LocationDataModel location);
 }
