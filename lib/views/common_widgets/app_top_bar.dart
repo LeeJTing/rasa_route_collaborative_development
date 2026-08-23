@@ -111,7 +111,9 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
-                        style: AppTextStyles.titleLarge,
+                        style: AppTextStyles.titleLarge.copyWith(
+                          color: AppColors.accentBrown,
+                        ),
                       ),
                       if (subtitle != null)
                         Text(
@@ -119,7 +121,9 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
-                          style: AppTextStyles.bodySmall,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.accentBrown,
+                          ),
                         ),
                     ],
                   ),
@@ -160,7 +164,7 @@ class _BarIconButton extends StatelessWidget {
         child: Icon(
           icon,
           size: AppSizes.appBarIconSize,
-          color: AppColors.textPrimary,
+          color: AppColors.accentBrown,
         ),
       ),
     );
@@ -200,7 +204,7 @@ class _ProfileAvatar extends StatelessWidget {
                   ? const Icon(
                       Icons.person_outline,
                       size: 20,
-                      color: AppColors.textSecondary,
+                      color: AppColors.accentBrown,
                     )
                   : Image.network(
                       imageUrl!,
@@ -208,7 +212,7 @@ class _ProfileAvatar extends StatelessWidget {
                       errorBuilder: (_, _, _) => const Icon(
                         Icons.person_outline,
                         size: 20,
-                        color: AppColors.textSecondary,
+                        color: AppColors.accentBrown,
                       ),
                     ),
             ),
