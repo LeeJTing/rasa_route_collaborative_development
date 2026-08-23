@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:rasa_route_collaborative_development/app/config/env.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -48,6 +50,26 @@ class SupabaseService {
         .map(Uri.encodeComponent)
         .join('/');
     return '${normalizedBase}storage/v1/object/public/$bucket/$encodedPath';
+  }
+
+  /// Uploads raw bytes to a storage bucket and returns the object path the
+  /// bucket assigned - stored as the row's `image_id` (and turned into the
+  /// public `image_url` via [storagePublicUrl]). Throws on failure - the
+  /// caller surfaces the error to the tourist. Uses `uploadBinary`, which
+  /// works on every platform (dart:io `File` is unavailable on web).
+  Future<String> uploadBytes({
+    required String bucket,
+    required String path,
+    required List<int> bytes,
+    String contentType = 'image/jpeg',
+  }) async {
+    return _client.storage
+        .from(bucket)
+        .uploadBinary(
+          path,
+          Uint8List.fromList(bytes),
+          fileOptions: FileOptions(contentType: contentType, upsert: true),
+        );
   }
 
   // ---------------------------------------------------------------------------

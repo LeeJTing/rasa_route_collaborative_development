@@ -21,6 +21,8 @@ class FoodAnalysisResponse implements JsonModel {
     this.tasteTags = const <String>[],
     this.foodCount = 1,
     this.candidates = const <FoodCandidate>[],
+    this.priceMin = 0,
+    this.priceMax = 0,
   });
 
   /// Dish name (e.g., "Nasi Lemak")
@@ -77,6 +79,13 @@ class FoodAnalysisResponse implements JsonModel {
   /// the quick name-only call (defaults to empty elsewhere).
   final List<FoodCandidate> candidates;
 
+  /// Suggested selling price range for the dish, in MYR (Gemini's estimate -
+  /// used to warn the tourist if they type a price that looks like a typo).
+  /// `0` means Gemini didn't supply one (unknown). Only populated by the
+  /// full analysis calls.
+  final double priceMin;
+  final double priceMax;
+
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
     'dish': dish,
@@ -94,6 +103,8 @@ class FoodAnalysisResponse implements JsonModel {
     'tasteTags': tasteTags,
     'foodCount': foodCount,
     'candidates': candidates.map((FoodCandidate c) => c.toJson()).toList(),
+    'priceMin': priceMin,
+    'priceMax': priceMax,
   };
 
   FoodAnalysisResponse copyWith({
@@ -112,6 +123,8 @@ class FoodAnalysisResponse implements JsonModel {
     List<String>? tasteTags,
     int? foodCount,
     List<FoodCandidate>? candidates,
+    double? priceMin,
+    double? priceMax,
   }) => FoodAnalysisResponse(
     dish: dish ?? this.dish,
     variant: variant ?? this.variant,
@@ -128,6 +141,8 @@ class FoodAnalysisResponse implements JsonModel {
     tasteTags: tasteTags ?? this.tasteTags,
     foodCount: foodCount ?? this.foodCount,
     candidates: candidates ?? this.candidates,
+    priceMin: priceMin ?? this.priceMin,
+    priceMax: priceMax ?? this.priceMax,
   );
 }
 

@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart' show visibleForTesting;
+
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
@@ -16,9 +18,10 @@ import 'swipe_repository.dart';
 /// separate repositories. It groups the repositories for one subject area and
 /// re-exposes them as a single flat API. No business rules live here.
 class FoodRepositoryFacade {
-  FoodRepositoryFacade();
+  FoodRepositoryFacade({@visibleForTesting FoodKnowledgeRepository? knowledge})
+    : knowledge = knowledge ?? FoodKnowledgeRepository();
 
-  final FoodKnowledgeRepository knowledge = FoodKnowledgeRepository();
+  final FoodKnowledgeRepository knowledge;
   final RecommendationRepository recommendation = RecommendationRepository();
   final SwipeRepository swipe = SwipeRepository();
 

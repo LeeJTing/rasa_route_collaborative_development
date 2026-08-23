@@ -54,6 +54,11 @@ class APIManager {
   /// `local_food_image.img_name` column stores the object name in this bucket.
   static const String storageBucketFoodImages = 'food-images';
 
+  /// Supabase Storage bucket holding tourist food photos attached to
+  /// submitted landmarks. `landmark_item.image_id` stores the object name in
+  /// this bucket and `landmark_item.image_url` the public URL of that object.
+  static const String storageBucketLandmarkImages = 'landmark-images';
+
   // ---------------------------------------------------------------------------
   // Generic row access, forwarded straight to SupabaseService.
   // ---------------------------------------------------------------------------
@@ -99,6 +104,19 @@ class APIManager {
     Map<String, Object?> values, {
     required Map<String, Object?> eq,
   }) => _supabase.updateRow(table, values, eq: eq);
+
+  /// Uploads a captured food photo to [storageBucketLandmarkImages] and
+  /// returns the storage object name - the `landmark_item.image_id` value.
+  /// The public URL is `_supabase.storagePublicUrl(...)` on the same name
+  /// (see [resolveImageUrl]).
+  Future<String> uploadLandmarkImage({
+    required List<int> bytes,
+    required String path,
+  }) => _supabase.uploadBytes(
+    bucket: storageBucketLandmarkImages,
+    path: path,
+    bytes: bytes,
+  );
 
   /// The signed-in user's id, or `''` when nobody is signed in.
   String get currentUserId => _supabase.currentUserId;

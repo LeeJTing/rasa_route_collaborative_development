@@ -37,6 +37,10 @@ class RecognitionResultCard extends StatelessWidget {
     this.capturedImage,
     this.onViewDetails,
     this.onAddLandmark,
+    this.isLocalFood = true,
+    this.isLowConfidence = false,
+    this.onEnterName,
+    this.isProcessing = false,
     this.addLandmarkLabel = 'Add New Landmark',
     this.promptText = 'Would you like to add this as a new landmark?',
   });
@@ -49,6 +53,27 @@ class RecognitionResultCard extends StatelessWidget {
 
   final VoidCallback? onViewDetails;
   final VoidCallback? onAddLandmark;
+
+  /// Whether the food is Malaysian local food. When false the header switches
+  /// to a "Not Local" warning and the caller must not pass [onAddLandmark] -
+  /// the details are still shown and "View Details" still works.
+  final bool isLocalFood;
+
+  /// Whether the recognition was shaky enough that the tourist should be
+  /// asked to verify it - the card shows a "low confidence" cue when true.
+  /// An already-decided boolean, not a raw score: the threshold is a domain
+  /// rule and lives in `FoodRecognitionLogic.isLowConfidence`, surfaced
+  /// through `FoodRecognitionViewModel.isLowConfidence`. This widget only
+  /// decides how to draw it.
+  final bool isLowConfidence;
+
+  /// Manual fallback when Gemini got the dish wrong - called with the food
+  /// name the tourist typed (see `FoodRecognitionViewModel.enterFoodName`).
+  /// Null hides the "type the name" option.
+  final ValueChanged<String>? onEnterName;
+
+  /// Disables the manual-entry field/button while a name is being resolved.
+  final bool isProcessing;
 
   /// Label on the primary confirm button - "Add New Landmark" for the
   /// primary capture, "Add to Landmark" for "Add More Food" (A12).
@@ -76,17 +101,47 @@ class RecognitionResultCard extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
-                    const Icon(Icons.check_circle, color: AppColors.success),
+                    Icon(
+                      isLocalFood ? Icons.check_circle : Icons.info_outline,
+                      color: isLocalFood
+                          ? AppColors.success
+                          : AppColors.warning,
+                    ),
                     const SizedBox(width: AppSpacing.sm),
-                    const Flexible(
+                    Flexible(
                       child: Text(
-                        'Local Food Recognised',
+                        isLocalFood
+                            ? 'Local Food Recognised'
+                            : 'Food Detected (Not Local)',
                         textAlign: TextAlign.center,
                         style: AppTextStyles.titleMedium,
                       ),
                     ),
                   ],
                 ),
+                if (isLocalFood && isLowConfidence) ...<Widget>[
+                  const SizedBox(height: AppSpacing.xs),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      const Icon(
+                        Icons.help_outline,
+                        size: AppSizes.inlineNoticeIconSize,
+                        color: AppColors.warning,
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      Flexible(
+                        child: Text(
+                          'Low confidence - please verify this dish',
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.warning,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.md),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -101,7 +156,10 @@ class RecognitionResultCard extends StatelessWidget {
                         children: <Widget>[
                           _InfoRow(label: 'Dish', value: food.name),
                           if (food.synonyms.isNotEmpty)
-                            _InfoRow(label: 'Variant', value: food.synonyms.first),
+                            _InfoRow(
+                              label: 'Variant',
+                              value: food.synonyms.first,
+                            ),
                           if (food.description.isNotEmpty) ...<Widget>[
                             const SizedBox(height: AppSpacing.xs),
                             Text(
@@ -138,6 +196,13 @@ class RecognitionResultCard extends StatelessWidget {
                 child: Text(addLandmarkLabel),
               ),
             ),
+          if (onEnterName != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            _ManualNameEntryField(
+              onEnterName: onEnterName!,
+              isProcessing: isProcessing,
+            ),
+          ],
         ],
       ),
     );
@@ -150,8 +215,9 @@ class RecognitionResultCard extends StatelessWidget {
 /// complete text either way.
 String _truncateDescription(String description, {int maxLength = 40}) {
   final String trimmed = description.trim();
-  final String preview =
-      trimmed.length <= maxLength ? trimmed : trimmed.substring(0, maxLength).trimRight();
+  final String preview = trimmed.length <= maxLength
+      ? trimmed
+      : trimmed.substring(0, maxLength).trimRight();
   return '$preview ...';
 }
 
@@ -237,6 +303,89 @@ class _InfoRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "Wrong dish? Type the name" - a small, collapsible manual-entry field
+/// appended to the single-result card. Lets the tourist override Gemini's
+/// answer by typing the food name (see
+/// `FoodRecognitionViewModel.enterFoodName`).
+class _ManualNameEntryField extends StatefulWidget {
+  const _ManualNameEntryField({
+    required this.onEnterName,
+    required this.isProcessing,
+  });
+
+  final ValueChanged<String> onEnterName;
+  final bool isProcessing;
+
+  @override
+  State<_ManualNameEntryField> createState() => _ManualNameEntryFieldState();
+}
+
+class _ManualNameEntryFieldState extends State<_ManualNameEntryField> {
+  final TextEditingController _controller = TextEditingController();
+  bool _show = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final String name = _controller.text.trim();
+    if (name.isEmpty || widget.isProcessing) return;
+    widget.onEnterName(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_show) {
+      return Align(
+        alignment: Alignment.center,
+        child: TextButton.icon(
+          onPressed: widget.isProcessing
+              ? null
+              : () => setState(() => _show = true),
+          icon: const Icon(Icons.edit_outlined, size: 16),
+          label: const Text('Wrong dish? Type the name'),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        TextField(
+          controller: _controller,
+          enabled: !widget.isProcessing,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _submit(),
+          decoration: const InputDecoration(
+            hintText: 'e.g. Murtabak',
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: <Widget>[
+            TextButton(
+              onPressed: widget.isProcessing
+                  ? null
+                  : () => setState(() => _show = false),
+              child: const Text('Cancel'),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            FilledButton(
+              onPressed: widget.isProcessing ? null : _submit,
+              child: const Text('Show this food'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

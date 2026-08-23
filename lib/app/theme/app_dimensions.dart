@@ -114,6 +114,11 @@ abstract final class AppSizes {
   /// Status icon used in notice and warning banners.
   static const double bannerIcon = 30;
 
+  /// Small icon sitting inline with body text - e.g. the "low confidence"
+  /// cue on `RecognitionResultCard`. Deliberately smaller than a standard
+  /// icon so it reads as part of the sentence rather than its own element.
+  static const double inlineNoticeIconSize = 14;
+
   /// Height of the captured signboard/stall image preview in the Add
   /// Landmark image-capture row.
   static const double capturedPhotoPreviewHeight = 160;

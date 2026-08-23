@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart' show visibleForTesting;
+
 import '../../domain_model/restaurant.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
@@ -19,10 +21,14 @@ import 'restaurant_repository.dart';
 /// separate repositories. It groups the repositories for one subject area and
 /// re-exposes them as a single flat API. No business rules live here.
 class DiscoveryRepositoryFacade {
-  DiscoveryRepositoryFacade();
+  DiscoveryRepositoryFacade({
+    @visibleForTesting RestaurantRepository? restaurant,
+    @visibleForTesting RecognitionRepository? recognition,
+  }) : restaurant = restaurant ?? RestaurantRepository(),
+       recognition = recognition ?? RecognitionRepository();
 
-  final RestaurantRepository restaurant = RestaurantRepository();
-  final RecognitionRepository recognition = RecognitionRepository();
+  final RestaurantRepository restaurant;
+  final RecognitionRepository recognition;
 
   /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
   final MapRepository map = MapRepository();

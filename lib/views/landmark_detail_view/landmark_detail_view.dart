@@ -57,6 +57,15 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
     _viewModel.setReturnToFormAsAdditionalFood(
       LandmarkDraftHandoff().takeReturnToFormAsAdditionalFood(),
     );
+    // Whether the food was judged to be Malaysian local food - when not, the
+    // "Add New Landmark" action below is hidden (details still shown).
+    _viewModel.setIsLocalFood(LandmarkDraftHandoff().takeIsLocalFood());
+    // Gemini's suggested price range for the food, carried onto the
+    // submitted LandmarkItem.
+    _viewModel.setPriceRange(
+      priceMin: LandmarkDraftHandoff().takePriceMin(),
+      priceMax: LandmarkDraftHandoff().takePriceMax(),
+    );
 
     _viewModel.onInit();
   }
@@ -89,7 +98,7 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                   return ListView(
                     padding: AppSpacing.screenPadding,
                     children: <Widget>[
-                      const _SuccessBanner(),
+                      _SuccessBanner(isLocalFood: viewModel.isLocalFood),
                       const SizedBox(height: AppSpacing.lg),
                       // The same "Recognised Food" card as `AddLandmarkView`'s,
                       // just always expanded (no collapse arrow) and without the
@@ -100,25 +109,37 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                         collapsible: false,
                       ),
                       const SizedBox(height: AppSpacing.lg),
-                      Text(
-                        viewModel.returnToFormAsAdditionalFood
-                            ? 'Add this food to the landmark?'
-                            : 'Would you like to add this as a new landmark?',
-                        textAlign: TextAlign.center,
-                        style: AppTextStyles.bodyMedium,
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: viewModel.proceedToAddLandmark,
-                          child: Text(
-                            viewModel.returnToFormAsAdditionalFood
-                                ? 'Add to Landmark'
-                                : 'Add New Landmark',
+                      if (viewModel.isLocalFood) ...<Widget>[
+                        Text(
+                          viewModel.returnToFormAsAdditionalFood
+                              ? 'Add this food to the landmark?'
+                              : 'Would you like to add this as a new landmark?',
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.bodyMedium,
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: viewModel.proceedToAddLandmark,
+                            child: Text(
+                              viewModel.returnToFormAsAdditionalFood
+                                  ? 'Add to Landmark'
+                                  : 'Add New Landmark',
+                            ),
                           ),
                         ),
-                      ),
+                      ] else ...<Widget>[
+                        // Not Malaysian local food - showing the info is the
+                        // whole point of this screen, but it must never be
+                        // offered as a landmark.
+                        const Text(
+                          "This doesn't appear to be Malaysian local food, "
+                          'so it cannot be added as a landmark.',
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.bodyMedium,
+                        ),
+                      ],
                       const SizedBox(height: AppSpacing.xxl),
                     ],
                   );
@@ -131,35 +152,50 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
 }
 
 class _SuccessBanner extends StatelessWidget {
-  const _SuccessBanner();
+  const _SuccessBanner({required this.isLocalFood});
+
+  /// Whether the shown food is Malaysian local food - changes the banner
+  /// from a green "recognised" success into a caution-coloured "not local"
+  /// note.
+  final bool isLocalFood;
 
   @override
   Widget build(BuildContext context) {
+    final Color accent = isLocalFood ? AppColors.success : AppColors.warning;
     return Container(
       padding: AppSpacing.cardPadding,
-      decoration: const BoxDecoration(
-        color: AppColors.successContainer,
+      decoration: BoxDecoration(
+        color: isLocalFood
+            ? AppColors.successContainer
+            : AppColors.bannerCautionBackground,
         borderRadius: AppRadius.cardRadius,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const Icon(Icons.check_circle, color: AppColors.success),
+          Icon(
+            isLocalFood ? Icons.check_circle : Icons.info_outline,
+            color: accent,
+          ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'Local Food Recognised successfully!',
+                  isLocalFood
+                      ? 'Local Food Recognised successfully!'
+                      : 'Food Detected - Not Malaysian Local Food',
                   style: AppTextStyles.titleSmall.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: AppColors.success,
+                    color: accent,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                const Text(
-                  'Please review the information below.',
+                Text(
+                  isLocalFood
+                      ? 'Please review the information below.'
+                      : 'You can view the details, but it cannot be added as a landmark.',
                   style: AppTextStyles.bodySmall,
                 ),
               ],
