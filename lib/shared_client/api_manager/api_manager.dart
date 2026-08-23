@@ -47,6 +47,12 @@ class APIManager {
   static const String tableLandmarkItem = 'landmark_item';
   static const String tableFoodPreference = 'food_preference';
   static const String tableDietaryRestriction = 'dietary_restriction';
+  static const String tableFoodDietaryRestriction = 'food_dietary_restriction';
+  static const String tableUserDietaryRestriction = 'user_dietary_restriction';
+
+  /// Supabase Storage bucket holding local-food dish photos. The
+  /// `local_food_image.img_name` column stores the object name in this bucket.
+  static const String storageBucketFoodImages = 'food-images';
 
   // ---------------------------------------------------------------------------
   // Generic row access, forwarded straight to SupabaseService.
@@ -99,4 +105,16 @@ class APIManager {
 
   /// Plain-text prompt to Gemini, with the app's configured timeout + retry.
   Future<String> askGemini(String prompt) => _gemini.generateText(prompt);
+
+  /// Turns a Supabase Storage object name into a public HTTPS URL so the UI
+  /// can `Image.network` it. Full URLs and bundled `assets/...` paths are
+  /// passed through unchanged; empty values become `null`.
+  String? resolveImageUrl(String? name, {required String bucket}) {
+    final String? trimmed = name?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    if (trimmed.startsWith('http') || trimmed.startsWith('assets/')) {
+      return trimmed;
+    }
+    return _supabase.storagePublicUrl(bucket, trimmed);
+  }
 }
