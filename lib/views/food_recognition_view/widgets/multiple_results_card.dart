@@ -15,11 +15,13 @@ import '../../../domain_model/local_food.dart';
 /// inside it. Widgets in a `widgets/` folder are driven entirely by
 /// constructor parameters and callbacks - they never read a ViewModel
 /// themselves, and they style from the theme rather than raw values.
-class MultipleResultsCard extends StatelessWidget {
+class MultipleResultsCard extends StatefulWidget {
   const MultipleResultsCard({
     super.key,
     required this.results,
     required this.onSelect,
+    this.onEnterName,
+    this.isProcessing = false,
   });
 
   /// The candidate foods (usually 2-3), resolved against the catalogue.
@@ -27,6 +29,34 @@ class MultipleResultsCard extends StatelessWidget {
 
   /// Called with the food the tourist tapped.
   final ValueChanged<LocalFood> onSelect;
+
+  /// Manual fallback when none of the candidates is right - called with the
+  /// food name the tourist typed (see
+  /// `FoodRecognitionViewModel.enterFoodName`). Null hides the manual-entry
+  /// field.
+  final ValueChanged<String>? onEnterName;
+
+  /// Disables the manual-entry field/button while a name is being resolved.
+  final bool isProcessing;
+
+  @override
+  State<MultipleResultsCard> createState() => _MultipleResultsCardState();
+}
+
+class _MultipleResultsCardState extends State<MultipleResultsCard> {
+  final TextEditingController _nameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _submitName() {
+    final String name = _nameController.text.trim();
+    if (name.isEmpty || widget.isProcessing) return;
+    widget.onEnterName?.call(name);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,13 +77,48 @@ class MultipleResultsCard extends StatelessWidget {
             style: AppTextStyles.bodyMedium,
           ),
           const SizedBox(height: AppSpacing.md),
-          for (int i = 0; i < results.length; i++) ...<Widget>[
+          for (int i = 0; i < widget.results.length; i++) ...<Widget>[
             _ResultRow(
               index: i + 1,
-              food: results[i],
-              onTap: () => onSelect(results[i]),
+              food: widget.results[i],
+              onTap: () => widget.onSelect(widget.results[i]),
             ),
-            if (i < results.length - 1) const SizedBox(height: AppSpacing.sm),
+            if (i < widget.results.length - 1)
+              const SizedBox(height: AppSpacing.sm),
+          ],
+          if (widget.onEnterName != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.lg),
+            const Divider(),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'None of these? Type the food name:',
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _nameController,
+                    enabled: !widget.isProcessing,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _submitName(),
+                    decoration: const InputDecoration(
+                      hintText: 'e.g. Murtabak',
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                FilledButton(
+                  onPressed: widget.isProcessing ? null : _submitName,
+                  child: const Text('Show this food'),
+                ),
+              ],
+            ),
           ],
         ],
       ),

@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart' show visibleForTesting;
+
 import 'food_recognition_logic.dart';
 import 'landmark_submission_logic.dart';
 
@@ -13,8 +15,10 @@ import 'landmark_submission_logic.dart';
 /// facade fans out to as many business-logic classes as the feature needs. No
 /// business rules live here, and it never imports Flutter.
 class LandmarkLogicFacade {
-  LandmarkLogicFacade();
+  LandmarkLogicFacade({
+    @visibleForTesting FoodRecognitionLogic? foodRecognition,
+  }) : foodRecognition = foodRecognition ?? FoodRecognitionLogic();
 
-  final FoodRecognitionLogic foodRecognition = FoodRecognitionLogic();
+  final FoodRecognitionLogic foodRecognition ;
   final LandmarkSubmissionLogic submission = LandmarkSubmissionLogic();
 }

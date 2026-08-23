@@ -29,12 +29,19 @@ class AppBottomNavBar extends StatelessWidget {
     super.key,
     required this.currentIndex,
     required this.onTabSelected,
+    required this.onCameraPressed,
   });
 
   /// Index of the selected tab. See [AppBottomNavTab].
   final int currentIndex;
 
   final ValueChanged<int> onTabSelected;
+
+  /// Opens the camera. Unlike the two labelled tabs, the camera is a
+  /// momentary action, not a selectable destination - it pushes a full-screen
+  /// route (so the bottom bar is not visible on the camera screen, which
+  /// should show only its own capture button).
+  final VoidCallback onCameraPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -55,12 +62,7 @@ class AppBottomNavBar extends StatelessWidget {
                   onTap: () => onTabSelected(AppBottomNavTab.home.index),
                 ),
               ),
-              Expanded(
-                child: _CameraButton(
-                  isSelected: currentIndex == AppBottomNavTab.camera.index,
-                  onTap: () => onTabSelected(AppBottomNavTab.camera.index),
-                ),
-              ),
+              Expanded(child: _CameraButton(onTap: onCameraPressed)),
               Expanded(
                 child: _NavItem(
                   icon: Icons.search_outlined,
@@ -132,17 +134,17 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// The raised circular camera button in the middle of the bar.
+/// The raised circular camera button in the middle of the bar. Opens the
+/// camera as a full-screen route (via [AppBottomNavBar.onCameraPressed]) - an
+/// action, not a selectable tab, so it never shows a selected state.
 class _CameraButton extends StatelessWidget {
-  const _CameraButton({required this.isSelected, required this.onTap});
+  const _CameraButton({required this.onTap});
 
-  final bool isSelected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      selected: isSelected,
       button: true,
       label: 'Identify a dish',
       child: GestureDetector(
@@ -152,7 +154,7 @@ class _CameraButton extends StatelessWidget {
             width: AppSizes.navFabDiameter,
             height: AppSizes.navFabDiameter,
             decoration: BoxDecoration(
-              color: isSelected ? AppColors.primaryDark : AppColors.primary,
+              color: AppColors.primary,
               shape: BoxShape.circle,
               border: Border.all(color: AppColors.background, width: 3),
             ),

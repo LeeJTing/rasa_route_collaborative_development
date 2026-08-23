@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../model/data_models/location_data_model.dart';
 
@@ -120,9 +121,21 @@ class DeviceCapabilityManager {
 
   // --- camera ----------------------------------------------------------------
 
-  Future<bool> hasCameraPermission() async => false;
+  /// True when the OS camera permission is granted (Android/iOS runtime
+  /// permission - the `CAMERA` manifest permission alone is not enough on
+  /// Android 6+).
+  Future<bool> hasCameraPermission() async {
+    final PermissionStatus status = await Permission.camera.status;
+    return status.isGranted;
+  }
 
-  Future<bool> requestCameraPermission() async => false;
+  /// Asks for the OS camera permission if it isn't granted yet, and reports
+  /// whether it is granted afterwards.
+  Future<bool> requestCameraPermission() async {
+    if (await hasCameraPermission()) return true;
+    final PermissionStatus status = await Permission.camera.request();
+    return status.isGranted;
+  }
 
   /// Opens the camera. Returns null if the tourist cancels.
   Future<CapturedImage?> capturePhoto() async => null;

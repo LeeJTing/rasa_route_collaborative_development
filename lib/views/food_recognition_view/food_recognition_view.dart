@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
+import '../../shared_client/device_capability_manager/device_capability_manager.dart';
 import '../../view_models/food_recognition_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 import 'widgets/multiple_results_card.dart';
@@ -80,6 +81,26 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   }
 
   Future<void> _initCamera() async {
+    // Android 6+/iOS need the OS camera permission before the live preview
+    // can open. Request it explicitly (wrapped in `DeviceCapabilityManager`,
+    // the one place `permission_handler` is touched) instead of relying on
+    // the CameraException that initialize() would otherwise surface - this
+    // View owns the CameraController directly (REQ106_1), so it owns the
+    // permission gate too.
+    final bool cameraGranted = await DeviceCapabilityManager()
+        .requestCameraPermission();
+    if (!cameraGranted) {
+      if (mounted) {
+        setState(() {
+          _cameraError =
+              'Camera permission is needed to capture photos. Enable it in '
+              'Settings and try again.';
+          _isCameraInitializing = false;
+        });
+      }
+      return;
+    }
+
     try {
       final List<CameraDescription> cameras = await availableCameras();
       if (cameras.isEmpty) {
@@ -334,6 +355,8 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
       return MultipleResultsCard(
         results: viewModel.multipleResults,
         onSelect: viewModel.selectFromMultiple,
+        onEnterName: viewModel.enterFoodName,
+        isProcessing: viewModel.isProcessing,
       );
     }
 
@@ -342,22 +365,44 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
         return RecognitionResultCard(
           food: viewModel.recognizedFood!,
           capturedImage: viewModel.capturedImage,
+          isLocalFood: viewModel.isLocalFood,
+          isLowConfidence: viewModel.isLowConfidence,
           onViewDetails: viewModel.proceedToViewDetails,
-          onAddLandmark: viewModel.proceedToAddLandmark,
+          // Non-local food: details + "View Details" stay, but there is no
+          // "Add New Landmark" - it must never become a landmark.
+          onAddLandmark: viewModel.isLocalFood
+              ? viewModel.proceedToAddLandmark
+              : null,
+          onEnterName: viewModel.enterFoodName,
+          isProcessing: viewModel.isProcessing,
+          promptText: viewModel.isLocalFood
+              ? 'Would you like to add this as a new landmark?'
+              : "This doesn't appear to be Malaysian local food, so it "
+                    "can't be added as a landmark.",
         );
 
       case FoodRecognitionPurpose.additionalFood:
         return RecognitionResultCard(
           food: viewModel.recognizedFood!,
           capturedImage: viewModel.capturedImage,
+          isLocalFood: viewModel.isLocalFood,
+          isLowConfidence: viewModel.isLowConfidence,
           // Same "View Details" as the primary capture; the detail screen's
           // confirm then returns this food to the existing form (see
           // LandmarkDetailViewModel.returnToFormAsAdditionalFood) rather
           // than pushing a brand-new AddLandmarkView.
           onViewDetails: viewModel.proceedToViewDetails,
-          onAddLandmark: viewModel.confirmFoodAndReturn,
+          // Non-local food: never "Add to Landmark" back onto the form.
+          onAddLandmark: viewModel.isLocalFood
+              ? viewModel.confirmFoodAndReturn
+              : null,
+          onEnterName: viewModel.enterFoodName,
+          isProcessing: viewModel.isProcessing,
           addLandmarkLabel: 'Add to Landmark',
-          promptText: 'Add this food to the landmark?',
+          promptText: viewModel.isLocalFood
+              ? 'Add this food to the landmark?'
+              : "This doesn't appear to be Malaysian local food, so it "
+                    "can't be added.",
         );
 
       case FoodRecognitionPurpose.signboard:

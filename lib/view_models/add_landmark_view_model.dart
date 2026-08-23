@@ -34,6 +34,8 @@ class LandmarkFoodEntry {
     required this.food,
     this.image,
     this.price,
+    this.priceMin = 0,
+    this.priceMax = 0,
   });
 
   /// Creates a new form entry with a fresh, form-local identity.
@@ -41,11 +43,15 @@ class LandmarkFoodEntry {
     required LocalFood food,
     XFile? image,
     double? price,
+    double priceMin = 0,
+    double priceMax = 0,
   }) => LandmarkFoodEntry._(
     entryId: _nextEntryId++,
     food: food,
     image: image,
     price: price,
+    priceMin: priceMin,
+    priceMax: priceMax,
   );
 
   static int _nextEntryId = 0;
@@ -60,11 +66,18 @@ class LandmarkFoodEntry {
   final XFile? image;
   final double? price;
 
+  /// Gemini's suggested MYR price range for this food, carried onto the
+  /// persisted `LandmarkItem`. `0` means unknown.
+  final double priceMin;
+  final double priceMax;
+
   LandmarkFoodEntry withPrice(double newPrice) => LandmarkFoodEntry._(
     entryId: entryId,
     food: food,
     image: image,
     price: newPrice,
+    priceMin: priceMin,
+    priceMax: priceMax,
   );
 
   LandmarkFoodEntry withFood(LocalFood newFood) => LandmarkFoodEntry._(
@@ -72,6 +85,20 @@ class LandmarkFoodEntry {
     food: newFood,
     image: image,
     price: price,
+    priceMin: priceMin,
+    priceMax: priceMax,
+  );
+
+  LandmarkFoodEntry withPriceRange({
+    required double priceMin,
+    required double priceMax,
+  }) => LandmarkFoodEntry._(
+    entryId: entryId,
+    food: food,
+    image: image,
+    price: price,
+    priceMin: priceMin,
+    priceMax: priceMax,
   );
 }
 
@@ -123,12 +150,22 @@ class AddLandmarkViewModel extends BaseViewModel
   }
 
   // --- LOCATION STATE ---
-  TouristLocation _currentLocation = TouristLocation.unknown;
-  TouristLocation _adjustedLocation = TouristLocation.unknown;
+  LocationDataModel _currentLocation = LocationDataModel.unknown;
+  LocationDataModel _adjustedLocation = LocationDataModel.unknown;
+
+  /// Presenter tool: when set (via [simulateLocation]) this overrides the
+  /// device GPS fix everywhere (map center, 100m range, submitted
+  /// coordinates) so a demo can "be" in a different place. Cleared by
+  /// [useDeviceLocation] to go back to the real device GPS.
+  LocationDataModel _simulatedLocation = LocationDataModel.unknown;
   String? _locationError;
 
   // --- FOOD STATE (auto-filled from recognition; price entered per food) ---
   LandmarkFoodEntry? _primaryFood;
+
+  /// Soft price guidance from Gemini's suggested range - set in
+  /// [setPrimaryFoodPrice], shown under the primary food's price field.
+  String? _primaryFoodPriceWarning;
 
   /// The primary food's own photo (as captured on `FoodRecognitionView`),
   /// carried here via `LandmarkDraftHandoff.pendingCapturedImage` so the
@@ -136,6 +173,10 @@ class AddLandmarkViewModel extends BaseViewModel
   /// there - see [setRecognizedFoodImage].
   XFile? _recognizedFoodImage;
   List<LandmarkFoodEntry> _additionalFoods = <LandmarkFoodEntry>[];
+
+  /// Per-entry soft price guidance, keyed by the form-local
+  /// [LandmarkFoodEntry.entryId].
+  final Map<int, String> _additionalFoodPriceWarnings = <int, String>{};
 
   // --- IMAGE CAPTURE STATE (MANDATORY - ONE of two) ---
   XFile? _capturedImage; // Either signboard or stall
@@ -164,13 +205,21 @@ class AddLandmarkViewModel extends BaseViewModel
   String? _submitError;
 
   // --- GETTERS ---
-  TouristLocation get currentLocation => _currentLocation;
-  TouristLocation get adjustedLocation => _adjustedLocation;
+  LocationDataModel get currentLocation =>
+      _simulatedLocation.isKnown ? _simulatedLocation : _currentLocation;
+  LocationDataModel get adjustedLocation => _adjustedLocation;
   String? get locationError => _locationError;
+
+  /// True while a presenter-supplied demo location is overriding the device
+  /// GPS fix (see [simulateLocation]).
+  bool get isSimulatingLocation => _simulatedLocation.isKnown;
 
   LocalFood? get recognizedFood => _primaryFood?.food;
   XFile? get recognizedFoodImage => _recognizedFoodImage;
   double? get primaryFoodPrice => _primaryFood?.price;
+  String? get primaryFoodPriceWarning => _primaryFoodPriceWarning;
+  String? additionalFoodPriceWarning(int entryId) =>
+      _additionalFoodPriceWarnings[entryId];
   List<LandmarkFoodEntry> get additionalFoods =>
       List<LandmarkFoodEntry>.unmodifiable(_additionalFoods);
 
@@ -227,10 +276,22 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Set recognized food (auto-filled from food recognition, or from
   /// `LandmarkDraftHandoff` before `onInit()` - see class doc). Keeps any
   /// price already entered for this food if it is set again.
-  void setRecognizedFood(LocalFood food) {
+  void setRecognizedFood(
+    LocalFood food, {
+    double priceMin = 0,
+    double priceMax = 0,
+  }) {
     _primaryFood = _primaryFood == null
-        ? LandmarkFoodEntry.newEntry(food: food)
-        : _primaryFood!.withFood(food);
+        ? LandmarkFoodEntry.newEntry(
+            food: food,
+            priceMin: priceMin,
+            priceMax: priceMax,
+          )
+        : _primaryFood!
+              .withFood(food)
+              .withPriceRange(priceMin: priceMin, priceMax: priceMax);
+    // The previous food's suggested range no longer applies.
+    _primaryFoodPriceWarning = null;
     safeNotifyListeners();
   }
 
@@ -249,6 +310,12 @@ class AddLandmarkViewModel extends BaseViewModel
       return;
     }
     _primaryFood = _primaryFood!.withPrice(price);
+    _primaryFoodPriceWarning = landmarkLogic.submission.suggestedPriceWarning(
+      _primaryFood!.food.name,
+      price,
+      _primaryFood!.priceMin,
+      _primaryFood!.priceMax,
+    );
     _submitError = null;
     safeNotifyListeners();
   }
@@ -259,7 +326,7 @@ class AddLandmarkViewModel extends BaseViewModel
   /// last valid position; nothing here is mutated.
   void adjustLandmarkLocation(double latitude, double longitude) {
     if (!landmarkLogic.submission.isWithinAllowedRange(
-      _currentLocation,
+      currentLocation,
       latitude,
       longitude,
     )) {
@@ -268,13 +335,49 @@ class AddLandmarkViewModel extends BaseViewModel
       return; // Revert: _adjustedLocation is left unchanged.
     }
 
+    // A new landmark must be on Malaysian land (A9) - the pin can't be
+    // dragged out of the country (or into the sea) even within 100m.
+    if (!landmarkLogic.submission.isOnLand(latitude, longitude)) {
+      _locationError =
+          'New landmarks must be within Malaysia and on land.'; // A9
+      safeNotifyListeners();
+      return;
+    }
+
     _locationError = null;
     _adjustedLocation = TouristLocation(
       latitude: latitude,
       longitude: longitude,
-      accuracyMeters: _currentLocation.accuracyMeters,
+      accuracyMeters: currentLocation.accuracyMeters,
       capturedAt: DateTime.now(),
     );
+    safeNotifyListeners();
+  }
+
+  /// Presenter tool - override the detected location with [latitude] /
+  /// [longitude] (dev/demo only). The map center, the 100m range and the
+  /// submitted coordinates all follow [currentLocation], which prefers this
+  /// over the real GPS fix. Resets the adjusted pin so the map recentres on
+  /// the new spot. Call [useDeviceLocation] to go back to the real device
+  /// GPS.
+  void simulateLocation(double latitude, double longitude) {
+    _simulatedLocation = LocationDataModel(
+      latitude: latitude,
+      longitude: longitude,
+      accuracyMeters: 10,
+      capturedAt: DateTime.now(),
+    );
+    _adjustedLocation = LocationDataModel.unknown;
+    _locationError = null;
+    safeNotifyListeners();
+  }
+
+  /// Presenter tool - stop simulating; read the real device GPS again (the
+  /// next fix from `LocationMonitor` takes over).
+  void useDeviceLocation() {
+    _simulatedLocation = LocationDataModel.unknown;
+    _adjustedLocation = LocationDataModel.unknown;
+    _locationError = null;
     safeNotifyListeners();
   }
 
@@ -422,12 +525,17 @@ class AddLandmarkViewModel extends BaseViewModel
     final int? opening = isOpeningTime ? minutes : row.opensAt;
     final int? closing = isOpeningTime ? row.closesAt : minutes;
 
-    // Guard: a row is a single (open, close) range, so never store a closing
-    // time at/before its opening (or an opening at/after its closing). If
-    // the pick would make closing <= opening, ignore it and keep the previous
-    // value - this stops a confusing "closing must be after opening" error
-    // from appearing at submit time.
-    if (opening != null && closing != null && closing <= opening) return;
+    // If the pick would make this range invalid, ignore it and keep the
+    // previous value - stops a confusing "closing must be after opening"
+    // error from appearing at submit time. The rule itself
+    // (`isValidTimeOrder`) lives in `LandmarkSubmissionLogic`, the same
+    // domain invariant `validateOperatingHours` checks across a whole day -
+    // not reimplemented inline here.
+    if (opening != null &&
+        closing != null &&
+        !landmarkLogic.submission.isValidTimeOrder(opening, closing)) {
+      return;
+    }
 
     final List<OpeningHour> updated = List<OpeningHour>.of(existing);
     updated[rangeIndex] = OpeningHour(
@@ -493,15 +601,30 @@ class AddLandmarkViewModel extends BaseViewModel
           AppRoutes.foodRecognition,
         );
     if (result == null) return; // Tourist backed out without confirming.
-    addAdditionalFood(result.food, image: result.image);
+    addAdditionalFood(
+      result.food,
+      image: result.image,
+      priceMin: result.priceMin,
+      priceMax: result.priceMax,
+    );
   }
 
   /// Add additional food directly (used when the food is already in hand -
   /// prefer [openAddMoreFood] from the View).
-  void addAdditionalFood(LocalFood food, {XFile? image}) {
+  void addAdditionalFood(
+    LocalFood food, {
+    XFile? image,
+    double priceMin = 0,
+    double priceMax = 0,
+  }) {
     _additionalFoods = <LandmarkFoodEntry>[
       ..._additionalFoods,
-      LandmarkFoodEntry.newEntry(food: food, image: image),
+      LandmarkFoodEntry.newEntry(
+        food: food,
+        image: image,
+        priceMin: priceMin,
+        priceMax: priceMax,
+      ),
     ];
     safeNotifyListeners();
   }
@@ -514,12 +637,31 @@ class AddLandmarkViewModel extends BaseViewModel
       safeNotifyListeners();
       return;
     }
+    LandmarkFoodEntry? entry;
+    for (final LandmarkFoodEntry e in _additionalFoods) {
+      if (e.entryId == entryId) {
+        entry = e;
+        break;
+      }
+    }
+    if (entry == null) return;
     _additionalFoods = _additionalFoods
         .map(
-          (LandmarkFoodEntry entry) =>
-              entry.entryId == entryId ? entry.withPrice(price) : entry,
+          (LandmarkFoodEntry e) =>
+              e.entryId == entryId ? e.withPrice(price) : e,
         )
         .toList(growable: false);
+    final String? warning = landmarkLogic.submission.suggestedPriceWarning(
+      entry.food.name,
+      price,
+      entry.priceMin,
+      entry.priceMax,
+    );
+    if (warning == null) {
+      _additionalFoodPriceWarnings.remove(entryId);
+    } else {
+      _additionalFoodPriceWarnings[entryId] = warning;
+    }
     _submitError = null;
     safeNotifyListeners();
   }
@@ -529,6 +671,7 @@ class AddLandmarkViewModel extends BaseViewModel
     _additionalFoods = _additionalFoods
         .where((LandmarkFoodEntry entry) => entry.entryId != entryId)
         .toList(growable: false);
+    _additionalFoodPriceWarnings.remove(entryId);
     safeNotifyListeners();
   }
 
@@ -579,6 +722,19 @@ class AddLandmarkViewModel extends BaseViewModel
     return landmarkLogic.submission.validateOperatingHours(_operatingHours);
   }
 
+  /// Uploads [image] to Supabase Storage and returns what the row stores for
+  /// it - the object name (`image_id`) and public URL (`image_url`) - or
+  /// null when there's no photo to upload. Used for both the landmark's own
+  /// signboard/stall photo and each food's photo (all go to the same
+  /// `landmark-images` bucket). Network lives in the repository
+  /// (`LandmarkSubmissionLogic.uploadImage`); this method just reads the
+  /// bytes off the XFile the capture flow produced.
+  Future<({String id, String url})?> _uploadPhoto(XFile? image) async {
+    if (image == null) return null;
+    final List<int> bytes = await image.readAsBytes();
+    return landmarkLogic.submission.uploadImage(bytes);
+  }
+
   /// Submit landmark to database
   /// Validates: image captured, restaurant name, every food has a price,
   /// operating hours are complete/non-overlapping.
@@ -606,6 +762,23 @@ class AddLandmarkViewModel extends BaseViewModel
       return;
     }
 
+    // The landmark's coordinates are the pin if the tourist moved it, else
+    // the raw GPS fix. A new landmark must be on Malaysian land (A9) - reject
+    // before any spinner/network work, same fail-fast style as the other
+    // checks above.
+    final LocationDataModel location = _adjustedLocation.isKnown
+        ? _adjustedLocation
+        : currentLocation;
+    if (location.isKnown &&
+        !landmarkLogic.submission.isOnLand(
+          location.latitude,
+          location.longitude,
+        )) {
+      _submitError = 'New landmarks must be within Malaysia and on land.';
+      safeNotifyListeners();
+      return;
+    }
+
     final bool hasIncompleteAdditionalPrice = _additionalFoods.any(
       (LandmarkFoodEntry entry) =>
           entry.price == null ||
@@ -629,43 +802,67 @@ class AddLandmarkViewModel extends BaseViewModel
     safeNotifyListeners();
 
     try {
-      final String? touristId = await landmarkLogic.submission
-          .currentTouristId();
-      if (touristId == null) {
-        _submitError =
-            'Unable to identify tourist session. Please sign in again.';
-        _isSubmitting = false;
-        safeNotifyListeners();
-        return;
-      }
+      // Tourist auth isn't implemented in-app yet, so `currentTouristId()`
+      // returns null - fall back to the test tourist (Elwin) created in
+      // Supabase so the submit flow can be tested end-to-end. Replace with
+      // the real id once sign-in exists.
+      final String touristId =
+          await landmarkLogic.submission.currentTouristId() ??
+          '22222222-2222-4222-8222-222222222222';
 
-      final TouristLocation location = _adjustedLocation.isKnown
-          ? _adjustedLocation
-          : _currentLocation;
+      // Upload the landmark's own signboard/stall photo FIRST - it is stored
+      // on the `submitted_landmark` row (`image_url` / `image_id` /
+      // `image_category`), same bucket as the food photos.
+      final ({String id, String url})? landmarkPhoto = _capturedImage == null
+          ? null
+          : await _uploadPhoto(_capturedImage);
+
+      // Upload each food's photo to Supabase Storage NEXT - the resulting
+      // object name + public URL are what `landmark_item.image_id` /
+      // `landmark_item.image_url` store. A food without a photo stays null
+      // in those columns.
+      final ({String id, String url})? primaryPhoto = await _uploadPhoto(
+        _recognizedFoodImage,
+      );
+      final List<({String id, String url})?> additionalPhotos =
+          <({String id, String url})?>[];
+      for (final LandmarkFoodEntry entry in _additionalFoods) {
+        additionalPhotos.add(await _uploadPhoto(entry.image));
+      }
 
       // Everything below is raw, already-validated form data - building the
       // actual SubmittedLandmark/LandmarkItem domain objects (and deciding
-      // their defaults, like reportedCount: 0 and status: pending) is
+      // their defaults, like reportedCount: 0 and status: available) is
       // LandmarkSubmissionLogic's job now, not this ViewModel's - see that
-      // method's doc for why (and for the signboard/stall photo gap, which
-      // is unrelated to this refactor and still open).
+      // method's doc for why.
       await landmarkLogic.submission.submitLandmark(
         restaurantName: _restaurantName,
         latitude: location.isKnown ? location.latitude : null,
         longitude: location.isKnown ? location.longitude : null,
         category: _primaryFood!.food.category,
         touristId: touristId,
+        imageUrl: landmarkPhoto?.url,
+        imageId: landmarkPhoto?.id,
+        imageCategory: _capturedImageType,
         foods: <FoodSubmission>[
           FoodSubmission(
             food: _primaryFood!.food,
             price: _primaryFood!.price!,
             isFake: isFake,
+            priceMin: _primaryFood!.priceMin,
+            priceMax: _primaryFood!.priceMax,
+            imageUrl: primaryPhoto?.url,
+            imageId: primaryPhoto?.id,
           ),
-          for (final LandmarkFoodEntry entry in _additionalFoods)
+          for (int i = 0; i < _additionalFoods.length; i++)
             FoodSubmission(
-              food: entry.food,
-              price: entry.price!,
+              food: _additionalFoods[i].food,
+              price: _additionalFoods[i].price!,
               isFake: isFake,
+              priceMin: _additionalFoods[i].priceMin,
+              priceMax: _additionalFoods[i].priceMax,
+              imageUrl: additionalPhotos[i]?.url,
+              imageId: additionalPhotos[i]?.id,
             ),
         ],
         operatingHours: _operatingHours,
