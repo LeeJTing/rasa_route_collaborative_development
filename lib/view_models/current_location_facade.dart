@@ -1,5 +1,8 @@
-import '../model/data_models/location_data_model.dart';
+import '../domain_model/tourist_location.dart';
 import 'dashboard_view_model.dart';
+import 'add_landmark_view_model.dart';
+import 'restaurant_recommendation_view_model.dart';
+
 
 /// VIEWMODEL FACADE (inbound).
 ///
@@ -47,10 +50,10 @@ class CurrentLocationFacade {
 
   final List<CurrentLocationListener> _listeners = <CurrentLocationListener>[];
 
-  LocationDataModel _latest = LocationDataModel.unknown;
+  TouristLocation _latest = TouristLocation.unknown;
 
   /// Most recent fix, so a ViewModel registering late is not left blank.
-  LocationDataModel get latest => _latest;
+  TouristLocation get latest => _latest;
 
   void register(CurrentLocationListener listener) {
     if (_listeners.contains(listener)) return;
@@ -63,12 +66,14 @@ class CurrentLocationFacade {
 
   /// Called by `LocationMonitor`. Fans out to every ViewModel that wants the
   /// tourist's position, by whichever of the two routes it uses.
-  void publish(LocationDataModel location) {
+  void publish(TouristLocation location) {
     _latest = location;
 
     // Static entry points first - these hold the value whether or not a
     // ViewModel instance happens to be alive right now.
     try {
+
+
       DashboardViewModel.onCurrentLocationChanged(location);
     } catch (_) {
       // One broken ViewModel must not stop the others from updating.
@@ -88,5 +93,5 @@ class CurrentLocationFacade {
 /// Implemented by any ViewModel that cares where the tourist is and has not
 /// moved to a static entry point.
 abstract interface class CurrentLocationListener {
-  void onCurrentLocationChanged(LocationDataModel location);
+  void onCurrentLocationChanged(TouristLocation location);
 }

@@ -33,14 +33,39 @@ class DeviceCapabilityManager {
         permission == LocationPermission.whileInUse;
   }
 
-  /// One GPS fix, or `LocationDataModel.unknown` when permission is denied /
-  /// no fix is available yet.
+  /// Whether the OS location service is switched on. Separate from
+  /// permission: a tourist can grant the app permission and still have GPS
+  /// turned off device-wide.
+  Future<bool> isLocationServiceEnabled() =>
+      Geolocator.isLocationServiceEnabled();
+
+  /// Fires whenever the tourist turns location on or off in system settings.
+  ///
+  /// This is how the app finds out GPS went away. The position stream simply
+  /// stops - it does not announce anything - so without watching this the last
+  /// known fix would sit on the map forever.
+  Stream<bool> locationServiceStream() => Geolocator.getServiceStatusStream()
+      .map((ServiceStatus status) => status == ServiceStatus.enabled);
+
+  /// One GPS fix, or `LocationDataModel.unknown` when permission is denied,
+  /// location is switched off, or no fix is available yet.
+  ///
+  /// Never throws. `getCurrentPosition` raises if location is disabled
+  /// mid-call, and a thrown exception here would surface as a red error banner
+  /// over the map when the honest answer is simply "no fix".
   Future<LocationDataModel> currentLocation() async {
     if (!await hasLocationPermission()) return LocationDataModel.unknown;
-    final Position position = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-    );
-    return _fromPosition(position);
+    if (!await isLocationServiceEnabled()) return LocationDataModel.unknown;
+    try {
+      final Position position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      return _fromPosition(position);
+    } catch (_) {
+      return LocationDataModel.unknown;
+    }
   }
 
   /// Continuous fixes, consumed by `LocationMonitor`. Emits a new fix when the

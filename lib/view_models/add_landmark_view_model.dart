@@ -6,8 +6,8 @@ import '../core/base_view_model.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/opening_hour.dart';
 import '../domain_model/submitted_landmark.dart';
+import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
-import '../model/data_models/location_data_model.dart';
 import 'current_location_facade.dart';
 import 'food_recognition_view_model.dart'
     show
@@ -117,14 +117,14 @@ class AddLandmarkViewModel extends BaseViewModel
 
   /// Pushed by `LocationMonitor` through [CurrentLocationFacade].
   @override
-  void onCurrentLocationChanged(LocationDataModel location) {
+  void onCurrentLocationChanged(TouristLocation location) {
     _currentLocation = location;
     safeNotifyListeners();
   }
 
   // --- LOCATION STATE ---
-  LocationDataModel _currentLocation = LocationDataModel.unknown;
-  LocationDataModel _adjustedLocation = LocationDataModel.unknown;
+  TouristLocation _currentLocation = TouristLocation.unknown;
+  TouristLocation _adjustedLocation = TouristLocation.unknown;
   String? _locationError;
 
   // --- FOOD STATE (auto-filled from recognition; price entered per food) ---
@@ -164,8 +164,8 @@ class AddLandmarkViewModel extends BaseViewModel
   String? _submitError;
 
   // --- GETTERS ---
-  LocationDataModel get currentLocation => _currentLocation;
-  LocationDataModel get adjustedLocation => _adjustedLocation;
+  TouristLocation get currentLocation => _currentLocation;
+  TouristLocation get adjustedLocation => _adjustedLocation;
   String? get locationError => _locationError;
 
   LocalFood? get recognizedFood => _primaryFood?.food;
@@ -269,7 +269,7 @@ class AddLandmarkViewModel extends BaseViewModel
     }
 
     _locationError = null;
-    _adjustedLocation = LocationDataModel(
+    _adjustedLocation = TouristLocation(
       latitude: latitude,
       longitude: longitude,
       accuracyMeters: _currentLocation.accuracyMeters,
@@ -639,7 +639,7 @@ class AddLandmarkViewModel extends BaseViewModel
         return;
       }
 
-      final LocationDataModel location = _adjustedLocation.isKnown
+      final TouristLocation location = _adjustedLocation.isKnown
           ? _adjustedLocation
           : _currentLocation;
 

@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import '../../domain_model/exploration_filter.dart';
 import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
@@ -7,9 +5,10 @@ import '../../domain_model/local_food.dart';
 import '../../domain_model/map.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
-import '../data_models/location_data_model.dart';
-import '../repositories/food_repository_facade.dart';
+import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
+import '../repositories/food_repository_facade.dart';
+import 'dart:math' as math;
 
 /// REQ102 - the Local Food Dashboard.
 ///
@@ -522,8 +521,8 @@ class MapExplorationLogic {
   Future<bool> ensureLocationPermission() =>
       repository.location.ensureLocationPermission();
 
-  /// REQ102_7 - one GPS fix. `LocationDataModel.unknown` when there isn't one.
-  Future<LocationDataModel> currentLocation() =>
+  /// REQ102_7 - one GPS fix. `TouristLocation.unknown` when there isn't one.
+  Future<TouristLocation> currentLocation() =>
       repository.location.currentLocation();
 
   // ===========================================================================
