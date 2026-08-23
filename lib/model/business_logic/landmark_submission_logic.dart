@@ -1,9 +1,7 @@
-import 'dart:math' as math;
-
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/submitted_landmark.dart';
-import '../data_models/location_data_model.dart';
+import '../../domain_model/tourist_location.dart';
 import '../repositories/landmark_repository_facade.dart';
 import 'location_rules.dart';
 
@@ -192,7 +190,7 @@ class LandmarkSubmissionLogic {
   /// [current] itself has no fix yet - nothing to compare the adjustment
   /// against.
   bool isWithinAllowedRange(
-    LocationDataModel current,
+    TouristLocation current,
     double adjustedLat,
     double adjustedLon,
   ) {

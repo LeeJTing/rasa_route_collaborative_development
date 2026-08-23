@@ -6,7 +6,7 @@ import '../../../app/config/env.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../app/theme/app_text_styles.dart';
-import '../../../model/data_models/location_data_model.dart';
+import '../../../domain_model/tourist_location.dart';
 
 /// Reusable piece of `AddLandmarkView`: an OpenStreetMap showing the GPS fix
 /// with a draggable pin (A9).
@@ -33,10 +33,10 @@ class LocationPickerField extends StatelessWidget {
   });
 
   /// The GPS fix - map centre and the anchor for the 100m radius.
-  final LocationDataModel center;
+  final TouristLocation center;
 
   /// Where the pin currently sits (the fix, or the last accepted adjustment).
-  final LocationDataModel pin;
+  final TouristLocation pin;
 
   /// Called with a tapped lat/lng so the ViewModel can validate the 100m rule.
   final void Function(double latitude, double longitude) onMove;

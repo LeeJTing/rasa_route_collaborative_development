@@ -101,7 +101,9 @@ class RestaurantPinSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return PullToDismissSheet(
+      onDismiss: onDismiss,
+      child: Container(
       decoration: const BoxDecoration(
         color: AppColors.surface,
         borderRadius: AppRadius.sheetRadius,
@@ -123,7 +125,7 @@ class RestaurantPinSheet extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          _Grabber(onDismiss: onDismiss),
+          const _Grabber(),
           const SizedBox(height: AppSpacing.md),
           _Header(pin: pin, isLandmark: _isLandmark),
           const SizedBox(height: AppSpacing.md),
@@ -139,41 +141,29 @@ class RestaurantPinSheet extends StatelessWidget {
           ),
         ],
       ),
+      ),
     );
   }
 }
 
+/// The pull handle. No close button - the sheet is dismissed by dragging it
+/// down, which is what the handle is advertising.
 class _Grabber extends StatelessWidget {
-  const _Grabber({required this.onDismiss});
-
-  final VoidCallback onDismiss;
+  const _Grabber();
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      const SizedBox(width: AppSizes.minTapTarget),
-      Expanded(
-        child: Center(
-          child: Container(
-            width: 67,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.outline,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-            ),
-          ),
+  Widget build(BuildContext context) => Semantics(
+    label: 'Pull down to close',
+    child: Center(
+      child: Container(
+        width: 67,
+        height: 4,
+        decoration: BoxDecoration(
+          color: AppColors.outline,
+          borderRadius: BorderRadius.circular(AppRadius.pill),
         ),
       ),
-      InkWell(
-        onTap: onDismiss,
-        customBorder: const CircleBorder(),
-        child: const SizedBox(
-          width: AppSizes.minTapTarget,
-          height: 28,
-          child: Icon(Icons.close, size: 20, color: AppColors.textSecondary),
-        ),
-      ),
-    ],
+    ),
   );
 }
 

@@ -33,7 +33,6 @@ class MapFilterPanel extends StatelessWidget {
     required this.onToggleOption,
     required this.onClearGroup,
     required this.onToggleExpanded,
-    required this.matchingFoodCount,
   });
 
   final String Function(ExplorationFilterGroup group) labelFor;
@@ -45,10 +44,6 @@ class MapFilterPanel extends StatelessWidget {
   onToggleOption;
   final ValueChanged<ExplorationFilterGroup> onClearGroup;
   final ValueChanged<ExplorationFilterGroup> onToggleExpanded;
-
-  /// REQ102_28 - how many catalogue entries survive the current selection.
-  /// Zero is a legitimate answer, and saying so beats a silently grey map.
-  final int matchingFoodCount;
 
   @override
   Widget build(BuildContext context) {
@@ -86,19 +81,6 @@ class MapFilterPanel extends StatelessWidget {
                 onClearGroup: () => onClearGroup(group),
                 onToggleExpanded: () => onToggleExpanded(group),
               ),
-            const Divider(height: AppSpacing.lg),
-            Text(
-              matchingFoodCount == 0
-                  ? 'No local food matches this filter combination.'
-                  : '$matchingFoodCount local food'
-                        '${matchingFoodCount == 1 ? '' : 's'} match'
-                        '${matchingFoodCount == 1 ? 'es' : ''} this filter.',
-              style: AppTextStyles.bodySmall.copyWith(
-                color: matchingFoodCount == 0
-                    ? AppColors.error
-                    : AppColors.textSecondary,
-              ),
-            ),
           ],
         ),
       ),
