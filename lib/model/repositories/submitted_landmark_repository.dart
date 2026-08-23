@@ -39,8 +39,17 @@ class SubmittedLandmarkRepository {
       'longitude': landmark.longitude,
       'latitude': landmark.latitude,
       'category': landmark.category,
-      'reported_count': landmark.reportedCount,
-      'status': landmark.status.name,
+      // A new submission is ALWAYS available with a clean reported count -
+      // never frozen (the tourist just reported it as a valid landmark, so
+      // it starts visible even if an earlier frozen submission of the same
+      // name exists) and never carrying old reports.
+      'reported_count': 0,
+      'status': 'available',
+      // The landmark's own signboard/stall photo, uploaded to Storage by
+      // the ViewModel before this save (see [uploadImage]).
+      'image_url': landmark.imageUrl,
+      'image_id': landmark.imageId,
+      'image_category': landmark.imageCategory,
     });
 
     await addItems(landmarkId, landmark.items);
@@ -69,6 +78,8 @@ class SubmittedLandmarkRepository {
         'image_url': item.imageUrl,
         'image_id': item.imageId,
         'item_price': item.price,
+        'price_min': item.priceMin > 0 ? item.priceMin : null,
+        'price_max': item.priceMax > 0 ? item.priceMax : null,
         'seasonal': item.seasonal,
         'cooking_style': item.cookingStyle,
         'meal_type': item.mealType,
@@ -76,14 +87,39 @@ class SubmittedLandmarkRepository {
     }
   }
 
-  /// A20: reactivate a frozen landmark - sets its `status` back to `pending`
-  /// so it is re-queued for moderation.
+  /// A20: reactivate a frozen landmark - sets its `status` back to
+  /// [LandmarkStatus.available] so it is re-queued for display.
   Future<void> reactivate(int landmarkId) async {
     await api.updateRow(
       APIManager.tableSubmittedLandmark,
-      <String, Object?>{'status': LandmarkStatus.pending.name},
+      <String, Object?>{'status': LandmarkStatus.available.name},
       eq: <String, Object?>{'landmark_id': landmarkId},
     );
+  }
+
+  /// Uploads a captured photo - a food's own photo, OR the landmark's
+  /// signboard/stall photo - to Supabase Storage (`landmark-images` bucket)
+  /// and returns what the row stores for it:
+  ///   * [id] - the storage object name (`landmark_item.image_id` /
+  ///     `submitted_landmark.image_id`);
+  ///   * [url] - its public HTTPS URL (`landmark_item.image_url` /
+  ///     `submitted_landmark.image_url`).
+  /// Only called when a photo actually exists - see
+  /// `AddLandmarkViewModel.submitLandmark`, which skips this when there's no
+  /// image (e.g. a name-typed food with no photo).
+  Future<({String id, String url})> uploadImage(List<int> bytes) async {
+    // Unique object name per upload - a tourist photo is never overwritten.
+    final String objectName =
+        'photo/${DateTime.now().microsecondsSinceEpoch}.jpg';
+    final String path = await api.uploadLandmarkImage(
+      bytes: bytes,
+      path: objectName,
+    );
+    final String? url = api.resolveImageUrl(
+      path,
+      bucket: APIManager.storageBucketLandmarkImages,
+    );
+    return (id: path, url: url ?? '');
   }
 
   Future<void> _insertOpeningHours(
