@@ -356,11 +356,20 @@ class DashboardViewModel extends BaseViewModel {
   /// outcome, not an error - the dashboard still works, it just shows the
   /// whole country.
   Future<void> locateTourist() async {
+    // Tapping Find Me again while it is still working must not stack a second
+    // request behind the first - that is how one slow fix turns into a spinner
+    // that outlives several taps.
+    if (_locating) return;
+
     _locating = true;
     safeNotifyListeners();
     try {
-      _locationPermissionGranted =
-          await discoveryLogic.ensureLocationPermission();
+      // Both awaits are bounded here as well as in the device layer. The
+      // spinner is driven by `_locating`, so anything that can hang below has
+      // to be capped above too, or the button spins forever.
+      _locationPermissionGranted = await discoveryLogic
+          .ensureLocationPermission()
+          .timeout(_locateTimeout, onTimeout: () => false);
 
       if (!_locationPermissionGranted) {
         _locationInMalaysia = false;
@@ -371,11 +380,18 @@ class DashboardViewModel extends BaseViewModel {
         return;
       }
 
-      final TouristLocation fix = await discoveryLogic.currentLocation();
+      final TouristLocation fix = await discoveryLogic
+          .currentLocation()
+          .timeout(_locateTimeout, onTimeout: () => TouristLocation.unknown);
       _sharedLocation = fix;
 
       if (!fix.isKnown) {
+        // Say so. Silently falling back to the country view looks like the
+        // button did nothing.
         _locationInMalaysia = false;
+        _notice =
+            'Could not get your location. Check that GPS is switched on, '
+            'then try Find Me again.';
         _showMalaysiaOverview();
         return;
       }
@@ -791,6 +807,10 @@ class DashboardViewModel extends BaseViewModel {
   double? _lastPinZoom;
 
   Timer? _pinRefreshTimer;
+
+  /// Ceiling on one Find Me attempt, a little above the device layer's own so
+  /// that layer gets to answer first when it can.
+  static const Duration _locateTimeout = Duration(seconds: 16);
 
   /// How long the map has to sit still before the pins are refetched. Short
   /// enough to feel immediate, long enough that one pinch is one query.

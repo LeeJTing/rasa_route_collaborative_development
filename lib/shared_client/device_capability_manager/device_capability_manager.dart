@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:geolocator/geolocator.dart';
@@ -27,10 +28,27 @@ class DeviceCapabilityManager {
         permission == LocationPermission.whileInUse;
   }
 
+  /// How long any single location call may take before it is treated as a
+  /// failure.
+  ///
+  /// Every call below is bounded. Neither `requestPermission` nor
+  /// `getCurrentPosition` completes on its own if the OS never answers - and
+  /// `getCurrentPosition` will happily wait forever for a first satellite fix,
+  /// which is exactly what happens the moment GPS is switched on. An
+  /// unbounded await here becomes a spinner that never stops three layers up.
+  static const Duration locationTimeout = Duration(seconds: 12);
+
   Future<bool> requestLocationPermission() async {
-    final LocationPermission permission = await Geolocator.requestPermission();
-    return permission == LocationPermission.always ||
-        permission == LocationPermission.whileInUse;
+    try {
+      final LocationPermission permission = await Geolocator.requestPermission()
+          .timeout(locationTimeout);
+      return permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse;
+    } catch (_) {
+      // Timed out, or a request was already in flight - either way the honest
+      // answer is "not granted right now".
+      return false;
+    }
   }
 
   /// Whether the OS location service is switched on. Separate from
@@ -57,13 +75,23 @@ class DeviceCapabilityManager {
     if (!await hasLocationPermission()) return LocationDataModel.unknown;
     if (!await isLocationServiceEnabled()) return LocationDataModel.unknown;
     try {
-      final Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
+      final Position position =
+          await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              // Geolocator's own ceiling: without it the call blocks until a
+              // satellite fix arrives, which indoors or just after GPS is
+              // switched on may be never.
+              timeLimit: locationTimeout,
+            ),
+          ).timeout(
+            // A second ceiling in case the platform side ignores the first.
+            locationTimeout + const Duration(seconds: 3),
+          );
       return _fromPosition(position);
     } catch (_) {
+      // Timed out, service switched off mid-call, or no fix available. All of
+      // these mean the same thing to every caller: no position.
       return LocationDataModel.unknown;
     }
   }
