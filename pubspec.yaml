@@ -13,11 +13,31 @@ dependencies:
   flutter_dotenv: ^6.0.1
   supabase_flutter: ^2.17.2
 
+  # @visibleForTesting test seams (pure annotations, ships with the Flutter SDK).
+  meta: ^1.9.1
+
   # Connects each View to its ViewModel.
   provider: ^6.1.2
+  # UI / fonts.
+  google_fonts: ^8.0.2
+
+  # Camera + gallery capture (UC500 in-app capture: food / signboard / stall).
+  camera: ^0.12.0+2
+  image_picker: ^1.2.3
+
+  # Runtime camera permission - wrapped in DeviceCapabilityManager.
+  permission_handler: ^11.3.1
+
+  # Location: GPS fixes + OpenStreetMap picker (UC500 "Add Landmark").
+  geolocator: ^13.0.1
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  # Full-app tests run on a real device/emulator (flutter test integration_test).
+  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 

@@ -41,9 +41,14 @@ class FoodKnowledgeRepository {
       return rows
           .map(LocalFoodDataModel.fromJson)
           .map(
-            (LocalFoodDataModel data) => data.toDomain(
-              isFavourite: favouriteIds.contains(data.localFoodId),
-            ),
+            (LocalFoodDataModel data) => data
+                .toDomain(isFavourite: favouriteIds.contains(data.localFoodId))
+                .copyWith(
+                  imageUrl: api.resolveImageUrl(
+                    data.imageUrl,
+                    bucket: APIManager.storageBucketFoodImages,
+                  ),
+                ),
           )
           .toList(growable: false);
     } catch (_) {
@@ -69,9 +74,16 @@ class FoodKnowledgeRepository {
         eq: <String, Object?>{'local_food_id': foodId},
       );
       if (row == null) return null;
-      return LocalFoodDataModel.fromJson(
-        row,
-      ).toDomain(isFavourite: await _isFavouriteSafely(foodId));
+      final LocalFoodDataModel data = LocalFoodDataModel.fromJson(row);
+      final LocalFood food = data.toDomain(
+        isFavourite: await _isFavouriteSafely(foodId),
+      );
+      return food.copyWith(
+        imageUrl: api.resolveImageUrl(
+          data.imageUrl,
+          bucket: APIManager.storageBucketFoodImages,
+        ),
+      );
     } catch (_) {
       throw Exception(
         'Unable to load this local food. Check your connection and try again.',
@@ -113,6 +125,19 @@ class FoodKnowledgeRepository {
       // Favourites should not prevent the public catalogue from loading.
       return <int>{};
     }
+  }
+
+  /// Looks up a catalogue entry by exact name match (case-insensitive) -
+  /// used by the UC500 two-phase recognition flow to avoid re-generating an
+  /// entry Gemini has already described once. Returns null when nothing
+  /// matches.
+  Future<LocalFood?> findByName(String name) async {
+    final String normalized = name.trim().toLowerCase();
+    final List<LocalFood> foods = await getFoods();
+    for (final LocalFood food in foods) {
+      if (food.name.toLowerCase() == normalized) return food;
+    }
+    return null;
   }
 
   Future<Set<int>> _getFavouriteFoodIds() async {

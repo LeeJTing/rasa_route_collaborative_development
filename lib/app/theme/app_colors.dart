@@ -153,4 +153,107 @@ abstract final class AppColors {
 
   /// [Figma] Selected source-tab background.
   static const Color tabBackground = Color(0xFFFFEACA);
+
+  // ---------------------------------------------------------------------------
+  // UC500 (Add Landmark / recognition flow)
+  // ---------------------------------------------------------------------------
+
+  /// [Derived] 15% success - the "recognised successfully" banner.
+  static const Color successContainer = Color(0x263FA34D);
+
+  /// [Figma] Field-label colour on the food detail card - Dish, Variant,
+  /// Origin, Food Category, Meal Type, Taste, Description, Cooking Style,
+  /// Cultural Background.
+  static const Color detailLabel = Color(0xFFAC7F5E);
+
+  /// [Figma] Highlight box behind the Dish/Variant/description preview in
+  /// the recognition-result popup (`FoodRecognitionView`) - FFE082 at 40%
+  /// opacity.
+  static const Color recognitionHighlight = Color(0x66FFE082);
+
+  /// [Figma] Background for the "Taste" tags (Spicy / Sweet / Rich).
+  static const Color tasteTagBackground = Color(0xFFFFCDD2);
+
+  /// [Figma] Text colour on [tasteTagBackground].
+  static const Color tasteTagText = Color(0xFFC62828);
+
+  /// [Figma] Opening/closing time chip in the operating-hours grid
+  /// (`AddLandmarkView`).
+  static const Color timeChipBackground = Color(0xFFFFF0C5);
+
+  // ---------------------------------------------------------------------------
+  // REQ102 - Local food distribution heatmap
+  // ---------------------------------------------------------------------------
+  // REQ102_16: green is the highest local-food availability score, grey the
+  // lowest. REQ102_17: every shade in between is `Color.lerp`-ed from these
+  // two, so the gradient is generated, never hand-picked per state.
+
+  // The five-step availability scale, highest score first. REQ102_16 fixes the
+  // ends - green for the highest score, grey for the lowest; REQ102_17
+  // generates everything between, which `heatmapColourFor` does by
+  // interpolating along this list. The legend prints the five steps as-is.
+
+  /// [REQ102_16] Highest availability score.
+  ///
+  /// Sampled off the reference mock-up rather than invented: its land runs
+  /// from about #A0D375 to #D8E67C, a yellow-green range rather than the
+  /// blue-greens a default palette reaches for. The top step is pushed a
+  /// little darker than anything in the reference so the scale has somewhere
+  /// to go at the high end.
+  static const Color heatmapStep1 = Color(0xFF6FBB5E);
+  static const Color heatmapStep2 = Color(0xFF96CC6E);
+  static const Color heatmapStep3 = Color(0xFFB9D97B);
+  static const Color heatmapStep4 = Color(0xFFD6E27F);
+
+  /// [REQ102_16] Lowest availability score. Warm grey, not neutral - a cold
+  /// grey reads as "broken" next to the cream ground.
+  static const Color heatmapStep5 = Color(0xFFDDDCD0);
+
+  static const List<Color> heatmapScale = <Color>[
+    heatmapStep1,
+    heatmapStep2,
+    heatmapStep3,
+    heatmapStep4,
+    heatmapStep5,
+  ];
+
+  static const Color heatmapHigh = heatmapStep1;
+  static const Color heatmapLow = heatmapStep5;
+
+  /// The heatmap draws on the plain cream scaffold rather than over map tiles,
+  /// so the fill is close to opaque - the softness comes from the blur, not
+  /// from transparency.
+  static const double heatmapFillOpacity = 1;
+
+  /// Boundary line between states on the heatmap. Warm grey rather than black
+  /// so it separates the states without turning a soft map into a chart.
+  static const Color heatmapBorder = Color(0xFF8A8578);
+  static const double heatmapBorderOpacity = 0.58;
+
+  /// Label text sitting directly on the heatmap.
+  static const Color heatmapLabel = Color(0xFF3D3D3D);
+
+  /// Floating map control (zoom, Find Me) background.
+  static const Color mapControlBackground = Color(0xFFFFFFFF);
+
+  /// Hairline between the "+" and "-" halves of the zoom control.
+  static const Color mapControlDivider = Color(0xFFE0E0E0);
+
+  /// The tourist's own position marker on the detailed map.
+  static const Color currentLocationMarker = Color(0xFF1E88E5);
+
+  // ---------------------------------------------------------------------------
+  // Map pins (REQ102_32)
+  // ---------------------------------------------------------------------------
+  // Two sources, two colours, so a tourist can tell at a glance whether a place
+  // came from the catalogue or from another tourist.
+
+  /// A landmark another tourist submitted.
+  static const Color pinUserLandmark = Color(0xFFF2B01E);
+
+  /// A restaurant the system already knew about.
+  static const Color pinSystemRestaurant = Color(0xFFD32F2F);
+
+  /// Darker edge of whichever pin colour, for the selected pin.
+  static const Color pinSelectedRing = Color(0xFF2B2B2B);
 }

@@ -58,6 +58,9 @@ abstract final class Env {
   static const String _keySupabasePublishableKey = 'SUPABASE_PUBLISHABLE_KEY';
   static const String _keyGeminiApiKey = 'GEMINI_API_KEY';
   static const String _keyGeminiModel = 'GEMINI_MODEL';
+  static const String _keyGeminiApiKeyLandmark = 'GEMINI_API_KEY_LANDMARK';
+  static const String _keyGeminiModelLandmark = 'GEMINI_MODEL_LANDMARK';
+  static const String _keyGeminiFallbackModels = 'GEMINI_FALLBACK_MODELS';
   static const String _keyOsmBaseUrl = 'OSM_BASE_URL';
   static const String _keyOsmTileUrl = 'OSM_TILE_URL';
   static const String _keyApiTimeoutSeconds = 'API_TIMEOUT_SECONDS';
@@ -74,6 +77,13 @@ abstract final class Env {
       ),
       _keyGeminiApiKey: String.fromEnvironment('GEMINI_API_KEY'),
       _keyGeminiModel: String.fromEnvironment('GEMINI_MODEL'),
+      _keyGeminiApiKeyLandmark: String.fromEnvironment(
+        'GEMINI_API_KEY_LANDMARK',
+      ),
+      _keyGeminiModelLandmark: String.fromEnvironment('GEMINI_MODEL_LANDMARK'),
+      _keyGeminiFallbackModels: String.fromEnvironment(
+        'GEMINI_FALLBACK_MODELS',
+      ),
       _keyOsmBaseUrl: String.fromEnvironment('OSM_BASE_URL'),
       _keyOsmTileUrl: String.fromEnvironment('OSM_TILE_URL'),
       _keyApiTimeoutSeconds: String.fromEnvironment('API_TIMEOUT_SECONDS'),
@@ -101,7 +111,36 @@ abstract final class Env {
   static String get geminiApiKey => _read(_keyGeminiApiKey);
 
   static String get geminiModel =>
-      _read(_keyGeminiModel, fallback: 'gemini-2.5-flash');
+      _read(_keyGeminiModel, fallback: 'gemini-3.5-flash-lite');
+
+  /// Optional UC500-specific key; falls back to [geminiApiKey] when unset.
+  static String get geminiApiKeyLandmark =>
+      _read(_keyGeminiApiKeyLandmark, fallback: geminiApiKey);
+
+  /// Optional UC500-specific model; falls back to [geminiModel] when unset.
+  static String get geminiModelLandmark =>
+      _read(_keyGeminiModelLandmark, fallback: geminiModel);
+
+  /// Ordered models to try when the primary Gemini model is temporarily
+  /// unavailable (HTTP 429 rate-limited / 5xx high demand, e.g. 503).
+  /// Comma-separated in `.env` (`GEMINI_FALLBACK_MODELS`); defaults to three
+  /// common Gemini models when unset. See `GeminiService._generate`.
+  static List<String> get geminiFallbackModels {
+    const List<String> defaults = <String>[
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+    ];
+    final String raw = _read(_keyGeminiFallbackModels);
+    if (raw.isEmpty) return defaults;
+    final List<String> parsed = raw
+        .split(',')
+        .map((String s) => s.trim())
+        .where((String s) => s.isNotEmpty)
+        .toList(growable: false);
+    return parsed.isEmpty ? defaults : parsed;
+  }
 
   static String get osmBaseUrl =>
       _read(_keyOsmBaseUrl, fallback: 'https://overpass-api.de/api');
@@ -112,7 +151,7 @@ abstract final class Env {
   );
 
   static Duration get apiTimeout =>
-      Duration(seconds: _readInt(_keyApiTimeoutSeconds, 20));
+      Duration(seconds: _readInt(_keyApiTimeoutSeconds, 120));
 
   static Duration get locationPollInterval =>
       Duration(seconds: _readInt(_keyLocationPollSeconds, 30));

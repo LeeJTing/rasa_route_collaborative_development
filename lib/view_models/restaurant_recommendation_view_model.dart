@@ -1,7 +1,7 @@
 import '../core/base_view_model.dart';
 import '../domain_model/restaurant.dart';
+import '../domain_model/tourist_location.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
-import '../model/data_models/location_data_model.dart';
 import 'current_location_facade.dart';
 import 'update_restaurant_facade.dart';
 
@@ -14,7 +14,7 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   final CurrentLocationFacade locationFacade = CurrentLocationFacade();
   final UpdateRestaurantFacade restaurantFacade = UpdateRestaurantFacade();
 
-  LocationDataModel _location = LocationDataModel.unknown;
+  TouristLocation _location = TouristLocation.unknown;
   List<Restaurant> _restaurants = const <Restaurant>[];
   RestaurantSource _source = RestaurantSource.google;
   final Set<int> _expandedIds = <int>{};
@@ -61,7 +61,7 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   }
 
   @override
-  void onCurrentLocationChanged(LocationDataModel location) {
+  void onCurrentLocationChanged(TouristLocation location) {
     _location = location;
     loadNearbyRestaurants();
   }
