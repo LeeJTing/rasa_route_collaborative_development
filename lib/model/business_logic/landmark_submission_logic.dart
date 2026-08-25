@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/submitted_landmark.dart';
-import '../../domain_model/tourist_location.dart';
+import '../data_models/location_data_model.dart';
 import '../repositories/landmark_repository_facade.dart';
 import 'location_rules.dart';
 
@@ -109,10 +109,10 @@ class LandmarkSubmissionLogic {
   /// assumes that rather than re-checking it, since completeness isn't this
   /// method's concern.
   String? validateOperatingHours(
-    Map<Weekday, List<OpeningHour>> operatingHours,
-  ) {
+      Map<Weekday, List<OpeningHour>> operatingHours,
+      ) {
     for (final MapEntry<Weekday, List<OpeningHour>> entry
-        in operatingHours.entries) {
+    in operatingHours.entries) {
       final String dayName = _dayNames[entry.key]!;
       final List<OpeningHour> openRows = entry.value
           .where((OpeningHour hour) => hour.status == DayStatus.open)
@@ -153,11 +153,11 @@ class LandmarkSubmissionLogic {
   /// suggestion is known. A warning only - the tourist can still enter any
   /// valid price.
   String? suggestedPriceWarning(
-    String foodName,
-    double price,
-    double priceMin,
-    double priceMax,
-  ) {
+      String foodName,
+      double price,
+      double priceMin,
+      double priceMax,
+      ) {
     if (priceMin <= 0 || priceMax < priceMin) return null;
     if (price < priceMin || price > priceMax) {
       return 'Suggested price for $foodName is '
@@ -176,10 +176,10 @@ class LandmarkSubmissionLogic {
     final double dLon = _degToRad(lon2 - lon1);
     final double a =
         math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(_degToRad(lat1)) *
-            math.cos(_degToRad(lat2)) *
-            math.sin(dLon / 2) *
-            math.sin(dLon / 2);
+            math.cos(_degToRad(lat1)) *
+                math.cos(_degToRad(lat2)) *
+                math.sin(dLon / 2) *
+                math.sin(dLon / 2);
     final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     return earthRadiusMetres * c;
   }
@@ -192,17 +192,17 @@ class LandmarkSubmissionLogic {
   /// [current] itself has no fix yet - nothing to compare the adjustment
   /// against.
   bool isWithinAllowedRange(
-    TouristLocation current,
-    double adjustedLat,
-    double adjustedLon,
-  ) {
+      LocationDataModel current,
+      double adjustedLat,
+      double adjustedLon,
+      ) {
     if (!current.isKnown) return true;
     return _distanceMetres(
-          current.latitude,
-          current.longitude,
-          adjustedLat,
-          adjustedLon,
-        ) <=
+      current.latitude,
+      current.longitude,
+      adjustedLat,
+      adjustedLon,
+    ) <=
         100;
   }
 
