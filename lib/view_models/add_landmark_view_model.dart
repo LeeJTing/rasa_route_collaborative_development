@@ -6,8 +6,8 @@ import '../core/base_view_model.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/opening_hour.dart';
 import '../domain_model/submitted_landmark.dart';
-import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
+import '../model/data_models/location_data_model.dart';
 import 'current_location_facade.dart';
 import 'food_recognition_view_model.dart'
     show
@@ -142,16 +142,16 @@ class AddLandmarkViewModel extends BaseViewModel
     locationFacade.register(this);
   }
 
-  /// Pushed by `LocationMonitor` through [CurrentLocationFacade].
-  @override
-  void onCurrentLocationChanged(TouristLocation location) {
-    _currentLocation = location;
-    safeNotifyListeners();
-  }
-
   // --- LOCATION STATE ---
   LocationDataModel _currentLocation = LocationDataModel.unknown;
   LocationDataModel _adjustedLocation = LocationDataModel.unknown;
+
+  /// Pushed by `LocationMonitor` through [CurrentLocationFacade].
+  @override
+  void onCurrentLocationChanged(LocationDataModel location) {
+    _currentLocation = location;
+    safeNotifyListeners();
+  }
 
   /// Presenter tool: when set (via [simulateLocation]) this overrides the
   /// device GPS fix everywhere (map center, 100m range, submitted
@@ -345,7 +345,7 @@ class AddLandmarkViewModel extends BaseViewModel
     }
 
     _locationError = null;
-    _adjustedLocation = TouristLocation(
+    _adjustedLocation = LocationDataModel(
       latitude: latitude,
       longitude: longitude,
       accuracyMeters: currentLocation.accuracyMeters,
