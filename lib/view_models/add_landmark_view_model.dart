@@ -8,6 +8,7 @@ import '../domain_model/opening_hour.dart';
 import '../domain_model/submitted_landmark.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
+import '../model/data_models/location_data_model.dart';
 import 'current_location_facade.dart';
 import 'food_recognition_view_model.dart'
     show
