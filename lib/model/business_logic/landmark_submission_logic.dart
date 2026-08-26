@@ -5,6 +5,7 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../data_models/location_data_model.dart';
 import '../repositories/landmark_repository_facade.dart';
+import 'location_rules.dart';
 
 /// Submitting a new food landmark and attaching dishes to it.
 ///
@@ -64,6 +65,14 @@ class LandmarkSubmissionLogic {
   /// nobody is signed in / the session can't be resolved yet.
   Future<String?> currentTouristId() => repository.auth.currentTouristId();
 
+  /// Uploads a captured photo - a food's photo, or the landmark's
+  /// signboard/stall photo - to Supabase Storage and returns what the row
+  /// stores: the object name (`image_id`) and its public URL (`image_url`).
+  /// The actual upload lives in the repository - this method just makes it
+  /// reachable from the ViewModel through the one facade this class holds.
+  Future<({String id, String url})> uploadImage(List<int> bytes) =>
+      repository.landmark.uploadImage(bytes);
+
   /// Day names for validation messages.
   static const Map<Weekday, String> _dayNames = <Weekday, String>{
     Weekday.monday: 'Monday',
@@ -74,6 +83,15 @@ class LandmarkSubmissionLogic {
     Weekday.saturday: 'Saturday',
     Weekday.sunday: 'Sunday',
   };
+
+  /// Whether [opensAt]/[closesAt] (minutes since midnight) form a valid
+  /// single range - closing strictly after opening. The same rule
+  /// [validateOperatingHours] checks across a whole day's rows, exposed here
+  /// separately so a single in-progress edit (e.g.
+  /// `AddLandmarkViewModel.setRangeTime`, which rejects a pick that would
+  /// make a range invalid, keeping the previous value) can check just one
+  /// range without needing a whole day's rows to check overlap against.
+  bool isValidTimeOrder(int opensAt, int closesAt) => closesAt > opensAt;
 
   /// Validates the two operating-hours rules that are domain invariants -
   /// true of an `OpeningHour` no matter where the data came from, unlike a
@@ -91,10 +109,10 @@ class LandmarkSubmissionLogic {
   /// assumes that rather than re-checking it, since completeness isn't this
   /// method's concern.
   String? validateOperatingHours(
-    Map<Weekday, List<OpeningHour>> operatingHours,
-  ) {
+      Map<Weekday, List<OpeningHour>> operatingHours,
+      ) {
     for (final MapEntry<Weekday, List<OpeningHour>> entry
-        in operatingHours.entries) {
+    in operatingHours.entries) {
       final String dayName = _dayNames[entry.key]!;
       final List<OpeningHour> openRows = entry.value
           .where((OpeningHour hour) => hour.status == DayStatus.open)
@@ -103,7 +121,7 @@ class LandmarkSubmissionLogic {
 
       final List<(int, int)> ranges = <(int, int)>[];
       for (final OpeningHour row in openRows) {
-        if (row.closesAt! <= row.opensAt!) {
+        if (!isValidTimeOrder(row.opensAt!, row.closesAt!)) {
           return 'Closing time must be after opening time for $dayName.';
         }
         ranges.add((row.opensAt!, row.closesAt!));
@@ -127,6 +145,28 @@ class LandmarkSubmissionLogic {
   /// and again inline in `submitLandmark`) - centralised here instead.
   bool isValidPrice(double price) => price > 0 && price <= 1000;
 
+  /// Soft, non-blocking price guidance: when Gemini supplied a suggested
+  /// selling range for the recognised dish (both [priceMin]/[priceMax] > 0),
+  /// returns a user-facing warning when [price] falls outside it - so an
+  /// accidental typo (e.g. 500 instead of 5) is caught at the field, not at
+  /// submit. Returns null when the price is inside the range, or no
+  /// suggestion is known. A warning only - the tourist can still enter any
+  /// valid price.
+  String? suggestedPriceWarning(
+      String foodName,
+      double price,
+      double priceMin,
+      double priceMax,
+      ) {
+    if (priceMin <= 0 || priceMax < priceMin) return null;
+    if (price < priceMin || price > priceMax) {
+      return 'Suggested price for $foodName is '
+          'RM ${priceMin.toStringAsFixed(2)} - RM ${priceMax.toStringAsFixed(2)}. '
+          'Double-check your price.';
+    }
+    return null;
+  }
+
   /// Haversine distance between two coordinates, in metres - a pure
   /// geometric calculation, true regardless of where the coordinates came
   /// from.
@@ -136,10 +176,10 @@ class LandmarkSubmissionLogic {
     final double dLon = _degToRad(lon2 - lon1);
     final double a =
         math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(_degToRad(lat1)) *
-            math.cos(_degToRad(lat2)) *
-            math.sin(dLon / 2) *
-            math.sin(dLon / 2);
+            math.cos(_degToRad(lat1)) *
+                math.cos(_degToRad(lat2)) *
+                math.sin(dLon / 2) *
+                math.sin(dLon / 2);
     final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     return earthRadiusMetres * c;
   }
@@ -152,30 +192,42 @@ class LandmarkSubmissionLogic {
   /// [current] itself has no fix yet - nothing to compare the adjustment
   /// against.
   bool isWithinAllowedRange(
-    LocationDataModel current,
-    double adjustedLat,
-    double adjustedLon,
-  ) {
+      LocationDataModel current,
+      double adjustedLat,
+      double adjustedLon,
+      ) {
     if (!current.isKnown) return true;
     return _distanceMetres(
-          current.latitude,
-          current.longitude,
-          adjustedLat,
-          adjustedLon,
-        ) <=
+      current.latitude,
+      current.longitude,
+      adjustedLat,
+      adjustedLon,
+    ) <=
         100;
   }
+
+  /// Whether (lat, lon) is within Malaysia's (simplified) land boundary - a
+  /// new landmark may only be submitted on Malaysian land (UC500, A9). Pure
+  /// geometry, delegated to [LocationRules] - see its class doc for the
+  /// boundary's accuracy caveat.
+  bool isWithinMalaysia(double latitude, double longitude) =>
+      LocationRules.isWithinMalaysia(latitude, longitude);
+
+  /// Whether (lat, lon) is on Malaysian land (UC500, A9) - see
+  /// [isWithinMalaysia] and [LocationRules.isOnLand].
+  bool isOnLand(double latitude, double longitude) =>
+      LocationRules.isOnLand(latitude, longitude);
 
   /// One food entry, resolved into the wire-shaped `LandmarkItem` this
   /// method's own submission expects. [entry.price] is always non-null by
   /// this point - `AddLandmarkViewModel` only calls [submitLandmark] once
   /// every food has passed its own completeness check.
   ///
-  /// `imageUrl`/`imageId` are left null: the photo itself is tracked in the
-  /// ViewModel (`AddLandmarkViewModel._recognizedFoodImage` /
-  /// `LandmarkFoodEntry.image`), but there is no image-upload repository yet
-  /// to turn an `XFile` into a real URL/id. Wiring that up is a one-line
-  /// change here once that repository exists - not a redesign.
+  /// `imageUrl`/`imageId` come from [entry] - the ViewModel uploads each
+  /// food's photo (via [uploadImage]) BEFORE calling [submitLandmark],
+  /// so a food that has a photo persists with its `landmark_item.image_url`
+  /// / `image_id` set; a food without one (e.g. name-typed, no photo)
+  /// persists those as null.
   LandmarkItem _toLandmarkItem(FoodSubmission entry, String touristId) {
     return LandmarkItem(
       id: 0,
@@ -189,7 +241,11 @@ class LandmarkSubmissionLogic {
       description: entry.food.description,
       origin: entry.food.origin,
       culturalBackground: entry.food.culturalBackground,
+      imageUrl: entry.imageUrl,
+      imageId: entry.imageId,
       price: entry.price,
+      priceMin: entry.priceMin,
+      priceMax: entry.priceMax,
       seasonal: '', // TODO: no seasonal-tracking UI yet
       cookingStyle: entry.food.cookingStyle,
       mealType: entry.food.mealType,
@@ -200,15 +256,23 @@ class LandmarkSubmissionLogic {
   /// Saves a new landmark (BF-24..28) - builds the `SubmittedLandmark` and
   /// `LandmarkItem` domain objects here, from the raw, already-validated
   /// form data `AddLandmarkViewModel` passes in. This construction (and its
-  /// business defaults - `reportedCount: 0`, `status: pending`) used to
+  /// business defaults - `reportedCount: 0`, `status: available`) used to
   /// happen in the ViewModel itself; moved here since deciding a landmark's
   /// initial moderation state is a domain concern, not a form concern.
   ///
-  /// NOTE: [SubmittedLandmark] has no field for the signboard/stall photo
-  /// yet - it isn't saved anywhere by this call. That's a domain-model gap,
-  /// not an oversight here; the ERD shows `Landmark` itself has no image
-  /// column at all, so there's genuinely nowhere for it to go until that's
-  /// decided.
+  /// A new landmark is ALWAYS submitted as [LandmarkStatus.available] with
+  /// `reported_count` 0 - i.e. even if a previous frozen landmark of the
+  /// same name exists, the fresh submission starts available and clean (the
+  /// repository forces these two values on insert too, so the guarantee
+  /// holds regardless of what is passed in).
+  ///
+  /// The landmark's own signboard/stall photo is carried on the submitted
+  /// row too: [imageUrl]/[imageId] are its storage URL / object id and
+  /// [imageCategory] is `'signboard'` or `'stall'` (see
+  /// `AddLandmarkViewModel._capturedImageType`). The ViewModel uploads the
+  /// photo (via [uploadImage]) before calling this - the same way it uploads
+  /// each food's photo - so `submitted_landmark.image_url` / `image_id` /
+  /// `image_category` are set, not null.
   ///
   /// TODO once `SubmittedLandmarkRepository` has real methods:
   ///  - if [checkRestaurantExists] found a match: A13 - check whether it is
@@ -222,6 +286,9 @@ class LandmarkSubmissionLogic {
     required double? longitude,
     required String category,
     required String touristId,
+    String? imageUrl,
+    String? imageId,
+    String? imageCategory,
     required List<FoodSubmission> foods,
     required Map<Weekday, List<OpeningHour>> operatingHours,
   }) async {
@@ -244,7 +311,10 @@ class LandmarkSubmissionLogic {
       longitude: longitude,
       category: category,
       reportedCount: 0,
-      status: LandmarkStatus.pending,
+      status: LandmarkStatus.available,
+      imageUrl: imageUrl,
+      imageId: imageId,
+      imageCategory: imageCategory,
       items: <LandmarkItem>[
         for (final FoodSubmission entry in foods)
           _toLandmarkItem(entry, touristId),

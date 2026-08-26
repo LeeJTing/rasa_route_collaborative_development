@@ -36,6 +36,16 @@ class LandmarkDetailViewModel extends BaseViewModel {
   LocalFood? _recognizedFood;
   XFile? _capturedImage;
 
+  /// Whether the recognised food is Malaysian local food. When false the
+  /// details are still shown, but "Add New Landmark" must be hidden - see
+  /// `LandmarkDraftHandoff.pendingIsLocalFood`.
+  bool _isLocalFood = true;
+
+  /// Gemini's suggested MYR price range for the recognised food, carried
+  /// onto the submitted `LandmarkItem`. `0` means unknown.
+  double _priceMin = 0;
+  double _priceMax = 0;
+
   /// Whether the confirm button should return this food to the *existing*
   /// `AddLandmarkView` (additional-food flow) instead of pushing a fresh
   /// form (primary flow). Set from `LandmarkDraftHandoff` in the View's
@@ -45,7 +55,19 @@ class LandmarkDetailViewModel extends BaseViewModel {
 
   LocalFood? get recognizedFood => _recognizedFood;
   XFile? get capturedImage => _capturedImage;
+  bool get isLocalFood => _isLocalFood;
   bool get returnToFormAsAdditionalFood => _returnToFormAsAdditionalFood;
+  double get priceMin => _priceMin;
+  double get priceMax => _priceMax;
+
+  void setIsLocalFood(bool value) {
+    _isLocalFood = value;
+  }
+
+  void setPriceRange({required double priceMin, required double priceMax}) {
+    _priceMin = priceMin;
+    _priceMax = priceMax;
+  }
 
   void setReturnToFormAsAdditionalFood(bool value) {
     _returnToFormAsAdditionalFood = value;
@@ -74,6 +96,9 @@ class LandmarkDetailViewModel extends BaseViewModel {
   void proceedToAddLandmark() {
     final LocalFood? food = _recognizedFood;
     if (food == null) return;
+    // A non-local food is never allowed to become a landmark - the UI hides
+    // the button, this guard is the second line of defence.
+    if (!_isLocalFood) return;
     if (_returnToFormAsAdditionalFood) {
       final XFile? image = _capturedImage;
       if (image == null) return;
@@ -81,9 +106,20 @@ class LandmarkDetailViewModel extends BaseViewModel {
       // WITH the result - which completes `AddLandmarkViewModel.openAddMoreFood`'s
       // await, so the food lands in the existing form's additional-foods list.
       AppNavigator.pop();
-      AppNavigator.pop<AdditionalFoodCaptureResult>((food: food, image: image));
+      AppNavigator.pop<AdditionalFoodCaptureResult>((
+        food: food,
+        image: image,
+        priceMin: _priceMin,
+        priceMax: _priceMax,
+      ));
       return;
     }
-    LandmarkDraftHandoff().pushAddLandmark(food, _capturedImage);
+    LandmarkDraftHandoff().pushAddLandmark(
+      food,
+      _capturedImage,
+      isLocalFood: _isLocalFood,
+      priceMin: _priceMin,
+      priceMax: _priceMax,
+    );
   }
 }

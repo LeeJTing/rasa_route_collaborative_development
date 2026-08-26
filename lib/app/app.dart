@@ -49,7 +49,7 @@ class RasaRouteApp extends StatelessWidget {
 
       navigatorKey: AppNavigator.navigatorKey,
       // initialRoute: AppRoutes.loginRegister,
-      initialRoute: AppRoutes.foodRecognition,
+      initialRoute: AppRoutes.mainShell,
 
       // The route table. Names come from AppRoutes so no call site types a
       // string literal. Adding a screen is two edits: a constant there, an

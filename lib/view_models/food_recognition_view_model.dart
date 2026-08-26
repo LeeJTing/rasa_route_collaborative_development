@@ -1,8 +1,10 @@
 import 'package:image_picker/image_picker.dart';
+import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../app/routing/app_navigator.dart';
 import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
+import '../domain_model/food_recognition_result.dart';
 import '../domain_model/local_food.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
 
@@ -67,6 +69,17 @@ class LandmarkDraftHandoff {
   /// [AdditionalFoodCaptureResult]) instead of pushing a brand-new form.
   bool pendingReturnToFormAsAdditionalFood = false;
 
+  /// Whether [pendingRecognizedFood] was judged by Gemini to be Malaysian
+  /// local food. When false, the detail screen still shows the food but must
+  /// not offer "Add New Landmark" - see [FoodRecognitionResult.isLocalFood].
+  /// Defaults to true (the common case).
+  bool pendingIsLocalFood = true;
+
+  /// Gemini's suggested MYR price range for [pendingRecognizedFood], carried
+  /// onto the submitted `LandmarkItem`. `0` means unknown.
+  double pendingPriceMin = 0;
+  double pendingPriceMax = 0;
+
   LocalFood? takeRecognizedFood() {
     final LocalFood? value = pendingRecognizedFood;
     pendingRecognizedFood = null;
@@ -92,6 +105,24 @@ class LandmarkDraftHandoff {
     return value;
   }
 
+  bool takeIsLocalFood() {
+    final bool value = pendingIsLocalFood;
+    pendingIsLocalFood = true;
+    return value;
+  }
+
+  double takePriceMin() {
+    final double value = pendingPriceMin;
+    pendingPriceMin = 0;
+    return value;
+  }
+
+  double takePriceMax() {
+    final double value = pendingPriceMax;
+    pendingPriceMax = 0;
+    return value;
+  }
+
   /// Stashes [food] and [image] for the food-detail screen
   /// (`LandmarkDetailView`, at `AppRoutes.landmarkDetail`) and
   /// navigates there - the one shared implementation of "go view details
@@ -103,9 +134,18 @@ class LandmarkDraftHandoff {
   /// the time `AddLandmarkView` is reached via "View Details"), so each
   /// still needs its own thin entry point - but the actual 2-line body only
   /// lives here once.
-  void pushLandmarkDetail(LocalFood food, XFile? image) {
+  void pushLandmarkDetail(
+    LocalFood food,
+    XFile? image, {
+    bool isLocalFood = true,
+    double priceMin = 0,
+    double priceMax = 0,
+  }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
+    pendingIsLocalFood = isLocalFood;
+    pendingPriceMin = priceMin;
+    pendingPriceMax = priceMax;
     AppNavigator.push(AppRoutes.landmarkDetail);
   }
 
@@ -114,9 +154,18 @@ class LandmarkDraftHandoff {
   /// `FoodRecognitionViewModel.proceedToAddLandmark` and
   /// `LandmarkDetailViewModel.proceedToAddLandmark` both call this for the
   /// same reason [pushLandmarkDetail] is shared rather than duplicated.
-  void pushAddLandmark(LocalFood food, XFile? image) {
+  void pushAddLandmark(
+    LocalFood food,
+    XFile? image, {
+    bool isLocalFood = true,
+    double priceMin = 0,
+    double priceMax = 0,
+  }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
+    pendingIsLocalFood = isLocalFood;
+    pendingPriceMin = priceMin;
+    pendingPriceMax = priceMax;
     AppNavigator.push(AppRoutes.addLandmark);
   }
 
@@ -128,6 +177,9 @@ class LandmarkDraftHandoff {
     pendingCapturedImage = null;
     pendingPurpose = null;
     pendingReturnToFormAsAdditionalFood = false;
+    pendingIsLocalFood = true;
+    pendingPriceMin = 0;
+    pendingPriceMax = 0;
   }
 }
 
@@ -158,7 +210,12 @@ typedef LandmarkImageCaptureResult = ({
 /// `LandmarkItem.imageUrl`/`imageId` has somewhere to eventually come from
 /// for that food too (previously only the primary food's photo was ever
 /// tracked - this was a real gap, not an intentional asymmetry).
-typedef AdditionalFoodCaptureResult = ({LocalFood food, XFile image});
+typedef AdditionalFoodCaptureResult = ({
+  LocalFood food,
+  XFile image,
+  double priceMin,
+  double priceMax,
+});
 
 /// ViewModel for `FoodRecognitionView` (also pushed from `AddLandmarkView`
 /// in signboard/stall/additional-food capture mode - see
@@ -175,9 +232,11 @@ typedef AdditionalFoodCaptureResult = ({LocalFood food, XFile image});
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
 class FoodRecognitionViewModel extends BaseViewModel {
-  FoodRecognitionViewModel();
+  FoodRecognitionViewModel({
+    @visibleForTesting LandmarkLogicFacade? landmarkLogic,
+  }) : landmarkLogic = landmarkLogic ?? LandmarkLogicFacade();
 
-  final LandmarkLogicFacade landmarkLogic = LandmarkLogicFacade();
+  final LandmarkLogicFacade landmarkLogic;
 
   // --- MODE ---
   FoodRecognitionPurpose _purpose = FoodRecognitionPurpose.food;
@@ -193,10 +252,24 @@ class FoodRecognitionViewModel extends BaseViewModel {
   // --- FOOD RECOGNITION STATE ---
   XFile? _capturedImage;
   LocalFood? _recognizedFood;
-  List<LocalFood> _multipleResults = []; // TODO: A5, once Gemini returns
-  // more than one candidate - the mock always returns exactly one today.
+  List<LocalFood> _multipleResults = [];
   String? _recognitionError;
   bool _isProcessing = false;
+
+  /// Whether the recognised food is Malaysian local food. When false the
+  /// result is still shown (and "View Details" works) but the tourist must
+  /// not be allowed to add it as a landmark.
+  bool _isLocalFood = true;
+
+  /// Gemini's suggested MYR price range for the recognised food - carried
+  /// onto the submitted `LandmarkItem` (see `FoodRecognitionResult`).
+  double _priceMin = 0;
+  double _priceMax = 0;
+
+  /// Gemini's confidence (0..1) in the recognised food - surfaced in the UI
+  /// so a shaky result is never presented as certain. `1.0` when unknown
+  /// (picker selection / manual name entry - the tourist drove the result).
+  double _confidence = 1.0;
 
   XFile? get capturedImage => _capturedImage;
   LocalFood? get recognizedFood => _recognizedFood;
@@ -204,6 +277,17 @@ class FoodRecognitionViewModel extends BaseViewModel {
   String? get recognitionError => _recognitionError;
   bool get isProcessing => _isProcessing;
   bool get hasMultipleResults => _multipleResults.length > 1;
+  bool get isLocalFood => _isLocalFood;
+  double get priceMin => _priceMin;
+  double get priceMax => _priceMax;
+  double get confidence => _confidence;
+
+  /// Whether the current recognition is shaky enough to ask the tourist to
+  /// verify it. The threshold itself is a domain rule and lives in
+  /// `FoodRecognitionLogic.isLowConfidence` - this getter just surfaces the
+  /// already-decided answer so the View never compares numbers itself.
+  bool get isLowConfidence =>
+      landmarkLogic.foodRecognition.isLowConfidence(_confidence);
 
   /// Capture image and send to Gemini for recognition (REQ106_1, REQ106_2).
   /// Used for both [FoodRecognitionPurpose.food] and
@@ -220,15 +304,19 @@ class FoodRecognitionViewModel extends BaseViewModel {
     try {
       _capturedImage = image;
       final List<int> bytes = await image.readAsBytes();
-      final List<LocalFood> results = await landmarkLogic.foodRecognition
+      final FoodRecognitionResult result = await landmarkLogic.foodRecognition
           .recognizeFood(bytes);
-      if (results.length > 1) {
+      _isLocalFood = result.isLocalFood;
+      _priceMin = result.priceMin;
+      _priceMax = result.priceMax;
+      _confidence = result.confidence;
+      if (result.candidates.length > 1) {
         // Gemini was unsure between a few likely dishes (A5) - show the
         // top-3 picker instead of a single result.
         _recognizedFood = null;
-        _multipleResults = results;
+        _multipleResults = result.candidates;
       } else {
-        _recognizedFood = results.first;
+        _recognizedFood = result.candidates.first;
         _multipleResults = [];
       }
       notifyListeners();
@@ -241,11 +329,83 @@ class FoodRecognitionViewModel extends BaseViewModel {
     }
   }
 
-  /// Handle multiple results - user selects one
-  void selectFromMultiple(LocalFood food) {
+  /// Handle multiple results - user selects one (A5). The picked candidate
+  /// may be name-only (a picker candidate that isn't in the catalogue - see
+  /// `FoodRecognitionLogic._nameOnlyFood`), so its FULL details are fetched
+  /// - the catalogue record if there is one, else a full Gemini analysis of
+  /// the picked name + the captured photo (via `resolveByName`) - before the
+  /// single-result card settles. This is what fills the result card and
+  /// "View Details" (and the suggested price range) for the picked dish;
+  /// without it a non-catalogue pick would show only its name.
+  /// The picked food is set immediately so the picker closes; the enrichment
+  /// then swaps in the full record when it arrives.
+  Future<void> selectFromMultiple(LocalFood food) async {
     _recognizedFood = food;
     _multipleResults = [];
+    // A picker is only ever shown for a Malaysian local food - keep the flag
+    // consistent with the photo that produced these candidates. The price
+    // range is filled once the full analysis resolves below.
+    _isLocalFood = true;
+    _priceMin = 0;
+    _priceMax = 0;
+    _confidence = 1.0; // The tourist chose - treat the pick as certain.
     notifyListeners();
+
+    final XFile? image = _capturedImage;
+    if (image == null) return; // No photo to enrich with - keep the pick.
+    try {
+      final List<int> bytes = await image.readAsBytes();
+      final resolved = await landmarkLogic.foodRecognition.resolveByName(
+        bytes,
+        food.name,
+      );
+      _recognizedFood = resolved.food;
+      _priceMin = resolved.priceMin;
+      _priceMax = resolved.priceMax;
+      notifyListeners();
+    } catch (_) {
+      // Gemini/catalogue hiccup - keep the picked (possibly name-only) food
+      // rather than dropping the selection. The tourist can retry via the
+      // manual name entry.
+    }
+  }
+
+  /// Manual fallback: the tourist types the food name when Gemini's
+  /// candidates don't include the right dish (see
+  /// `FoodRecognitionLogic.resolveByName`). Resolves it (catalogue match, else
+  /// a full Gemini analysis with the typed name) and shows the single-result
+  /// card for it, exactly like a confident recognition.
+  Future<void> enterFoodName(String name) async {
+    final String trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    _isProcessing = true;
+    _recognitionError = null;
+    notifyListeners();
+    try {
+      final XFile? image = _capturedImage;
+      if (image == null) {
+        _recognitionError = 'No captured photo to analyse - capture one first.';
+      } else {
+        final List<int> bytes = await image.readAsBytes();
+        final resolved = await landmarkLogic.foodRecognition.resolveByName(
+          bytes,
+          trimmed,
+        );
+        _recognizedFood = resolved.food;
+        _priceMin = resolved.priceMin;
+        _priceMax = resolved.priceMax;
+        _multipleResults = [];
+        _isLocalFood = true;
+        _confidence = 1.0; // The tourist named it - treat as certain.
+      }
+      notifyListeners();
+    } catch (e) {
+      _recognitionError = _humaniseError(e);
+      notifyListeners();
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
+    }
   }
 
   /// "Add New Landmark" - hands the recognized food (and its photo) to
@@ -254,7 +414,16 @@ class FoodRecognitionViewModel extends BaseViewModel {
   void proceedToAddLandmark() {
     final LocalFood? food = _recognizedFood;
     if (food == null) return;
-    LandmarkDraftHandoff().pushAddLandmark(food, _capturedImage);
+    // A non-local food is never allowed to become a landmark - the UI hides
+    // the button, this guard is the second line of defence.
+    if (!_isLocalFood) return;
+    LandmarkDraftHandoff().pushAddLandmark(
+      food,
+      _capturedImage,
+      isLocalFood: _isLocalFood,
+      priceMin: _priceMin,
+      priceMax: _priceMax,
+    );
   }
 
   /// "View Details" (A6) - hands the recognized food (and its photo) to the
@@ -270,7 +439,13 @@ class FoodRecognitionViewModel extends BaseViewModel {
     if (_purpose == FoodRecognitionPurpose.additionalFood) {
       LandmarkDraftHandoff().pendingReturnToFormAsAdditionalFood = true;
     }
-    LandmarkDraftHandoff().pushLandmarkDetail(food, _capturedImage);
+    LandmarkDraftHandoff().pushLandmarkDetail(
+      food,
+      _capturedImage,
+      isLocalFood: _isLocalFood,
+      priceMin: _priceMin,
+      priceMax: _priceMax,
+    );
   }
 
   /// "Add to Landmark" (A12) - pops the recognized food (and its photo)
@@ -284,7 +459,14 @@ class FoodRecognitionViewModel extends BaseViewModel {
         _purpose != FoodRecognitionPurpose.additionalFood) {
       return;
     }
-    AppNavigator.pop<AdditionalFoodCaptureResult>((food: food, image: image));
+    // A non-local food is never allowed back onto a landmark draft either.
+    if (!_isLocalFood) return;
+    AppNavigator.pop<AdditionalFoodCaptureResult>((
+      food: food,
+      image: image,
+      priceMin: _priceMin,
+      priceMax: _priceMax,
+    ));
   }
 
   /// Clear and retry
@@ -293,6 +475,9 @@ class FoodRecognitionViewModel extends BaseViewModel {
     _recognizedFood = null;
     _multipleResults = [];
     _recognitionError = null;
+    _isLocalFood = true;
+    _priceMin = 0;
+    _priceMax = 0;
     _extractedRestaurantName = null;
     notifyListeners();
   }

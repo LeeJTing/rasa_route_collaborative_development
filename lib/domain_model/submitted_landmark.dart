@@ -16,6 +16,9 @@ class SubmittedLandmark {
     required this.category,
     required this.reportedCount,
     required this.status,
+    this.imageUrl,
+    this.imageId,
+    this.imageCategory,
     required this.items,
     required this.openingHours,
   });
@@ -27,12 +30,30 @@ class SubmittedLandmark {
   final String category;
   final int reportedCount;
   final LandmarkStatus status;
+
+  /// The landmark's own signboard/stall photo, uploaded to Supabase Storage
+  /// (`landmark-images` bucket) and persisted on `submitted_landmark`
+  /// (`image_url` / `image_id` / `image_category` - all text). Null when no
+  /// image was captured.
+  final String? imageUrl;
+  final String? imageId;
+
+  /// What kind of photo [imageUrl]/[imageId] is - `'signboard'` or `'stall'`
+  /// (see `AddLandmarkViewModel._capturedImageType`).
+  final String? imageCategory;
+
   final List<LandmarkItem> items;
   final List<OpeningHour> openingHours;
 }
 
-/// Moderation state of a submission.
-enum LandmarkStatus { pending, approved, rejected }
+/// Moderation state of a submission - `submitted_landmark.status` is free
+/// text in Supabase holding one of these two values:
+///   * [available] - the landmark is listed/visible to tourists;
+///   * [frozen] - the landmark has been reported too many times and is
+///     temporarily hidden, until it is reactivated (A20).
+/// A brand-new submission is ALWAYS [available] with `reported_count` 0 (see
+/// `LandmarkSubmissionLogic.submitLandmark` / `SubmittedLandmarkRepository`).
+enum LandmarkStatus { available, frozen }
 
 /// A dish attached to a submitted landmark.
 ///
@@ -54,6 +75,8 @@ class LandmarkItem {
     this.imageUrl,
     this.imageId,
     this.price,
+    this.priceMin = 0,
+    this.priceMax = 0,
     required this.seasonal,
     required this.cookingStyle,
     required this.mealType,
@@ -70,15 +93,25 @@ class LandmarkItem {
   final String origin;
   final String culturalBackground;
 
-  /// The food's own photo (as captured on `FoodRecognitionView`), once
-  /// actually uploaded somewhere - null until a real image-storage
-  /// repository exists (see `AddLandmarkViewModel._toLandmarkItem`'s note).
+  /// The food's own photo (as captured on `FoodRecognitionView`), stored in
+  /// Supabase Storage (`landmark-images` bucket) by
+  /// `SubmittedLandmarkRepository.uploadImage` before the item is
+  /// inserted. Null when the food had no photo (e.g. name-typed) - the
+  /// repository then writes null.
   ///
   /// `image_id` in `landmark_item` is `text` (a storage object id) - not an
   /// integer, matching the real Supabase column.
   final String? imageUrl;
   final String? imageId;
   final double? price;
+
+  /// Suggested selling price range for this dish (MYR), from Gemini's full
+  /// analysis of the recognised food. `0` means unknown. Persisted with the
+  /// landmark item (`landmark_item.price_min` / `price_max`) - this is what
+  /// the tourist's submission carries, NOT the shared `local_food` catalogue.
+  final double priceMin;
+  final double priceMax;
+
   final String seasonal;
   final String cookingStyle;
   final String mealType;
@@ -101,6 +134,10 @@ class FoodSubmission {
     required this.food,
     required this.price,
     this.isFake = false,
+    this.priceMin = 0,
+    this.priceMax = 0,
+    this.imageUrl,
+    this.imageId,
   });
 
   final LocalFood food;
@@ -108,4 +145,15 @@ class FoodSubmission {
 
   /// Test/QA marker - `true` for "fake food" (see `LandmarkItem.isFake`).
   final bool isFake;
+
+  /// Suggested MYR price range for [food] from Gemini - carried onto the
+  /// persisted [LandmarkItem]. `0` means unknown.
+  final double priceMin;
+  final double priceMax;
+
+  /// Where this food's photo lives after upload, carried onto the persisted
+  /// [LandmarkItem] (`landmark_item.image_url` / `image_id`). Null when the
+  /// food has no photo (e.g. a name-typed food) - the repository writes null.
+  final String? imageUrl;
+  final String? imageId;
 }

@@ -109,7 +109,7 @@ class LocationPickerField extends StatelessWidget {
               const SizedBox(height: AppSpacing.sm),
               Text(
                 '${pin.latitude.toStringAsFixed(5)}, '
-                '${pin.longitude.toStringAsFixed(5)}',
+                    '${pin.longitude.toStringAsFixed(5)}',
                 style: AppTextStyles.bodySmall,
               ),
             ],
