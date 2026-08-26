@@ -1,3 +1,4 @@
+import '../../domain_model/food_comparison.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
@@ -92,4 +93,15 @@ class FoodLogicFacade {
     );
     return recommendation.pairingsFor(selected, catalogue);
   }
+
+  // --- Food comparison ------------------------------------------------------
+
+  Future<FoodComparison> buildComparison(List<int> foodIds) =>
+      comparison.buildComparison(foodIds);
+
+  LocalFood? bestDietaryMatch(FoodComparison result) =>
+      comparison.bestDietaryMatch(result);
+
+  LocalFood? bestValueFood(FoodComparison result) =>
+      comparison.bestValueFood(result);
 }
