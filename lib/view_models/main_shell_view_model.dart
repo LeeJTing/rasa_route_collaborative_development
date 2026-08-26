@@ -15,11 +15,13 @@ import '../model/business_logic/tourist_information_logic_facade.dart';
 class MainShellViewModel extends BaseViewModel {
   MainShellViewModel();
 
+  static const int tabCount = 2;
+
   int _currentIndex = 0;
   int get currentIndex => _currentIndex;
 
   void selectTab(int index) {
-    if (index < 0 || index > 2 || index == _currentIndex) return;
+    if (index < 0 || index >= tabCount || index == _currentIndex) return;
     _currentIndex = index;
     safeNotifyListeners();
   }

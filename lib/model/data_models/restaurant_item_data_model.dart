@@ -9,9 +9,11 @@ class RestaurantItemDataModel implements JsonModel {
     required this.restaurantItemName,
     this.ingredients,
     this.foodImgUrl,
-    this.seasonal,
     this.foodCategory,
     this.restaurantItemPrice,
+    this.localFoodName,
+    this.localFoodDescription,
+    this.localFoodImageName,
   });
 
   /// `restaurant_item.restaurant_item_id` (bigint identity, PK).
@@ -32,11 +34,14 @@ class RestaurantItemDataModel implements JsonModel {
   /// Image associated with this restaurant-specific menu item.
   final String? foodImgUrl;
 
-  final String? seasonal;
   final String? foodCategory;
   final double? restaurantItemPrice;
+  final String? localFoodName;
+  final String? localFoodDescription;
+  final String? localFoodImageName;
 
   factory RestaurantItemDataModel.fromJson(Map<String, dynamic> json) {
+    final Map<String, dynamic> localFood = JsonReader.asMap(json['local_food']);
     return RestaurantItemDataModel(
       restaurantItemId: JsonReader.asInt(json['restaurant_item_id']),
       restaurantId: JsonReader.asInt(json['restaurant_id']),
@@ -44,12 +49,27 @@ class RestaurantItemDataModel implements JsonModel {
       restaurantItemName: JsonReader.asString(json['restaurant_item_name']),
       ingredients: JsonReader.asStringOrNull(json['ingredients']),
       foodImgUrl: JsonReader.asStringOrNull(json['food_img_url']),
-      seasonal: JsonReader.asStringOrNull(json['seasonal']),
       foodCategory: JsonReader.asStringOrNull(json['food_category']),
       restaurantItemPrice: JsonReader.asDoubleOrNull(
         json['restaurant_item_price'],
       ),
+      localFoodName: JsonReader.asStringOrNull(localFood['food_name']),
+      localFoodDescription: JsonReader.asStringOrNull(localFood['description']),
+      localFoodImageName: _firstImageName(localFood),
     );
+  }
+
+  static String? _firstImageName(Map<String, dynamic> localFood) {
+    final Object? images = localFood['local_food_image'];
+    if (images is! List) return null;
+    final List<String> names =
+        images
+            .whereType<Map>()
+            .map((Map image) => JsonReader.asStringOrNull(image['img_name']))
+            .whereType<String>()
+            .toList()
+          ..sort();
+    return names.isEmpty ? null : names.first;
   }
 
   @override
@@ -60,8 +80,15 @@ class RestaurantItemDataModel implements JsonModel {
     'restaurant_item_name': restaurantItemName,
     'ingredients': ingredients,
     'food_img_url': foodImgUrl,
-    'seasonal': seasonal,
     'food_category': foodCategory,
     'restaurant_item_price': restaurantItemPrice,
+    'local_food': <String, dynamic>{
+      'food_name': localFoodName,
+      'description': localFoodDescription,
+      'local_food_image': <Map<String, dynamic>>[
+        if (localFoodImageName != null)
+          <String, dynamic>{'img_name': localFoodImageName},
+      ],
+    },
   };
 }

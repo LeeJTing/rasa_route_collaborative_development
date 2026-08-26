@@ -180,9 +180,9 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
       final double fx = _size.width / 2;
       final double fy = _size.height / 2;
       final Matrix4 next = Matrix4.identity()
-        ..translate(fx, fy)
-        ..scale(applied)
-        ..translate(-fx, -fy);
+        ..translateByDouble(fx, fy, 0, 1)
+        ..scaleByDouble(applied, applied, 1, 1)
+        ..translateByDouble(-fx, -fy, 0, 1);
       // `multiply` keeps this typed as Matrix4; `*` on vector_math returns
       // dynamic.
       next.multiply(_controller.value);
@@ -306,7 +306,8 @@ class StylisedMalaysiaProjection {
 
     const double totalWidth = peninsulaWidth + gapDegrees + borneoWidth;
     const double borneoCentreY = peninsulaHeight / 2 + borneoDropDegrees;
-    const double totalHeight = peninsulaHeight > borneoCentreY + borneoHeight / 2
+    const double totalHeight =
+        peninsulaHeight > borneoCentreY + borneoHeight / 2
         ? peninsulaHeight
         : borneoCentreY + borneoHeight / 2;
 
@@ -413,11 +414,7 @@ class _HeatmapPainter extends CustomPainter {
   };
 
   /// Too small to label until the tourist zooms in.
-  static const Set<String> _labelOnlyWhenZoomed = <String>{
-    'KUL',
-    'PJY',
-    'LBN',
-  };
+  static const Set<String> _labelOnlyWhenZoomed = <String>{'KUL', 'PJY', 'LBN'};
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -515,8 +512,7 @@ class _HeatmapPainter extends CustomPainter {
       path.addPolygon(
         outline.ring
             .map(
-              (GeoPoint point) =>
-                  projection(point.latitude, point.longitude),
+              (GeoPoint point) => projection(point.latitude, point.longitude),
             )
             .toList(growable: false),
         true,
