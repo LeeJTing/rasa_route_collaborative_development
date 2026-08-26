@@ -221,8 +221,15 @@ class MapExplorationLogic {
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
   }) async {
-    final List<Region> allRegions = await regions();
-    final List<LocalFood> catalogue = await foodRepository.getFoods();
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      regions(),
+      foodRepository.getFoods(),
+      repository.map.foodOccurrences(),
+    ]);
+    final List<Region> allRegions = gathered[0] as List<Region>;
+    final List<LocalFood> catalogue = gathered[1] as List<LocalFood>;
+    final List<FoodOccurrence> rawOccurrences =
+        gathered[2] as List<FoodOccurrence>;
 
     final List<LocalFood> matching = catalogue
         .where(
@@ -236,9 +243,7 @@ class MapExplorationLogic {
         .map((LocalFood food) => food.id)
         .toSet();
 
-    final List<FoodOccurrence> occurrences = await _resolvedOccurrences(
-      catalogue,
-    );
+    final List<FoodOccurrence> occurrences = _resolve(rawOccurrences, catalogue);
 
     // state code -> the distinct local foods served in it
     final Map<String, Set<int>> foodsByRegion = <String, Set<int>>{
@@ -313,7 +318,20 @@ class MapExplorationLogic {
     double? fromLongitude,
     int limit = 200,
   }) async {
-    final List<LocalFood> catalogue = await foodRepository.getFoods();
+    // Catalogue, occurrences and opening hours are independent reads. Fetched
+    // together they cost one round trip instead of three; cached, they cost
+    // nothing at all on a pan.
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      foodRepository.getFoods(),
+      repository.map.foodOccurrences(),
+      repository.map.openingHours(),
+    ]);
+    final List<LocalFood> catalogue = gathered[0] as List<LocalFood>;
+    final List<FoodOccurrence> rawOccurrences =
+        gathered[1] as List<FoodOccurrence>;
+    final Map<String, List<OpeningHour>> hours =
+        gathered[2] as Map<String, List<OpeningHour>>;
+
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
@@ -326,11 +344,7 @@ class MapExplorationLogic {
         .map((LocalFood food) => food.id)
         .toSet();
 
-    final List<FoodOccurrence> occurrences = await _resolvedOccurrences(
-      catalogue,
-    );
-    final Map<String, List<OpeningHour>> hours = await repository.map
-        .openingHours();
+    final List<FoodOccurrence> occurrences = _resolve(rawOccurrences, catalogue);
 
     // One pin per place, gathering every matching dish served there.
     final Map<String, _PinBuilder> byPlace = <String, _PinBuilder>{};
@@ -534,10 +548,20 @@ class MapExplorationLogic {
   /// catalogue name and synonyms here; an unmatched dish keeps id 0 and is
   /// therefore counted by no state, which is the honest outcome - the app
   /// cannot claim a landmark serves a local food it cannot identify.
-  Future<List<FoodOccurrence>> _resolvedOccurrences(
+  /// Restaurant occurrences already carry a `local_food_id`. Submitted
+  /// landmarks carry only free text, so their `dish` is matched against the
+  /// catalogue name and synonyms here; an unmatched dish keeps id 0 and is
+  /// therefore counted by no state, which is the honest outcome - the app
+  /// cannot claim a landmark serves a local food it cannot identify.
+  ///
+  /// Pure and synchronous: both inputs are already in hand, so this no longer
+  /// hides a repository call behind an await.
+  List<FoodOccurrence> _resolve(
+    List<FoodOccurrence> raw,
     List<LocalFood> catalogue,
-  ) async {
-    final List<FoodOccurrence> raw = await repository.map.foodOccurrences();
+  ) {
+    // Nothing to match against, so nothing to rewrite.
+    if (raw.every((FoodOccurrence o) => o.localFoodId != 0)) return raw;
 
     final Map<String, int> idByName = <String, int>{};
     for (final LocalFood food in catalogue) {
@@ -562,6 +586,10 @@ class MapExplorationLogic {
             foodName: occurrence.foodName,
             latitude: occurrence.latitude,
             longitude: occurrence.longitude,
+            placeImageUrl: occurrence.placeImageUrl,
+            placeCategory: occurrence.placeCategory,
+            placeRating: occurrence.placeRating,
+            itemPrice: occurrence.itemPrice,
           );
         })
         .toList(growable: false);

@@ -63,6 +63,44 @@ class MapRepository {
         .toList(growable: false);
   }
 
+  // ---------------------------------------------------------------------------
+  // Caching
+  // ---------------------------------------------------------------------------
+  //
+  // Occurrences and opening hours are read on every pin refresh, and a pin
+  // refresh happens on every pan and every zoom. Uncached that was four
+  // full-table selects per camera move; cached, panning costs nothing at all
+  // and the work becomes pure in-memory filtering one layer up.
+  //
+  // Static, so the heatmap and the pins share one copy even though each facade
+  // builds its own `MapRepository`, and so the cache survives a ViewModel being
+  // rebuilt. Restaurants and submitted landmarks change on the scale of days,
+  // not seconds; [cacheTtl] is the ceiling on how stale the map can be, and
+  // [invalidate] is there for anything that writes.
+
+  static const Duration cacheTtl = Duration(minutes: 5);
+
+  static List<FoodOccurrence>? _cachedOccurrences;
+  static DateTime? _cachedOccurrencesAt;
+  static Future<List<FoodOccurrence>>? _occurrencesRequest;
+
+  static Map<String, List<OpeningHour>>? _cachedHours;
+  static DateTime? _cachedHoursAt;
+  static Future<Map<String, List<OpeningHour>>>? _hoursRequest;
+
+  static bool _isFresh(DateTime? at) =>
+      at != null && DateTime.now().difference(at) < cacheTtl;
+
+  /// Drops the cached map data. Call after anything that adds or edits a
+  /// restaurant or a submitted landmark, or the map will keep showing the old
+  /// answer for up to [cacheTtl].
+  static void invalidate() {
+    _cachedOccurrences = null;
+    _cachedOccurrencesAt = null;
+    _cachedHours = null;
+    _cachedHoursAt = null;
+  }
+
   /// Every place a local food is served, from both sources.
   ///
   /// Returns an empty list when the backend holds no restaurants or landmarks
@@ -70,29 +108,61 @@ class MapRepository {
   /// heatmap is grey), not an error. A failed *query* does throw, so the
   /// ViewModel can offer a retry rather than showing a blank map as if it were
   /// the truth.
-  Future<List<FoodOccurrence>> foodOccurrences() async {
-    final List<FoodOccurrence> occurrences = <FoodOccurrence>[];
-    occurrences.addAll(await _restaurantOccurrences());
-    occurrences.addAll(await _landmarkOccurrences());
-    return List<FoodOccurrence>.unmodifiable(occurrences);
+  ///
+  /// Cached for [cacheTtl]. Concurrent callers share one request rather than
+  /// each firing their own - the heatmap and the pins routinely ask at the
+  /// same moment.
+  Future<List<FoodOccurrence>> foodOccurrences() {
+    final List<FoodOccurrence>? cached = _cachedOccurrences;
+    if (cached != null && _isFresh(_cachedOccurrencesAt)) {
+      return Future<List<FoodOccurrence>>.value(cached);
+    }
+    return _occurrencesRequest ??= _fetchOccurrences()
+        .then((List<FoodOccurrence> value) {
+          _cachedOccurrences = value;
+          _cachedOccurrencesAt = DateTime.now();
+          return value;
+        })
+        .whenComplete(() => _occurrencesRequest = null);
+  }
+
+  Future<List<FoodOccurrence>> _fetchOccurrences() async {
+    // The two sources are independent, so they go together rather than one
+    // after the other.
+    final List<List<FoodOccurrence>> both = await Future.wait(
+      <Future<List<FoodOccurrence>>>[
+        _restaurantOccurrences(),
+        _landmarkOccurrences(),
+      ],
+    );
+    return List<FoodOccurrence>.unmodifiable(both.expand(
+      (List<FoodOccurrence> group) => group,
+    ));
   }
 
   Future<List<FoodOccurrence>> _restaurantOccurrences() async {
     final List<Map<String, dynamic>> restaurants;
     final List<Map<String, dynamic>> items;
     try {
-      restaurants = await api.selectAll(
-        APIManager.tableRestaurant,
-        columns:
-            'restaurant_id, restaurant_name, latitude, longitude, '
-            'category, rating, restaurant_image_url',
+      // Neither select depends on the other.
+      final List<List<Map<String, dynamic>>> rows = await Future.wait(
+        <Future<List<Map<String, dynamic>>>>[
+          api.selectAll(
+            APIManager.tableRestaurant,
+            columns:
+                'restaurant_id, restaurant_name, latitude, longitude, '
+                'category, rating, restaurant_image_url',
+          ),
+          api.selectAll(
+            APIManager.tableRestaurantItem,
+            columns:
+                'restaurant_id, local_food_id, restaurant_item_name, '
+                'restaurant_item_price',
+          ),
+        ],
       );
-      items = await api.selectAll(
-        APIManager.tableRestaurantItem,
-        columns:
-            'restaurant_id, local_food_id, restaurant_item_name, '
-            'restaurant_item_price',
-      );
+      restaurants = rows[0];
+      items = rows[1];
     } catch (_) {
       throw Exception(
         'Unable to load the local food distribution. '
@@ -138,14 +208,20 @@ class MapRepository {
     final List<Map<String, dynamic>> landmarks;
     final List<Map<String, dynamic>> items;
     try {
-      landmarks = await api.selectAll(
-        APIManager.tableSubmittedLandmark,
-        columns: 'landmark_id, landmark_name, latitude, longitude, status',
+      final List<List<Map<String, dynamic>>> rows = await Future.wait(
+        <Future<List<Map<String, dynamic>>>>[
+          api.selectAll(
+            APIManager.tableSubmittedLandmark,
+            columns: 'landmark_id, landmark_name, latitude, longitude, status',
+          ),
+          api.selectAll(
+            APIManager.tableLandmarkItem,
+            columns: 'landmark_id, dish, image_url, item_price, food_category',
+          ),
+        ],
       );
-      items = await api.selectAll(
-        APIManager.tableLandmarkItem,
-        columns: 'landmark_id, dish, image_url, item_price, food_category',
-      );
+      landmarks = rows[0];
+      items = rows[1];
     } catch (_) {
       throw Exception(
         'Unable to load submitted landmarks. '
@@ -197,7 +273,21 @@ class MapRepository {
   ///
   /// A place with no rows simply has no entry, which is how "hours unknown"
   /// reaches the sheet instead of being guessed as closed.
-  Future<Map<String, List<OpeningHour>>> openingHours() async {
+  Future<Map<String, List<OpeningHour>>> openingHours() {
+    final Map<String, List<OpeningHour>>? cached = _cachedHours;
+    if (cached != null && _isFresh(_cachedHoursAt)) {
+      return Future<Map<String, List<OpeningHour>>>.value(cached);
+    }
+    return _hoursRequest ??= _fetchOpeningHours()
+        .then((Map<String, List<OpeningHour>> value) {
+          _cachedHours = value;
+          _cachedHoursAt = DateTime.now();
+          return value;
+        })
+        .whenComplete(() => _hoursRequest = null);
+  }
+
+  Future<Map<String, List<OpeningHour>>> _fetchOpeningHours() async {
     final List<Map<String, dynamic>> rows;
     try {
       rows = await api.selectAll(

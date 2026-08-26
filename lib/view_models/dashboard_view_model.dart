@@ -849,25 +849,37 @@ class DashboardViewModel extends BaseViewModel {
   /// pins on screen until the new set arrives, because those pins are still
   /// the right answer; blanking them every camera nudge just made the map
   /// flicker. Either way the camera is untouched.
-  Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
-    if (clearFirst && _pins.isNotEmpty) {
-      _pins = const <MapPin>[];
-      safeNotifyListeners();
-    }
+  bool _pinsInFlight = false;
 
-    _lastPinLatitude = _centreLatitude;
-    _lastPinLongitude = _centreLongitude;
-    _lastPinZoom = _zoom;
-    _pins = await discoveryLogic.mapPins(
-      filter: _filter,
-      localFoodId: _selectedFood?.id,
-      south: _viewportSouth,
-      west: _viewportWest,
-      north: _viewportNorth,
-      east: _viewportEast,
-      fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
-      fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
-    );
+  Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
+    // A mode switch and a settled camera can both ask at once. One query is
+    // enough; the debounce will fire again if the map has moved since.
+    if (_pinsInFlight) return;
+    _pinsInFlight = true;
+    try {
+      if (clearFirst && _pins.isNotEmpty) {
+        _pins = const <MapPin>[];
+        safeNotifyListeners();
+      }
+
+      _lastPinLatitude = _centreLatitude;
+      _lastPinLongitude = _centreLongitude;
+      _lastPinZoom = _zoom;
+      _pins = await discoveryLogic.mapPins(
+        filter: _filter,
+        localFoodId: _selectedFood?.id,
+        south: _viewportSouth,
+        west: _viewportWest,
+        north: _viewportNorth,
+        east: _viewportEast,
+        fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
+        fromLongitude: _sharedLocation.isKnown
+            ? _sharedLocation.longitude
+            : null,
+      );
+    } finally {
+      _pinsInFlight = false;
+    }
   }, silent: true);
 
   /// Has the viewport moved or scaled enough that the pins on screen could
