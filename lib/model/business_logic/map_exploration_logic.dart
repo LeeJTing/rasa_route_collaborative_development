@@ -204,6 +204,13 @@ class MapExplorationLogic {
 
   Future<List<Region>> regions() => repository.map.malaysiaRegions();
 
+  /// Throws away the cached map data so the next read goes to Supabase.
+  ///
+  /// Called when the tourist accepts the "map has been updated" prompt, and
+  /// worth calling after this app submits a landmark of its own - otherwise the
+  /// tourist's own contribution takes up to `MapRepository.cacheTtl` to appear.
+  void clearMapCache() => repository.map.clearCache();
+
   /// REQ102_1 - the tight coastline, which the painted overview clips to.
   Future<List<CountryOutline>> outlines() => repository.map.malaysiaOutlines();
 

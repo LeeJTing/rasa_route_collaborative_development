@@ -45,6 +45,62 @@ class DashboardViewModel extends BaseViewModel {
   /// The most recent GPS fix, shared by every instance of this ViewModel.
   static TouristLocation get sharedLocation => _sharedLocation;
 
+  // ===========================================================================
+  // Somebody else changed the map
+  // ===========================================================================
+  //
+  //   RestaurantMonitor -> UpdateRestaurantFacade.publishMapDataChanged()
+  //                     -> DashboardViewModel.onMapDataChanged()   [here]
+  //
+  // Static for the same reason the location fix is: the prompt has to survive
+  // this ViewModel being disposed and rebuilt, or switching tabs would quietly
+  // lose it.
+
+  static int _pendingNewLandmarks = 0;
+  static bool _mapUpdatePending = false;
+
+  /// **Called by `UpdateRestaurantFacade`, which `RestaurantMonitor` calls.**
+  /// Nothing else should call it.
+  ///
+  /// Note it only raises a flag. Re-fetching here would swap the map out from
+  /// under a tourist mid-read; the dashboard asks first.
+  static void onMapDataChanged({required int newLandmarks}) {
+    _mapUpdatePending = true;
+    _pendingNewLandmarks = newLandmarks;
+    for (final DashboardViewModel viewModel
+        in Set<DashboardViewModel>.of(_live)) {
+      viewModel.safeNotifyListeners();
+    }
+  }
+
+  /// Whether the map on screen has fallen behind the database.
+  bool get mapUpdateAvailable => _mapUpdatePending;
+
+  /// What the prompt says. Names a number when there is one, because "2 new
+  /// landmarks" is worth tapping and "something changed" is not.
+  String get mapUpdateMessage => _pendingNewLandmarks > 0
+      ? '$_pendingNewLandmarks new landmark'
+            '${_pendingNewLandmarks == 1 ? '' : 's'} added by other tourists.'
+      : 'The map has new places since you opened it.';
+
+  /// The Update button. Drops the caches, re-reads whichever view is showing,
+  /// and leaves the camera exactly where it was.
+  Future<void> applyMapUpdate() async {
+    _mapUpdatePending = false;
+    _pendingNewLandmarks = 0;
+    discoveryLogic.clearMapCache();
+    safeNotifyListeners();
+    await _reloadActiveView();
+  }
+
+  /// Dismissed without refreshing. The next change re-raises it.
+  void dismissMapUpdate() {
+    if (!_mapUpdatePending) return;
+    _mapUpdatePending = false;
+    _pendingNewLandmarks = 0;
+    safeNotifyListeners();
+  }
+
   /// **Called by `CurrentLocationFacade`, which `LocationMonitor` calls.**
   /// Nothing else should call it.
   static void onCurrentLocationChanged(TouristLocation location) {

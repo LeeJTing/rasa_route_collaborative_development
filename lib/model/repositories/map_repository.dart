@@ -3,6 +3,7 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../../shared_client/local_storage_manager/local_storage_manager.dart';
+import '../../domain_model/map_data_stamp.dart';
 import '../../domain_model/map_place.dart';
 import '../data_models/malaysia_outline_data_model.dart';
 import '../data_models/malaysia_region_data_model.dart';
@@ -107,6 +108,39 @@ class MapRepository {
     _cachedHoursAt = null;
     _cachedPlaces = null;
     _cachedPlacesAt = null;
+  }
+
+  /// Drops the cached map data from an instance. Same as [invalidate]; exists
+  /// because a business-logic class holds a repository, not the class itself,
+  /// and Dart will not let it reach a static through the instance.
+  void clearCache() => invalidate();
+
+  /// How much map data exists right now - polled by `RestaurantMonitor` to
+  /// notice that another tourist has added a landmark.
+  ///
+  /// Deliberately **not cached**: its whole job is to see past the cache. Reads
+  /// one id column from each table, so the payload stays small even as the
+  /// tables grow.
+  Future<MapDataStamp> mapDataStamp() async {
+    try {
+      final List<List<Map<String, dynamic>>> rows = await Future.wait(
+        <Future<List<Map<String, dynamic>>>>[
+          api.selectAll(
+            APIManager.tableSubmittedLandmark,
+            columns: 'landmark_id',
+          ),
+          api.selectAll(APIManager.tableRestaurant, columns: 'restaurant_id'),
+        ],
+      );
+      return MapDataStamp(
+        landmarkCount: rows[0].length,
+        restaurantCount: rows[1].length,
+      );
+    } catch (_) {
+      // A failed poll must not look like "everything vanished" - that would
+      // prompt the tourist to refresh into an empty map.
+      return MapDataStamp.empty;
+    }
   }
 
   /// REQ102_19 / REQ102_20 - every searchable city, town, area and landmark.
