@@ -4,7 +4,7 @@ import '../../domain_model/food_distribution.dart';
 import '../../domain_model/map.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
-import '../data_models/location_data_model.dart';
+import '../../domain_model/tourist_location.dart';
 import 'food_discovery_logic.dart';
 import 'map_exploration_logic.dart';
 import 'restaurant_discovery_logic.dart';
@@ -25,7 +25,7 @@ class DiscoveryLogicFacade {
   final MapExplorationLogic mapExploration = MapExplorationLogic();
 
   Future<List<Restaurant>> getQuickModeRestaurants({
-    required LocationDataModel location,
+    required TouristLocation location,
     required int limit,
   }) => restaurantDiscovery.nearbyWithAutomaticExpansion(
     location: location,
@@ -155,6 +155,6 @@ class DiscoveryLogicFacade {
       mapExploration.ensureLocationPermission();
 
   /// REQ102_7 - one GPS fix.
-  Future<LocationDataModel> currentLocation() =>
+  Future<TouristLocation> currentLocation() =>
       mapExploration.currentLocation();
 }

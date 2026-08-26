@@ -341,7 +341,6 @@ class _DashboardViewState extends State<DashboardView> {
                   onToggleOption: viewModel.toggleFilterOption,
                   onClearGroup: viewModel.clearFilterGroup,
                   onToggleExpanded: viewModel.toggleGroupExpanded,
-                  matchingFoodCount: viewModel.distribution.matchingFoodCount,
                 ),
               if (viewModel.searchPanelOpen &&
                   viewModel.searchKeyword.isNotEmpty)

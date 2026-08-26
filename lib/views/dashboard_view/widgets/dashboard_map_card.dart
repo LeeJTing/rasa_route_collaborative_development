@@ -42,7 +42,9 @@ class DashboardMapCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return PullToDismissSheet(
+      onDismiss: onDismiss,
+      child: Container(
       decoration: const BoxDecoration(
         color: AppColors.surface,
         borderRadius: AppRadius.sheetRadius,
@@ -60,13 +62,16 @@ class DashboardMapCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.outline,
-                borderRadius: BorderRadius.circular(AppRadius.pill),
+          Semantics(
+            label: 'Pull down to close',
+            child: Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.outline,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
               ),
             ),
           ),
@@ -86,18 +91,6 @@ class DashboardMapCard extends StatelessWidget {
                     if (subtitle.isNotEmpty)
                       Text(subtitle, style: AppTextStyles.bodySmall),
                   ],
-                ),
-              ),
-              InkWell(
-                onTap: onDismiss,
-                customBorder: const CircleBorder(),
-                child: const Padding(
-                  padding: EdgeInsets.all(AppSpacing.xs),
-                  child: Icon(
-                    Icons.close,
-                    size: 20,
-                    color: AppColors.textSecondary,
-                  ),
                 ),
               ),
             ],
@@ -134,6 +127,78 @@ class DashboardMapCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+      ),
+    );
+  }
+}
+
+/// Wraps a bottom sheet so it can be pulled down to dismiss.
+///
+/// Replaces the close button the sheets used to carry. A grabber you can drag
+/// is the gesture people already expect from a bottom sheet, and it puts the
+/// dismiss target where the thumb already is instead of in the far corner.
+///
+/// The sheet follows the finger while dragging and springs back if released
+/// short of the threshold, so a half-hearted pull reads as "not yet" rather
+/// than doing nothing. Only downward travel counts - dragging up must not lift
+/// the sheet off the bottom of the screen.
+class PullToDismissSheet extends StatefulWidget {
+  const PullToDismissSheet({
+    super.key,
+    required this.child,
+    required this.onDismiss,
+  });
+
+  final Widget child;
+  final VoidCallback onDismiss;
+
+  @override
+  State<PullToDismissSheet> createState() => _PullToDismissSheetState();
+}
+
+class _PullToDismissSheetState extends State<PullToDismissSheet> {
+  double _offset = 0;
+  bool _dragging = false;
+
+  /// Far enough to be deliberate, short enough not to be a workout.
+  static const double _dismissDistance = 90;
+
+  /// A flick closes it even if it never travelled the full distance.
+  static const double _dismissVelocity = 700;
+
+  void _settle() => setState(() {
+    _dragging = false;
+    _offset = 0;
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragStart: (_) => setState(() => _dragging = true),
+      onVerticalDragUpdate: (DragUpdateDetails details) => setState(() {
+        _offset = (_offset + details.delta.dy).clamp(0.0, 400.0);
+      }),
+      onVerticalDragEnd: (DragEndDetails details) {
+        final bool dismiss =
+            _offset > _dismissDistance ||
+            (details.primaryVelocity ?? 0) > _dismissVelocity;
+        _settle();
+        if (dismiss) widget.onDismiss();
+      },
+      onVerticalDragCancel: _settle,
+      child: TweenAnimationBuilder<double>(
+        // Zero duration while the finger is down so the sheet tracks it
+        // exactly; the duration only exists for the spring back.
+        tween: Tween<double>(begin: 0, end: _offset),
+        duration: _dragging
+            ? Duration.zero
+            : const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        builder: (BuildContext context, double value, Widget? child) =>
+            Transform.translate(offset: Offset(0, value), child: child),
+        child: widget.child,
       ),
     );
   }

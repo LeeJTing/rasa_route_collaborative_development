@@ -142,16 +142,16 @@ class AddLandmarkViewModel extends BaseViewModel
     locationFacade.register(this);
   }
 
+  // --- LOCATION STATE ---
+  LocationDataModel _currentLocation = LocationDataModel.unknown;
+  LocationDataModel _adjustedLocation = LocationDataModel.unknown;
+
   /// Pushed by `LocationMonitor` through [CurrentLocationFacade].
   @override
   void onCurrentLocationChanged(LocationDataModel location) {
     _currentLocation = location;
     safeNotifyListeners();
   }
-
-  // --- LOCATION STATE ---
-  LocationDataModel _currentLocation = LocationDataModel.unknown;
-  LocationDataModel _adjustedLocation = LocationDataModel.unknown;
 
   /// Presenter tool: when set (via [simulateLocation]) this overrides the
   /// device GPS fix everywhere (map center, 100m range, submitted

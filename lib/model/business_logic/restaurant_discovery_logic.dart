@@ -1,6 +1,6 @@
-import '../repositories/discovery_repository_facade.dart';
 import '../../domain_model/restaurant.dart';
-import '../data_models/location_data_model.dart';
+import '../../domain_model/tourist_location.dart';
+import '../repositories/discovery_repository_facade.dart';
 import 'dart:math' as math;
 
 /// Finding and filtering restaurants.
@@ -13,7 +13,7 @@ class RestaurantDiscoveryLogic {
   final DiscoveryRepositoryFacade repository = DiscoveryRepositoryFacade();
 
   Future<List<Restaurant>> nearby({
-    required LocationDataModel location,
+    required TouristLocation location,
     required double radiusKm,
     required int limit,
   }) async {
@@ -27,7 +27,7 @@ class RestaurantDiscoveryLogic {
 
   List<Restaurant> _measure(
     List<Restaurant> restaurants,
-    LocationDataModel location,
+    TouristLocation location,
   ) => restaurants
       .map((Restaurant restaurant) {
         if (!location.isKnown ||
@@ -64,7 +64,7 @@ class RestaurantDiscoveryLogic {
 
   /// Starts at 1 km and expands silently until the nearest results are found.
   Future<List<Restaurant>> nearbyWithAutomaticExpansion({
-    required LocationDataModel location,
+    required TouristLocation location,
     required int limit,
     double initialRadiusKm = 1,
     double radiusStepKm = 1,

@@ -9,8 +9,8 @@ import '../domain_model/food_distribution.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/map.dart';
 import '../domain_model/region.dart';
+import '../domain_model/tourist_location.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
-import '../model/data_models/location_data_model.dart';
 
 /// Which of the two dashboard maps is showing (REQ102_12, REQ102_13).
 enum DashboardMapMode { heatmap, detailed }
@@ -40,18 +40,19 @@ class DashboardViewModel extends BaseViewModel {
   /// would be notified forever.
   static final Set<DashboardViewModel> _live = <DashboardViewModel>{};
 
-  static LocationDataModel _sharedLocation = LocationDataModel.unknown;
+  static TouristLocation _sharedLocation = TouristLocation.unknown;
 
   /// The most recent GPS fix, shared by every instance of this ViewModel.
-  static LocationDataModel get sharedLocation => _sharedLocation;
+  static TouristLocation get sharedLocation => _sharedLocation;
 
   /// **Called by `CurrentLocationFacade`, which `LocationMonitor` calls.**
   /// Nothing else should call it.
-  static void onCurrentLocationChanged(LocationDataModel location) {
+  static void onCurrentLocationChanged(TouristLocation location) {
+    final bool lost = _sharedLocation.isKnown && !location.isKnown;
     _sharedLocation = location;
     for (final DashboardViewModel viewModel
         in Set<DashboardViewModel>.of(_live)) {
-      viewModel._onLocationPushed();
+      viewModel._onLocationPushed(lost: lost);
     }
   }
 
@@ -231,7 +232,7 @@ class DashboardViewModel extends BaseViewModel {
 
   /// Reads the shared fix, so a freshly built ViewModel starts with whatever
   /// the monitor last published rather than `unknown`.
-  LocationDataModel get location => _sharedLocation;
+  TouristLocation get location => _sharedLocation;
 
   bool _locationPermissionGranted = false;
   bool get locationPermissionGranted => _locationPermissionGranted;
@@ -326,7 +327,13 @@ class DashboardViewModel extends BaseViewModel {
   /// One instance's reaction to a pushed fix. A background fix should update
   /// the Find Me and Quick Mode affordances, but must never yank the camera
   /// away from wherever the tourist panned to.
-  void _onLocationPushed() {
+  void _onLocationPushed({bool lost = false}) {
+    // Say why the marker vanished. Silently removing it looks like a glitch.
+    if (lost) {
+      _notice =
+          'Location is off, so the map cannot show where you are. '
+          'Turn it on to use Find Me and Quick Mode.';
+    }
     safeNotifyListeners();
     _refreshWithinMalaysia();
   }
@@ -349,11 +356,20 @@ class DashboardViewModel extends BaseViewModel {
   /// outcome, not an error - the dashboard still works, it just shows the
   /// whole country.
   Future<void> locateTourist() async {
+    // Tapping Find Me again while it is still working must not stack a second
+    // request behind the first - that is how one slow fix turns into a spinner
+    // that outlives several taps.
+    if (_locating) return;
+
     _locating = true;
     safeNotifyListeners();
     try {
-      _locationPermissionGranted =
-          await discoveryLogic.ensureLocationPermission();
+      // Both awaits are bounded here as well as in the device layer. The
+      // spinner is driven by `_locating`, so anything that can hang below has
+      // to be capped above too, or the button spins forever.
+      _locationPermissionGranted = await discoveryLogic
+          .ensureLocationPermission()
+          .timeout(_locateTimeout, onTimeout: () => false);
 
       if (!_locationPermissionGranted) {
         _locationInMalaysia = false;
@@ -364,11 +380,18 @@ class DashboardViewModel extends BaseViewModel {
         return;
       }
 
-      final LocationDataModel fix = await discoveryLogic.currentLocation();
+      final TouristLocation fix = await discoveryLogic
+          .currentLocation()
+          .timeout(_locateTimeout, onTimeout: () => TouristLocation.unknown);
       _sharedLocation = fix;
 
       if (!fix.isKnown) {
+        // Say so. Silently falling back to the country view looks like the
+        // button did nothing.
         _locationInMalaysia = false;
+        _notice =
+            'Could not get your location. Check that GPS is switched on, '
+            'then try Find Me again.';
         _showMalaysiaOverview();
         return;
       }
@@ -785,6 +808,10 @@ class DashboardViewModel extends BaseViewModel {
 
   Timer? _pinRefreshTimer;
 
+  /// Ceiling on one Find Me attempt, a little above the device layer's own so
+  /// that layer gets to answer first when it can.
+  static const Duration _locateTimeout = Duration(seconds: 16);
+
   /// How long the map has to sit still before the pins are refetched. Short
   /// enough to feel immediate, long enough that one pinch is one query.
   static const Duration _pinRefreshDelay = Duration(milliseconds: 250);
@@ -910,7 +937,16 @@ class DashboardViewModel extends BaseViewModel {
   }
 
   Future<void> _refreshWithinMalaysia() async {
-    if (!_sharedLocation.isKnown) return;
+    // Losing the fix has to clear this, not just skip the check. It gates the
+    // Quick Mode button (REQ102_11), so an early return here left Quick Mode
+    // on screen after the tourist switched GPS off.
+    if (!_sharedLocation.isKnown) {
+      if (!_locationInMalaysia) return;
+      _locationInMalaysia = false;
+      safeNotifyListeners();
+      return;
+    }
+
     final bool inside = await discoveryLogic.isWithinMalaysia(
       _sharedLocation.latitude,
       _sharedLocation.longitude,
