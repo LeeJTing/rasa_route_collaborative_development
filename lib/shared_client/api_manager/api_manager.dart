@@ -47,6 +47,10 @@ class APIManager {
   static const String tableLandmarkItem = 'landmark_item';
   static const String tableFoodPreference = 'food_preference';
   static const String tableDietaryRestriction = 'dietary_restriction';
+
+  /// Searchable geography for the dashboard: cities, towns, areas and notable
+  /// locations (REQ102_19). Read-only - seeded by migration.
+  static const String tablePlace = 'place';
   static const String tableFoodDietaryRestriction = 'food_dietary_restriction';
   static const String tableUserDietaryRestriction = 'user_dietary_restriction';
 

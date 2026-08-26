@@ -31,8 +31,11 @@ class PlaceSuggestion {
   final double zoom;
 }
 
-/// A location result is either a whole state or a place inside one (C15).
-enum PlaceKind { state, city }
+/// What kind of thing a location result points at (C15).
+///
+/// The order matters: it is the tie-breaker when two results score the same,
+/// so "Penang" lands on the state rather than a street in George Town.
+enum PlaceKind { state, city, town, area, landmark, address }
 
 /// The single result list of A8, grouped under "Location" and "Local Food".
 ///

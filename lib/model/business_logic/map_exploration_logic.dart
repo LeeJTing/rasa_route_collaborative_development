@@ -3,6 +3,7 @@ import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/map.dart';
+import '../../domain_model/map_place.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/tourist_location.dart';
@@ -73,6 +74,29 @@ class MapExplorationLogic {
 
   /// Where a city search result settles the map (REQ102_22).
   static const double cityZoom = 13;
+
+  /// Where a restaurant or landmark search result settles - street level.
+  static const double addressZoom = 16;
+
+  /// What people type instead of a state's official name.
+  ///
+  /// Without these, searching "Penang" surfaces George Town and Penang Hill
+  /// but never the state itself, because the catalogue calls it Pulau Pinang.
+  /// Keyed by region code.
+  static const Map<String, List<String>> stateAliases = <String, List<String>>{
+    'PNG': <String>['Penang'],
+    'MLK': <String>['Malacca'],
+    'NSN': <String>['N. Sembilan', 'Negri Sembilan'],
+    'KUL': <String>['KL', 'WP Kuala Lumpur'],
+    'PJY': <String>['WP Putrajaya'],
+    'LBN': <String>['WP Labuan'],
+    'TRG': <String>['Trengganu'],
+    'PLS': <String>['Perlis Indera Kayangan'],
+  };
+
+  /// How many location results the list shows. Enough to find what you meant,
+  /// short enough to scan.
+  static const int maximumPlaceResults = 12;
 
   /// Where Find Me and the initial GPS centring settle the map
   /// (REQ102_8, REQ102_9).
@@ -480,12 +504,30 @@ class MapExplorationLogic {
     final String needle = keyword.trim().toLowerCase();
     if (needle.isEmpty) return ExplorationSearchResults.empty;
 
-    final List<PlaceSuggestion> places = <PlaceSuggestion>[];
+    // States, the place table and the food catalogue are independent reads.
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      regions(),
+      repository.map.places(),
+      foodRepository.searchFoods(keyword),
+      repository.map.foodOccurrences(),
+    ]);
+    final List<Region> allRegions = gathered[0] as List<Region>;
+    final List<MapPlace> catalogue = gathered[1] as List<MapPlace>;
+    final List<LocalFood> foods = gathered[2] as List<LocalFood>;
+    final List<FoodOccurrence> occurrences = gathered[3] as List<FoodOccurrence>;
 
-    // REQ102_18 - states first, so "Penang" lands on the state, not a suburb.
-    for (final Region region in await regions()) {
-      if (region.name.toLowerCase().contains(needle)) {
-        places.add(
+    final List<_ScoredPlace> scored = <_ScoredPlace>[];
+
+    // REQ102_18 - states.
+    for (final Region region in allRegions) {
+      final int score = _score(needle, <String>[
+        region.name,
+        ...?stateAliases[region.code],
+      ]);
+      if (score == 0) continue;
+      scored.add(
+        _ScoredPlace(
+          score,
           PlaceSuggestion(
             name: region.name,
             subtitle: 'State',
@@ -494,37 +536,154 @@ class MapExplorationLogic {
             longitude: region.centreLongitude,
             zoom: region.defaultZoom,
           ),
-        );
-      }
+        ),
+      );
     }
 
-    // REQ102_19 - then cities and notable locations.
-    for (final Region region in await regions()) {
-      for (final RegionPlace place in region.places) {
-        if (place.name.toLowerCase().contains(needle)) {
-          places.add(
-            PlaceSuggestion(
-              name: place.name,
-              subtitle: place.regionName,
-              kind: PlaceKind.city,
-              latitude: place.latitude,
-              longitude: place.longitude,
-              zoom: cityZoom,
+    // REQ102_19 / REQ102_20 - cities, towns, areas and notable locations, each
+    // matched on its name and on the alternates people actually type.
+    for (final MapPlace place in catalogue) {
+      final int score = _score(needle, <String>[place.name, ...place.aliases]);
+      if (score == 0) continue;
+      scored.add(
+        _ScoredPlace(
+          score,
+          PlaceSuggestion(
+            name: place.name,
+            subtitle: '${_label(place.kind)} - ${place.stateName}',
+            kind: _suggestionKind(place.kind),
+            latitude: place.latitude,
+            longitude: place.longitude,
+            zoom: place.zoom,
+          ),
+        ),
+      );
+    }
+
+    // The fallback that keeps search working when the place table is empty or
+    // unreachable: the region catalogue's own handful of cities.
+    if (catalogue.isEmpty) {
+      for (final Region region in allRegions) {
+        for (final RegionPlace place in region.places) {
+          final int score = _score(needle, <String>[place.name]);
+          if (score == 0) continue;
+          scored.add(
+            _ScoredPlace(
+              score,
+              PlaceSuggestion(
+                name: place.name,
+                subtitle: place.regionName,
+                kind: PlaceKind.city,
+                latitude: place.latitude,
+                longitude: place.longitude,
+                zoom: cityZoom,
+              ),
             ),
           );
         }
       }
     }
 
-    // REQ102_30 / REQ102_31 - the same keyword against the food catalogue.
-    final List<LocalFood> foods = await foodRepository.searchFoods(keyword);
+    // Addresses: the places already on the map answer "where is X" too, and a
+    // tourist searching a restaurant name expects to find it.
+    final Set<String> seenAddresses = <String>{};
+    for (final FoodOccurrence occurrence in occurrences) {
+      final int score = _score(needle, <String>[occurrence.placeName]);
+      if (score == 0) continue;
+      final String key = '${occurrence.source.name}:${occurrence.sourceId}';
+      if (!seenAddresses.add(key)) continue;
+      scored.add(
+        _ScoredPlace(
+          // One step below a named place: a restaurant called "Penang Village"
+          // must not outrank Penang.
+          score - 1,
+          PlaceSuggestion(
+            name: occurrence.placeName,
+            subtitle: occurrence.source == FoodOccurrenceSource.restaurant
+                ? 'Restaurant'
+                : 'Submitted landmark',
+            kind: PlaceKind.address,
+            latitude: occurrence.latitude,
+            longitude: occurrence.longitude,
+            zoom: addressZoom,
+          ),
+        ),
+      );
+    }
+
+    scored.sort((_ScoredPlace a, _ScoredPlace b) {
+      final int byScore = b.score.compareTo(a.score);
+      if (byScore != 0) return byScore;
+      // Same score: broader things first, then alphabetically.
+      final int byKind = a.suggestion.kind.index.compareTo(
+        b.suggestion.kind.index,
+      );
+      if (byKind != 0) return byKind;
+      return a.suggestion.name.compareTo(b.suggestion.name);
+    });
 
     return ExplorationSearchResults(
       keyword: keyword.trim(),
-      places: List<PlaceSuggestion>.unmodifiable(places),
+      places: List<PlaceSuggestion>.unmodifiable(
+        scored
+            .take(maximumPlaceResults)
+            .map((_ScoredPlace entry) => entry.suggestion),
+      ),
       foods: foods,
     );
   }
+
+  /// How well [candidates] answer what was typed. 0 means no match.
+  ///
+  /// Ranked rather than a flat `contains`, because with 148 places a bare
+  /// substring match buries the obvious answer: typing "kl" should offer Kuala
+  /// Lumpur and KLCC before Kluang and Kuala Selangor.
+  static int _score(String needle, List<String> candidates) {
+    int best = 0;
+    for (final String candidate in candidates) {
+      final String value = candidate.toLowerCase().trim();
+      if (value.isEmpty) continue;
+      if (value == needle) {
+        best = _scoreExact;
+      } else if (value.startsWith(needle)) {
+        if (best < _scorePrefix) best = _scorePrefix;
+      } else if (_startsAWord(value, needle)) {
+        // "alor" finding "Jalan Alor" - a word boundary is a much better
+        // signal than a substring landing mid-word.
+        if (best < _scoreWord) best = _scoreWord;
+      } else if (value.contains(needle)) {
+        if (best < _scoreContains) best = _scoreContains;
+      }
+      if (best == _scoreExact) break;
+    }
+    return best;
+  }
+
+  static bool _startsAWord(String value, String needle) {
+    for (final String word in value.split(RegExp(r'[\s,./-]+'))) {
+      if (word.startsWith(needle)) return true;
+    }
+    return false;
+  }
+
+  static const int _scoreExact = 100;
+  static const int _scorePrefix = 60;
+  static const int _scoreWord = 40;
+  static const int _scoreContains = 20;
+
+  static PlaceKind _suggestionKind(MapPlaceKind kind) => switch (kind) {
+    MapPlaceKind.city => PlaceKind.city,
+    MapPlaceKind.town => PlaceKind.town,
+    MapPlaceKind.area => PlaceKind.area,
+    MapPlaceKind.landmark => PlaceKind.landmark,
+  };
+
+  static String _label(MapPlaceKind kind) => switch (kind) {
+    MapPlaceKind.city => 'City',
+    MapPlaceKind.town => 'Town',
+    MapPlaceKind.area => 'Area',
+    MapPlaceKind.landmark => 'Landmark',
+  };
 
   // ===========================================================================
   // Location (REQ102_6 - REQ102_9)
@@ -682,4 +841,12 @@ class _PinBuilder {
     final int to = high.round();
     return from == to ? 'RM$from' : 'RM$from-$to';
   }
+}
+
+/// One search hit with the score that ordered it.
+class _ScoredPlace {
+  const _ScoredPlace(this.score, this.suggestion);
+
+  final int score;
+  final PlaceSuggestion suggestion;
 }

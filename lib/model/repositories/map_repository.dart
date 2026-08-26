@@ -3,10 +3,12 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../../shared_client/local_storage_manager/local_storage_manager.dart';
+import '../../domain_model/map_place.dart';
 import '../data_models/malaysia_outline_data_model.dart';
 import '../data_models/malaysia_region_data_model.dart';
 import '../data_models/map_data_model.dart';
 import '../data_models/opening_hours_data_model.dart';
+import '../data_models/place_data_model.dart';
 
 /// The exploration map: the Malaysian regions it is drawn from, the food
 /// occurrences plotted on it, and the viewport the tourist left it at.
@@ -84,6 +86,10 @@ class MapRepository {
   static DateTime? _cachedOccurrencesAt;
   static Future<List<FoodOccurrence>>? _occurrencesRequest;
 
+  static List<MapPlace>? _cachedPlaces;
+  static DateTime? _cachedPlacesAt;
+  static Future<List<MapPlace>>? _placesRequest;
+
   static Map<String, List<OpeningHour>>? _cachedHours;
   static DateTime? _cachedHoursAt;
   static Future<Map<String, List<OpeningHour>>>? _hoursRequest;
@@ -99,6 +105,51 @@ class MapRepository {
     _cachedOccurrencesAt = null;
     _cachedHours = null;
     _cachedHoursAt = null;
+    _cachedPlaces = null;
+    _cachedPlacesAt = null;
+  }
+
+  /// REQ102_19 / REQ102_20 - every searchable city, town, area and landmark.
+  ///
+  /// Read whole and cached: the table is small reference data and the search
+  /// runs on every keystroke, so filtering in memory beats a query per letter.
+  /// `APIManager` only offers equality filters anyway - there is no `ilike` to
+  /// push the match down to Postgres with.
+  ///
+  /// An empty or unreachable table is not fatal. The region catalogue still
+  /// carries the 16 states and a city each, so search degrades to what it did
+  /// before this table existed rather than returning nothing.
+  Future<List<MapPlace>> places() {
+    final List<MapPlace>? cached = _cachedPlaces;
+    if (cached != null && _isFresh(_cachedPlacesAt)) {
+      return Future<List<MapPlace>>.value(cached);
+    }
+    return _placesRequest ??= _fetchPlaces()
+        .then((List<MapPlace> value) {
+          _cachedPlaces = value;
+          _cachedPlacesAt = DateTime.now();
+          return value;
+        })
+        .whenComplete(() => _placesRequest = null);
+  }
+
+  Future<List<MapPlace>> _fetchPlaces() async {
+    try {
+      final List<Map<String, dynamic>> rows = await api.selectAll(
+        APIManager.tablePlace,
+        columns:
+            'place_id, name, kind, state_name, latitude, longitude, '
+            'zoom, aliases',
+        orderBy: 'name',
+      );
+      return rows
+          .map(PlaceDataModel.fromJson)
+          .map((PlaceDataModel data) => data.toDomain())
+          .toList(growable: false);
+    } catch (_) {
+      // Reference data - losing it degrades search, it does not break it.
+      return const <MapPlace>[];
+    }
   }
 
   /// Every place a local food is served, from both sources.
