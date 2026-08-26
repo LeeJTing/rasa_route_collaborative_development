@@ -248,6 +248,24 @@ abstract final class AppSizes {
   /// One swatch in the availability legend.
   static const double legendSwatch = 18;
 
+  /// Elevation of a card while it is selected for comparison - a stronger
+  /// shadow so the selected card stands out without tinting its surface.
+  static const double selectedCardElevation = 4;
+
+  /// Standard small icon (inline with body text).
+  static const double iconSmall = 18;
+
+  /// Standard medium icon (section headers, notices).
+  static const double iconMedium = 24;
+
+  /// Hairline divider / border width.
+  static const double borderWidth = 1;
+
+  /// Dish image height in the food-comparison pair card.
+  static const double comparisonImageHeight = 140;
+
+  /// Max body width of `FoodComparisonView` (two columns side by side).
+  static const double comparisonMaxWidth = 720;
 }
 
 /// Camera-frame guide proportions (REQ106_1) - fractions of the viewfinder's

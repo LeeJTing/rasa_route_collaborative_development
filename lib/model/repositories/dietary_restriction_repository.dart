@@ -1,8 +1,11 @@
+import '../../core/json_model.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../data_models/dietary_restriction_data_model.dart';
 
-/// Reference dietary restrictions (`dietary_restriction` table).
+/// Reference dietary restrictions (`dietary_restriction` table) plus the two
+/// many-to-many link tables that attach them to dishes and to tourists:
+/// `food_dietary_restriction` and `user_dietary_restriction`.
 ///
 /// A repository is the only layer that talks to the shared clients. It asks
 /// `APIManager` for raw rows, hands them to a **data model** (`fromJson`), then
@@ -28,5 +31,51 @@ class DietaryRestrictionRepository {
           );
         })
         .toList(growable: false);
+  }
+
+  /// The restrictions attached to one dish via `food_dietary_restriction`.
+  /// A dish with no link (null) is allowed - it simply has no restrictions.
+  /// Uses the FK embed `dietary_restriction(...)` so the link table's FK
+  /// column name never has to be referenced directly.
+  Future<List<DietaryRestriction>> restrictionsForFood(int localFoodId) async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableFoodDietaryRestriction,
+      columns: 'dietary_restriction(dietary_restriction_id, restriction_name)',
+      eq: <String, Object?>{'local_food_id': localFoodId},
+    );
+    return rows
+        .map(_fromRow)
+        .whereType<DietaryRestriction>()
+        .toList(growable: false);
+  }
+
+  /// The restrictions a tourist holds via `user_dietary_restriction`. Returns
+  /// an empty list when [touristId] is blank (nobody signed in).
+  Future<List<DietaryRestriction>> restrictionsForTourist(
+    String touristId,
+  ) async {
+    if (touristId.isEmpty) return const <DietaryRestriction>[];
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableUserDietaryRestriction,
+      columns: 'dietary_restriction(dietary_restriction_id, restriction_name)',
+      eq: <String, Object?>{'tourist_id': touristId},
+    );
+    return rows
+        .map(_fromRow)
+        .whereType<DietaryRestriction>()
+        .toList(growable: false);
+  }
+
+  /// Parses one link row. Returns null when the embedded restriction is null
+  /// so a food with no dietary restriction is allowed (treated as none).
+  DietaryRestriction? _fromRow(Map<String, dynamic> row) {
+    final Map<String, dynamic> embedded =
+        JsonReader.asMap(row['dietary_restriction']);
+    final int? id = JsonReader.asIntOrNull(embedded['dietary_restriction_id']);
+    if (id == null) return null;
+    final String name =
+        JsonReader.asStringOrNull(embedded['restriction_name']) ??
+        'Restriction $id';
+    return DietaryRestriction(id: id, name: name);
   }
 }

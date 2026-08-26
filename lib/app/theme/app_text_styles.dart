@@ -186,4 +186,24 @@ abstract final class AppTextStyles {
     fontWeight: FontWeight.w200,
     color: const Color(0xFF000000),
   );
+
+  // Dietary status badge (FoodComparisonView) -------------------------------
+
+  /// Caption inside a "suitable" dietary-status badge.
+  static const TextStyle successCaption = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    height: 1.4,
+    color: AppColors.success,
+  );
+
+  /// Caption inside a "not suitable" dietary-status badge.
+  static const TextStyle errorCaption = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    height: 1.4,
+    color: AppColors.error,
+  );
 }

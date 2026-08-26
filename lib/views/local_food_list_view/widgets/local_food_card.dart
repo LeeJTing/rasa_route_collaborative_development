@@ -25,12 +25,21 @@ class LocalFoodCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: isSelected ? AppColors.primaryContainer : AppColors.surface,
-      elevation: AppSizes.cardElevation,
+      // The card stays white when selected - selection is shown with a
+      // primary border and a stronger shadow instead of tinting the surface.
+      color: AppColors.surface,
+      elevation: isSelected
+          ? AppSizes.selectedCardElevation
+          : AppSizes.cardElevation,
       shadowColor: AppColors.shadow,
       shape: RoundedRectangleBorder(
         borderRadius: AppRadius.cardRadius,
-        side: const BorderSide(color: AppColors.cardBorder),
+        side: BorderSide(
+          color: isSelected ? AppColors.primary : AppColors.cardBorder,
+          width: isSelected
+              ? AppSizes.borderWidth * 2
+              : AppSizes.borderWidth,
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
