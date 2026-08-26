@@ -18,11 +18,18 @@ class FoodAnalysisResponse implements JsonModel {
     required this.foodStatus,
     required this.foodImageStatus,
     this.confidence = 1.0,
+    this.localFoodConfidence = 1.0,
+    this.localFoodReasoning = '',
+    this.imageQuality = 'good',
+    this.imageQualityIssues = const <String>[],
     this.tasteTags = const <String>[],
     this.foodCount = 1,
     this.candidates = const <FoodCandidate>[],
     this.priceMin = 0,
     this.priceMax = 0,
+    this.nameMatchesPhoto = true,
+    this.matchConfidence = 0,
+    this.observedFood = '',
   });
 
   /// Dish name (e.g., "Nasi Lemak")
@@ -63,6 +70,46 @@ class FoodAnalysisResponse implements JsonModel {
   /// Confidence score 0.0 - 1.0
   final double confidence;
 
+  /// How sure Gemini is about the [isMalaysianLocalFood] judgement
+  /// SPECIFICALLY - separate from [confidence], which is about naming the
+  /// dish. The two genuinely differ: a photo can be an unmistakable burger
+  /// (high [confidence]) while whether it's a Malaysian Ramly-style burger
+  /// or a Western chain burger is a much closer call (low
+  /// [localFoodConfidence]). Folding them into one number hid exactly the
+  /// uncertainty that matters for the "can this become a landmark" gate.
+  final double localFoodConfidence;
+
+  /// One short sentence naming the dish's origin and which class Gemini put
+  /// it in. Forcing the model to state its reasoning BEFORE the boolean
+  /// measurably improves the boolean - and it gives a human something to
+  /// check when a judgement looks wrong. Not shown in the UI; useful in
+  /// logs/debugging.
+  final String localFoodReasoning;
+
+  /// Whether the photo plausibly shows the dish the tourist typed by hand
+  /// (only `GeminiLandmarkService.analyzeFoodWithName` verifies a typed
+  /// name). `true` for every other call. When `false`, [dish] is what the
+  /// photo ACTUALLY shows, not what was typed.
+  final bool nameMatchesPhoto;
+
+  /// How sure (0..1) Gemini is of [nameMatchesPhoto] specifically. `0` when
+  /// not applicable (non-verification calls).
+  final double matchConfidence;
+
+  /// What Gemini sees in the photo, in its own words, BEFORE considering the
+  /// typed name - used by the UI to say "this photo looks more like X".
+  /// Empty for non-verification calls.
+  final String observedFood;
+
+  /// Overall usability of the PHOTO itself (not the food):
+  /// "good" | "acceptable" | "poor". "poor" means blur, bad exposure or a
+  /// strong colour cast is bad enough to make identification unreliable.
+  final String imageQuality;
+
+  /// The specific problems behind a non-"good" [imageQuality] - e.g.
+  /// `["blurry", "too_dark"]`. Empty when the photo is fine.
+  final List<String> imageQualityIssues;
+
   /// Flavour tags (e.g. "Spicy", "Sweet", "Rich"). Only populated by the
   /// full analysis call, not the quick name-only one - left empty there.
   final List<String> tasteTags;
@@ -100,6 +147,13 @@ class FoodAnalysisResponse implements JsonModel {
     'foodStatus': foodStatus,
     'foodImageStatus': foodImageStatus,
     'confidence': confidence,
+    'localFoodConfidence': localFoodConfidence,
+    'localFoodReasoning': localFoodReasoning,
+    'nameMatchesPhoto': nameMatchesPhoto,
+    'matchConfidence': matchConfidence,
+    'observedFood': observedFood,
+    'imageQuality': imageQuality,
+    'imageQualityIssues': imageQualityIssues,
     'tasteTags': tasteTags,
     'foodCount': foodCount,
     'candidates': candidates.map((FoodCandidate c) => c.toJson()).toList(),
@@ -120,6 +174,13 @@ class FoodAnalysisResponse implements JsonModel {
     String? foodStatus,
     String? foodImageStatus,
     double? confidence,
+    double? localFoodConfidence,
+    String? localFoodReasoning,
+    bool? nameMatchesPhoto,
+    double? matchConfidence,
+    String? observedFood,
+    String? imageQuality,
+    List<String>? imageQualityIssues,
     List<String>? tasteTags,
     int? foodCount,
     List<FoodCandidate>? candidates,
@@ -138,6 +199,13 @@ class FoodAnalysisResponse implements JsonModel {
     foodStatus: foodStatus ?? this.foodStatus,
     foodImageStatus: foodImageStatus ?? this.foodImageStatus,
     confidence: confidence ?? this.confidence,
+    localFoodConfidence: localFoodConfidence ?? this.localFoodConfidence,
+    localFoodReasoning: localFoodReasoning ?? this.localFoodReasoning,
+    nameMatchesPhoto: nameMatchesPhoto ?? this.nameMatchesPhoto,
+    matchConfidence: matchConfidence ?? this.matchConfidence,
+    observedFood: observedFood ?? this.observedFood,
+    imageQuality: imageQuality ?? this.imageQuality,
+    imageQualityIssues: imageQualityIssues ?? this.imageQualityIssues,
     tasteTags: tasteTags ?? this.tasteTags,
     foodCount: foodCount ?? this.foodCount,
     candidates: candidates ?? this.candidates,

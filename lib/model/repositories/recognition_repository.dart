@@ -27,6 +27,31 @@ typedef FoodAnalysis = ({
   /// How confident (0..1) the full analysis is in [food] - surfaced so a
   /// shaky result is never presented as certain.
   double confidence,
+
+  /// How confident (0..1) the full analysis is in [isLocal] SPECIFICALLY -
+  /// separate from [confidence], which is about naming the dish. The two
+  /// genuinely differ: a burger can be unmistakable as a burger while
+  /// whether it's a Malaysian Ramly-style one stays a close call.
+  double localConfidence,
+
+  /// Usability of the PHOTO itself: "good" | "acceptable" | "poor".
+  String imageQuality,
+
+  /// Specific problems behind a non-"good" [imageQuality] - e.g.
+  /// `["blurry", "too_dark"]`. Empty when the photo is fine.
+  List<String> imageQualityIssues,
+
+  /// Whether the photo plausibly shows the typed name (manual-entry path) -
+  /// `FoodRecognitionLogic.resolveByName` uses this to decide whether a
+  /// mismatch should be surfaced rather than silently accepted.
+  bool nameMatchesPhoto,
+
+  /// How sure (0..1) Gemini is of [nameMatchesPhoto]. `0` when not applicable.
+  double matchConfidence,
+
+  /// What the photo actually shows, in Gemini's words, when [nameMatchesPhoto]
+  /// is false - the UI says "this photo looks more like X".
+  String observedFood,
 });
 
 /// Food recognition from a photo, via Gemini. Also used for restaurant
@@ -69,6 +94,12 @@ class RecognitionRepository {
       priceMax: response.priceMax,
       isLocal: response.isMalaysianLocalFood,
       confidence: response.confidence,
+      localConfidence: response.localFoodConfidence,
+      imageQuality: response.imageQuality,
+      imageQualityIssues: response.imageQualityIssues,
+      nameMatchesPhoto: response.nameMatchesPhoto,
+      matchConfidence: response.matchConfidence,
+      observedFood: response.observedFood,
     );
   }
 
@@ -91,6 +122,14 @@ class RecognitionRepository {
       priceMax: response.priceMax,
       isLocal: response.isMalaysianLocalFood,
       confidence: response.confidence,
+      localConfidence: response.localFoodConfidence,
+      imageQuality: response.imageQuality,
+      imageQualityIssues: response.imageQualityIssues,
+      nameMatchesPhoto: response.nameMatchesPhoto,
+      matchConfidence: response.matchConfidence,
+      observedFood: response.observedFood.isNotEmpty
+          ? response.observedFood
+          : response.dish,
     );
   }
 
