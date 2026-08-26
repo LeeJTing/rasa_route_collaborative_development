@@ -4,6 +4,7 @@ import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
+import '../../shared_client/api_manager/api_manager.dart';
 import 'dietary_restriction_repository.dart';
 import 'food_knowledge_repository.dart';
 import 'food_preference_repository.dart';
@@ -20,6 +21,8 @@ import 'swipe_repository.dart';
 class FoodRepositoryFacade {
   FoodRepositoryFacade({@visibleForTesting FoodKnowledgeRepository? knowledge})
     : knowledge = knowledge ?? FoodKnowledgeRepository();
+
+  final APIManager api = APIManager();
 
   final FoodKnowledgeRepository knowledge;
   final RecommendationRepository recommendation = RecommendationRepository();
@@ -53,6 +56,15 @@ class FoodRepositoryFacade {
   /// Reference dietary restrictions (`dietary_restriction`).
   Future<List<DietaryRestriction>> dietaryRestrictions() =>
       dietaryRestriction.restrictions();
+
+  /// The signed-in tourist's dietary restrictions (`user_dietary_restriction`),
+  /// keyed by `tourist_id` = the current auth user.
+  Future<List<DietaryRestriction>> touristDietaryRestrictions() =>
+      dietaryRestriction.restrictionsForTourist(api.currentUserId);
+
+  /// The restrictions attached to one dish (`food_dietary_restriction`).
+  Future<List<DietaryRestriction>> foodDietaryRestrictions(int foodId) =>
+      dietaryRestriction.restrictionsForFood(foodId);
 
   /// AI-generated pairing suggestions for [food], matched against [catalogue].
   Future<List<FoodPairing>> getPairings(

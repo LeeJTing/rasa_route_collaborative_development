@@ -28,7 +28,7 @@ class LocalFoodDataModel implements JsonModel {
     this.pronunciationText,
     this.audioGuideUrl,
     this.synonyms,
-    this.imageUrl,
+    this.imageUrls = const <String>[],
   });
 
   final int localFoodId;
@@ -46,7 +46,9 @@ class LocalFoodDataModel implements JsonModel {
   final String? pronunciationText;
   final String? audioGuideUrl;
   final String? synonyms;
-  final String? imageUrl;
+  final List<String> imageUrls;
+
+  String? get imageUrl => imageUrls.isEmpty ? null : imageUrls.first;
 
   /// Parse a raw Supabase row, e.g.:
   /// ```
@@ -79,7 +81,7 @@ class LocalFoodDataModel implements JsonModel {
       pronunciationText: JsonReader.asStringOrNull(json['pronunciation_text']),
       audioGuideUrl: JsonReader.asStringOrNull(json['audio_guide_url']),
       synonyms: JsonReader.asStringOrNull(json['synonyms']),
-      imageUrl: _extractImageUrl(json),
+      imageUrls: _extractImageUrls(json),
     );
   }
 
@@ -119,21 +121,26 @@ class LocalFoodDataModel implements JsonModel {
       .where((String value) => value.isNotEmpty);
 
   /// Handles either a direct `img_name` field or the joined
-  /// `local_food_image` array shape.
-  static String? _extractImageUrl(Map<String, dynamic> json) {
+  /// `local_food_image` array shape. The catalogue currently stores three
+  /// ordered images per dish; keeping all of them lets Food Detail present
+  /// the real gallery while list cards continue to use the first image.
+  static List<String> _extractImageUrls(Map<String, dynamic> json) {
     final String? direct = JsonReader.asStringOrNull(json['img_name']);
-    if (direct != null) return direct;
+    if (direct != null) return <String>[direct];
 
-    final dynamic images = json['local_food_image'];
-    if (images is List && images.isNotEmpty) {
-      final Object? first = images.first;
-      if (first is Map) {
-        return JsonReader.asStringOrNull(
-          Map<String, dynamic>.from(first)['img_name'],
-        );
+    final Object? images = json['local_food_image'];
+    if (images is List) {
+      final List<String> values = <String>[];
+      for (final Object? image in images) {
+        if (image is Map) {
+          final String? name = JsonReader.asStringOrNull(image['img_name']);
+          if (name != null && !values.contains(name)) values.add(name);
+        }
       }
+      values.sort();
+      return List<String>.unmodifiable(values);
     }
-    return null;
+    return const <String>[];
   }
 
   @override
@@ -153,7 +160,9 @@ class LocalFoodDataModel implements JsonModel {
     'pronunciation_text': pronunciationText,
     'audio_guide_url': audioGuideUrl,
     'synonyms': synonyms,
-    'img_name': imageUrl,
+    'local_food_image': imageUrls
+        .map((String imageUrl) => <String, dynamic>{'img_name': imageUrl})
+        .toList(growable: false),
   };
 
   /// Converts to the domain model. [isFavourite] is looked up separately
@@ -174,11 +183,11 @@ class LocalFoodDataModel implements JsonModel {
     pronunciationText: pronunciationText ?? '',
     audioGuideUrl: audioGuideUrl,
     synonyms: JsonReader.asStringList(synonyms),
-    imageUrl: imageUrl,
+    imageUrls: imageUrls,
     isFavourite: isFavourite,
   );
 
   @override
   String toString() =>
-      'LocalFoodDataModel(id: $localFoodId, name: $foodName, imageUrl: $imageUrl)';
+      'LocalFoodDataModel(id: $localFoodId, name: $foodName, imageCount: ${imageUrls.length})';
 }

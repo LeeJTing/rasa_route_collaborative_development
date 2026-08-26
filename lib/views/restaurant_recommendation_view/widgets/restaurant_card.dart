@@ -65,18 +65,22 @@ class RestaurantCard extends StatelessWidget {
                             ),
                             const SizedBox(width: AppSpacing.xs),
                             Text(
-                              '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount ?? 0})',
+                              restaurant.reviewCount == null
+                                  ? restaurant.rating?.toStringAsFixed(1) ?? '—'
+                                  : '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount})',
                             ),
                             const SizedBox(width: AppSpacing.md),
                             const Icon(Icons.location_on_outlined, size: 16),
                             Text(restaurant.distanceLabel),
                           ],
                         ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(
-                          restaurant.category,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        if (restaurant.category.isNotEmpty) ...<Widget>[
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            restaurant.category,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                       ],
                     ),
                   ),

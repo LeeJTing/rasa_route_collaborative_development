@@ -5,7 +5,7 @@ import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/local_food.dart';
 import '../../common_widgets/app_image.dart';
 
-class FoodHeroCard extends StatelessWidget {
+class FoodHeroCard extends StatefulWidget {
   const FoodHeroCard({
     super.key,
     required this.food,
@@ -17,26 +17,72 @@ class FoodHeroCard extends StatelessWidget {
   final LocalFood food;
   final bool isLiked;
   final VoidCallback onLike;
-  final VoidCallback onImageTap;
+  final ValueChanged<int> onImageTap;
+
+  @override
+  State<FoodHeroCard> createState() => _FoodHeroCardState();
+}
+
+class _FoodHeroCardState extends State<FoodHeroCard> {
+  int _currentImage = 0;
 
   @override
   Widget build(BuildContext context) {
+    final List<String?> images = widget.food.imageUrls.isEmpty
+        ? <String?>[null]
+        : widget.food.imageUrls;
     return Stack(
       children: <Widget>[
         Semantics(
           button: true,
-          label: 'Enlarge ${food.name} image',
+          label: 'Enlarge ${widget.food.name} image',
           child: InkWell(
-            onTap: onImageTap,
+            onTap: () => widget.onImageTap(_currentImage),
             borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
-            child: SizedBox.square(
-              dimension: AppSizes.foodHeroImage,
-              child: AppImage(
-                source: food.imageUrl,
-                borderRadius: const BorderRadius.all(
-                  Radius.circular(AppRadius.lg),
-                ),
-                semanticLabel: food.name,
+            child: SizedBox(
+              width: AppSizes.foodHeroImage,
+              height: AppSizes.foodHeroImage,
+              child: Stack(
+                alignment: Alignment.bottomCenter,
+                children: <Widget>[
+                  PageView.builder(
+                    itemCount: images.length,
+                    onPageChanged: (int index) =>
+                        setState(() => _currentImage = index),
+                    itemBuilder: (BuildContext context, int index) => AppImage(
+                      source: images[index],
+                      borderRadius: const BorderRadius.all(
+                        Radius.circular(AppRadius.lg),
+                      ),
+                      semanticLabel:
+                          '${widget.food.name} image ${index + 1} of ${images.length}',
+                    ),
+                  ),
+                  if (images.length > 1)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: List<Widget>.generate(
+                          images.length,
+                          (int index) => Container(
+                            width: AppSpacing.sm,
+                            height: AppSpacing.sm,
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.xs,
+                            ),
+                            decoration: BoxDecoration(
+                              color: index == _currentImage
+                                  ? AppColors.primary
+                                  : AppColors.surface,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: AppColors.cardBorder),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -48,11 +94,15 @@ class FoodHeroCard extends StatelessWidget {
             color: AppColors.surface,
             shape: const CircleBorder(),
             child: IconButton(
-              tooltip: isLiked ? 'Remove from favourites' : 'Add to favourites',
-              onPressed: onLike,
+              tooltip: widget.isLiked
+                  ? 'Remove from favourites'
+                  : 'Add to favourites',
+              onPressed: widget.onLike,
               icon: Icon(
-                isLiked ? Icons.favorite : Icons.favorite_border,
-                color: isLiked ? AppColors.error : AppColors.textSecondary,
+                widget.isLiked ? Icons.favorite : Icons.favorite_border,
+                color: widget.isLiked
+                    ? AppColors.error
+                    : AppColors.textSecondary,
               ),
             ),
           ),

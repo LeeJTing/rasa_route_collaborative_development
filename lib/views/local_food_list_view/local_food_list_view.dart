@@ -144,15 +144,33 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                               ),
                       ),
                     ),
-                    if (vm.isSelecting && vm.selectedIds.isNotEmpty)
+                    if (vm.isSelecting)
                       Container(
                         width: double.infinity,
                         padding: AppSpacing.cardPadding,
-                        color: AppColors.surfaceVariant,
-                        child: Text(
-                          '${vm.selectedIds.length} selected for comparison',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.titleSmall,
+                        decoration: const BoxDecoration(
+                          color: AppColors.surface,
+                          border: Border(
+                            top: BorderSide(color: AppColors.outline),
+                          ),
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: Text(
+                                vm.selectedIds.length < 2
+                                    ? 'Select at least 2 local foods'
+                                    : '${vm.selectedIds.length} selected',
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                            ),
+                            FilledButton(
+                              onPressed: vm.selectedIds.length >= 2
+                                  ? () => _openComparison(context, vm)
+                                  : null,
+                              child: const Text('Compare Foods'),
+                            ),
+                          ],
                         ),
                       ),
                   ],
@@ -271,6 +289,22 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
           ),
         ),
   );
+
+  void _openComparison(BuildContext context, LocalFoodListViewModel vm) {
+    if (vm.selectedIds.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select at least 2 local foods to compare.'),
+        ),
+      );
+      return;
+    }
+    Navigator.pushNamed(
+      context,
+      AppRoutes.foodComparison,
+      arguments: vm.selectedIds.toList(growable: false),
+    );
+  }
 
   String _filterTitle(FoodFilterGroup group) => switch (group) {
     FoodFilterGroup.category => 'Food Category',
