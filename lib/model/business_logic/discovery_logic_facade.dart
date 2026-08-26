@@ -94,6 +94,10 @@ class DiscoveryLogicFacade {
   /// REQ102_1 - every Malaysian state, with its outline.
   Future<List<Region>> regions() => mapExploration.regions();
 
+  /// Drops the cached map data so the next read is fresh - what the dashboard
+  /// calls when the tourist accepts the update prompt.
+  void clearMapCache() => mapExploration.clearMapCache();
+
   /// REQ102_1 - the tight coastline, which the painted overview clips to.
   Future<List<CountryOutline>> countryOutlines() => mapExploration.outlines();
 
