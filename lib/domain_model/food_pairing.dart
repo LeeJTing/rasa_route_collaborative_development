@@ -9,6 +9,7 @@ class FoodPairing {
     required this.localFoodId,
     required this.pairedLocalFoodId,
     required this.pairedFoodName,
+    this.pairedImageUrl,
     required this.score,
     required this.reason,
   });
@@ -16,6 +17,7 @@ class FoodPairing {
   final int localFoodId;
   final int pairedLocalFoodId;
   final String pairedFoodName;
+  final String? pairedImageUrl;
   final double score;
   final String reason;
 }

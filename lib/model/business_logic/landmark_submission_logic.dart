@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/submitted_landmark.dart';

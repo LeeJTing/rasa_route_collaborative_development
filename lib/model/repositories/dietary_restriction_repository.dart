@@ -12,7 +12,7 @@ class DietaryRestrictionRepository {
 
   final APIManager api = APIManager();
 
-  /// All dietary restrictions, alphabetically (e.g. Halal, Vegetarian, ...).
+  /// All dietary restrictions, alphabetically.
   Future<List<DietaryRestriction>> restrictions() async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableDietaryRestriction,

@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import '../../domain_model/local_food.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../data_models/local_food_data_model.dart';
@@ -43,15 +45,16 @@ class FoodKnowledgeRepository {
           .map(
             (LocalFoodDataModel data) => data
                 .toDomain(isFavourite: favouriteIds.contains(data.localFoodId))
-                .copyWith(
-                  imageUrl: api.resolveImageUrl(
-                    data.imageUrl,
-                    bucket: APIManager.storageBucketFoodImages,
-                  ),
-                ),
+                .copyWith(imageUrls: _resolveImageUrls(data.imageUrls)),
           )
           .toList(growable: false);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'Local-food catalogue query failed.',
+        name: 'FoodKnowledgeRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
       throw Exception(
         'Unable to load local food. Check your connection and try again.',
       );
@@ -78,13 +81,14 @@ class FoodKnowledgeRepository {
       final LocalFood food = data.toDomain(
         isFavourite: await _isFavouriteSafely(foodId),
       );
-      return food.copyWith(
-        imageUrl: api.resolveImageUrl(
-          data.imageUrl,
-          bucket: APIManager.storageBucketFoodImages,
-        ),
+      return food.copyWith(imageUrls: _resolveImageUrls(data.imageUrls));
+    } catch (error, stackTrace) {
+      developer.log(
+        'Local-food detail query failed.',
+        name: 'FoodKnowledgeRepository',
+        error: error,
+        stackTrace: stackTrace,
       );
-    } catch (_) {
       throw Exception(
         'Unable to load this local food. Check your connection and try again.',
       );
@@ -164,4 +168,14 @@ class FoodKnowledgeRepository {
 
   Future<bool> _isFavourite(int localFoodId) async =>
       (await _getFavouriteFoodIds()).contains(localFoodId);
+
+  List<String> _resolveImageUrls(List<String> names) => names
+      .map(
+        (String name) => api.resolveImageUrl(
+          name,
+          bucket: APIManager.storageBucketFoodImages,
+        ),
+      )
+      .whereType<String>()
+      .toList(growable: false);
 }
