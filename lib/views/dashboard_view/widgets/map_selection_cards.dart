@@ -49,9 +49,7 @@ class RegionScoreCard extends StatelessWidget {
         alignment: Alignment.center,
         child: Text(
           '${availability.availableFoodCount}',
-          style: AppTextStyles.titleMedium.copyWith(
-            color: AppColors.onPrimary,
-          ),
+          style: AppTextStyles.titleMedium.copyWith(color: AppColors.onPrimary),
         ),
       ),
       facts: <String>[
@@ -104,43 +102,41 @@ class RestaurantPinSheet extends StatelessWidget {
     return PullToDismissSheet(
       onDismiss: onDismiss,
       child: Container(
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: AppRadius.sheetRadius,
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: AppColors.shadow,
-            blurRadius: 16,
-            offset: Offset(0, -2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.sm,
-        AppSpacing.lg,
-        AppSpacing.lg,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const _Grabber(),
-          const SizedBox(height: AppSpacing.md),
-          _Header(pin: pin, isLandmark: _isLandmark),
-          const SizedBox(height: AppSpacing.md),
-          _ServesStrip(foods: pin.servedFoods),
-          const SizedBox(height: AppSpacing.md),
-          Center(
-            child: FilledButton(
-              onPressed: onOpen,
-              child: Text(
-                _isLandmark ? 'View Landmark' : 'View Restaurant',
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: AppRadius.sheetRadius,
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: AppColors.shadow,
+              blurRadius: 16,
+              offset: Offset(0, -2),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.sm,
+          AppSpacing.lg,
+          AppSpacing.lg,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const _Grabber(),
+            const SizedBox(height: AppSpacing.md),
+            _Header(pin: pin, isLandmark: _isLandmark),
+            const SizedBox(height: AppSpacing.md),
+            _ServesStrip(foods: pin.servedFoods),
+            const SizedBox(height: AppSpacing.md),
+            Center(
+              child: FilledButton(
+                onPressed: onOpen,
+                child: Text(_isLandmark ? 'View Landmark' : 'View Restaurant'),
               ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
@@ -181,23 +177,7 @@ class _Header extends StatelessWidget {
         SizedBox(
           width: AppSizes.pinSheetImage,
           height: AppSizes.pinSheetImage,
-          child: AppImage(
-            source: pin.imageUrl,
-            borderRadius: AppRadius.cardRadius,
-            semanticLabel: pin.label,
-            fallback: ColoredBox(
-              color: AppColors.surfaceVariant,
-              child: Center(
-                child: Icon(
-                  Icons.location_on,
-                  size: 32,
-                  color: isLandmark
-                      ? AppColors.pinUserLandmark
-                      : AppColors.pinSystemRestaurant,
-                ),
-              ),
-            ),
-          ),
+          child: _photo(),
         ),
         const SizedBox(width: AppSpacing.md),
         Expanded(
@@ -231,6 +211,43 @@ class _Header extends StatelessWidget {
       ],
     );
   }
+
+  /// The place photo in its fixed 102-square frame. A missing DB value ("No
+  /// photo") is shown differently from a photo that the app tried and failed
+  /// to load ("Couldn't load" - almost always the storage bucket not being
+  /// public), so a blank card says WHY instead of failing silently.
+  Widget _photo() {
+    final String? url = pin.imageUrl;
+    if (url == null || url.isEmpty) {
+      return _photoPlaceholder('No photo');
+    }
+    return AppImage(
+      source: url,
+      borderRadius: AppRadius.cardRadius,
+      semanticLabel: pin.label,
+      fallback: _photoPlaceholder('Couldn’t load'),
+    );
+  }
+
+  Widget _photoPlaceholder(String label) => ColoredBox(
+    color: AppColors.surfaceVariant,
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            Icons.location_on,
+            size: 32,
+            color: isLandmark
+                ? AppColors.pinUserLandmark
+                : AppColors.pinSystemRestaurant,
+          ),
+          const SizedBox(height: 2),
+          Text(label, style: AppTextStyles.bodySmall),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Distance and rating - the icon-plus-two-values row in the Figma frame.
@@ -331,7 +348,9 @@ class _ServesStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      constraints: const BoxConstraints(minHeight: AppSizes.pinSheetServesStrip),
+      constraints: const BoxConstraints(
+        minHeight: AppSizes.pinSheetServesStrip,
+      ),
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
