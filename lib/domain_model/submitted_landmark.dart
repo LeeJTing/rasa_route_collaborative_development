@@ -138,6 +138,8 @@ class FoodSubmission {
     this.priceMax = 0,
     this.imageUrl,
     this.imageId,
+    this.confidence = 0,
+    this.isLocalFood = false,
   });
 
   final LocalFood food;
@@ -156,4 +158,14 @@ class FoodSubmission {
   /// food has no photo (e.g. a name-typed food) - the repository writes null.
   final String? imageUrl;
   final String? imageId;
+
+  /// Gemini's confidence (0..1) in this dish's NAME, carried from the
+  /// recognition screen so the catalogue-growth gate can demand a HIGH bar
+  /// before writing a new `local_food` row. `0` when unknown (never
+  /// catalogue-insert eligible).
+  final double confidence;
+
+  /// Whether Gemini judged this dish Malaysian local food. Only true dishes
+  /// may be added to the shared `local_food` catalogue.
+  final bool isLocalFood;
 }

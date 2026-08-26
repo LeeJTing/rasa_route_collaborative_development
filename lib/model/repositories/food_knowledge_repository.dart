@@ -143,6 +143,44 @@ class FoodKnowledgeRepository {
     }
   }
 
+  /// Adds a genuinely-new, tourist-confirmed Malaysian local food to the
+  /// catalogue (Option C - catalogue growth from submissions). The logic
+  /// layer already ran the full matcher; this is a belt-and-suspenders dedupe
+  /// on the normalized name. Returns the saved row with its assigned id, or
+  /// null when a duplicate already exists.
+  Future<LocalFood?> insertFood(LocalFood food) async {
+    final String normalized = food.name.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    final List<LocalFood> existing = await getFoods();
+    if (existing.any(
+      (LocalFood f) => f.name.trim().toLowerCase() == normalized,
+    )) {
+      return null;
+    }
+    final Map<String, dynamic>? row = await api
+        .insertRowReturning(APIManager.tableLocalFood, <String, dynamic>{
+          'food_name': food.name.trim(),
+          'description': food.description.isEmpty ? null : food.description,
+          'origin': food.origin.isEmpty ? null : food.origin,
+          'cultural_background': food.culturalBackground.isEmpty
+              ? null
+              : food.culturalBackground,
+          'ingredients': food.ingredients.isEmpty ? null : food.ingredients,
+          'food_category': food.category.isEmpty ? null : food.category,
+          'cooking_style': food.cookingStyle.isEmpty ? null : food.cookingStyle,
+          'meal_type': food.mealType.isEmpty ? null : food.mealType,
+          'food_type': food.foodType.isEmpty ? null : food.foodType,
+          'synonyms': food.synonyms.isEmpty ? null : food.synonyms.join(','),
+        });
+    if (row == null) return null;
+    final LocalFood saved = LocalFoodDataModel.fromJson(
+      row,
+    ).toDomain(isFavourite: false);
+    // The cached catalogue no longer reflects what is on the server.
+    invalidate();
+    return saved;
+  }
+
   Future<void> toggleFavourite(int localFoodId) async {
     if (api.currentUserId.isEmpty) {
       throw Exception('Sign in to save local food to your favourites.');

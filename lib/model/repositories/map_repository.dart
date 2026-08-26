@@ -123,15 +123,14 @@ class MapRepository {
   /// tables grow.
   Future<MapDataStamp> mapDataStamp() async {
     try {
-      final List<List<Map<String, dynamic>>> rows = await Future.wait(
-        <Future<List<Map<String, dynamic>>>>[
-          api.selectAll(
-            APIManager.tableSubmittedLandmark,
-            columns: 'landmark_id',
-          ),
-          api.selectAll(APIManager.tableRestaurant, columns: 'restaurant_id'),
-        ],
-      );
+      final List<List<Map<String, dynamic>>> rows =
+          await Future.wait(<Future<List<Map<String, dynamic>>>>[
+            api.selectAll(
+              APIManager.tableSubmittedLandmark,
+              columns: 'landmark_id',
+            ),
+            api.selectAll(APIManager.tableRestaurant, columns: 'restaurant_id'),
+          ]);
       return MapDataStamp(
         landmarkCount: rows[0].length,
         restaurantCount: rows[1].length,
@@ -220,9 +219,9 @@ class MapRepository {
         _landmarkOccurrences(),
       ],
     );
-    return List<FoodOccurrence>.unmodifiable(both.expand(
-      (List<FoodOccurrence> group) => group,
-    ));
+    return List<FoodOccurrence>.unmodifiable(
+      both.expand((List<FoodOccurrence> group) => group),
+    );
   }
 
   Future<List<FoodOccurrence>> _restaurantOccurrences() async {
@@ -230,22 +229,21 @@ class MapRepository {
     final List<Map<String, dynamic>> items;
     try {
       // Neither select depends on the other.
-      final List<List<Map<String, dynamic>>> rows = await Future.wait(
-        <Future<List<Map<String, dynamic>>>>[
-          api.selectAll(
-            APIManager.tableRestaurant,
-            columns:
-                'restaurant_id, restaurant_name, latitude, longitude, '
-                'category, rating, restaurant_image_url',
-          ),
-          api.selectAll(
-            APIManager.tableRestaurantItem,
-            columns:
-                'restaurant_id, local_food_id, restaurant_item_name, '
-                'restaurant_item_price',
-          ),
-        ],
-      );
+      final List<List<Map<String, dynamic>>> rows =
+          await Future.wait(<Future<List<Map<String, dynamic>>>>[
+            api.selectAll(
+              APIManager.tableRestaurant,
+              columns:
+                  'restaurant_id, restaurant_name, latitude, longitude, '
+                  'category, rating, restaurant_image_url',
+            ),
+            api.selectAll(
+              APIManager.tableRestaurantItem,
+              columns:
+                  'restaurant_id, local_food_id, restaurant_item_name, '
+                  'restaurant_item_price',
+            ),
+          ]);
       restaurants = rows[0];
       items = rows[1];
     } catch (_) {
@@ -297,7 +295,9 @@ class MapRepository {
         <Future<List<Map<String, dynamic>>>>[
           api.selectAll(
             APIManager.tableSubmittedLandmark,
-            columns: 'landmark_id, landmark_name, latitude, longitude, status',
+            columns:
+                'landmark_id, landmark_name, latitude, longitude, status, '
+                'image_url, category',
           ),
           api.selectAll(
             APIManager.tableLandmarkItem,
@@ -343,7 +343,13 @@ class MapRepository {
           foodName: _asString(item['dish']),
           latitude: latitude,
           longitude: longitude,
-          placeImageUrl: _asStringOrNull(item['image_url']),
+          // The tourist's own signboard/stall photo is the landmark's "place
+          // photo" (like a restaurant's own photo); fall back to the food
+          // photo when it is missing. URLs are normalized so legacy rows that
+          // doubled the bucket segment still display.
+          placeImageUrl:
+              _normalizeLandmarkImageUrl(place['image_url']) ??
+              _normalizeLandmarkImageUrl(item['image_url']),
           placeCategory: _asStringOrNull(place['category']),
           itemPrice: _asDoubleOrNull(item['item_price']),
         ),
@@ -406,17 +412,19 @@ class MapRepository {
       final int? opensAt = _minutesOfDay(data.openingTime);
       final int? closesAt = _minutesOfDay(data.closingTime);
 
-      byPlace.putIfAbsent(key, () => <OpeningHour>[]).add(
-        OpeningHour(
-          id: data.openingHoursId,
-          day: day,
-          status: opensAt == null || closesAt == null
-              ? DayStatus.closed
-              : DayStatus.open,
-          opensAt: opensAt,
-          closesAt: closesAt,
-        ),
-      );
+      byPlace
+          .putIfAbsent(key, () => <OpeningHour>[])
+          .add(
+            OpeningHour(
+              id: data.openingHoursId,
+              day: day,
+              status: opensAt == null || closesAt == null
+                  ? DayStatus.closed
+                  : DayStatus.open,
+              opensAt: opensAt,
+              closesAt: closesAt,
+            ),
+          );
     }
     return byPlace;
   }
@@ -457,9 +465,10 @@ class MapRepository {
     }
   }
 
-  Future<void> saveViewport(MapDataModel viewport) =>
-      storage.writeJson(LocalStorageManager.keyLastMapViewport,
-          viewport.toJson());
+  Future<void> saveViewport(MapDataModel viewport) => storage.writeJson(
+    LocalStorageManager.keyLastMapViewport,
+    viewport.toJson(),
+  );
 
   // ---------------------------------------------------------------------------
   // Row readers. Supabase returns numerics as String on some drivers, so every
@@ -485,5 +494,17 @@ class MapRepository {
     if (value == null) return null;
     final String text = '$value';
     return text.isEmpty ? null : text;
+  }
+
+  /// Legacy landmark image URLs (written before the bucket-prefix guard in
+  /// `SubmittedLandmarkRepository.uploadImage` existed) double the bucket
+  /// segment: ".../object/public/landmark-images/landmark-images/photo/...".
+  /// Supabase answers that with 404 NoSuchKey, which is the blank-card
+  /// symptom. Collapse the doubled segment so those rows display; correct
+  /// URLs pass through unchanged. Null/empty becomes null.
+  static String? _normalizeLandmarkImageUrl(Object? value) {
+    final String? trimmed = _asStringOrNull(value)?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed.replaceAll(RegExp(r'(/object/public/[^/]+/)\1'), r'$1');
   }
 }

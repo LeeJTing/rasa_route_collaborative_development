@@ -46,6 +46,11 @@ class FoodRepositoryFacade {
 
   Future<LocalFood?> getFoodById(int foodId) => knowledge.getFoodById(foodId);
 
+  /// Adds a genuinely-new, tourist-confirmed Malaysian local food to the
+  /// catalogue (Option C - catalogue growth from submissions). Returns the
+  /// saved row (with its assigned id) or null when a duplicate exists.
+  Future<LocalFood?> insertFood(LocalFood food) => knowledge.insertFood(food);
+
   Future<void> toggleFavourite(int localFoodId) =>
       knowledge.toggleFavourite(localFoodId);
 
