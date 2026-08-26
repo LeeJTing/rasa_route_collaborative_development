@@ -17,6 +17,7 @@ import 'widgets/map_controls.dart';
 import 'widgets/map_filter_panel.dart';
 import 'widgets/map_search_bar.dart';
 import 'widgets/map_search_results_panel.dart';
+import 'widgets/map_update_banner.dart';
 import 'widgets/heatmap_scale.dart';
 import 'widgets/map_selection_cards.dart';
 import 'widgets/region_heatmap_layer.dart';
@@ -318,6 +319,16 @@ class _DashboardViewState extends State<DashboardView> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              // Above the rest: it is the only one asking for a decision.
+              if (viewModel.mapUpdateAvailable) ...<Widget>[
+                MapUpdateBanner(
+                  message: viewModel.mapUpdateMessage,
+                  onUpdate: viewModel.applyMapUpdate,
+                  onDismiss: viewModel.dismissMapUpdate,
+                  busy: viewModel.isBusy,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
               if (viewModel.notice != null) ...<Widget>[
                 _NoticeBanner(
                   message: viewModel.notice!,
