@@ -30,12 +30,15 @@ class RestaurantDiscoveryLogic {
     TouristLocation location,
   ) => restaurants
       .map((Restaurant restaurant) {
+        final Restaurant visibleRestaurant = restaurant.copyWith(
+          category: _visibleCategory(restaurant.category),
+        );
         if (!location.isKnown ||
             restaurant.latitude == null ||
             restaurant.longitude == null) {
-          return restaurant;
+          return visibleRestaurant;
         }
-        return restaurant.copyWith(
+        return visibleRestaurant.copyWith(
           distanceMetres: _distanceMetres(
             location.latitude,
             location.longitude,
@@ -45,6 +48,18 @@ class RestaurantDiscoveryLogic {
         );
       })
       .toList(growable: false);
+
+  /// Halal classification was retired from the product. Imported restaurant
+  /// source categories can still contain the old word, so remove that whole
+  /// category segment before anything reaches a View.
+  String _visibleCategory(String raw) => raw
+      .split(RegExp(r'[,·|/]'))
+      .map((String value) => value.trim())
+      .where(
+        (String value) => !value.toLowerCase().contains(RegExp(r'\bhalal\b')),
+      )
+      .where((String value) => value.isNotEmpty)
+      .join(', ');
 
   List<Restaurant> _withinRadius(
     List<Restaurant> measured, {

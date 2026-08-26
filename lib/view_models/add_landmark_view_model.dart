@@ -143,8 +143,8 @@ class AddLandmarkViewModel extends BaseViewModel
   }
 
   // --- LOCATION STATE ---
-  LocationDataModel _currentLocation = LocationDataModel.unknown;
-  LocationDataModel _adjustedLocation = LocationDataModel.unknown;
+  TouristLocation _currentLocation = TouristLocation.unknown;
+  TouristLocation _adjustedLocation = TouristLocation.unknown;
 
   /// Pushed by `LocationMonitor` through [CurrentLocationFacade].
   @override
@@ -157,7 +157,7 @@ class AddLandmarkViewModel extends BaseViewModel
   /// device GPS fix everywhere (map center, 100m range, submitted
   /// coordinates) so a demo can "be" in a different place. Cleared by
   /// [useDeviceLocation] to go back to the real device GPS.
-  LocationDataModel _simulatedLocation = LocationDataModel.unknown;
+  TouristLocation _simulatedLocation = TouristLocation.unknown;
   String? _locationError;
 
   // --- FOOD STATE (auto-filled from recognition; price entered per food) ---
@@ -205,9 +205,9 @@ class AddLandmarkViewModel extends BaseViewModel
   String? _submitError;
 
   // --- GETTERS ---
-  LocationDataModel get currentLocation =>
+  TouristLocation get currentLocation =>
       _simulatedLocation.isKnown ? _simulatedLocation : _currentLocation;
-  LocationDataModel get adjustedLocation => _adjustedLocation;
+  TouristLocation get adjustedLocation => _adjustedLocation;
   String? get locationError => _locationError;
 
   /// True while a presenter-supplied demo location is overriding the device
@@ -361,13 +361,13 @@ class AddLandmarkViewModel extends BaseViewModel
   /// the new spot. Call [useDeviceLocation] to go back to the real device
   /// GPS.
   void simulateLocation(double latitude, double longitude) {
-    _simulatedLocation = LocationDataModel(
+    _simulatedLocation = TouristLocation(
       latitude: latitude,
       longitude: longitude,
       accuracyMeters: 10,
       capturedAt: DateTime.now(),
     );
-    _adjustedLocation = LocationDataModel.unknown;
+    _adjustedLocation = TouristLocation.unknown;
     _locationError = null;
     safeNotifyListeners();
   }
@@ -375,8 +375,8 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Presenter tool - stop simulating; read the real device GPS again (the
   /// next fix from `LocationMonitor` takes over).
   void useDeviceLocation() {
-    _simulatedLocation = LocationDataModel.unknown;
-    _adjustedLocation = LocationDataModel.unknown;
+    _simulatedLocation = TouristLocation.unknown;
+    _adjustedLocation = TouristLocation.unknown;
     _locationError = null;
     safeNotifyListeners();
   }
@@ -766,7 +766,7 @@ class AddLandmarkViewModel extends BaseViewModel
     // the raw GPS fix. A new landmark must be on Malaysian land (A9) - reject
     // before any spinner/network work, same fail-fast style as the other
     // checks above.
-    final LocationDataModel location = _adjustedLocation.isKnown
+    final TouristLocation location = _adjustedLocation.isKnown
         ? _adjustedLocation
         : currentLocation;
     if (location.isKnown &&

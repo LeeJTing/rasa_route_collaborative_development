@@ -11,13 +11,6 @@ class FoodPairingList extends StatelessWidget {
 
   final List<FoodPairing> pairings;
 
-  String _imageFor(FoodPairing pairing) => switch (pairing.pairedFoodName) {
-    'Teh Tarik' => 'assets/images/figma/restaurant_04.png',
-    'Cendol' => 'assets/images/figma/detail_06.png',
-    'Bubur Cha Cha' => 'assets/images/figma/detail_07.png',
-    _ => 'assets/images/figma/detail_11.png',
-  };
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -30,7 +23,7 @@ class FoodPairingList extends StatelessWidget {
               SizedBox.square(
                 dimension: AppSizes.pairingImage,
                 child: AppImage(
-                  source: _imageFor(pairing),
+                  source: pairing.pairedImageUrl,
                   borderRadius: AppRadius.cardRadius,
                   semanticLabel: pairing.pairedFoodName,
                 ),

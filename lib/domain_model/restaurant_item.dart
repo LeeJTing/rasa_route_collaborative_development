@@ -15,7 +15,6 @@ class RestaurantItem {
     this.price,
     required this.currency,
     required this.foodCategory,
-    required this.seasonal,
   });
 
   final int id;
@@ -27,5 +26,4 @@ class RestaurantItem {
   final double? price;
   final String currency;
   final String foodCategory;
-  final String seasonal;
 }

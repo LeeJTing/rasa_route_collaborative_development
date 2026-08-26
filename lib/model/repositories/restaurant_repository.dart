@@ -1,33 +1,70 @@
-import '../../core/json_model.dart';
+import 'dart:developer' as developer;
+
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../shared_client/api_manager/api_manager.dart';
+import '../data_models/restaurant_data_model.dart';
+import '../data_models/restaurant_item_data_model.dart';
 
-/// Supabase-backed restaurant catalogue with a local preview when it is empty.
+/// Supabase-backed restaurant catalogue used by Quick Mode.
+///
+/// Errors and empty results are intentionally not replaced with sample cards:
+/// the ViewModel must be able to show an honest retry/empty state in the final
+/// product. Restaurant-specific item photos are preferred; when absent, the
+/// linked local-food catalogue image is used.
 class RestaurantRepository {
   final APIManager api = APIManager();
+
+  static const String _selectColumns = '''
+    restaurant_id,
+    restaurant_name,
+    category,
+    address,
+    rating,
+    longitude,
+    latitude,
+    phone,
+    website,
+    opening_hours,
+    restaurant_image_id,
+    restaurant_image_url,
+    restaurant_item(
+      restaurant_item_id,
+      restaurant_id,
+      local_food_id,
+      restaurant_item_name,
+      ingredients,
+      food_img_url,
+      food_category,
+      restaurant_item_price,
+      local_food(food_name, description, local_food_image(img_name))
+    )
+  ''';
 
   Future<List<Restaurant>> getRestaurants() async {
     try {
       final List<Map<String, dynamic>> rows = await api.selectAll(
         APIManager.tableRestaurant,
-        columns:
-            '*, restaurant_item(*, local_food(food_name, local_food_image(img_name)))',
+        columns: _selectColumns,
         orderBy: 'rating',
         ascending: false,
-        limit: 30,
+        limit: 200,
       );
-      if (rows.isNotEmpty) {
-        return rows.map(_fromRow).toList(growable: false);
-      }
-    } catch (_) {
-      // Empty, unauthenticated and offline projects use the same useful UI.
+      return rows.map(_toDomain).toList(growable: false);
+    } catch (error, stackTrace) {
+      developer.log(
+        'Restaurant catalogue query failed.',
+        name: 'RestaurantRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load nearby restaurants. Check your connection and try again.',
+      );
     }
-    return _demoRestaurants;
   }
 
-  /// Looks up a restaurant by exact name match (case-insensitive) - UC500's
-  /// A13 "Restaurant Already Exists" check. Returns null when nothing matches.
+  /// UC500's "Restaurant Already Exists" check.
   Future<Restaurant?> findByName(String name) async {
     final String normalized = name.trim().toLowerCase();
     final List<Restaurant> restaurants = await getRestaurants();
@@ -37,229 +74,54 @@ class RestaurantRepository {
     return null;
   }
 
-  Restaurant _fromRow(Map<String, dynamic> row) {
-    final int id = JsonReader.asInt(row['restaurant_id']);
-    final List<RestaurantItem> items = <RestaurantItem>[];
+  Restaurant _toDomain(Map<String, dynamic> row) {
+    final RestaurantDataModel data = RestaurantDataModel.fromJson(row);
     final Object? rawItems = row['restaurant_item'];
-    if (rawItems is List) {
-      for (final Object? raw in rawItems) {
-        if (raw is! Map) continue;
-        final Map<String, dynamic> item = Map<String, dynamic>.from(raw);
-        final Map<String, dynamic> food = JsonReader.asMap(item['local_food']);
-        String? image = JsonReader.asStringOrNull(item['food_img_url']);
-        final Object? images = food['local_food_image'];
-        if (image == null &&
-            images is List &&
-            images.isNotEmpty &&
-            images.first is Map) {
-          image = JsonReader.asStringOrNull(
-            Map<String, dynamic>.from(images.first as Map)['img_name'],
-          );
-        }
-        items.add(
-          RestaurantItem(
-            id: JsonReader.asInt(item['restaurant_item_id']),
-            restaurantId: id,
-            localFoodId: JsonReader.asInt(item['local_food_id']),
-            foodName: JsonReader.asString(
-              item['restaurant_item_name'],
-              fallback: JsonReader.asString(
-                food['food_name'],
-                fallback: 'Local food',
-              ),
-            ),
-            ingredients: JsonReader.asStringOrNull(item['ingredients']),
-            imageUrl: image,
-            price: JsonReader.asDoubleOrNull(item['restaurant_item_price']),
-            currency: 'RM',
-            foodCategory: JsonReader.asString(item['food_category']),
-            seasonal: JsonReader.asString(item['seasonal']),
-          ),
-        );
-      }
-    }
+    final List<RestaurantItem> items = rawItems is List
+        ? rawItems
+              .whereType<Map>()
+              .map(
+                (Map raw) => RestaurantItemDataModel.fromJson(
+                  Map<String, dynamic>.from(raw),
+                ),
+              )
+              .map(_itemToDomain)
+              .toList(growable: false)
+        : const <RestaurantItem>[];
+
     return Restaurant(
-      id: id,
-      name: JsonReader.asString(row['restaurant_name']),
-      category: JsonReader.asString(row['category']),
-      address: JsonReader.asString(row['address']),
-      rating: JsonReader.asDoubleOrNull(row['rating']),
-      latitude: JsonReader.asDoubleOrNull(row['latitude']),
-      longitude: JsonReader.asDoubleOrNull(row['longitude']),
-      phone: JsonReader.asString(row['phone']),
-      website: JsonReader.asString(row['website']),
-      imageUrl: JsonReader.asStringOrNull(row['restaurant_image_url']),
+      id: data.restaurantId,
+      name: data.restaurantName,
+      category: data.category ?? '',
+      address: data.address ?? '',
+      rating: data.rating,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      phone: data.phone ?? '',
+      website: data.website ?? '',
+      imageUrl: data.restaurantImageUrl,
       openingHours: const [],
       items: items,
     );
   }
 
-  static const List<Restaurant> _demoRestaurants = <Restaurant>[
-    Restaurant(
-      id: 1,
-      name: 'OldTown Heritage Kitchen',
-      category: 'Malaysian · Chinese',
-      address: 'Jalan Tun H S Lee, Kuala Lumpur',
-      rating: 4.8,
-      reviewCount: 1243,
-      latitude: 3.1458,
-      longitude: 101.6953,
-      phone: '+60 3-2020 1888',
-      website: '',
-      imageUrl: 'assets/images/figma/restaurant_01.jpeg',
-      openingHours: [],
-      distanceMetres: 240,
-      items: <RestaurantItem>[
-        RestaurantItem(
-          id: 1,
-          restaurantId: 1,
-          localFoodId: 1,
-          foodName: 'Prawn Noodle',
-          ingredients:
-              'Yellow noodles and rice vermicelli in a rich prawn broth.',
-          imageUrl: 'assets/images/figma/local_food_01.png',
-          price: 14.9,
-          currency: 'RM',
-          foodCategory: 'Noodles',
-          seasonal: 'All year',
-        ),
-        RestaurantItem(
-          id: 2,
-          restaurantId: 1,
-          localFoodId: 2,
-          foodName: 'Char Kway Teow',
-          ingredients:
-              'Flat rice noodles stir-fried with prawns, egg and bean sprouts.',
-          imageUrl: 'assets/images/figma/restaurant_09.png',
-          price: 13.5,
-          currency: 'RM',
-          foodCategory: 'Noodles',
-          seasonal: 'All year',
-        ),
-        RestaurantItem(
-          id: 3,
-          restaurantId: 1,
-          localFoodId: 6,
-          foodName: 'Teh Tarik',
-          ingredients: 'Pulled black tea with creamy condensed milk.',
-          imageUrl: 'assets/images/figma/restaurant_04.png',
-          price: 4.5,
-          currency: 'RM',
-          foodCategory: 'Beverage',
-          seasonal: 'All year',
-        ),
-      ],
-    ),
-    Restaurant(
-      id: 2,
-      name: 'Kopitiam Sentral',
-      category: 'Kopitiam · Local favourites',
-      address: 'Brickfields, Kuala Lumpur',
-      rating: 4.6,
-      reviewCount: 842,
-      latitude: 3.1348,
-      longitude: 101.6867,
-      phone: '+60 3-2276 2211',
-      website: '',
-      imageUrl: 'assets/images/figma/restaurant_08.jpeg',
-      openingHours: [],
-      distanceMetres: 480,
-      items: <RestaurantItem>[
-        RestaurantItem(
-          id: 4,
-          restaurantId: 2,
-          localFoodId: 3,
-          foodName: 'Roti Canai',
-          ingredients: 'Crispy flatbread served with curry dhal.',
-          imageUrl: 'assets/images/figma/restaurant_07.png',
-          price: 3.2,
-          currency: 'RM',
-          foodCategory: 'Bread',
-          seasonal: 'All year',
-        ),
-        RestaurantItem(
-          id: 5,
-          restaurantId: 2,
-          localFoodId: 4,
-          foodName: 'Curry Laksa',
-          ingredients: 'Noodles served in a spicy coconut curry broth.',
-          imageUrl: 'assets/images/figma/restaurant_13.png',
-          price: 12.8,
-          currency: 'RM',
-          foodCategory: 'Noodles',
-          seasonal: 'All year',
-        ),
-      ],
-    ),
-    Restaurant(
-      id: 3,
-      name: 'Nyonya Spice House',
-      category: 'Peranakan · Malaysian',
-      address: 'Bukit Bintang, Kuala Lumpur',
-      rating: 4.5,
-      reviewCount: 619,
-      latitude: 3.1479,
-      longitude: 101.7115,
-      phone: '+60 3-2142 9088',
-      website: '',
-      imageUrl: 'assets/images/figma/restaurant_10.jpeg',
-      openingHours: [],
-      distanceMetres: 720,
-      items: <RestaurantItem>[
-        RestaurantItem(
-          id: 6,
-          restaurantId: 3,
-          localFoodId: 8,
-          foodName: 'Bubur Cha Cha',
-          ingredients: 'Sweet potato, taro and sago in creamy coconut milk.',
-          imageUrl: 'assets/images/figma/detail_07.png',
-          price: 7.5,
-          currency: 'RM',
-          foodCategory: 'Dessert',
-          seasonal: 'All year',
-        ),
-      ],
-    ),
-    Restaurant(
-      id: 4,
-      name: 'Mamak Corner 24/7',
-      category: 'Indian Muslim · Street food',
-      address: 'Chow Kit, Kuala Lumpur',
-      rating: 4.4,
-      reviewCount: 1108,
-      latitude: 3.1643,
-      longitude: 101.6977,
-      phone: '+60 3-2698 7171',
-      website: '',
-      imageUrl: 'assets/images/figma/restaurant_12.jpeg',
-      openingHours: [],
-      distanceMetres: 910,
-      items: <RestaurantItem>[
-        RestaurantItem(
-          id: 7,
-          restaurantId: 4,
-          localFoodId: 10,
-          foodName: 'Satay',
-          ingredients: 'Charcoal-grilled skewers served with peanut sauce.',
-          imageUrl: 'assets/images/figma/detail_12.png',
-          price: 12,
-          currency: 'RM',
-          foodCategory: 'Grilled',
-          seasonal: 'All year',
-        ),
-        RestaurantItem(
-          id: 8,
-          restaurantId: 4,
-          localFoodId: 6,
-          foodName: 'Teh Tarik',
-          ingredients: 'Pulled black tea with creamy condensed milk.',
-          imageUrl: 'assets/images/figma/restaurant_04.png',
-          price: 4,
-          currency: 'RM',
-          foodCategory: 'Beverage',
-          seasonal: 'All year',
-        ),
-      ],
-    ),
-  ];
+  RestaurantItem _itemToDomain(RestaurantItemDataModel data) {
+    final String? imageName = data.foodImgUrl ?? data.localFoodImageName;
+    return RestaurantItem(
+      id: data.restaurantItemId,
+      restaurantId: data.restaurantId,
+      localFoodId: data.localFoodId,
+      foodName: data.restaurantItemName.isEmpty
+          ? data.localFoodName ?? 'Local food'
+          : data.restaurantItemName,
+      ingredients: data.ingredients ?? data.localFoodDescription,
+      imageUrl: api.resolveImageUrl(
+        imageName,
+        bucket: APIManager.storageBucketFoodImages,
+      ),
+      price: data.restaurantItemPrice,
+      currency: 'RM',
+      foodCategory: data.foodCategory ?? '',
+    );
+  }
 }
