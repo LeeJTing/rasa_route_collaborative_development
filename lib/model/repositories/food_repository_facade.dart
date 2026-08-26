@@ -24,7 +24,7 @@ class FoodRepositoryFacade {
 
   final APIManager api = APIManager();
 
-  final FoodKnowledgeRepository knowledge = FoodKnowledgeRepository();
+  final FoodKnowledgeRepository knowledge;
   final RecommendationRepository recommendation = RecommendationRepository();
   final SwipeRepository swipe = SwipeRepository();
 

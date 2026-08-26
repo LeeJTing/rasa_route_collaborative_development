@@ -151,6 +151,12 @@ void main() {
           priceMax: 0.0,
           isLocal: false,
           confidence: 1.0,
+          localConfidence: 0.8,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
         );
 
         final FoodRecognitionResult result = await logic.recognizeFood(<int>[
@@ -176,6 +182,12 @@ void main() {
         priceMax: 10.0,
         isLocal: true,
         confidence: 1.0,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 1.0,
+        observedFood: '',
       );
 
       final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
@@ -203,6 +215,12 @@ void main() {
           priceMax: 9.0,
           isLocal: true,
           confidence: 0.95,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
         );
       };
 
@@ -318,6 +336,12 @@ void main() {
             priceMax: 0.0,
             isLocal: true,
             confidence: 1.0,
+            localConfidence: 1.0,
+            imageQuality: 'good',
+            imageQualityIssues: const <String>[],
+            nameMatchesPhoto: true,
+            matchConfidence: 1.0,
+            observedFood: '',
           );
         };
 
@@ -348,6 +372,12 @@ void main() {
             priceMax: 0.0,
             isLocal: true,
             confidence: 1.0,
+            localConfidence: 1.0,
+            imageQuality: 'good',
+            imageQualityIssues: const <String>[],
+            nameMatchesPhoto: true,
+            matchConfidence: 1.0,
+            observedFood: '',
           );
         };
 
@@ -372,6 +402,12 @@ void main() {
           priceMax: 0.0,
           isLocal: true,
           confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
         );
 
         final FoodRecognitionResult result = await logic.recognizeFood(<int>[
@@ -408,7 +444,7 @@ void main() {
     });
   });
 
-  group('FoodRecognitionLogic.resolveByName', () {
+  group('FoodRecognitionLogic.resolveByName (manual entry)', () {
     late _FakeRecognitionRepository recognition;
     late _FakeFoodKnowledgeRepository knowledge;
     late FoodRecognitionLogic logic;
@@ -424,28 +460,40 @@ void main() {
       );
     });
 
-    test('returns the catalogue food when the typed name matches', () async {
+    test('always verifies the typed name against the photo, then prefers the '
+        'catalogue for details once verified', () async {
       final murtabak = _food('Murtabak');
       knowledge.onFindByName = (String name) async =>
           name == 'Murtabak' ? murtabak : null;
       bool analyzeByNameCalled = false;
+      // Gemini confirms the photo shows the typed name...
       recognition.onAnalyzeByName = (List<int> _, String name) async {
         analyzeByNameCalled = true;
         return (
-          food: _food(name),
-          priceMin: 0.0,
-          priceMax: 0.0,
+          food: _food('Murtabak (Gemini)'),
+          priceMin: 1.5,
+          priceMax: 6.0,
           isLocal: true,
           confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 0.9,
+          observedFood: '',
         );
       };
 
-      final ({LocalFood food, double priceMin, double priceMax}) result =
-          await logic.resolveByName(<int>[1], 'Murtabak');
+      final result = await logic.resolveByName(<int>[1], 'Murtabak');
 
+      // The verification call ALWAYS happens - a catalogue hit is a details
+      // optimisation, never a substitute for checking the photo.
+      expect(analyzeByNameCalled, isTrue);
+      expect(result.nameMatchesPhoto, isTrue);
+      expect(result.isLocalFood, isTrue);
+      // Once verified, the curated catalogue row's details are preferred.
       expect(result.food.name, 'Murtabak');
-      // Catalogue hit - no expensive Gemini call.
-      expect(analyzeByNameCalled, isFalse);
+      expect(result.priceMin, 0.0);
     });
 
     test(
@@ -460,13 +508,123 @@ void main() {
           priceMax: 0.0,
           isLocal: true,
           confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
         );
 
-        final ({LocalFood food, double priceMin, double priceMax}) result =
-            await logic.resolveByName(<int>[1], '  Murtabak ');
+        final result = await logic.resolveByName(<int>[1], '  Murtabak ');
 
         // Name trimmed, and the returned food is exactly the typed dish.
         expect(result.food.name, 'Murtabak');
+        expect(result.nameMatchesPhoto, isTrue);
+      },
+    );
+
+    test(
+      'reports a mismatch (and the observed food) instead of agreeing',
+      () async {
+        knowledge.onFindByName = (String _) async => null;
+        // Photograph a pizza, type "Nasi Lemak": Gemini says the photo does
+        // NOT show nasi lemak - it sees a pepperoni pizza.
+        recognition.onAnalyzeByName = (List<int> _, String name) async => (
+          food: _food('Nasi Lemak'),
+          priceMin: 0.0,
+          priceMax: 0.0,
+          isLocal: false,
+          confidence: 0.95,
+          localConfidence: 0.9,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: false,
+          matchConfidence: 0.9,
+          observedFood: 'Pepperoni Pizza',
+        );
+
+        final result = await logic.resolveByName(<int>[1], 'Nasi Lemak');
+
+        expect(result.nameMatchesPhoto, isFalse);
+        expect(result.matchConfidence, 0.9);
+        expect(result.observedFood, 'Pepperoni Pizza');
+        // A mismatched typed name must not pass the local-food gate.
+        expect(result.isLocalFood, isFalse);
+        // The typed name is kept (warn-and-allow) so the UI can warn.
+        expect(result.food.name, 'Nasi Lemak');
+      },
+    );
+
+    test('spelling variants count as a match, not a mismatch', () async {
+      knowledge.onFindByName = (String _) async => null;
+      recognition.onAnalyzeByName = (List<int> _, String name) async => (
+        food: _food('Char Kway Teow'),
+        priceMin: 0.0,
+        priceMax: 0.0,
+        isLocal: true,
+        confidence: 1.0,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true, // "char kuey teow" == "char kway teow"
+        matchConfidence: 0.85,
+        observedFood: '',
+      );
+
+      final result = await logic.resolveByName(<int>[1], 'char kuey teow');
+
+      expect(result.nameMatchesPhoto, isTrue);
+      expect(result.food.name, 'Char Kway Teow');
+    });
+  });
+
+  group('FoodRecognitionLogic.enrichCandidate (picker)', () {
+    late _FakeRecognitionRepository recognition;
+    late _FakeFoodKnowledgeRepository knowledge;
+    late FoodRecognitionLogic logic;
+
+    setUp(() {
+      recognition = _FakeRecognitionRepository();
+      knowledge = _FakeFoodKnowledgeRepository();
+      logic = FoodRecognitionLogic(
+        discoveryRepository: DiscoveryRepositoryFacade(
+          recognition: recognition,
+        ),
+        foodRepository: FoodRepositoryFacade(knowledge: knowledge),
+      );
+    });
+
+    test(
+      'returns the catalogue row without calling Gemini (fast path)',
+      () async {
+        final murtabak = _food('Murtabak');
+        knowledge.onFindByName = (String name) async =>
+            name == 'Murtabak' ? murtabak : null;
+        bool analyzeByNameCalled = false;
+        recognition.onAnalyzeByName = (List<int> _, String name) async {
+          analyzeByNameCalled = true;
+          return (
+            food: _food(name),
+            priceMin: 0.0,
+            priceMax: 0.0,
+            isLocal: true,
+            confidence: 1.0,
+            localConfidence: 1.0,
+            imageQuality: 'good',
+            imageQualityIssues: const <String>[],
+            nameMatchesPhoto: true,
+            matchConfidence: 1.0,
+            observedFood: '',
+          );
+        };
+
+        final ({LocalFood food, double priceMin, double priceMax}) result =
+            await logic.enrichCandidate(<int>[1], 'Murtabak');
+
+        expect(result.food.name, 'Murtabak');
+        // Picker candidates came from the photo - no verification call needed.
+        expect(analyzeByNameCalled, isFalse);
       },
     );
   });
