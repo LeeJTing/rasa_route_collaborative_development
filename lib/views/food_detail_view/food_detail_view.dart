@@ -98,7 +98,8 @@ class _FoodDetailViewState extends State<FoodDetailView> {
               food: food,
               isLiked: vm.isLiked,
               onLike: vm.toggleLike,
-              onImageTap: () => _showEnlargedImage(context, food),
+              onImageTap: (int initialIndex) =>
+                  _showEnlargedImage(context, food, initialIndex),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -170,44 +171,52 @@ class _FoodDetailViewState extends State<FoodDetailView> {
     );
   }
 
-  Future<void> _showEnlargedImage(BuildContext context, LocalFood food) =>
-      showDialog<void>(
-        context: context,
-        barrierColor: AppColors.scrim,
-        builder: (BuildContext dialogContext) => Dialog(
-          insetPadding: EdgeInsets.zero,
-          backgroundColor: AppColors.transparent,
-          child: Stack(
-            fit: StackFit.expand,
-            children: <Widget>[
-              InteractiveViewer(
-                minScale: 1,
-                maxScale: 4,
-                child: Center(
-                  child: AppImage(
-                    source: food.imageUrl,
-                    fit: BoxFit.contain,
-                    semanticLabel: food.name,
-                  ),
+  Future<void> _showEnlargedImage(
+    BuildContext context,
+    LocalFood food,
+    int initialIndex,
+  ) => showDialog<void>(
+    context: context,
+    barrierColor: AppColors.scrim,
+    builder: (BuildContext dialogContext) => Dialog(
+      insetPadding: EdgeInsets.zero,
+      backgroundColor: AppColors.transparent,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          PageView.builder(
+            controller: PageController(initialPage: initialIndex),
+            itemCount: food.imageUrls.isEmpty ? 1 : food.imageUrls.length,
+            itemBuilder: (BuildContext context, int index) => InteractiveViewer(
+              minScale: 1,
+              maxScale: 4,
+              child: Center(
+                child: AppImage(
+                  source: food.imageUrls.isEmpty ? null : food.imageUrls[index],
+                  fit: BoxFit.contain,
+                  semanticLabel:
+                      '${food.name} image ${index + 1} of ${food.imageUrls.length}',
                 ),
               ),
-              Positioned(
-                top: AppSpacing.lg,
-                right: AppSpacing.lg,
-                child: Material(
-                  color: AppColors.surface,
-                  shape: const CircleBorder(),
-                  child: IconButton(
-                    tooltip: 'Close image',
-                    onPressed: () => Navigator.pop(dialogContext),
-                    icon: const Icon(Icons.close),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      );
+          Positioned(
+            top: AppSpacing.lg,
+            right: AppSpacing.lg,
+            child: Material(
+              color: AppColors.surface,
+              shape: const CircleBorder(),
+              child: IconButton(
+                tooltip: 'Close image',
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _InformationItem extends StatelessWidget {

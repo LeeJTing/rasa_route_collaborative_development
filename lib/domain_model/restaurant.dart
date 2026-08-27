@@ -48,21 +48,24 @@ class Restaurant {
     return '${(metres / 1000).toStringAsFixed(1)} km';
   }
 
-  Restaurant copyWith({double? distanceMetres, List<RestaurantItem>? items}) =>
-      Restaurant(
-        id: id,
-        name: name,
-        category: category,
-        address: address,
-        rating: rating,
-        latitude: latitude,
-        longitude: longitude,
-        phone: phone,
-        website: website,
-        imageUrl: imageUrl,
-        openingHours: openingHours,
-        distanceMetres: distanceMetres ?? this.distanceMetres,
-        reviewCount: reviewCount,
-        items: items ?? this.items,
-      );
+  Restaurant copyWith({
+    String? category,
+    double? distanceMetres,
+    List<RestaurantItem>? items,
+  }) => Restaurant(
+    id: id,
+    name: name,
+    category: category ?? this.category,
+    address: address,
+    rating: rating,
+    latitude: latitude,
+    longitude: longitude,
+    phone: phone,
+    website: website,
+    imageUrl: imageUrl,
+    openingHours: openingHours,
+    distanceMetres: distanceMetres ?? this.distanceMetres,
+    reviewCount: reviewCount,
+    items: items ?? this.items,
+  );
 }

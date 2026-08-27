@@ -55,7 +55,7 @@ class FoodOverviewCard extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'Tap to hear • Tap again to replay',
+                    'Pronunciation guide',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: AppColors.accentRust,
                     ),
@@ -67,9 +67,12 @@ class FoodOverviewCard extends StatelessWidget {
               color: AppColors.cardBorderWarm,
               shape: const CircleBorder(),
               child: IconButton(
-                tooltip: 'Play pronunciation',
-                onPressed: () {},
-                icon: const Icon(Icons.volume_up, color: AppColors.textPrimary),
+                tooltip: 'Audio guide unavailable',
+                onPressed: null,
+                icon: const Icon(
+                  Icons.volume_off_outlined,
+                  color: AppColors.textSecondary,
+                ),
               ),
             ),
           ],

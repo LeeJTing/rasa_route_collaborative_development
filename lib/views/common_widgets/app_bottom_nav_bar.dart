@@ -21,9 +21,8 @@ import '../../app/theme/app_text_styles.dart';
 /// )
 /// ```
 ///
-/// The tab order is fixed by [AppBottomNavTab]. If a fourth destination is ever
-/// added, add it to that enum and to [_items] — do not hard-code an index at a
-/// call site.
+/// The destination order is fixed by [AppBottomNavTab]. The camera is not a
+/// destination: it opens a route and therefore must never consume a tab index.
 class AppBottomNavBar extends StatelessWidget {
   const AppBottomNavBar({
     super.key,
@@ -80,9 +79,9 @@ class AppBottomNavBar extends StatelessWidget {
   }
 }
 
-/// The shell's destinations, in bar order. Use `AppBottomNavTab.learn.index`
-/// rather than the literal `2`.
-enum AppBottomNavTab { home, camera, learn }
+/// The shell's indexed destinations. Use `AppBottomNavTab.learn.index` rather
+/// than a literal index. The camera action is intentionally absent.
+enum AppBottomNavTab { home, learn }
 
 /// One labelled destination.
 class _NavItem extends StatelessWidget {

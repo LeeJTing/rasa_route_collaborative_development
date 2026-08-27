@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import '../../domain_model/local_food.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../data_models/local_food_data_model.dart';
@@ -11,6 +13,29 @@ class FoodKnowledgeRepository {
   FoodKnowledgeRepository();
 
   final APIManager api = APIManager();
+
+  // ---------------------------------------------------------------------------
+  // Catalogue cache
+  // ---------------------------------------------------------------------------
+  //
+  // `getFoods` is a wide nested select plus a favourites lookup, and the map
+  // called it on every pan. The catalogue itself is effectively static at
+  // runtime - only favourites move, and [toggleFavourite] clears this.
+  //
+  // Static so every screen shares one copy, however many facades exist.
+
+  static const Duration cacheTtl = Duration(minutes: 5);
+
+  static List<LocalFood>? _cachedFoods;
+  static DateTime? _cachedFoodsAt;
+  static Future<List<LocalFood>>? _foodsRequest;
+
+  /// Drops the cached catalogue. Called by [toggleFavourite]; call it too after
+  /// anything else that writes to `local_food`.
+  static void invalidate() {
+    _cachedFoods = null;
+    _cachedFoodsAt = null;
+  }
 
   static const String _selectColumns = '''
     local_food_id,
@@ -30,28 +55,54 @@ class FoodKnowledgeRepository {
     local_food_preference(is_main, food_preference(preferred_taste))
   ''';
 
-  Future<List<LocalFood>> getFoods() async {
+  /// The whole catalogue, cached for [cacheTtl]. Concurrent callers share one
+  /// request instead of each firing their own.
+  Future<List<LocalFood>> getFoods() {
+    final List<LocalFood>? cached = _cachedFoods;
+    if (cached != null &&
+        _cachedFoodsAt != null &&
+        DateTime.now().difference(_cachedFoodsAt!) < cacheTtl) {
+      return Future<List<LocalFood>>.value(cached);
+    }
+    return _foodsRequest ??= _fetchFoods()
+        .then((List<LocalFood> value) {
+          _cachedFoods = value;
+          _cachedFoodsAt = DateTime.now();
+          return value;
+        })
+        .whenComplete(() => _foodsRequest = null);
+  }
+
+  Future<List<LocalFood>> _fetchFoods() async {
     try {
-      final List<Map<String, dynamic>> rows = await api.selectAll(
-        APIManager.tableLocalFood,
-        columns: _selectColumns,
-        orderBy: 'food_name',
-      );
-      final Set<int> favouriteIds = await _getFavouriteFoodIdsSafely();
+      // Independent of each other, so they go together.
+      final List<Map<String, dynamic>> rows;
+      final Set<int> favouriteIds;
+      final List<Object> results = await Future.wait(<Future<Object>>[
+        api.selectAll(
+          APIManager.tableLocalFood,
+          columns: _selectColumns,
+          orderBy: 'food_name',
+        ),
+        _getFavouriteFoodIdsSafely(),
+      ]);
+      rows = results[0] as List<Map<String, dynamic>>;
+      favouriteIds = results[1] as Set<int>;
       return rows
           .map(LocalFoodDataModel.fromJson)
           .map(
             (LocalFoodDataModel data) => data
                 .toDomain(isFavourite: favouriteIds.contains(data.localFoodId))
-                .copyWith(
-                  imageUrl: api.resolveImageUrl(
-                    data.imageUrl,
-                    bucket: APIManager.storageBucketFoodImages,
-                  ),
-                ),
+                .copyWith(imageUrls: _resolveImageUrls(data.imageUrls)),
           )
           .toList(growable: false);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'Local-food catalogue query failed.',
+        name: 'FoodKnowledgeRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
       throw Exception(
         'Unable to load local food. Check your connection and try again.',
       );
@@ -78,17 +129,56 @@ class FoodKnowledgeRepository {
       final LocalFood food = data.toDomain(
         isFavourite: await _isFavouriteSafely(foodId),
       );
-      return food.copyWith(
-        imageUrl: api.resolveImageUrl(
-          data.imageUrl,
-          bucket: APIManager.storageBucketFoodImages,
-        ),
+      return food.copyWith(imageUrls: _resolveImageUrls(data.imageUrls));
+    } catch (error, stackTrace) {
+      developer.log(
+        'Local-food detail query failed.',
+        name: 'FoodKnowledgeRepository',
+        error: error,
+        stackTrace: stackTrace,
       );
-    } catch (_) {
       throw Exception(
         'Unable to load this local food. Check your connection and try again.',
       );
     }
+  }
+
+  /// Adds a genuinely-new, tourist-confirmed Malaysian local food to the
+  /// catalogue (Option C - catalogue growth from submissions). The logic
+  /// layer already ran the full matcher; this is a belt-and-suspenders dedupe
+  /// on the normalized name. Returns the saved row with its assigned id, or
+  /// null when a duplicate already exists.
+  Future<LocalFood?> insertFood(LocalFood food) async {
+    final String normalized = food.name.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    final List<LocalFood> existing = await getFoods();
+    if (existing.any(
+      (LocalFood f) => f.name.trim().toLowerCase() == normalized,
+    )) {
+      return null;
+    }
+    final Map<String, dynamic>? row = await api
+        .insertRowReturning(APIManager.tableLocalFood, <String, dynamic>{
+          'food_name': food.name.trim(),
+          'description': food.description.isEmpty ? null : food.description,
+          'origin': food.origin.isEmpty ? null : food.origin,
+          'cultural_background': food.culturalBackground.isEmpty
+              ? null
+              : food.culturalBackground,
+          'ingredients': food.ingredients.isEmpty ? null : food.ingredients,
+          'food_category': food.category.isEmpty ? null : food.category,
+          'cooking_style': food.cookingStyle.isEmpty ? null : food.cookingStyle,
+          'meal_type': food.mealType.isEmpty ? null : food.mealType,
+          'food_type': food.foodType.isEmpty ? null : food.foodType,
+          'synonyms': food.synonyms.isEmpty ? null : food.synonyms.join(','),
+        });
+    if (row == null) return null;
+    final LocalFood saved = LocalFoodDataModel.fromJson(
+      row,
+    ).toDomain(isFavourite: false);
+    // The cached catalogue no longer reflects what is on the server.
+    invalidate();
+    return saved;
   }
 
   Future<void> toggleFavourite(int localFoodId) async {
@@ -115,6 +205,9 @@ class FoodKnowledgeRepository {
     } catch (_) {
       throw Exception('Unable to update favourites. Please try again.');
     }
+
+    // The cached catalogue carries `isFavourite`, so it is now wrong.
+    invalidate();
   }
 
   Future<Set<int>> _getFavouriteFoodIdsSafely() async {
@@ -164,4 +257,14 @@ class FoodKnowledgeRepository {
 
   Future<bool> _isFavourite(int localFoodId) async =>
       (await _getFavouriteFoodIds()).contains(localFoodId);
+
+  List<String> _resolveImageUrls(List<String> names) => names
+      .map(
+        (String name) => api.resolveImageUrl(
+          name,
+          bucket: APIManager.storageBucketFoodImages,
+        ),
+      )
+      .whereType<String>()
+      .toList(growable: false);
 }
