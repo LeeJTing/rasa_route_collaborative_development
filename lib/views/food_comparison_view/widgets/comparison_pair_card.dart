@@ -103,7 +103,9 @@ class _FoodHeader extends StatelessWidget {
         SizedBox(
           height: AppSizes.comparisonImageHeight,
           width: double.infinity,
-          child: AppImage(source: food.imageUrl),
+          child: AppImage(
+            source: food.imageUrls.isEmpty ? null : food.imageUrls.first,
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
@@ -196,12 +198,16 @@ class _PairRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Expanded(child: Padding(padding: padding, child: left)),
+          Expanded(
+            child: Padding(padding: padding, child: left),
+          ),
           const VerticalDivider(
             width: AppSizes.borderWidth,
             color: AppColors.accentBrown,
           ),
-          Expanded(child: Padding(padding: padding, child: right)),
+          Expanded(
+            child: Padding(padding: padding, child: right),
+          ),
         ],
       ),
     );
@@ -243,10 +249,7 @@ class _LabeledText extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelLarge,
-        ),
+        Text(label, style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: AppSpacing.xs),
         Text(value),
       ],

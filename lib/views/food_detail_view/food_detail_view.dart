@@ -38,7 +38,7 @@ class _FoodDetailViewState extends State<FoodDetailView> {
     if (_initialised) return;
     _initialised = true;
     final Object? argument = ModalRoute.of(context)?.settings.arguments;
-    _viewModel.loadFood(argument is int ? argument : 1);
+    _viewModel.loadFood(argument is int ? argument : 0);
   }
 
   @override

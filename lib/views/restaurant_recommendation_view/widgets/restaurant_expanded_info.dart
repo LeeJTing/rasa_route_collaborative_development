@@ -10,10 +10,12 @@ class RestaurantExpandedInfo extends StatelessWidget {
 
   final List<RestaurantItem> items;
 
+  static const int _previewItemLimit = 4;
+
   @override
   Widget build(BuildContext context) {
     final List<RestaurantItem> previewItems = items
-        .take(4)
+        .take(_previewItemLimit)
         .toList(growable: false);
     return Container(
       width: double.infinity,

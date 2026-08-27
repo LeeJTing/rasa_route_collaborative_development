@@ -42,7 +42,12 @@ class FoodNoticeBanner extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
-                child: Text(message, style: TextStyle(color: foreground)),
+                child: Text(
+                  message,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: foreground),
+                ),
               ),
               if (onTap != null) Icon(Icons.chevron_right, color: foreground),
             ],
