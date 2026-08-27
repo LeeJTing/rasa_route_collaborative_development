@@ -43,6 +43,11 @@ class RecognitionResultCard extends StatelessWidget {
     this.isProcessing = false,
     this.addLandmarkLabel = 'Add New Landmark',
     this.promptText = 'Would you like to add this as a new landmark?',
+    this.nameMismatch = false,
+    this.observedFoodName,
+    this.typedName,
+    this.onDismissNameMismatch,
+    this.onAcceptTypedName,
   });
 
   final LocalFood food;
@@ -66,6 +71,25 @@ class RecognitionResultCard extends StatelessWidget {
   /// through `FoodRecognitionViewModel.isLowConfidence`. This widget only
   /// decides how to draw it.
   final bool isLowConfidence;
+
+  /// Whether a manually-typed name was verified against the photo and found
+  /// NOT to match it (warn-and-allow) - the card warns "this photo doesn't
+  /// look like X, it looks like Y" so a mismatch is never silently accepted.
+  final bool nameMismatch;
+
+  /// What the photo actually shows, in Gemini's words, when [nameMismatch].
+  final String? observedFoodName;
+
+  /// The name the tourist typed, shown as the alternative in the mismatch
+  /// warning ("This looks more like X than `<typedName>`.").
+  final String? typedName;
+
+  /// "Keep the detected food" - dismisses the mismatch warning.
+  final VoidCallback? onDismissNameMismatch;
+
+  /// "Add as `<typedName>` anyway" - the tourist explicitly accepts the typed
+  /// name even though Gemini could not confirm it (warn-and-allow commit).
+  final VoidCallback? onAcceptTypedName;
 
   /// Manual fallback when Gemini got the dish wrong - called with the food
   /// name the tourist typed (see `FoodRecognitionViewModel.enterFoodName`).
@@ -140,6 +164,64 @@ class RecognitionResultCard extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+                ],
+                if (nameMismatch &&
+                    observedFoodName != null &&
+                    observedFoodName!.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: AppSpacing.xs),
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            const Icon(
+                              Icons.error_outline,
+                              size: AppSizes.inlineNoticeIconSize,
+                              color: AppColors.warning,
+                            ),
+                            const SizedBox(width: AppSpacing.xs),
+                            Expanded(
+                              child: Text(
+                                "This looks more like "
+                                "'${observedFoodName ?? food.name}' than "
+                                "'${typedName ?? food.name}'. Add it as "
+                                "'${typedName ?? food.name}' anyway?",
+                                style: AppTextStyles.bodySmall.copyWith(
+                                  color: AppColors.warning,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (onAcceptTypedName != null ||
+                            onDismissNameMismatch != null)
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: <Widget>[
+                              if (onAcceptTypedName != null &&
+                                  typedName != null)
+                                TextButton(
+                                  onPressed: onAcceptTypedName,
+                                  child: Text("Add as '$typedName'"),
+                                ),
+                              if (onDismissNameMismatch != null)
+                                TextButton(
+                                  onPressed: onDismissNameMismatch,
+                                  child: Text(
+                                    "Keep '${observedFoodName ?? food.name}'",
+                                  ),
+                                ),
+                            ],
+                          ),
+                      ],
+                    ),
                   ),
                 ],
                 const SizedBox(height: AppSpacing.md),

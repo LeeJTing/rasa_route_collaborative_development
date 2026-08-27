@@ -24,7 +24,7 @@ class FoodRepositoryFacade {
 
   final APIManager api = APIManager();
 
-  final FoodKnowledgeRepository knowledge = FoodKnowledgeRepository();
+  final FoodKnowledgeRepository knowledge;
   final RecommendationRepository recommendation = RecommendationRepository();
   final SwipeRepository swipe = SwipeRepository();
 
@@ -45,6 +45,11 @@ class FoodRepositoryFacade {
       knowledge.searchFoods(query);
 
   Future<LocalFood?> getFoodById(int foodId) => knowledge.getFoodById(foodId);
+
+  /// Adds a genuinely-new, tourist-confirmed Malaysian local food to the
+  /// catalogue (Option C - catalogue growth from submissions). Returns the
+  /// saved row (with its assigned id) or null when a duplicate exists.
+  Future<LocalFood?> insertFood(LocalFood food) => knowledge.insertFood(food);
 
   Future<void> toggleFavourite(int localFoodId) =>
       knowledge.toggleFavourite(localFoodId);
