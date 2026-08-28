@@ -219,6 +219,10 @@ class FoodKnowledgeRepository {
     invalidate();
   }
 
+  /// The signed-in tourist's favourited food ids (`favourite_food`), or an
+  /// empty set when nobody is signed in. Used to prioritise similar foods.
+  Future<Set<int>> favouriteFoodIds() => _getFavouriteFoodIdsSafely();
+
   Future<Set<int>> _getFavouriteFoodIdsSafely() async {
     if (api.currentUserId.isEmpty) return <int>{};
     try {

@@ -63,47 +63,52 @@ enum FoodOccurrenceSource { restaurant, submittedLandmark }
 
 /// One state's slice of the heatmap.
 ///
-/// [score] is C1: `availableFoodCount / maximumFoodCount`, clamped to 0..1.
+/// [score] is C1: `restaurantCount / maximumRestaurantCount`, clamped to 0..1.
 /// REQ102_15 renders the state with a colour gradient from this value;
 /// REQ102_16 makes 1.0 green and 0.0 grey.
 class RegionAvailability {
   const RegionAvailability({
     required this.region,
-    required this.availableFoodCount,
-    required this.maximumFoodCount,
+    required this.restaurantCount,
+    required this.maximumRestaurantCount,
     required this.score,
-    required this.occurrenceCount,
+    required this.foodCount,
   });
 
   final Region region;
 
-  /// Distinct local foods served somewhere inside this state, after the
-  /// active filters have been applied (REQ102_28).
-  final int availableFoodCount;
+  /// **What the gradient is built from.** Distinct places inside this state -
+  /// restaurants and submitted landmarks - serving at least one local food
+  /// that survives the active filters (REQ102_28).
+  ///
+  /// Counted per *place*, not per menu entry: a restaurant serving six
+  /// matching dishes is still one restaurant, and counting entries would let a
+  /// single large menu outweigh a whole town.
+  final int restaurantCount;
 
-  /// The denominator of C1 - the highest [availableFoodCount] any state
-  /// reached for this same filter set.
-  final int maximumFoodCount;
+  /// The denominator of C1 - the highest [restaurantCount] any state reached
+  /// for this same filter set.
+  final int maximumRestaurantCount;
 
-  /// `availableFoodCount / maximumFoodCount`, 0..1.
+  /// `restaurantCount / maximumRestaurantCount`, 0..1.
   final double score;
 
-  /// Restaurants + submitted landmarks behind [availableFoodCount]. Shown on
-  /// the state card, not used by the gradient.
-  final int occurrenceCount;
+  /// Distinct local foods available in this state. Shown on the state card as
+  /// context; the gradient no longer uses it.
+  final int foodCount;
 }
 
 /// The whole heatmap for one filter selection (REQ102_29).
 class FoodDistribution {
   const FoodDistribution({
     required this.regions,
-    required this.maximumFoodCount,
+    required this.maximumRestaurantCount,
     required this.matchingFoodCount,
   });
 
   static const FoodDistribution empty = FoodDistribution(
     regions: <RegionAvailability>[],
-    maximumFoodCount: 0,
+    maximumRestaurantCount: 0,
     matchingFoodCount: 0,
   );
 
@@ -111,8 +116,8 @@ class FoodDistribution {
   /// drawn, in grey.
   final List<RegionAvailability> regions;
 
-  /// C1's denominator (see [RegionAvailability.maximumFoodCount]).
-  final int maximumFoodCount;
+  /// C1's denominator (see [RegionAvailability.maximumRestaurantCount]).
+  final int maximumRestaurantCount;
 
   /// How many catalogue entries survived the active filters. Zero means the
   /// filter combination matches nothing, not that the map failed to load.
