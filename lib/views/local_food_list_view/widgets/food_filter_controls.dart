@@ -72,7 +72,7 @@ class _Control extends StatelessWidget {
       height: AppSizes.compactControlHeight,
       child: OutlinedButton.icon(
         onPressed: onTap,
-        icon: Icon(icon, size: 16),
+        icon: Icon(icon, size: AppSizes.iconCompact),
         label: Text(label, maxLines: 1),
         style: OutlinedButton.styleFrom(
           backgroundColor: selected

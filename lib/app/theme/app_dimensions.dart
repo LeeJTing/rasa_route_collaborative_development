@@ -255,6 +255,9 @@ abstract final class AppSizes {
   /// Standard small icon (inline with body text).
   static const double iconSmall = 18;
 
+  /// Compact icon used inside dense catalogue and restaurant metadata rows.
+  static const double iconCompact = 16;
+
   /// Standard medium icon (section headers, notices).
   static const double iconMedium = 24;
 
@@ -298,4 +301,8 @@ abstract final class AppLayoutRatios {
 
   /// The result popup's max height as a fraction of the screen height.
   static const double popupMaxHeightFraction = 0.8;
+
+  /// Initial and maximum heights for the catalogue filter bottom sheet.
+  static const double catalogueFilterSheetInitial = 0.8;
+  static const double catalogueFilterSheetMaximum = 0.92;
 }
