@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
+import '../../app/theme/app_text_styles.dart';
 import '../../view_models/profile_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 
@@ -51,9 +53,35 @@ class _ProfileViewState extends State<ProfileView> {
           child: Consumer<ProfileViewModel>(
             builder:
                 (BuildContext context, ProfileViewModel viewModel, Widget? _) {
-                  return const Padding(
+                  return ListView(
                     padding: AppSpacing.screenPadding,
-                    child: Center(child: Text('ProfileView')),
+                    children: <Widget>[
+                      const Text(
+                        'Contributions',
+                        style: AppTextStyles.titleSmall,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      // The tourist's submitted landmarks - opens the full
+                      // contribution history (one tourist can add many).
+                      Card(
+                        margin: EdgeInsets.zero,
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.place_outlined,
+                            color: AppColors.primary,
+                          ),
+                          title: const Text('Submitted Landmarks'),
+                          subtitle: const Text(
+                            'Landmarks you have added to the map',
+                          ),
+                          trailing: const Icon(
+                            Icons.chevron_right,
+                            color: AppColors.textSecondary,
+                          ),
+                          onTap: viewModel.openSubmittedLandmarks,
+                        ),
+                      ),
+                    ],
                   );
                 },
           ),

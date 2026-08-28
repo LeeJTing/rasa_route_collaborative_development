@@ -23,6 +23,8 @@ class FoodAnalysisResponse implements JsonModel {
     this.imageQuality = 'good',
     this.imageQualityIssues = const <String>[],
     this.tasteTags = const <String>[],
+    this.mainTaste = '',
+    this.dietaryRestrictions = const <String>[],
     this.foodCount = 1,
     this.candidates = const <FoodCandidate>[],
     this.priceMin = 0,
@@ -30,6 +32,7 @@ class FoodAnalysisResponse implements JsonModel {
     this.nameMatchesPhoto = true,
     this.matchConfidence = 0,
     this.observedFood = '',
+    this.ingredients = '',
   });
 
   /// Dish name (e.g., "Nasi Lemak")
@@ -40,6 +43,10 @@ class FoodAnalysisResponse implements JsonModel {
 
   /// Dish description
   final String description;
+
+  /// Main ingredients, comma-separated (e.g. "rice, coconut milk, sambal,
+  /// peanuts, anchovies, egg"). Empty when Gemini didn't supply them.
+  final String ingredients;
 
   /// Origin/region (e.g., "Melaka & Negeri Sembilan")
   final String origin;
@@ -114,6 +121,17 @@ class FoodAnalysisResponse implements JsonModel {
   /// full analysis call, not the quick name-only one - left empty there.
   final List<String> tasteTags;
 
+  /// The single primary taste from [tasteTags] - it marks `is_main` on the
+  /// `local_food_preference` link when a new food is written to the
+  /// catalogue (mirrors the scraper's `main_taste`). Empty when unknown.
+  final String mainTaste;
+
+  /// Dietary restrictions that apply to this dish, using the canonical
+  /// `dietary_restriction.restriction_name` strings (e.g. "No Pork",
+  /// "No Beef", "Vegetarian"). Only populated by the full analysis calls;
+  /// empty when none apply.
+  final List<String> dietaryRestrictions;
+
   /// How many SEPARATE, distinct food items/dishes are clearly visible in the
   /// image. A single dish/plate/portion counts as one. > 1 means the tourist
   /// should re-capture with only one food in frame. Only populated by the
@@ -138,6 +156,7 @@ class FoodAnalysisResponse implements JsonModel {
     'dish': dish,
     'variant': variant,
     'description': description,
+    'ingredients': ingredients,
     'origin': origin,
     'cookingStyle': cookingStyle,
     'mealType': mealType,
@@ -155,6 +174,8 @@ class FoodAnalysisResponse implements JsonModel {
     'imageQuality': imageQuality,
     'imageQualityIssues': imageQualityIssues,
     'tasteTags': tasteTags,
+    'mainTaste': mainTaste,
+    'dietaryRestrictions': dietaryRestrictions,
     'foodCount': foodCount,
     'candidates': candidates.map((FoodCandidate c) => c.toJson()).toList(),
     'priceMin': priceMin,
@@ -165,6 +186,7 @@ class FoodAnalysisResponse implements JsonModel {
     String? dish,
     String? variant,
     String? description,
+    String? ingredients,
     String? origin,
     String? cookingStyle,
     String? mealType,
@@ -182,6 +204,8 @@ class FoodAnalysisResponse implements JsonModel {
     String? imageQuality,
     List<String>? imageQualityIssues,
     List<String>? tasteTags,
+    String? mainTaste,
+    List<String>? dietaryRestrictions,
     int? foodCount,
     List<FoodCandidate>? candidates,
     double? priceMin,
@@ -190,6 +214,7 @@ class FoodAnalysisResponse implements JsonModel {
     dish: dish ?? this.dish,
     variant: variant ?? this.variant,
     description: description ?? this.description,
+    ingredients: ingredients ?? this.ingredients,
     origin: origin ?? this.origin,
     cookingStyle: cookingStyle ?? this.cookingStyle,
     mealType: mealType ?? this.mealType,
@@ -207,6 +232,8 @@ class FoodAnalysisResponse implements JsonModel {
     imageQuality: imageQuality ?? this.imageQuality,
     imageQualityIssues: imageQualityIssues ?? this.imageQualityIssues,
     tasteTags: tasteTags ?? this.tasteTags,
+    mainTaste: mainTaste ?? this.mainTaste,
+    dietaryRestrictions: dietaryRestrictions ?? this.dietaryRestrictions,
     foodCount: foodCount ?? this.foodCount,
     candidates: candidates ?? this.candidates,
     priceMin: priceMin ?? this.priceMin,

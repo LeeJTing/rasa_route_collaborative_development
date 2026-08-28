@@ -46,6 +46,11 @@ class LandmarkDetailViewModel extends BaseViewModel {
   double _priceMin = 0;
   double _priceMax = 0;
 
+  /// Dietary restrictions (canonical names) for the recognised food, carried
+  /// to the `food_dietary_restriction` association table when it becomes a
+  /// new catalogue row.
+  List<String> _dietaryRestrictions = const <String>[];
+
   /// Whether the confirm button should return this food to the *existing*
   /// `AddLandmarkView` (additional-food flow) instead of pushing a fresh
   /// form (primary flow). Set from `LandmarkDraftHandoff` in the View's
@@ -59,6 +64,7 @@ class LandmarkDetailViewModel extends BaseViewModel {
   bool get returnToFormAsAdditionalFood => _returnToFormAsAdditionalFood;
   double get priceMin => _priceMin;
   double get priceMax => _priceMax;
+  List<String> get dietaryRestrictions => _dietaryRestrictions;
 
   void setIsLocalFood(bool value) {
     _isLocalFood = value;
@@ -67,6 +73,10 @@ class LandmarkDetailViewModel extends BaseViewModel {
   void setPriceRange({required double priceMin, required double priceMax}) {
     _priceMin = priceMin;
     _priceMax = priceMax;
+  }
+
+  void setDietaryRestrictions(List<String> dietaryRestrictions) {
+    _dietaryRestrictions = dietaryRestrictions;
   }
 
   void setReturnToFormAsAdditionalFood(bool value) {
@@ -120,6 +130,7 @@ class LandmarkDetailViewModel extends BaseViewModel {
       isLocalFood: _isLocalFood,
       priceMin: _priceMin,
       priceMax: _priceMax,
+      dietaryRestrictions: _dietaryRestrictions,
     );
   }
 }

@@ -9,6 +9,8 @@ import '../views/food_recognition_view/food_recognition_view.dart';
 import '../views/food_recommendation_view/food_recommendation_view.dart';
 import '../views/landmark_detail_view/landmark_detail_view.dart';
 import '../views/landmark_history_view/landmark_history_view.dart';
+import '../views/landmark_place_detail_view/landmark_item_detail_view.dart';
+import '../views/landmark_place_detail_view/landmark_place_detail_view.dart';
 import '../views/local_food_list_view/local_food_list_view.dart';
 import '../views/login_register_view/login_register_view.dart';
 import '../views/main_shell_view/main_shell_view.dart';
@@ -94,6 +96,10 @@ class RasaRouteApp extends StatelessWidget {
             const RestaurantSignboardView(),
         AppRoutes.landmarkDetail: (BuildContext context) =>
             const LandmarkDetailView(),
+        AppRoutes.landmarkPlaceDetail: (BuildContext context) =>
+            const LandmarkPlaceDetailView(),
+        AppRoutes.landmarkItemDetail: (BuildContext context) =>
+            const LandmarkItemDetailView(),
       },
     );
   }

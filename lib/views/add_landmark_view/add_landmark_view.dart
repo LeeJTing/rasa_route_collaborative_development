@@ -61,6 +61,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
         priceMin: LandmarkDraftHandoff().takePriceMin(),
         priceMax: LandmarkDraftHandoff().takePriceMax(),
         confidence: LandmarkDraftHandoff().takeConfidence(),
+        dietaryRestrictions: LandmarkDraftHandoff().takeDietaryRestrictions(),
       );
     }
     final XFile? foodImage = LandmarkDraftHandoff().takeCapturedImage();

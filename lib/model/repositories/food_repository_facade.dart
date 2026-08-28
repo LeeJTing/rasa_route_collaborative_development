@@ -51,6 +51,31 @@ class FoodRepositoryFacade {
   /// saved row (with its assigned id) or null when a duplicate exists.
   Future<LocalFood?> insertFood(LocalFood food) => knowledge.insertFood(food);
 
+  /// Taste/category name -> id lookups (lowercased) for normalising a
+  /// recognized food's tags against `food_preference` before writing links.
+  Future<({Map<String, int> tastes, Map<String, int> categories})>
+  preferenceIdLookup() => foodPreference.preferenceIdLookup();
+
+  /// Writes the `local_food_preference` links for a freshly-inserted dish
+  /// (tastes with the main taste marked, plus its category).
+  Future<void> linkFoodPreferences(
+    int localFoodId, {
+    required List<int> tasteIds,
+    int mainTasteId = 0,
+    int? categoryId,
+  }) => knowledge.linkFoodPreferences(
+    localFoodId,
+    tasteIds: tasteIds,
+    mainTasteId: mainTasteId,
+    categoryId: categoryId,
+  );
+
+  /// Writes the `food_dietary_restriction` links for a freshly-inserted dish.
+  Future<void> linkFoodDietaryRestrictions(
+    int localFoodId,
+    List<int> restrictionIds,
+  ) => knowledge.linkFoodDietaryRestrictions(localFoodId, restrictionIds);
+
   Future<void> toggleFavourite(int localFoodId) =>
       knowledge.toggleFavourite(localFoodId);
 
