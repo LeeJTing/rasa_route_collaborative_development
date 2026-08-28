@@ -10,7 +10,6 @@ import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
 import '../../domain_model/map.dart';
 import '../../domain_model/region.dart';
-import '../../external/location/mock_location_service.dart';
 import '../../view_models/dashboard_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 import 'widgets/discovery_layer_bar.dart';
@@ -276,11 +275,12 @@ class _DashboardViewState extends State<DashboardView> {
               ],
               // Presenter tool (dev builds only, Android only): teleports the
               // OS-level GPS so the map can be demoed "at" a preset spot
-              // without moving the device - see `MockLocationService`.
+              // without moving the device. Wired through the ViewModel so this
+              // View never touches a shared client (see `DashboardViewModel`).
               if (Env.appEnv != 'prod' &&
-                  MockLocationService.isSupported) ...<Widget>[
+                  viewModel.mockGpsSupported) ...<Widget>[
                 const SizedBox(height: AppSpacing.sm),
-                const _MockGpsButton(),
+                _MockGpsButton(viewModel: viewModel),
               ],
             ],
           ),
@@ -617,11 +617,17 @@ class _CurrentLocationDot extends StatelessWidget {
 
 /// Presenter tool (dev builds only, Android only): opens a picker of preset
 /// Malaysian spots and teleports the OS-level GPS there, so the dashboard can
-/// be demoed "at" that location without moving the device. Wired to
-/// `MockLocationService` (the `fluttermocklocation` plugin); requires Android
-/// Developer Options > "Select mock location app" to point at this app.
+/// be demoed "at" that location without moving the device. Wired through
+/// `DashboardViewModel` to `MockLocationService` (the vendored
+/// `fluttermocklocation` plugin); requires Android Developer Options >
+/// "Select mock location app" to point at this app.
+///
+/// A toggle: while a mock is live the button turns into "Stop mock", which
+/// clears the OS test provider and lets the real GPS drive the map again.
 class _MockGpsButton extends StatelessWidget {
-  const _MockGpsButton();
+  const _MockGpsButton({required this.viewModel});
+
+  final DashboardViewModel viewModel;
 
   static const List<({String label, double lat, double lon})> _presets =
       <({String label, double lat, double lon})>[
@@ -635,11 +641,26 @@ class _MockGpsButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool active = viewModel.mockGpsActive;
     return IconButton.filledTonal(
-      tooltip: 'Mock GPS (dev)',
-      icon: const Icon(Icons.my_location),
-      onPressed: () => _openPicker(context),
+      tooltip: active ? 'Stop GPS mock (dev)' : 'Mock GPS (dev)',
+      style: active
+          ? IconButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: AppColors.onPrimary,
+            )
+          : null,
+      icon: Icon(active ? Icons.location_off : Icons.my_location),
+      onPressed: active ? () => _stopMock(context) : () => _openPicker(context),
     );
+  }
+
+  Future<void> _stopMock(BuildContext context) async {
+    await viewModel.stopMockGps();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('GPS mock stopped (dev)')));
   }
 
   Future<void> _openPicker(BuildContext context) async {
@@ -666,10 +687,7 @@ class _MockGpsButton extends StatelessWidget {
           ),
         );
     if (choice == null || !context.mounted) return;
-    final String? error = await const MockLocationService().setMockLocation(
-      choice.lat,
-      choice.lon,
-    );
+    final String? error = await viewModel.setMockGps(choice.lat, choice.lon);
     if (!context.mounted) return;
     ScaffoldMessenger.of(
       context,
