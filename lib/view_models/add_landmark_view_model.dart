@@ -172,6 +172,12 @@ class AddLandmarkViewModel extends BaseViewModel
   /// "Recognised Food" card can show the same thumbnail the tourist saw
   /// there - see [setRecognizedFoodImage].
   XFile? _recognizedFoodImage;
+
+  /// Gemini's confidence in the recognized primary dish's name, carried from
+  /// the recognition screen through `LandmarkDraftHandoff` - the catalogue-
+  /// growth gate (`FoodRecognitionLogic.registerNewDishes`) demands a high
+  /// bar before writing a new `local_food` row.
+  double _recognizedFoodConfidence = 0;
   List<LandmarkFoodEntry> _additionalFoods = <LandmarkFoodEntry>[];
 
   /// Per-entry soft price guidance, keyed by the form-local
@@ -280,7 +286,9 @@ class AddLandmarkViewModel extends BaseViewModel
     LocalFood food, {
     double priceMin = 0,
     double priceMax = 0,
+    double confidence = 0,
   }) {
+    _recognizedFoodConfidence = confidence;
     _primaryFood = _primaryFood == null
         ? LandmarkFoodEntry.newEntry(
             food: food,
@@ -848,6 +856,8 @@ class AddLandmarkViewModel extends BaseViewModel
             priceMax: _primaryFood!.priceMax,
             imageUrl: primaryPhoto?.url,
             imageId: primaryPhoto?.id,
+            confidence: _recognizedFoodConfidence,
+            isLocalFood: true,
           ),
           for (int i = 0; i < _additionalFoods.length; i++)
             FoodSubmission(

@@ -1,10 +1,13 @@
 import 'dart:developer' as developer;
 
+import '../../core/json_model.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../data_models/restaurant_data_model.dart';
 import '../data_models/restaurant_item_data_model.dart';
+import '../data_models/local_food_data_model.dart';
+import '../data_models/local_food_image_data_model.dart';
 
 /// Supabase-backed restaurant catalogue used by Quick Mode.
 ///
@@ -37,7 +40,12 @@ class RestaurantRepository {
       food_img_url,
       food_category,
       restaurant_item_price,
-      local_food(food_name, description, local_food_image(img_name))
+      local_food(
+        local_food_id,
+        food_name,
+        description,
+        local_food_image(local_food_image_id, img_name, local_food_id)
+      )
     )
   ''';
 
@@ -80,12 +88,7 @@ class RestaurantRepository {
     final List<RestaurantItem> items = rawItems is List
         ? rawItems
               .whereType<Map>()
-              .map(
-                (Map raw) => RestaurantItemDataModel.fromJson(
-                  Map<String, dynamic>.from(raw),
-                ),
-              )
-              .map(_itemToDomain)
+              .map((Map raw) => _itemToDomain(Map<String, dynamic>.from(raw)))
               .toList(growable: false)
         : const <RestaurantItem>[];
 
@@ -105,16 +108,36 @@ class RestaurantRepository {
     );
   }
 
-  RestaurantItem _itemToDomain(RestaurantItemDataModel data) {
-    final String? imageName = data.foodImgUrl ?? data.localFoodImageName;
+  RestaurantItem _itemToDomain(Map<String, dynamic> row) {
+    final RestaurantItemDataModel data = RestaurantItemDataModel.fromJson(row);
+    final Map<String, dynamic>? localFoodRow = JsonReader.asMapOrNull(
+      row['local_food'],
+    );
+    final LocalFoodDataModel? localFood = localFoodRow == null
+        ? null
+        : LocalFoodDataModel.fromJson(localFoodRow);
+    final List<LocalFoodImageDataModel> localFoodImages =
+        localFoodRow == null
+              ? const <LocalFoodImageDataModel>[]
+              : JsonReader.asModelList(
+                  localFoodRow['local_food_image'],
+                  LocalFoodImageDataModel.fromJson,
+                )
+          ..sort(
+            (LocalFoodImageDataModel a, LocalFoodImageDataModel b) =>
+                a.localFoodImageId.compareTo(b.localFoodImageId),
+          );
+    final String? imageName =
+        data.foodImgUrl ??
+        (localFoodImages.isEmpty ? null : localFoodImages.first.imageName);
     return RestaurantItem(
       id: data.restaurantItemId,
       restaurantId: data.restaurantId,
       localFoodId: data.localFoodId,
       foodName: data.restaurantItemName.isEmpty
-          ? data.localFoodName ?? 'Local food'
+          ? localFood?.foodName ?? 'Local food'
           : data.restaurantItemName,
-      ingredients: data.ingredients ?? data.localFoodDescription,
+      ingredients: data.ingredients ?? localFood?.description,
       imageUrl: api.resolveImageUrl(
         imageName,
         bucket: APIManager.storageBucketFoodImages,

@@ -1,8 +1,12 @@
 import 'dart:developer' as developer;
 
+import '../../core/json_model.dart';
 import '../../domain_model/local_food.dart';
 import '../../shared_client/api_manager/api_manager.dart';
+import '../data_models/food_preference_data_model.dart';
 import '../data_models/local_food_data_model.dart';
+import '../data_models/local_food_image_data_model.dart';
+import '../data_models/local_food_preference_data_model.dart';
 
 /// Supabase-backed access to the local-food catalogue and favourites.
 ///
@@ -51,8 +55,17 @@ class FoodKnowledgeRepository {
     pronunciation_text,
     audio_guide_url,
     synonyms,
-    local_food_image(img_name),
-    local_food_preference(is_main, food_preference(preferred_taste))
+    local_food_image(local_food_image_id, img_name, local_food_id),
+    local_food_preference(
+      food_preference_id,
+      local_food_id,
+      is_main,
+      food_preference(
+        food_preference_id,
+        preferred_categories,
+        preferred_taste
+      )
+    )
   ''';
 
   /// The whole catalogue, cached for [cacheTtl]. Concurrent callers share one
@@ -89,11 +102,13 @@ class FoodKnowledgeRepository {
       rows = results[0] as List<Map<String, dynamic>>;
       favouriteIds = results[1] as Set<int>;
       return rows
-          .map(LocalFoodDataModel.fromJson)
           .map(
-            (LocalFoodDataModel data) => data
-                .toDomain(isFavourite: favouriteIds.contains(data.localFoodId))
-                .copyWith(imageUrls: _resolveImageUrls(data.imageUrls)),
+            (Map<String, dynamic> row) => _toDomain(
+              row,
+              isFavourite: favouriteIds.contains(
+                JsonReader.asInt(row['local_food_id']),
+              ),
+            ),
           )
           .toList(growable: false);
     } catch (error, stackTrace) {
@@ -125,11 +140,7 @@ class FoodKnowledgeRepository {
         eq: <String, Object?>{'local_food_id': foodId},
       );
       if (row == null) return null;
-      final LocalFoodDataModel data = LocalFoodDataModel.fromJson(row);
-      final LocalFood food = data.toDomain(
-        isFavourite: await _isFavouriteSafely(foodId),
-      );
-      return food.copyWith(imageUrls: _resolveImageUrls(data.imageUrls));
+      return _toDomain(row, isFavourite: await _isFavouriteSafely(foodId));
     } catch (error, stackTrace) {
       developer.log(
         'Local-food detail query failed.',
@@ -141,6 +152,42 @@ class FoodKnowledgeRepository {
         'Unable to load this local food. Check your connection and try again.',
       );
     }
+  }
+
+  /// Adds a genuinely-new, tourist-confirmed Malaysian local food to the
+  /// catalogue (Option C - catalogue growth from submissions). The logic
+  /// layer already ran the full matcher; this is a belt-and-suspenders dedupe
+  /// on the normalized name. Returns the saved row with its assigned id, or
+  /// null when a duplicate already exists.
+  Future<LocalFood?> insertFood(LocalFood food) async {
+    final String normalized = food.name.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    final List<LocalFood> existing = await getFoods();
+    if (existing.any(
+      (LocalFood f) => f.name.trim().toLowerCase() == normalized,
+    )) {
+      return null;
+    }
+    final Map<String, dynamic>? row = await api
+        .insertRowReturning(APIManager.tableLocalFood, <String, dynamic>{
+          'food_name': food.name.trim(),
+          'description': food.description.isEmpty ? null : food.description,
+          'origin': food.origin.isEmpty ? null : food.origin,
+          'cultural_background': food.culturalBackground.isEmpty
+              ? null
+              : food.culturalBackground,
+          'ingredients': food.ingredients.isEmpty ? null : food.ingredients,
+          'food_category': food.category.isEmpty ? null : food.category,
+          'cooking_style': food.cookingStyle.isEmpty ? null : food.cookingStyle,
+          'meal_type': food.mealType.isEmpty ? null : food.mealType,
+          'food_type': food.foodType.isEmpty ? null : food.foodType,
+          'synonyms': food.synonyms.isEmpty ? null : food.synonyms.join(','),
+        });
+    if (row == null) return null;
+    final LocalFood saved = _toDomain(row, isFavourite: false);
+    // The cached catalogue no longer reflects what is on the server.
+    invalidate();
+    return saved;
   }
 
   Future<void> toggleFavourite(int localFoodId) async {
@@ -219,6 +266,74 @@ class FoodKnowledgeRepository {
 
   Future<bool> _isFavourite(int localFoodId) async =>
       (await _getFavouriteFoodIds()).contains(localFoodId);
+
+  /// Converts one nested Supabase response into the screen-facing domain
+  /// object. Each table is parsed by its own data model before composition.
+  LocalFood _toDomain(Map<String, dynamic> row, {required bool isFavourite}) {
+    final LocalFoodDataModel food = LocalFoodDataModel.fromJson(row);
+    final List<LocalFoodImageDataModel> images =
+        JsonReader.asModelList(
+          row['local_food_image'],
+          LocalFoodImageDataModel.fromJson,
+        )..sort(
+          (LocalFoodImageDataModel a, LocalFoodImageDataModel b) =>
+              a.localFoodImageId.compareTo(b.localFoodImageId),
+        );
+
+    final Set<String> tastes = <String>{};
+    String mainTaste = '';
+    final Object? rawLinks = row['local_food_preference'];
+    if (rawLinks is List) {
+      for (final Object? rawLink in rawLinks) {
+        if (rawLink is! Map) continue;
+        final Map<String, dynamic> linkRow = Map<String, dynamic>.from(rawLink);
+        final LocalFoodPreferenceDataModel link =
+            LocalFoodPreferenceDataModel.fromJson(linkRow);
+        final Map<String, dynamic>? preferenceRow = JsonReader.asMapOrNull(
+          linkRow['food_preference'],
+        );
+        if (preferenceRow == null) continue;
+        final FoodPreferenceDataModel preference =
+            FoodPreferenceDataModel.fromJson(preferenceRow);
+        final String? rawTaste = preference.preferredTaste;
+        if (rawTaste == null) continue;
+        final List<String> values = _splitValues(rawTaste);
+        tastes.addAll(values);
+        if (link.isMain && values.isNotEmpty) mainTaste = values.first;
+      }
+    }
+
+    return LocalFood(
+      id: food.localFoodId,
+      name: food.foodName,
+      description: food.description ?? '',
+      origin: food.origin ?? '',
+      culturalBackground: food.culturalBackground ?? '',
+      ingredients: food.ingredients ?? '',
+      category: food.foodCategory ?? '',
+      cookingStyle: food.cookingStyle ?? '',
+      mealType: food.mealType ?? '',
+      foodType: food.foodType ?? '',
+      tastes: List<String>.unmodifiable(tastes),
+      mainTaste: mainTaste,
+      pronunciationText: food.pronunciationText ?? '',
+      audioGuideUrl: food.audioGuideUrl,
+      synonyms: JsonReader.asStringList(food.synonyms),
+      imageUrls: _resolveImageUrls(
+        images
+            .map((LocalFoodImageDataModel image) => image.imageName)
+            .where((String name) => name.isNotEmpty)
+            .toList(growable: false),
+      ),
+      isFavourite: isFavourite,
+    );
+  }
+
+  List<String> _splitValues(String raw) => raw
+      .split(RegExp(r'[,;/|]'))
+      .map((String value) => value.trim())
+      .where((String value) => value.isNotEmpty)
+      .toList(growable: false);
 
   List<String> _resolveImageUrls(List<String> names) => names
       .map(

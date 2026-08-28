@@ -2,8 +2,10 @@ import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../domain_model/food_recognition_result.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/submitted_landmark.dart';
 import '../repositories/discovery_repository_facade.dart';
 import '../repositories/food_repository_facade.dart';
+import 'food_name_matcher.dart';
 
 /// Photo -> Gemini -> a row in `local_food`.
 /// The one logic class holding two repository facades: it recognises through
@@ -35,6 +37,13 @@ class FoodRecognitionLogic {
   /// shortcut is trusted at all: a result can clear this bar (so no warning
   /// is shown) while still being re-judged by the full analysis.
   static const double _lowConfidence = 0.6;
+
+  /// The minimum dish-name confidence before a genuinely-NEW detected dish
+  /// may be WRITTEN to the shared `local_food` catalogue (Option C - catalogue
+  /// growth from confirmed submissions). Deliberately the same high bar as
+  /// [_highConfidence]: 0.6 only means "warn the tourist to verify", which is
+  /// far too low to create a permanent, shared, curated row.
+  static const double _catalogueInsertConfidence = 0.8;
 
   /// Whether [confidence] (0..1) is shaky enough that the result should be
   /// flagged for the tourist to verify rather than presented as certain.
@@ -75,9 +84,20 @@ class FoodRecognitionLogic {
   final DiscoveryRepositoryFacade discoveryRepository;
   final FoodRepositoryFacade foodRepository;
 
+  /// The curated `local_food` row best matching a free-text dish name, or
+  /// null when none is good enough (then Gemini's own details are used).
+  /// Routed through the facade's flat `getFoods()` (never
+  /// `facade.knowledge.xxx`) and [FoodNameMatcher], so "nasi lemak ayam"
+  /// resolves to the curated "nasi lemak" and its authoritative details.
+  Future<LocalFood?> _matchCatalogue(String name) async {
+    final List<LocalFood> catalogue = await foodRepository.getFoods();
+    return FoodNameMatcher.bestMatch(name, catalogue);
+  }
+
   /// Recognises the food in [imageBytes] (REQ106_2, UC500 two-phase flow):
   ///  1. A quick, name-only Gemini call (`RecognitionRepository.identifyFoodName`).
-  ///  2. If that name is already in the catalogue (`FoodKnowledgeRepository`),
+  ///  2. If that name (or a whole-word variant of it - "nasi lemak ayam"
+  ///     resolving to the curated "nasi lemak") is already in the catalogue,
   ///     the stored record is used as-is - no need to pay for a full call.
   ///  3. Otherwise, a second, full Gemini call generates the complete entry
   ///     (`RecognitionRepository.analyzeFoodFull`, already returning the
@@ -149,9 +169,7 @@ class FoodRecognitionLogic {
     final List<LocalFood> candidates = <LocalFood>[];
     for (final candidate in quick.candidates) {
       if (candidate.confidence < 0.5) continue;
-      final LocalFood? match = await foodRepository.knowledge.findByName(
-        candidate.dish,
-      );
+      final LocalFood? match = await _matchCatalogue(candidate.dish);
       final LocalFood food =
           match ?? _nameOnlyFood(candidate.dish, quick.foodCategory);
       if (!candidates.any((LocalFood f) => f.name == food.name)) {
@@ -178,9 +196,7 @@ class FoodRecognitionLogic {
       // must never be matched to a catalogue record and shown as certain.
       // Anything less is re-judged by the full analysis, which is the
       // deeper, authoritative call.
-      final LocalFood? existing = await foodRepository.knowledge.findByName(
-        quick.dish,
-      );
+      final LocalFood? existing = await _matchCatalogue(quick.dish);
       if (existing != null &&
           quick.confidence >= _highConfidence &&
           !isPoorImageQuality(quick.imageQuality)) {
@@ -248,9 +264,7 @@ class FoodRecognitionLogic {
     // details once Gemini has confirmed the typed name is what the photo
     // actually shows.
     if (analysis.nameMatchesPhoto) {
-      final LocalFood? match = await foodRepository.knowledge.findByName(
-        trimmed,
-      );
+      final LocalFood? match = await _matchCatalogue(trimmed);
       if (match != null) {
         food = match;
         priceMin = 0;
@@ -277,7 +291,7 @@ class FoodRecognitionLogic {
     String name,
   ) async {
     final String trimmed = name.trim();
-    final LocalFood? match = await foodRepository.knowledge.findByName(trimmed);
+    final LocalFood? match = await _matchCatalogue(trimmed);
     if (match != null) return (food: match, priceMin: 0.0, priceMax: 0.0);
     final analysis = await discoveryRepository.recognition.analyzeFoodByName(
       imageBytes,
@@ -305,4 +319,37 @@ class FoodRecognitionLogic {
     mealType: '',
     foodType: 'Food',
   );
+
+  /// Option C - grow the `local_food` catalogue from confirmed submissions.
+  ///
+  /// Every food on a submitted landmark is a candidate, but only a genuinely
+  /// NEW, HIGH-CONFIDENCE Malaysian local food is written:
+  ///   * not test/QA data (`isFake`);
+  ///   * not already a curated row (`id != 0`);
+  ///   * judged Malaysian local food ([FoodSubmission.isLocalFood]);
+  ///   * dish-name confidence at least [_catalogueInsertConfidence] - the
+  ///     same bar the app uses before trusting a quick recognition enough to
+  ///     shortcut to a curated record (0.6 is only "warn the tourist");
+  ///   * the matcher finds NO existing canonical entry (exact / whole-word
+  ///     prefix / containment) - so "nasi lemak ayam" never becomes a new
+  ///     row when "nasi lemak" already exists; it just uses the canonical one.
+  ///
+  /// Best-effort: the caller has already saved the landmark, so a catalogue
+  /// write failure must not fail the submission.
+  Future<void> registerNewDishes(List<FoodSubmission> foods) async {
+    final List<LocalFood> catalogue = await foodRepository.getFoods();
+    // Working copy, so a dish written earlier in this loop is seen by the
+    // matcher for the ones after it (dedupe within one submission).
+    final List<LocalFood> working = List<LocalFood>.of(catalogue);
+    for (final FoodSubmission entry in foods) {
+      if (entry.isFake) continue;
+      final LocalFood food = entry.food;
+      if (food.id != 0) continue;
+      if (!entry.isLocalFood) continue;
+      if (entry.confidence < _catalogueInsertConfidence) continue;
+      if (FoodNameMatcher.bestMatch(food.name, working) != null) continue;
+      final LocalFood? saved = await foodRepository.insertFood(food);
+      if (saved != null) working.add(saved);
+    }
+  }
 }

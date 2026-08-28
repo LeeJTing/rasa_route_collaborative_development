@@ -80,6 +80,15 @@ class LandmarkDraftHandoff {
   double pendingPriceMin = 0;
   double pendingPriceMax = 0;
 
+  /// Gemini's confidence (0..1) in [pendingRecognizedFood]'s dish name. Set by
+  /// the recognition screen so `AddLandmarkView` can attach it to the
+  /// submitted food, where the catalogue-growth gate (`FoodRecognitionLogic
+  /// .registerNewDishes`) demands a HIGH bar before writing a new `local_food`
+  /// row. `0` means unknown/never catalogue-insert eligible. Survives the
+  /// detail-screen round trip because `pushAddLandmark` only overwrites it
+  /// when a value is explicitly passed.
+  double pendingConfidence = 0;
+
   LocalFood? takeRecognizedFood() {
     final LocalFood? value = pendingRecognizedFood;
     pendingRecognizedFood = null;
@@ -123,6 +132,12 @@ class LandmarkDraftHandoff {
     return value;
   }
 
+  double takeConfidence() {
+    final double value = pendingConfidence;
+    pendingConfidence = 0;
+    return value;
+  }
+
   /// Stashes [food] and [image] for the food-detail screen
   /// (`LandmarkDetailView`, at `AppRoutes.landmarkDetail`) and
   /// navigates there - the one shared implementation of "go view details
@@ -140,12 +155,16 @@ class LandmarkDraftHandoff {
     bool isLocalFood = true,
     double priceMin = 0,
     double priceMax = 0,
+    double confidence = 0,
   }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
     pendingIsLocalFood = isLocalFood;
     pendingPriceMin = priceMin;
     pendingPriceMax = priceMax;
+    // Only overwrite when a real confidence is passed - a later re-push
+    // without one (e.g. from the detail screen) must keep the value set here.
+    if (confidence > 0) pendingConfidence = confidence;
     AppNavigator.push(AppRoutes.landmarkDetail);
   }
 
@@ -160,12 +179,15 @@ class LandmarkDraftHandoff {
     bool isLocalFood = true,
     double priceMin = 0,
     double priceMax = 0,
+    double confidence = 0,
   }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
     pendingIsLocalFood = isLocalFood;
     pendingPriceMin = priceMin;
     pendingPriceMax = priceMax;
+    // Only overwrite when a real confidence is passed - see pushLandmarkDetail.
+    if (confidence > 0) pendingConfidence = confidence;
     AppNavigator.push(AppRoutes.addLandmark);
   }
 
@@ -180,6 +202,7 @@ class LandmarkDraftHandoff {
     pendingIsLocalFood = true;
     pendingPriceMin = 0;
     pendingPriceMax = 0;
+    pendingConfidence = 0;
   }
 }
 
@@ -291,7 +314,8 @@ class FoodRecognitionViewModel extends BaseViewModel {
     double priceMax,
     bool isLocalFood,
     double confidence,
-  })? _pendingTyped;
+  })?
+  _pendingTyped;
 
   XFile? get capturedImage => _capturedImage;
   LocalFood? get recognizedFood => _recognizedFood;
@@ -472,6 +496,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
       isLocalFood: _isLocalFood,
       priceMin: _priceMin,
       priceMax: _priceMax,
+      confidence: _confidence,
     );
   }
 
@@ -494,6 +519,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
       isLocalFood: _isLocalFood,
       priceMin: _priceMin,
       priceMax: _priceMax,
+      confidence: _confidence,
     );
   }
 

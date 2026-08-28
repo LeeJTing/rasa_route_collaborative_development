@@ -52,6 +52,7 @@ class MapExplorationLogic {
   /// is unavailable or outside Malaysia.
   static const double malaysiaCentreLatitude = 4.10;
   static const double malaysiaCentreLongitude = 109.50;
+
   ///
   /// 4.7, not 5.3: Malaysia's bounding box is 20.3 degrees of longitude wide,
   /// and at 5.3 that does not fit a 390pt phone - Sabah fell off the right
@@ -274,7 +275,10 @@ class MapExplorationLogic {
         .map((LocalFood food) => food.id)
         .toSet();
 
-    final List<FoodOccurrence> occurrences = _resolve(rawOccurrences, catalogue);
+    final List<FoodOccurrence> occurrences = _resolve(
+      rawOccurrences,
+      catalogue,
+    );
 
     // state code -> the distinct local foods served in it
     final Map<String, Set<int>> foodsByRegion = <String, Set<int>>{
@@ -293,8 +297,7 @@ class MapExplorationLogic {
       );
       if (region == null) continue;
       foodsByRegion[region.code]!.add(occurrence.localFoodId);
-      occurrencesByRegion[region.code] =
-          occurrencesByRegion[region.code]! + 1;
+      occurrencesByRegion[region.code] = occurrencesByRegion[region.code]! + 1;
     }
 
     int maximum = 0;
@@ -375,12 +378,29 @@ class MapExplorationLogic {
         .map((LocalFood food) => food.id)
         .toSet();
 
-    final List<FoodOccurrence> occurrences = _resolve(rawOccurrences, catalogue);
+    final List<FoodOccurrence> occurrences = _resolve(
+      rawOccurrences,
+      catalogue,
+    );
+
+    // A dish only has to match the catalogue when the tourist is actually
+    // looking for one - a filter is active or a specific dish search is set.
+    // An unresolved submitted landmark (free-text dish, `localFoodId` 0) still
+    // has valid coordinates, so with nothing filtering the map it deserves a
+    // pin; it just cannot honestly be matched against a criterion it was never
+    // checked against, so it is excluded the moment a criterion exists. This
+    // is deliberately different from `distribution()`, where an unmatched dish
+    // counting by no state is the honest outcome for a diversity score.
+    final bool requiresCatalogueMatch =
+        localFoodId != null || filter.selectionCount > 0;
 
     // One pin per place, gathering every matching dish served there.
     final Map<String, _PinBuilder> byPlace = <String, _PinBuilder>{};
     for (final FoodOccurrence occurrence in occurrences) {
-      if (!matchingIds.contains(occurrence.localFoodId)) continue;
+      if (requiresCatalogueMatch &&
+          !matchingIds.contains(occurrence.localFoodId)) {
+        continue;
+      }
       if (south != null && occurrence.latitude < south) continue;
       if (north != null && occurrence.latitude > north) continue;
       if (west != null && occurrence.longitude < west) continue;
@@ -521,7 +541,8 @@ class MapExplorationLogic {
     final List<Region> allRegions = gathered[0] as List<Region>;
     final List<MapPlace> catalogue = gathered[1] as List<MapPlace>;
     final List<LocalFood> foods = gathered[2] as List<LocalFood>;
-    final List<FoodOccurrence> occurrences = gathered[3] as List<FoodOccurrence>;
+    final List<FoodOccurrence> occurrences =
+        gathered[3] as List<FoodOccurrence>;
 
     final List<_ScoredPlace> scored = <_ScoredPlace>[];
 
@@ -786,8 +807,7 @@ class MapExplorationLogic {
     for (int i = 0, j = boundary.length - 1; i < boundary.length; j = i++) {
       final GeoPoint a = boundary[i];
       final GeoPoint b = boundary[j];
-      final bool straddles =
-          (a.latitude > latitude) != (b.latitude > latitude);
+      final bool straddles = (a.latitude > latitude) != (b.latitude > latitude);
       if (!straddles) continue;
       final double crossing =
           (b.longitude - a.longitude) *

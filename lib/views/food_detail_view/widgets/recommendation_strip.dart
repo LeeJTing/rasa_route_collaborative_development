@@ -33,7 +33,9 @@ class RecommendationStrip extends StatelessWidget {
                 children: <Widget>[
                   Expanded(
                     child: AppImage(
-                      source: food.imageUrl,
+                      source: food.imageUrls.isEmpty
+                          ? null
+                          : food.imageUrls.first,
                       borderRadius: AppRadius.cardRadius,
                       semanticLabel: food.name,
                     ),

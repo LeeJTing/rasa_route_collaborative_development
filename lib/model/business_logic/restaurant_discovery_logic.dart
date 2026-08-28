@@ -30,15 +30,15 @@ class RestaurantDiscoveryLogic {
     TouristLocation location,
   ) => restaurants
       .map((Restaurant restaurant) {
-        final Restaurant visibleRestaurant = restaurant.copyWith(
-          category: _visibleCategory(restaurant.category),
-        );
+        final String visibleCategory = _visibleCategory(restaurant.category);
         if (!location.isKnown ||
             restaurant.latitude == null ||
             restaurant.longitude == null) {
-          return visibleRestaurant;
+          return _withDiscoveryValues(restaurant, category: visibleCategory);
         }
-        return visibleRestaurant.copyWith(
+        return _withDiscoveryValues(
+          restaurant,
+          category: visibleCategory,
           distanceMetres: _distanceMetres(
             location.latitude,
             location.longitude,
@@ -48,6 +48,27 @@ class RestaurantDiscoveryLogic {
         );
       })
       .toList(growable: false);
+
+  Restaurant _withDiscoveryValues(
+    Restaurant restaurant, {
+    required String category,
+    double? distanceMetres,
+  }) => Restaurant(
+    id: restaurant.id,
+    name: restaurant.name,
+    category: category,
+    address: restaurant.address,
+    rating: restaurant.rating,
+    latitude: restaurant.latitude,
+    longitude: restaurant.longitude,
+    phone: restaurant.phone,
+    website: restaurant.website,
+    imageUrl: restaurant.imageUrl,
+    openingHours: restaurant.openingHours,
+    distanceMetres: distanceMetres ?? restaurant.distanceMetres,
+    reviewCount: restaurant.reviewCount,
+    items: restaurant.items,
+  );
 
   /// Halal classification was retired from the product. Imported restaurant
   /// source categories can still contain the old word, so remove that whole

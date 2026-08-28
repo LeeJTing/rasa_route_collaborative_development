@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/food_recognition_result.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
+import 'package:rasa_route_collaborative_development/domain_model/submitted_landmark.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/food_recognition_logic.dart';
 import 'package:rasa_route_collaborative_development/model/data_models/food_analysis_response.dart';
 import 'package:rasa_route_collaborative_development/model/repositories/discovery_repository_facade.dart';
@@ -29,12 +30,42 @@ class _FakeRecognitionRepository extends RecognitionRepository {
       onAnalyzeByName!(imageBytes, name);
 }
 
-/// Fake catalogue repository - replaces Supabase's `findByName` lookup.
+/// Fake catalogue repository - replaces Supabase's `getFoods` lookup with a
+/// controllable in-memory catalogue list, and records `insertFood` calls.
 class _FakeFoodKnowledgeRepository extends FoodKnowledgeRepository {
-  Future<LocalFood?> Function(String name)? onFindByName;
+  List<LocalFood> catalogue = const <LocalFood>[];
+  final List<LocalFood> inserted = <LocalFood>[];
 
   @override
-  Future<LocalFood?> findByName(String name) => onFindByName!(name);
+  Future<List<LocalFood>> getFoods() async => catalogue;
+
+  @override
+  Future<LocalFood?> insertFood(LocalFood food) async {
+    inserted.add(food);
+    return food;
+  }
+}
+
+class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
+  _FakeDiscoveryRepositoryFacade(this.fakeRecognition);
+
+  final RecognitionRepository fakeRecognition;
+
+  @override
+  RecognitionRepository get recognition => fakeRecognition;
+}
+
+class _FakeFoodRepositoryFacade extends FoodRepositoryFacade {
+  _FakeFoodRepositoryFacade(this.fakeKnowledge);
+
+  final _FakeFoodKnowledgeRepository fakeKnowledge;
+
+  @override
+  Future<List<LocalFood>> getFoods() => fakeKnowledge.getFoods();
+
+  @override
+  Future<LocalFood?> insertFood(LocalFood food) =>
+      fakeKnowledge.insertFood(food);
 }
 
 LocalFood _food(String name) => LocalFood(
@@ -86,10 +117,8 @@ void main() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
       logic = FoodRecognitionLogic(
-        discoveryRepository: DiscoveryRepositoryFacade(
-          recognition: recognition,
-        ),
-        foodRepository: FoodRepositoryFacade(knowledge: knowledge),
+        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
+        foodRepository: _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -199,8 +228,7 @@ void main() {
     test('a low-confidence catalogue match is verified by the full analysis '
         '(never shown as certain)', () async {
       final murtabak = _food('Murtabak');
-      knowledge.onFindByName = (String name) async =>
-          name == 'Murtabak' ? murtabak : null;
+      knowledge.catalogue = <LocalFood>[murtabak];
       // Gemini is only 40% sure - even though the name IS in the catalogue,
       // the full analysis must re-judge the photo instead of shortcutting
       // straight to that record and presenting it as certain.
@@ -235,12 +263,7 @@ void main() {
       final murtabak = _food('Murtabak');
       final roti = _food('Roti Canai');
       final nasi = _food('Nasi Lemak');
-      final Map<String, LocalFood> catalogue = <String, LocalFood>{
-        'Murtabak': murtabak,
-        'Roti Canai': roti,
-        'Nasi Lemak': nasi,
-      };
-      knowledge.onFindByName = (String name) async => catalogue[name];
+      knowledge.catalogue = <LocalFood>[murtabak, roti, nasi];
       recognition.onIdentify = (_) async => _quickResponse(
         candidates: <FoodCandidate>[
           FoodCandidate(dish: 'Murtabak', confidence: 0.9),
@@ -266,10 +289,7 @@ void main() {
         'C',
         'D',
       ].map(_food).toList();
-      final Map<String, LocalFood> catalogue = <String, LocalFood>{
-        for (final LocalFood f in foods) f.name: f,
-      };
-      knowledge.onFindByName = (String name) async => catalogue[name];
+      knowledge.catalogue = foods;
       recognition.onIdentify = (_) async => _quickResponse(
         candidates: <FoodCandidate>[
           FoodCandidate(dish: 'A', confidence: 0.9),
@@ -293,8 +313,7 @@ void main() {
       'a candidate missing from the catalogue is still offered name-only',
       () async {
         final murtabak = _food('Murtabak');
-        knowledge.onFindByName = (String name) async =>
-            name == 'Murtabak' ? murtabak : null;
+        knowledge.catalogue = <LocalFood>[murtabak];
         recognition.onIdentify = (_) async => _quickResponse(
           candidates: <FoodCandidate>[
             FoodCandidate(dish: 'Murtabak', confidence: 0.9),
@@ -318,8 +337,7 @@ void main() {
       'low-confidence candidates (< 0.5) are dropped, single path wins',
       () async {
         final murtabak = _food('Murtabak');
-        knowledge.onFindByName = (String name) async =>
-            name == 'Murtabak' ? murtabak : null;
+        knowledge.catalogue = <LocalFood>[murtabak];
         recognition.onIdentify = (_) async => _quickResponse(
           dish: 'Murtabak',
           candidates: <FoodCandidate>[
@@ -360,8 +378,7 @@ void main() {
       'confident single result in the catalogue skips the full call',
       () async {
         final murtabak = _food('Murtabak');
-        knowledge.onFindByName = (String name) async =>
-            name == 'Murtabak' ? murtabak : null;
+        knowledge.catalogue = <LocalFood>[murtabak];
         recognition.onIdentify = (_) async => _quickResponse(dish: 'Murtabak');
         bool analyzeFullCalled = false;
         recognition.onAnalyzeFull = (List<int> _) async {
@@ -393,7 +410,7 @@ void main() {
     test(
       'confident single result NOT in the catalogue runs the full call',
       () async {
-        knowledge.onFindByName = (String _) async => null;
+        knowledge.catalogue = const <LocalFood>[];
         recognition.onIdentify = (_) async =>
             _quickResponse(dish: 'Unknown Dish');
         recognition.onAnalyzeFull = (List<int> _) async => (
@@ -421,11 +438,7 @@ void main() {
     test('duplicate candidate names are deduplicated', () async {
       final murtabak = _food('Murtabak');
       final roti = _food('Roti Canai');
-      final Map<String, LocalFood> catalogue = <String, LocalFood>{
-        'Murtabak': murtabak,
-        'Roti Canai': roti,
-      };
-      knowledge.onFindByName = (String name) async => catalogue[name];
+      knowledge.catalogue = <LocalFood>[murtabak, roti];
       recognition.onIdentify = (_) async => _quickResponse(
         candidates: <FoodCandidate>[
           FoodCandidate(dish: 'Murtabak', confidence: 0.9),
@@ -453,18 +466,15 @@ void main() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
       logic = FoodRecognitionLogic(
-        discoveryRepository: DiscoveryRepositoryFacade(
-          recognition: recognition,
-        ),
-        foodRepository: FoodRepositoryFacade(knowledge: knowledge),
+        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
+        foodRepository: _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
     test('always verifies the typed name against the photo, then prefers the '
         'catalogue for details once verified', () async {
       final murtabak = _food('Murtabak');
-      knowledge.onFindByName = (String name) async =>
-          name == 'Murtabak' ? murtabak : null;
+      knowledge.catalogue = <LocalFood>[murtabak];
       bool analyzeByNameCalled = false;
       // Gemini confirms the photo shows the typed name...
       recognition.onAnalyzeByName = (List<int> _, String name) async {
@@ -499,7 +509,7 @@ void main() {
     test(
       'sends the typed name + image to Gemini and returns that one dish',
       () async {
-        knowledge.onFindByName = (String _) async => null;
+        knowledge.catalogue = const <LocalFood>[];
         // The repository names the result exactly what was typed - the fake
         // mirrors that by returning a food named after [name].
         recognition.onAnalyzeByName = (List<int> _, String name) async => (
@@ -527,7 +537,7 @@ void main() {
     test(
       'reports a mismatch (and the observed food) instead of agreeing',
       () async {
-        knowledge.onFindByName = (String _) async => null;
+        knowledge.catalogue = const <LocalFood>[];
         // Photograph a pizza, type "Nasi Lemak": Gemini says the photo does
         // NOT show nasi lemak - it sees a pepperoni pizza.
         recognition.onAnalyzeByName = (List<int> _, String name) async => (
@@ -557,7 +567,7 @@ void main() {
     );
 
     test('spelling variants count as a match, not a mismatch', () async {
-      knowledge.onFindByName = (String _) async => null;
+      knowledge.catalogue = const <LocalFood>[];
       recognition.onAnalyzeByName = (List<int> _, String name) async => (
         food: _food('Char Kway Teow'),
         priceMin: 0.0,
@@ -588,10 +598,8 @@ void main() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
       logic = FoodRecognitionLogic(
-        discoveryRepository: DiscoveryRepositoryFacade(
-          recognition: recognition,
-        ),
-        foodRepository: FoodRepositoryFacade(knowledge: knowledge),
+        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
+        foodRepository: _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -599,8 +607,7 @@ void main() {
       'returns the catalogue row without calling Gemini (fast path)',
       () async {
         final murtabak = _food('Murtabak');
-        knowledge.onFindByName = (String name) async =>
-            name == 'Murtabak' ? murtabak : null;
+        knowledge.catalogue = <LocalFood>[murtabak];
         bool analyzeByNameCalled = false;
         recognition.onAnalyzeByName = (List<int> _, String name) async {
           analyzeByNameCalled = true;
@@ -628,4 +635,103 @@ void main() {
       },
     );
   });
+
+  group(
+    'FoodRecognitionLogic.registerNewDishes (Option C catalogue growth)',
+    () {
+      late _FakeFoodKnowledgeRepository knowledge;
+      late FoodRecognitionLogic logic;
+
+      /// A food as Gemini produces it - not yet a curated row (`id: 0`).
+      LocalFood geminiFood(String name) => LocalFood(
+        id: 0,
+        name: name,
+        description: 'Description of $name',
+        origin: 'Malaysia',
+        culturalBackground: '',
+        ingredients: '',
+        category: 'Malay',
+        cookingStyle: 'Frying',
+        mealType: 'Breakfast',
+        foodType: 'Food',
+      );
+
+      FoodSubmission submission(
+        LocalFood food, {
+        double confidence = 0.9,
+        bool isLocalFood = true,
+        bool isFake = false,
+      }) => FoodSubmission(
+        food: food,
+        price: 5,
+        confidence: confidence,
+        isLocalFood: isLocalFood,
+        isFake: isFake,
+      );
+
+      setUp(() {
+        knowledge = _FakeFoodKnowledgeRepository();
+        logic = FoodRecognitionLogic(
+          discoveryRepository: _FakeDiscoveryRepositoryFacade(
+            _FakeRecognitionRepository(),
+          ),
+          foodRepository: _FakeFoodRepositoryFacade(knowledge),
+        );
+      });
+
+      test('inserts a genuinely-new high-confidence dish', () async {
+        knowledge.catalogue = <LocalFood>[_food('Nasi Lemak')];
+
+        await logic.registerNewDishes(<FoodSubmission>[
+          submission(geminiFood('Laksam')),
+        ]);
+
+        expect(knowledge.inserted.map((LocalFood f) => f.name), <String>[
+          'Laksam',
+        ]);
+      });
+
+      test('skips a low-confidence dish (0.6 is not enough)', () async {
+        knowledge.catalogue = const <LocalFood>[];
+
+        await logic.registerNewDishes(<FoodSubmission>[
+          submission(geminiFood('Laksam'), confidence: 0.6),
+        ]);
+
+        expect(knowledge.inserted, isEmpty);
+      });
+
+      test('skips a variant of an existing dish ("nasi lemak ayam")', () async {
+        knowledge.catalogue = <LocalFood>[_food('Nasi Lemak')];
+
+        await logic.registerNewDishes(<FoodSubmission>[
+          submission(geminiFood('Nasi Lemak Ayam'), confidence: 0.95),
+        ]);
+
+        expect(knowledge.inserted, isEmpty);
+      });
+
+      test('skips a dish already in the catalogue (id != 0)', () async {
+        final existing = _food('Nasi Lemak');
+        knowledge.catalogue = <LocalFood>[existing];
+
+        await logic.registerNewDishes(<FoodSubmission>[
+          submission(existing, confidence: 0.95),
+        ]);
+
+        expect(knowledge.inserted, isEmpty);
+      });
+
+      test('skips non-local and fake dishes', () async {
+        knowledge.catalogue = const <LocalFood>[];
+
+        await logic.registerNewDishes(<FoodSubmission>[
+          submission(geminiFood('Pizza'), isLocalFood: false, confidence: 0.95),
+          submission(geminiFood('Laksam'), confidence: 0.95, isFake: true),
+        ]);
+
+        expect(knowledge.inserted, isEmpty);
+      });
+    },
+  );
 }

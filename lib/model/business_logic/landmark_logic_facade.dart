@@ -119,16 +119,27 @@ class LandmarkLogicFacade {
     String? imageCategory,
     required List<FoodSubmission> foods,
     required Map<Weekday, List<OpeningHour>> operatingHours,
-  }) => submission.submitLandmark(
-    restaurantName: restaurantName,
-    latitude: latitude,
-    longitude: longitude,
-    category: category,
-    touristId: touristId,
-    imageUrl: imageUrl,
-    imageId: imageId,
-    imageCategory: imageCategory,
-    foods: foods,
-    operatingHours: operatingHours,
-  );
+  }) async {
+    await submission.submitLandmark(
+      restaurantName: restaurantName,
+      latitude: latitude,
+      longitude: longitude,
+      category: category,
+      touristId: touristId,
+      imageUrl: imageUrl,
+      imageId: imageId,
+      imageCategory: imageCategory,
+      foods: foods,
+      operatingHours: operatingHours,
+    );
+    // Option C - best-effort catalogue growth. The landmark write is the one
+    // the tourist confirmed; a catalogue insert that fails (e.g. the RLS
+    // migration not applied yet) must not fail the submission that already
+    // succeeded.
+    try {
+      await foodRecognition.registerNewDishes(foods);
+    } catch (_) {
+      // Ignored - the landmark was already saved.
+    }
+  }
 }

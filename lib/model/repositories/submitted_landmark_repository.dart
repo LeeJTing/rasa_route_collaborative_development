@@ -115,11 +115,21 @@ class SubmittedLandmarkRepository {
       bytes: bytes,
       path: objectName,
     );
+    // The object key the SDK returns should be the bare path we sent. Guard
+    // against SDKs that return it already prefixed with the bucket name - if
+    // that prefix leaked into the public URL the path would double the bucket
+    // segment (".../public/landmark-images/landmark-images/photo/...") and
+    // Supabase would answer 404 NoSuchKey, which is exactly the blank-card
+    // symptom. Stripping it is a no-op when the key was already bare.
+    final String objectKey =
+        path.startsWith('${APIManager.storageBucketLandmarkImages}/')
+        ? path.substring(APIManager.storageBucketLandmarkImages.length + 1)
+        : path;
     final String? url = api.resolveImageUrl(
-      path,
+      objectKey,
       bucket: APIManager.storageBucketLandmarkImages,
     );
-    return (id: path, url: url ?? '');
+    return (id: objectKey, url: url ?? '');
   }
 
   Future<void> _insertOpeningHours(
