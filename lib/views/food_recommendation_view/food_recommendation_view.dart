@@ -1,25 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
+import '../../core/view_state.dart';
 import '../../view_models/food_recommendation_view_model.dart';
-import '../common_widgets/app_top_bar.dart';
+import 'widgets/recommendation_card.dart';
 
-/// For you screen.
-///
-/// Placeholder body. What is wired up is the View - ViewModel connection:
-///
-///   * the ViewModel is built in `initState` with `XViewModel()` - a View knows
-///     its ViewModel and nothing else, and nothing is passed in;
-///   * it is published to this screen's subtree with a
-///     `ChangeNotifierProvider` declared by this View and nobody else;
-///   * it is disposed with the screen.
-///
-/// Build the layout from the Figma frame for this screen, using
-/// `Theme.of(context)` and the tokens in `lib/app/theme/`. Reusable pieces go
-/// in `food_recommendation_view/widgets/`.
 class FoodRecommendationView extends StatefulWidget {
-  const FoodRecommendationView({super.key});
+  const FoodRecommendationView({super.key, this.foodId});
+  final int? foodId;
 
   @override
   State<FoodRecommendationView> createState() => _FoodRecommendationViewState();
@@ -27,12 +17,34 @@ class FoodRecommendationView extends StatefulWidget {
 
 class _FoodRecommendationViewState extends State<FoodRecommendationView> {
   late final FoodRecommendationViewModel _viewModel;
+  bool _initialised = false;
 
   @override
   void initState() {
     super.initState();
     _viewModel = FoodRecommendationViewModel();
-    _viewModel.onInit();
+  }
+
+  int get _foodId {
+    if (widget.foodId != null) return widget.foodId!;
+    final Object? argument = ModalRoute.of(context)?.settings.arguments;
+    return argument is int ? argument : 1;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_initialised) return;
+    _initialised = true;
+    _viewModel.load(_foodId);
+  }
+
+  @override
+  void didUpdateWidget(FoodRecommendationView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.foodId != oldWidget.foodId) {
+      _viewModel.load(_foodId);
+    }
   }
 
   @override
@@ -45,24 +57,77 @@ class _FoodRecommendationViewState extends State<FoodRecommendationView> {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<FoodRecommendationViewModel>.value(
       value: _viewModel,
-      child: Scaffold(
-        appBar: const AppTopBar(title: 'For you'),
-        body: SafeArea(
-          child: Consumer<FoodRecommendationViewModel>(
-            builder:
-                (
-                  BuildContext context,
-                  FoodRecommendationViewModel viewModel,
-                  Widget? _,
-                ) {
-                  return const Padding(
-                    padding: AppSpacing.screenPadding,
-                    child: Center(child: Text('FoodRecommendationView')),
-                  );
-                },
-          ),
-        ),
+      child: Consumer<FoodRecommendationViewModel>(
+        builder:
+            (BuildContext context, FoodRecommendationViewModel vm, Widget? _) {
+          return _content(context, vm);
+        },
       ),
+    );
+  }
+
+  Widget _content(BuildContext context, FoodRecommendationViewModel vm) {
+    if (vm.state == ViewState.busy && vm.selectedFood == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (vm.state == ViewState.error && vm.selectedFood == null) {
+      return Center(
+        child: ElevatedButton(
+          onPressed: () => vm.load(vm.foodId),
+          child: Text(vm.errorMessage ?? 'Try again'),
+        ),
+      );
+    }
+    if (vm.loadingPairings) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (vm.pairingTimedOut) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          TextButton.icon(
+            onPressed: vm.retryPairings,
+            icon: const Icon(Icons.refresh),
+            label: const Text("Couldn't load pairings — retry"),
+          ),
+          if (vm.pairingError != null && vm.pairingError!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: Text(
+                vm.pairingError!,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+    if (vm.pairings.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+        child: Text(
+          'No suitable food pairings were found for your dietary requirements.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: vm.pairings
+          .map(
+            (pairing) => RecommendationCard(
+          pairing: pairing,
+          pairedFood: vm.pairedFood(pairing.pairedLocalFoodId),
+        ),
+      )
+          .toList(growable: false),
     );
   }
 }

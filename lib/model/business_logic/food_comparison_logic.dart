@@ -31,15 +31,26 @@ class FoodComparisonLogic {
       throw Exception('Select at least 2 local foods to compare.');
     }
 
-    final List<DietaryRestriction> touristRestrictions = await repository
-        .touristDietaryRestrictions();
+    // Dietary safety is best-effort: if the restriction relation queries fail
+    // (e.g. the `dietary_restriction(...)` FK embed isn't set up in Supabase),
+    // degrade to "no conflicts" instead of crashing with a PostgrestException.
+    List<DietaryRestriction> touristRestrictions;
+    try {
+      touristRestrictions = await repository.touristDietaryRestrictions();
+    } catch (_) {
+      touristRestrictions = const <DietaryRestriction>[];
+    }
     final Set<int> touristRestrictionIds = touristRestrictions
         .map((DietaryRestriction r) => r.id)
         .toSet();
     final Map<int, Set<int>> foodRestrictionIds = <int, Set<int>>{};
     for (final LocalFood food in foods) {
-      final List<DietaryRestriction> restrictions = await repository
-          .foodDietaryRestrictions(food.id);
+      List<DietaryRestriction> restrictions;
+      try {
+        restrictions = await repository.foodDietaryRestrictions(food.id);
+      } catch (_) {
+        restrictions = const <DietaryRestriction>[];
+      }
       foodRestrictionIds[food.id] = restrictions
           .map((DietaryRestriction restriction) => restriction.id)
           .toSet();

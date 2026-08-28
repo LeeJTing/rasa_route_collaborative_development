@@ -1,138 +1,174 @@
 import 'dart:convert';
 
+import 'package:meta/meta.dart' show visibleForTesting;
+
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 
-/// Candidate sets for personalised food and restaurant suggestions.
-///
-/// A repository is the only layer that talks to the shared clients. It asks
-/// `APIManager` for raw rows, hands them to a **data model** (`fromJson`), then
-/// converts that data model into a **domain model** for everything above.
-///
-/// NOTE (guideline §12 known gaps): there is no `food_pairing` or
-/// `food_similarity` table in Supabase yet, so neither method reads from the
-/// database. [getPairings] asks Gemini at request time (per UC406); [getSimilar]
-/// is computed client-side from attributes already on [LocalFood]. Once the
-/// tables exist, swap the bodies below for `api.selectAll(...)` without
-/// touching anything above this repository.
 class RecommendationRepository {
   RecommendationRepository();
 
   final APIManager api = APIManager();
 
-  /// Asks Gemini for dishes from [catalogue] that pair well with [food].
-  ///
-  /// Returns an empty list (never throws) when Gemini is unreachable or times
-  /// out - the caller decides how to present "no suggestions right now".
   Future<List<FoodPairing>> getPairings(
-    LocalFood food,
-    List<LocalFood> catalogue,
-  ) async {
+      LocalFood food,
+      List<LocalFood> catalogue, {
+        List<int> touristDietaryRestrictionIds = const <int>[],
+        Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
+        int maximumResults = 5,
+      }) async {
+    final int maxResults = maximumResults < 1
+        ? 1
+        : (maximumResults > 5 ? 5 : maximumResults);
+
+    // Confirmed dietary conflicts are excluded up front - dietary safety
+    // outranks pairing quality and is never left to the model alone.
+    final Set<int> touristRestrictionIds = touristDietaryRestrictionIds.toSet();
     final List<LocalFood> candidates = catalogue
         .where((LocalFood c) => c.id != food.id)
-        .take(30)
-        .toList();
+        .where(
+          (LocalFood c) => !_hasDietaryConflict(
+        c,
+        foodDietaryRestrictionIds,
+        touristRestrictionIds,
+      ),
+    )
+        .take(40)
+        .toList(growable: false);
     if (candidates.isEmpty) return const <FoodPairing>[];
 
-    final String candidateList = candidates
-        .map((LocalFood c) => '- id ${c.id}: ${c.name} (${c.category})')
-        .join('\n');
-
-    final String prompt =
-        'A tourist is looking at the Malaysian dish "${food.name}" '
-        '(${food.category}, ${food.description}). '
-        'From this list of other dishes, pick up to 3 that pair well with it '
-        '(e.g. a drink or side that complements the flavours):\n$candidateList\n\n'
-        'Reply with ONLY a JSON array, no prose, no markdown fences, shaped like: '
-        '[{"id": <int>, "score": <0..1>, "reason": "<short reason>"}]';
-
-    try {
-      final String raw = await api.askGemini(prompt);
-      final List<dynamic> parsed =
-          jsonDecode(_stripFences(raw)) as List<dynamic>;
-
-      final List<FoodPairing> pairings = <FoodPairing>[];
-      for (final dynamic entry in parsed) {
-        if (entry is! Map) continue;
-        final Map<String, dynamic> map = Map<String, dynamic>.from(entry);
-        final int? pairedId = (map['id'] as num?)?.toInt();
-        final LocalFood? paired = candidates.cast<LocalFood?>().firstWhere(
-          (LocalFood? c) => c?.id == pairedId,
-          orElse: () => null,
-        );
-        if (paired == null) continue;
-
-        pairings.add(
-          FoodPairing(
-            localFoodId: food.id,
-            pairedLocalFoodId: paired.id,
-            pairedFoodName: paired.name,
-            pairedImageUrl: _primaryImage(paired),
-            score: ((map['score'] as num?)?.toDouble() ?? 0.5).clamp(0.0, 1.0),
-            reason: (map['reason'] as String?) ?? '',
-          ),
-        );
-      }
-      pairings.sort(
-        (FoodPairing a, FoodPairing b) => b.score.compareTo(a.score),
-      );
-      final List<FoodPairing> ranked = pairings.take(3).toList();
-      return ranked.isEmpty ? _fallbackPairings(food, candidates) : ranked;
-    } catch (_) {
-      // Network failure, timeout, or malformed AI output: retain a useful,
-      // deterministic offline experience from the existing catalogue.
-      return _fallbackPairings(food, candidates);
-    }
+    final String raw = await api.gemini.generateFoodPairings(
+      selected: food,
+      candidates: candidates,
+    );
+    return parsePairings(
+      raw,
+      selected: food,
+      candidates: candidates,
+      maximumResults: maxResults,
+    );
   }
 
-  List<FoodPairing> _fallbackPairings(
-    LocalFood food,
-    List<LocalFood> candidates,
-  ) {
-    const List<String> preferred = <String>[
-      'Teh Tarik',
-      'Cendol',
-      'Bubur Cha Cha',
-    ];
-    const List<double> scores = <double>[0.98, 0.93, 0.85];
-    const List<String> reasons = <String>[
-      'Creamy milk tea balances the rich chilli-paste spices.',
-      'A cooling coconut dessert refreshes the palate.',
-      'A gently sweet coconut dessert rounds out the meal.',
-    ];
+  /// Whether [candidate]'s `food_dietary_restriction` ids intersect the
+  /// tourist's chosen restriction ids. True = confirmed conflict = excluded.
+  bool _hasDietaryConflict(
+      LocalFood candidate,
+      Map<int, List<int>> foodDietaryRestrictionIds,
+      Set<int> touristRestrictionIds,
+      ) {
+    if (touristRestrictionIds.isEmpty) return false;
+    final List<int> ids =
+        foodDietaryRestrictionIds[candidate.id] ?? const <int>[];
+    return ids.any(touristRestrictionIds.contains);
+  }
 
-    final List<FoodPairing> result = <FoodPairing>[];
-    for (int index = 0; index < preferred.length; index++) {
-      LocalFood? match;
-      for (final LocalFood candidate in candidates) {
-        if (candidate.name == preferred[index]) {
-          match = candidate;
-          break;
-        }
+  @visibleForTesting
+  List<FoodPairing> parsePairings(
+      String raw, {
+        required LocalFood selected,
+        required List<LocalFood> candidates,
+        required int maximumResults,
+      }) {
+    final Map<String, dynamic> decoded;
+    try {
+      final Object? parsed = jsonDecode(_stripFences(raw));
+      decoded = parsed is Map<String, dynamic>
+          ? parsed
+          : <String, dynamic>{};
+    } catch (_) {
+      return const <FoodPairing>[];
+    }
+
+    final List<dynamic>? entries = decoded['recommendations'] as List<dynamic>?;
+    if (entries == null) return const <FoodPairing>[];
+
+    final List<FoodPairing> pairings = <FoodPairing>[];
+    final Set<int> seen = <int>{};
+    for (final dynamic entry in entries) {
+      if (entry is! Map) continue;
+      final Map<String, dynamic> map = Map<String, dynamic>.from(entry);
+
+      final int? pairedId = (map['foodId'] as num?)?.toInt();
+      final LocalFood? paired = _candidateById(candidates, pairedId);
+      if (paired == null ||
+          paired.id == selected.id ||
+          !seen.add(paired.id)) {
+        continue;
       }
-      if (match == null) continue;
-      result.add(
+
+      final bool isWarning = map['dietaryStatus'] == 'warning';
+      final int rawPercentage = (map['matchPercentage'] as num?)?.toInt() ?? 0;
+      final int percentage = rawPercentage < 0
+          ? 0
+          : (rawPercentage > 100 ? 100 : rawPercentage);
+      final String reason = (map['reason'] as String?)?.trim() ?? '';
+      final String? warning = (map['warning'] as String?)?.trim();
+
+      pairings.add(
         FoodPairing(
-          localFoodId: food.id,
-          pairedLocalFoodId: match.id,
-          pairedFoodName: match.name,
-          pairedImageUrl: _primaryImage(match),
-          score: scores[index],
-          reason: reasons[index],
+          localFoodId: selected.id,
+          pairedLocalFoodId: paired.id,
+          pairedFoodName: paired.name,
+          rank: 0, // reassigned after sorting
+          matchPercentage: percentage,
+          reason: reason.isEmpty
+              ? 'Pairs well with ${selected.name}.'
+              : reason,
+          dietaryStatus: isWarning
+              ? FoodPairingDietaryStatus.warning
+              : FoodPairingDietaryStatus.compatible,
+          warning: isWarning
+              ? (warning == null || warning.isEmpty)
+              ? _defaultWarning
+              : warning
+              : null,
         ),
       );
     }
-    return result;
+
+    // Highest percentage first; ties keep CANDIDATES order.
+    pairings.sort(
+          (FoodPairing a, FoodPairing b) =>
+          b.matchPercentage.compareTo(a.matchPercentage),
+    );
+    final int take = pairings.length < maximumResults
+        ? pairings.length
+        : maximumResults;
+    // Rebuild with consecutive ranks (domain models carry no behaviour).
+    return <FoodPairing>[
+      for (int index = 0; index < take; index++)
+        FoodPairing(
+          localFoodId: pairings[index].localFoodId,
+          pairedLocalFoodId: pairings[index].pairedLocalFoodId,
+          pairedFoodName: pairings[index].pairedFoodName,
+          rank: index + 1,
+          matchPercentage: pairings[index].matchPercentage,
+          reason: pairings[index].reason,
+          dietaryStatus: pairings[index].dietaryStatus,
+          warning: pairings[index].warning,
+        ),
+    ];
   }
+
+  LocalFood? _candidateById(List<LocalFood> candidates, int? id) {
+    if (id == null) return null;
+    for (final LocalFood candidate in candidates) {
+      if (candidate.id == id) return candidate;
+    }
+    return null;
+  }
+
+  static const String _defaultWarning =
+      'Allergen or preparation information is incomplete; confirm with the seller before ordering.';
 
   /// "If you liked X, try Y" - dishes sharing category / cooking style / meal
   /// type with [food], ranked by how many attributes they share.
   Future<List<FoodSimilarity>> getSimilar(
-    LocalFood food,
-    List<LocalFood> catalogue,
-  ) async {
+      LocalFood food,
+      List<LocalFood> catalogue,
+      ) async {
     final List<FoodSimilarity> results = <FoodSimilarity>[];
 
     for (final LocalFood other in catalogue) {
@@ -161,9 +197,9 @@ class RecommendationRepository {
     }
 
     results.sort(
-      (FoodSimilarity a, FoodSimilarity b) => b.score.compareTo(a.score),
+          (FoodSimilarity a, FoodSimilarity b) => b.score.compareTo(a.score),
     );
-    return results.take(6).toList();
+    return results.take(10).toList();
   }
 
   /// Strips ```json fences a model sometimes wraps its reply in.
@@ -175,7 +211,4 @@ class RecommendationRepository {
     }
     return trimmed.trim();
   }
-
-  String? _primaryImage(LocalFood food) =>
-      food.imageUrls.isEmpty ? null : food.imageUrls.first;
 }
