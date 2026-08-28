@@ -293,6 +293,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  fluttermocklocation:
+    dependency: "direct main"
+    description:
+      name: fluttermocklocation
+      sha256: "186b2b86003686041b814e2c8f518b21b434deff836b4b2b3d4dc3d0386a3bba"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.5"
   fuchsia_remote_debug_protocol:
     dependency: transitive
     description: flutter
