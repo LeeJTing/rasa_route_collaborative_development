@@ -38,6 +38,32 @@ class MapExplorationLogic {
   final FoodRepositoryFacade foodRepository = FoodRepositoryFacade();
 
   // ===========================================================================
+  // Dev GPS mock (Android-only presenter tool)
+  // ===========================================================================
+  //
+  // Teleports the OS-level GPS so a demo can be "at" a preset spot without
+  // moving the device. The state lives in `MockLocationService`, behind
+  // `LocationRepository`, so `LocationMonitor` can hold the mocked fix and
+  // ignore the real GPS for exactly as long as the mock is active.
+
+  /// Whether this build can mock the OS GPS (Android, non-web). Views hide
+  /// the dev control when false.
+  bool get mockGpsSupported => repository.location.mockSupported;
+
+  /// Whether a mock is live right now.
+  bool get mockGpsActive => repository.location.mockActive;
+
+  /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error
+  /// message, or null on success.
+  Future<String?> setMockGps({
+    required double latitude,
+    required double longitude,
+  }) => repository.location.setMockLocation(latitude, longitude);
+
+  /// Stops mocking and resumes real GPS fixes.
+  Future<void> stopMockGps() => repository.location.stopMockLocation();
+
+  // ===========================================================================
   // Map geometry constants
   // ===========================================================================
 
