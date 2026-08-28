@@ -91,31 +91,77 @@ class ComparisonPairCard extends StatelessWidget {
   }
 }
 
-class _FoodHeader extends StatelessWidget {
+class _FoodHeader extends StatefulWidget {
   const _FoodHeader({required this.food});
 
   final LocalFood food;
 
   @override
+  State<_FoodHeader> createState() => _FoodHeaderState();
+}
+
+class _FoodHeaderState extends State<_FoodHeader> {
+  int _page = 0;
+
+  @override
   Widget build(BuildContext context) {
+    final List<String> images = widget.food.imageUrls;
     return Column(
       children: <Widget>[
         SizedBox(
           height: AppSizes.comparisonImageHeight,
           width: double.infinity,
-          child: AppImage(
-            source: food.imageUrls.isEmpty ? null : food.imageUrls.first,
-          ),
+          child: images.length > 1
+              ? Stack(
+                  children: <Widget>[
+                    Positioned.fill(
+                      child: PageView.builder(
+                        itemCount: images.length,
+                        onPageChanged: (int index) {
+                          setState(() => _page = index);
+                        },
+                        itemBuilder: (BuildContext context, int index) =>
+                            AppImage(
+                              source: images[index],
+                              semanticLabel: '${widget.food.name} image '
+                                  '${index + 1} of ${images.length}',
+                            ),
+                      ),
+                    ),
+                    Positioned(
+                      top: AppSpacing.sm,
+                      right: AppSpacing.sm,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm,
+                          vertical: AppSpacing.xs,
+                        ),
+                        decoration: const BoxDecoration(
+                          color: AppColors.scrim,
+                          borderRadius: BorderRadius.all(
+                            Radius.circular(AppRadius.pill),
+                          ),
+                        ),
+                        child: Text(
+                          '${_page + 1}/${images.length}',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(color: AppColors.surface),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : AppImage(source: widget.food.imageUrl),
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
-          food.name,
+          widget.food.name,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          food.category,
+          widget.food.category,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall,
         ),
@@ -198,16 +244,8 @@ class _PairRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Expanded(
-            child: Padding(padding: padding, child: left),
-          ),
-          const VerticalDivider(
-            width: AppSizes.borderWidth,
-            color: AppColors.accentBrown,
-          ),
-          Expanded(
-            child: Padding(padding: padding, child: right),
-          ),
+          Expanded(child: Padding(padding: padding, child: left)),
+          Expanded(child: Padding(padding: padding, child: right)),
         ],
       ),
     );
@@ -249,7 +287,10 @@ class _LabeledText extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(label, style: Theme.of(context).textTheme.labelLarge),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
         const SizedBox(height: AppSpacing.xs),
         Text(value),
       ],
