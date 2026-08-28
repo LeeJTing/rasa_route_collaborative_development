@@ -24,4 +24,36 @@ class FoodRecommendationLogic {
     LocalFood food,
     List<LocalFood> catalogue,
   ) => repository.getSimilar(food, catalogue);
+
+  Future<List<LocalFood>> getSimilarFoods(int foodId) async {
+    final List<LocalFood> catalogue = await repository.getFoods();
+    final LocalFood selected = catalogue.firstWhere(
+      (LocalFood food) => food.id == foodId,
+      orElse: () => throw Exception('Local food not found.'),
+    );
+    final List<FoodSimilarity> similarities = await similarTo(
+      selected,
+      catalogue,
+    );
+    final Map<int, LocalFood> foodsById = <int, LocalFood>{
+      for (final LocalFood food in catalogue) food.id: food,
+    };
+    return similarities
+        .map(
+          (FoodSimilarity similarity) =>
+              foodsById[similarity.similarLocalFoodId],
+        )
+        .whereType<LocalFood>()
+        .take(3)
+        .toList(growable: false);
+  }
+
+  Future<List<FoodPairing>> getPairingRecommendations(int foodId) async {
+    final List<LocalFood> catalogue = await repository.getFoods();
+    final LocalFood selected = catalogue.firstWhere(
+      (LocalFood food) => food.id == foodId,
+      orElse: () => throw Exception('Local food not found.'),
+    );
+    return pairingsFor(selected, catalogue);
+  }
 }

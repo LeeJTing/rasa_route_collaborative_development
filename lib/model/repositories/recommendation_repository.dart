@@ -69,7 +69,7 @@ class RecommendationRepository {
             localFoodId: food.id,
             pairedLocalFoodId: paired.id,
             pairedFoodName: paired.name,
-            pairedImageUrl: paired.imageUrl,
+            pairedImageUrl: _primaryImage(paired),
             score: ((map['score'] as num?)?.toDouble() ?? 0.5).clamp(0.0, 1.0),
             reason: (map['reason'] as String?) ?? '',
           ),
@@ -118,7 +118,7 @@ class RecommendationRepository {
           localFoodId: food.id,
           pairedLocalFoodId: match.id,
           pairedFoodName: match.name,
-          pairedImageUrl: match.imageUrl,
+          pairedImageUrl: _primaryImage(match),
           score: scores[index],
           reason: reasons[index],
         ),
@@ -175,4 +175,7 @@ class RecommendationRepository {
     }
     return trimmed.trim();
   }
+
+  String? _primaryImage(LocalFood food) =>
+      food.imageUrls.isEmpty ? null : food.imageUrls.first;
 }

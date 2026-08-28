@@ -29,4 +29,53 @@ class FoodKnowledgeLogic {
   /// Toggle favourite status (add if missing, remove if present).
   Future<void> toggleFavouriteFood(int localFoodId) =>
       repository.toggleFavourite(localFoodId);
+
+  Future<LocalFood> getFoodDetails(int foodId) async {
+    final LocalFood? food = await repository.getFoodById(foodId);
+    if (food == null) throw Exception('Local food not found.');
+    return food;
+  }
+
+  Future<bool> isFoodInFavourites(int foodId) async =>
+      (await getFoodDetails(foodId)).isFavourite;
+
+  /// Finds another catalogue entry whose canonical name or synonym overlaps
+  /// with the selected food. Collision detection is data-driven; no dish name
+  /// or database id is embedded in the app.
+  Future<LocalFood?> detectNameCollision(int foodId) async {
+    final List<LocalFood> catalogue = await repository.getFoods();
+    final LocalFood selected = catalogue.firstWhere(
+      (LocalFood food) => food.id == foodId,
+      orElse: () => throw Exception('Local food not found.'),
+    );
+    final Set<String> selectedNames = <String>{
+      selected.name.toLowerCase(),
+      ...selected.synonyms.map((String value) => value.toLowerCase()),
+    };
+    for (final LocalFood candidate in catalogue) {
+      if (candidate.id == selected.id) continue;
+      final Set<String> candidateNames = <String>{
+        candidate.name.toLowerCase(),
+        ...candidate.synonyms.map((String value) => value.toLowerCase()),
+      };
+      if (selectedNames.intersection(candidateNames).isNotEmpty) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  List<String> detectAllergies(LocalFood food) {
+    final String ingredients = food.ingredients.toLowerCase();
+    final List<String> warnings = <String>[];
+    if (ingredients.contains('prawn') ||
+        ingredients.contains('seafood') ||
+        ingredients.contains('shellfish')) {
+      warnings.add('People with seafood allergy should avoid this dish.');
+    }
+    if (ingredients.contains('peanut') || ingredients.contains('nut')) {
+      warnings.add('People with nut allergies should avoid this dish.');
+    }
+    return warnings;
+  }
 }

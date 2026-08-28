@@ -71,58 +71,6 @@ class LocalFood {
   /// Ordered gallery from `local_food_image`.
   final List<String> imageUrls;
 
-  /// First gallery image used by compact list and recommendation cards.
-  String? get imageUrl => imageUrls.isEmpty ? null : imageUrls.first;
-
   /// Whether current user has favourited this. Set by repo from favourite_food table.
   final bool isFavourite;
-
-  // NOTE: no toJson/fromJson here - domain models carry no JSON per the
-  // developer guideline (§10). Serialisation lives on [LocalFoodDataModel]
-  // in lib/model/data_models/. If a call site needs to reconstruct a
-  // LocalFood from cache, it should read a data-model JSON blob and call
-  // LocalFoodDataModel.fromJson(...).toDomain() instead.
-
-  /// Immutable copy-with.
-  LocalFood copyWith({
-    int? id,
-    String? name,
-    String? description,
-    String? origin,
-    String? culturalBackground,
-    String? ingredients,
-    String? category,
-    String? cookingStyle,
-    String? mealType,
-    String? foodType,
-    List<String>? tastes,
-    String? mainTaste,
-    String? pronunciationText,
-    String? audioGuideUrl,
-    List<String>? synonyms,
-    List<String>? imageUrls,
-    bool? isFavourite,
-  }) => LocalFood(
-    id: id ?? this.id,
-    name: name ?? this.name,
-    description: description ?? this.description,
-    origin: origin ?? this.origin,
-    culturalBackground: culturalBackground ?? this.culturalBackground,
-    ingredients: ingredients ?? this.ingredients,
-    category: category ?? this.category,
-    cookingStyle: cookingStyle ?? this.cookingStyle,
-    mealType: mealType ?? this.mealType,
-    foodType: foodType ?? this.foodType,
-    tastes: tastes ?? this.tastes,
-    mainTaste: mainTaste ?? this.mainTaste,
-    pronunciationText: pronunciationText ?? this.pronunciationText,
-    audioGuideUrl: audioGuideUrl ?? this.audioGuideUrl,
-    synonyms: synonyms ?? this.synonyms,
-    imageUrls: imageUrls ?? this.imageUrls,
-    isFavourite: isFavourite ?? this.isFavourite,
-  );
-
-  @override
-  String toString() =>
-      'LocalFood(id: $id, name: $name, category: $category, isFavourite: $isFavourite)';
 }

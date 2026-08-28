@@ -49,11 +49,11 @@ class DietaryRestrictionRepository {
         .toList(growable: false);
   }
 
-  /// The restrictions a tourist holds via `user_dietary_restriction`. Returns
-  /// an empty list when [touristId] is blank (nobody signed in).
-  Future<List<DietaryRestriction>> restrictionsForTourist(
-    String touristId,
-  ) async {
+  /// The signed-in tourist's restrictions via `user_dietary_restriction`.
+  /// Authentication state belongs to the repository/shared-client boundary;
+  /// repository facades never reach through to `APIManager` for it.
+  Future<List<DietaryRestriction>> restrictionsForCurrentTourist() async {
+    final String touristId = api.currentUserId;
     if (touristId.isEmpty) return const <DietaryRestriction>[];
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableUserDietaryRestriction,
@@ -69,8 +69,9 @@ class DietaryRestrictionRepository {
   /// Parses one link row. Returns null when the embedded restriction is null
   /// so a food with no dietary restriction is allowed (treated as none).
   DietaryRestriction? _fromRow(Map<String, dynamic> row) {
-    final Map<String, dynamic> embedded =
-        JsonReader.asMap(row['dietary_restriction']);
+    final Map<String, dynamic> embedded = JsonReader.asMap(
+      row['dietary_restriction'],
+    );
     final int? id = JsonReader.asIntOrNull(embedded['dietary_restriction_id']);
     if (id == null) return null;
     final String name =

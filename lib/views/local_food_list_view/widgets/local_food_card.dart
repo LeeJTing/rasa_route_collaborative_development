@@ -36,9 +36,7 @@ class LocalFoodCard extends StatelessWidget {
         borderRadius: AppRadius.cardRadius,
         side: BorderSide(
           color: isSelected ? AppColors.primary : AppColors.cardBorder,
-          width: isSelected
-              ? AppSizes.borderWidth * 2
-              : AppSizes.borderWidth,
+          width: isSelected ? AppSizes.borderWidth * 2 : AppSizes.borderWidth,
         ),
       ),
       clipBehavior: Clip.antiAlias,
@@ -52,7 +50,7 @@ class LocalFoodCard extends StatelessWidget {
               SizedBox.square(
                 dimension: AppSizes.foodCardImage,
                 child: AppImage(
-                  source: food.imageUrl,
+                  source: food.imageUrls.isEmpty ? null : food.imageUrls.first,
                   semanticLabel: food.name,
                   borderRadius: AppRadius.cardRadius,
                   fallback: const _FoodImageUnavailable(),
