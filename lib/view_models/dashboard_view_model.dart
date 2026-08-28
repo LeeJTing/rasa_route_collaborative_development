@@ -67,8 +67,9 @@ class DashboardViewModel extends BaseViewModel {
   static void onMapDataChanged({required int newLandmarks}) {
     _mapUpdatePending = true;
     _pendingNewLandmarks = newLandmarks;
-    for (final DashboardViewModel viewModel
-        in Set<DashboardViewModel>.of(_live)) {
+    for (final DashboardViewModel viewModel in Set<DashboardViewModel>.of(
+      _live,
+    )) {
       viewModel.safeNotifyListeners();
     }
   }
@@ -106,8 +107,9 @@ class DashboardViewModel extends BaseViewModel {
   static void onCurrentLocationChanged(TouristLocation location) {
     final bool lost = _sharedLocation.isKnown && !location.isKnown;
     _sharedLocation = location;
-    for (final DashboardViewModel viewModel
-        in Set<DashboardViewModel>.of(_live)) {
+    for (final DashboardViewModel viewModel in Set<DashboardViewModel>.of(
+      _live,
+    )) {
       viewModel._onLocationPushed(lost: lost);
     }
   }
@@ -225,7 +227,8 @@ class DashboardViewModel extends BaseViewModel {
   bool _filterPanelOpen = false;
   bool get filterPanelOpen => _filterPanelOpen;
 
-  final Set<ExplorationFilterGroup> _expandedGroups = <ExplorationFilterGroup>{};
+  final Set<ExplorationFilterGroup> _expandedGroups =
+      <ExplorationFilterGroup>{};
   bool isGroupExpanded(ExplorationFilterGroup group) =>
       _expandedGroups.contains(group);
 
@@ -486,6 +489,41 @@ class DashboardViewModel extends BaseViewModel {
   }
 
   // ===========================================================================
+  // Dev GPS mock (presenter tool, Android only)
+  // ===========================================================================
+  //
+  //   _MockGpsButton -> DashboardViewModel -> DiscoveryLogicFacade
+  //                 -> MapExplorationLogic -> LocationRepository
+  //                 -> MockLocationService (OS test provider)
+  //
+  // While a mock is active `LocationMonitor` holds the mocked fix and ignores
+  // the real GPS, so the map stays put until the mock is stopped.
+
+  /// Whether this build can mock the OS GPS (Android, non-web). The View hides
+  /// the dev control when false.
+  bool get mockGpsSupported => discoveryLogic.mockGpsSupported;
+
+  /// Whether a mock is live right now.
+  bool get mockGpsActive => discoveryLogic.mockGpsActive;
+
+  /// Teleports the OS GPS to a preset spot. Returns an error message, or null
+  /// on success.
+  Future<String?> setMockGps(double latitude, double longitude) async {
+    final String? error = await discoveryLogic.setMockGps(
+      latitude: latitude,
+      longitude: longitude,
+    );
+    safeNotifyListeners();
+    return error;
+  }
+
+  /// Stops mocking and lets the real GPS drive the map again.
+  Future<void> stopMockGps() async {
+    await discoveryLogic.stopMockGps();
+    safeNotifyListeners();
+  }
+
+  // ===========================================================================
   // Camera commands
   // ===========================================================================
 
@@ -654,7 +692,7 @@ class DashboardViewModel extends BaseViewModel {
 
   /// A7-3 - tick or untick one option, then recalculate (REQ102_28) and
   /// redraw (REQ102_29).
-   /// A7-3 - choose one option in a group, then recalculate (REQ102_28) and
+  /// A7-3 - choose one option in a group, then recalculate (REQ102_28) and
   /// redraw (REQ102_29).
   ///
   /// One option per group: picking a different one replaces what was there,
