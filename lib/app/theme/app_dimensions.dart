@@ -274,6 +274,18 @@ abstract final class AppSizes {
 
   /// Max body width of `FoodComparisonView` (two columns side by side).
   static const double comparisonMaxWidth = 720;
+
+  /// `LandmarkPlaceDetailView`'s photo, sized by `imageCategory` (signboard
+  /// vs stall) rather than one fixed height for both - a stall photo is
+  /// captured tall (see `AppLayoutRatios.stallFrameHeightFactor`), and
+  /// forcing it into a short, wide frame with `BoxFit.cover` was cropping
+  /// away most of it. A signboard photo is captured wide/short, so it fits
+  /// the shorter frame fine.
+  static const double landmarkPhotoHeightWide = 140;
+  static const double landmarkPhotoHeightTall = 280;
+
+  /// Fallback when `imageCategory` is unknown - splits the difference.
+  static const double landmarkPhotoHeightDefault = 180;
 }
 
 /// Camera-frame guide proportions (REQ106_1) - fractions of the viewfinder's

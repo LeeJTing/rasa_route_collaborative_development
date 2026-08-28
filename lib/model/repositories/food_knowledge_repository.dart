@@ -190,6 +190,71 @@ class FoodKnowledgeRepository {
     return saved;
   }
 
+  /// Writes the `local_food_preference` links for a freshly-inserted dish -
+  /// its tastes (with the main taste marked `is_main`) and its category.
+  /// [tasteIds] must already be normalised against `food_preference`
+  /// (`FoodRecognitionLogic` does that via `preferenceIdLookup`). Duplicates
+  /// are skipped (the composite PK would 409), and one bad link must not fail
+  /// the whole insert flow.
+  Future<void> linkFoodPreferences(
+    int localFoodId, {
+    required List<int> tasteIds,
+    int mainTasteId = 0,
+    int? categoryId,
+  }) async {
+    final Set<int> seen = <int>{};
+    for (final int tasteId in tasteIds) {
+      if (tasteId <= 0 || !seen.add(tasteId)) continue;
+      try {
+        await api
+            .insertRow(APIManager.tableLocalFoodPreference, <String, dynamic>{
+              'local_food_id': localFoodId,
+              'food_preference_id': tasteId,
+              'is_main': tasteId == mainTasteId,
+            });
+      } catch (_) {
+        // Ignored - see doc above.
+      }
+    }
+    if (categoryId != null && categoryId > 0 && seen.add(categoryId)) {
+      try {
+        await api
+            .insertRow(APIManager.tableLocalFoodPreference, <String, dynamic>{
+              'local_food_id': localFoodId,
+              'food_preference_id': categoryId,
+              'is_main': false,
+            });
+      } catch (_) {
+        // Ignored - see doc above.
+      }
+    }
+  }
+
+  /// Writes the `food_dietary_restriction` links for a freshly-inserted dish.
+  /// [restrictionIds] are `dietary_restriction` ids - the link table's PK
+  /// column `food_dietary_restriction_id` IS the restriction id. Duplicates
+  /// skipped; one bad link must not fail the whole insert flow.
+  Future<void> linkFoodDietaryRestrictions(
+    int localFoodId,
+    List<int> restrictionIds,
+  ) async {
+    final Set<int> seen = <int>{};
+    for (final int restrictionId in restrictionIds) {
+      if (restrictionId <= 0 || !seen.add(restrictionId)) continue;
+      try {
+        await api.insertRow(
+          APIManager.tableFoodDietaryRestriction,
+          <String, dynamic>{
+            'food_dietary_restriction_id': restrictionId,
+            'local_food_id': localFoodId,
+          },
+        );
+      } catch (_) {
+        // Ignored - see doc above.
+      }
+    }
+  }
+
   Future<void> toggleFavourite(int localFoodId) async {
     if (api.currentUserId.isEmpty) {
       throw Exception('Sign in to save local food to your favourites.');

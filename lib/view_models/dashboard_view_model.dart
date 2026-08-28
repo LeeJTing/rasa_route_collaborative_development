@@ -15,6 +15,32 @@ import '../model/business_logic/discovery_logic_facade.dart';
 /// Which of the two dashboard maps is showing (REQ102_12, REQ102_13).
 enum DashboardMapMode { heatmap, detailed }
 
+/// Temporary hand-off for the dashboard map -> landmark detail jump.
+///
+/// Routes pass no arguments (Developer Guideline, section 7.2 "Open
+/// decision") and a ViewModel takes no constructor parameters (Rule 1), so
+/// when the map's "View Landmark" button is tapped the dashboard stashes the
+/// tapped pin's `landmark_id` here right before pushing
+/// `AppRoutes.landmarkPlaceDetail`, and `LandmarkPlaceDetailView` reads-and-
+/// clears it in `initState` - the same pattern `LandmarkDraftHandoff` uses
+/// for the recognition flow.
+class MapSelectionHandoff {
+  factory MapSelectionHandoff() => _instance;
+
+  MapSelectionHandoff._();
+
+  static final MapSelectionHandoff _instance = MapSelectionHandoff._();
+
+  /// The `submitted_landmark.landmark_id` behind the tapped landmark pin.
+  int? pendingLandmarkId;
+
+  int? takeLandmarkId() {
+    final int? value = pendingLandmarkId;
+    pendingLandmarkId = null;
+    return value;
+  }
+}
+
 /// ViewModel for `DashboardView` - REQ102, the Local Food Dashboard &
 /// Regional Exploration Module, following UC300.
 
@@ -651,15 +677,22 @@ class DashboardViewModel extends BaseViewModel {
     safeNotifyListeners();
   }
 
-  /// A11-4 - open the full Restaurant Details page.
+  /// A11-4 - open the full details page for the selected pin: the full
+  /// Restaurant Details page for a system restaurant, or the full Landmark
+  /// Details page for a tourist-submitted landmark. The landmark screen has
+  /// no route arguments, so the pin's `landmark_id` rides the
+  /// [MapSelectionHandoff] instead.
   void openSelectedPin() {
     final MapPin? pin = _selectedPin;
     if (pin == null) return;
-    AppNavigator.push(
-      pin.kind == MapPinKind.landmark
-          ? AppRoutes.landmarkDetail
-          : AppRoutes.restaurantDetail,
-    );
+    if (pin.kind == MapPinKind.landmark) {
+      final int? landmarkId = int.tryParse(pin.referenceId);
+      if (landmarkId == null || landmarkId <= 0) return;
+      MapSelectionHandoff().pendingLandmarkId = landmarkId;
+      AppNavigator.push(AppRoutes.landmarkPlaceDetail);
+      return;
+    }
+    AppNavigator.push(AppRoutes.restaurantDetail);
   }
 
   // ===========================================================================
