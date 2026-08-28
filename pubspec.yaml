@@ -33,6 +33,14 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
 
+  # Dev-only OS-level GPS mock (Android) so a demo can teleport the app's
+  # location without moving - isolated in `lib/external/location/`.
+  # Vendored into packages/ so a `stopMockLocation()` (cancel the repeat
+  # timer + remove the Android test provider) could be added - the pub.dev
+  # release has no way to stop mocking.
+  fluttermocklocation:
+    path: packages/fluttermocklocation
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -1,6 +1,5 @@
 import '../../domain_model/food_comparison.dart';
 import '../../domain_model/food_pairing.dart';
-import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
 import 'food_comparison_logic.dart';
 import 'food_knowledge_logic.dart';
@@ -31,68 +30,23 @@ class FoodLogicFacade {
   Future<void> toggleFavouriteFood(int foodId) =>
       knowledge.toggleFavouriteFood(foodId);
 
-  Future<LocalFood> getFoodDetails(int foodId) async {
-    final LocalFood? food = await knowledge.getLocalFoodById(foodId);
-    if (food == null) throw Exception('Local food not found.');
-    return food;
-  }
+  Future<LocalFood> getFoodDetails(int foodId) =>
+      knowledge.getFoodDetails(foodId);
 
-  Future<bool> isFoodInFavourites(int foodId) async =>
-      (await getFoodDetails(foodId)).isFavourite;
+  Future<bool> isFoodInFavourites(int foodId) =>
+      knowledge.isFoodInFavourites(foodId);
 
-  Future<LocalFood?> detectNameCollision(int foodId) async {
-    final LocalFood selected = await getFoodDetails(foodId);
-    if (selected.name != 'Prawn Noodle') return null;
-    return knowledge.getLocalFoodById(5);
-  }
+  Future<LocalFood?> detectNameCollision(int foodId) =>
+      knowledge.detectNameCollision(foodId);
 
-  Future<List<String>> detectAllergies(LocalFood food) async {
-    final String ingredients = food.ingredients.toLowerCase();
-    final List<String> warnings = <String>[];
-    if (ingredients.contains('prawn') ||
-        ingredients.contains('seafood') ||
-        ingredients.contains('shellfish')) {
-      warnings.add('People with seafood allergy should avoid this dish.');
-    }
-    if (ingredients.contains('peanut') || ingredients.contains('nut')) {
-      warnings.add('People with nut allergies should avoid this dish.');
-    }
-    return warnings;
-  }
+  List<String> detectAllergies(LocalFood food) =>
+      knowledge.detectAllergies(food);
 
-  Future<List<LocalFood>> getSimilarFoods(int foodId) async {
-    final List<LocalFood> catalogue = await knowledge.getLocalFoods();
-    final LocalFood selected = catalogue.firstWhere(
-      (LocalFood food) => food.id == foodId,
-      orElse: () => throw Exception('Local food not found.'),
-    );
-    final List<FoodSimilarity> similarities = await recommendation.similarTo(
-      selected,
-      catalogue,
-    );
-    final Set<int> ids = similarities
-        .map((FoodSimilarity similarity) => similarity.similarLocalFoodId)
-        .toSet();
-    final List<LocalFood> ranked = catalogue
-        .where((LocalFood food) => ids.contains(food.id))
-        .toList(growable: false);
-    if (ranked.length >= 3) return ranked;
+  Future<List<LocalFood>> getSimilarFoods(int foodId) =>
+      recommendation.getSimilarFoods(foodId);
 
-    const List<int> fallbackIds = <int>[9, 10, 4];
-    return catalogue
-        .where((LocalFood food) => fallbackIds.contains(food.id))
-        .take(3)
-        .toList(growable: false);
-  }
-
-  Future<List<FoodPairing>> getFoodPairingRecommendations(int foodId) async {
-    final List<LocalFood> catalogue = await knowledge.getLocalFoods();
-    final LocalFood selected = catalogue.firstWhere(
-      (LocalFood food) => food.id == foodId,
-      orElse: () => throw Exception('Local food not found.'),
-    );
-    return recommendation.pairingsFor(selected, catalogue);
-  }
+  Future<List<FoodPairing>> getFoodPairingRecommendations(int foodId) =>
+      recommendation.getPairingRecommendations(foodId);
 
   // --- Food comparison ------------------------------------------------------
 

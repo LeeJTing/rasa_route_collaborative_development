@@ -46,6 +46,28 @@ class _FakeFoodKnowledgeRepository extends FoodKnowledgeRepository {
   }
 }
 
+class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
+  _FakeDiscoveryRepositoryFacade(this.fakeRecognition);
+
+  final RecognitionRepository fakeRecognition;
+
+  @override
+  RecognitionRepository get recognition => fakeRecognition;
+}
+
+class _FakeFoodRepositoryFacade extends FoodRepositoryFacade {
+  _FakeFoodRepositoryFacade(this.fakeKnowledge);
+
+  final _FakeFoodKnowledgeRepository fakeKnowledge;
+
+  @override
+  Future<List<LocalFood>> getFoods() => fakeKnowledge.getFoods();
+
+  @override
+  Future<LocalFood?> insertFood(LocalFood food) =>
+      fakeKnowledge.insertFood(food);
+}
+
 LocalFood _food(String name) => LocalFood(
   id: 1,
   name: name,
@@ -95,10 +117,8 @@ void main() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
       logic = FoodRecognitionLogic(
-        discoveryRepository: DiscoveryRepositoryFacade(
-          recognition: recognition,
-        ),
-        foodRepository: FoodRepositoryFacade(knowledge: knowledge),
+        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
+        foodRepository: _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -446,10 +466,8 @@ void main() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
       logic = FoodRecognitionLogic(
-        discoveryRepository: DiscoveryRepositoryFacade(
-          recognition: recognition,
-        ),
-        foodRepository: FoodRepositoryFacade(knowledge: knowledge),
+        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
+        foodRepository: _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -580,10 +598,8 @@ void main() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
       logic = FoodRecognitionLogic(
-        discoveryRepository: DiscoveryRepositoryFacade(
-          recognition: recognition,
-        ),
-        foodRepository: FoodRepositoryFacade(knowledge: knowledge),
+        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
+        foodRepository: _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -627,7 +643,18 @@ void main() {
       late FoodRecognitionLogic logic;
 
       /// A food as Gemini produces it - not yet a curated row (`id: 0`).
-      LocalFood geminiFood(String name) => _food(name).copyWith(id: 0);
+      LocalFood geminiFood(String name) => LocalFood(
+        id: 0,
+        name: name,
+        description: 'Description of $name',
+        origin: 'Malaysia',
+        culturalBackground: '',
+        ingredients: '',
+        category: 'Malay',
+        cookingStyle: 'Frying',
+        mealType: 'Breakfast',
+        foodType: 'Food',
+      );
 
       FoodSubmission submission(
         LocalFood food, {
@@ -645,10 +672,10 @@ void main() {
       setUp(() {
         knowledge = _FakeFoodKnowledgeRepository();
         logic = FoodRecognitionLogic(
-          discoveryRepository: DiscoveryRepositoryFacade(
-            recognition: _FakeRecognitionRepository(),
+          discoveryRepository: _FakeDiscoveryRepositoryFacade(
+            _FakeRecognitionRepository(),
           ),
-          foodRepository: FoodRepositoryFacade(knowledge: knowledge),
+          foodRepository: _FakeFoodRepositoryFacade(knowledge),
         );
       });
 

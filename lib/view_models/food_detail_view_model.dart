@@ -5,11 +5,13 @@ import '../model/business_logic/food_logic_facade.dart';
 
 /// Presentation state for one local-food detail page.
 class FoodDetailViewModel extends BaseViewModel {
-  FoodDetailViewModel({this.foodId = 1});
+  FoodDetailViewModel();
 
   final FoodLogicFacade foodLogic = FoodLogicFacade();
 
-  int foodId;
+  static const Duration _pairingTimeout = Duration(seconds: 20);
+
+  int foodId = 0;
   LocalFood? _food;
   bool _isLiked = false;
   List<LocalFood> _similarFoods = const <LocalFood>[];
@@ -32,13 +34,14 @@ class FoodDetailViewModel extends BaseViewModel {
   Future<void> onInit() => loadFood(foodId);
 
   Future<void> loadFood(int id) => runGuarded(() async {
+    if (id <= 0) throw Exception('No local food was selected.');
     foodId = id;
     _pairingTimedOut = false;
     _isFoodInformationExpanded = false;
     _food = await foodLogic.getFoodDetails(id);
     _isLiked = await foodLogic.isFoodInFavourites(id);
     _collidedFood = await foodLogic.detectNameCollision(id);
-    _allergyWarnings = await foodLogic.detectAllergies(_food!);
+    _allergyWarnings = foodLogic.detectAllergies(_food!);
     _similarFoods = await foodLogic.getSimilarFoods(id);
     await _loadPairings();
   });
@@ -46,7 +49,8 @@ class FoodDetailViewModel extends BaseViewModel {
   Future<void> toggleLike() => runGuarded(() async {
     await foodLogic.toggleFavouriteFood(foodId);
     _isLiked = !_isLiked;
-    _food = _food?.copyWith(isFavourite: _isLiked);
+    final LocalFood? food = _food;
+    if (food != null) _food = _withFavourite(food, _isLiked);
   }, silent: true);
 
   Future<void> retryPairings() => runGuarded(_loadPairings, silent: true);
@@ -61,10 +65,30 @@ class FoodDetailViewModel extends BaseViewModel {
     try {
       _foodPairings = await foodLogic
           .getFoodPairingRecommendations(foodId)
-          .timeout(const Duration(seconds: 20));
+          .timeout(_pairingTimeout);
     } catch (_) {
       _foodPairings = const <FoodPairing>[];
       _pairingTimedOut = true;
     }
   }
+
+  LocalFood _withFavourite(LocalFood food, bool isFavourite) => LocalFood(
+    id: food.id,
+    name: food.name,
+    description: food.description,
+    origin: food.origin,
+    culturalBackground: food.culturalBackground,
+    ingredients: food.ingredients,
+    category: food.category,
+    cookingStyle: food.cookingStyle,
+    mealType: food.mealType,
+    foodType: food.foodType,
+    tastes: food.tastes,
+    mainTaste: food.mainTaste,
+    pronunciationText: food.pronunciationText,
+    audioGuideUrl: food.audioGuideUrl,
+    synonyms: food.synonyms,
+    imageUrls: food.imageUrls,
+    isFavourite: isFavourite,
+  );
 }

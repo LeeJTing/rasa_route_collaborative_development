@@ -1,10 +1,7 @@
-import 'package:meta/meta.dart' show visibleForTesting;
-
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
-import '../../shared_client/api_manager/api_manager.dart';
 import 'dietary_restriction_repository.dart';
 import 'food_knowledge_repository.dart';
 import 'food_preference_repository.dart';
@@ -19,12 +16,9 @@ import 'swipe_repository.dart';
 /// separate repositories. It groups the repositories for one subject area and
 /// re-exposes them as a single flat API. No business rules live here.
 class FoodRepositoryFacade {
-  FoodRepositoryFacade({@visibleForTesting FoodKnowledgeRepository? knowledge})
-    : knowledge = knowledge ?? FoodKnowledgeRepository();
+  FoodRepositoryFacade();
 
-  final APIManager api = APIManager();
-
-  final FoodKnowledgeRepository knowledge;
+  final FoodKnowledgeRepository knowledge = FoodKnowledgeRepository();
   final RecommendationRepository recommendation = RecommendationRepository();
   final SwipeRepository swipe = SwipeRepository();
 
@@ -65,7 +59,7 @@ class FoodRepositoryFacade {
   /// The signed-in tourist's dietary restrictions (`user_dietary_restriction`),
   /// keyed by `tourist_id` = the current auth user.
   Future<List<DietaryRestriction>> touristDietaryRestrictions() =>
-      dietaryRestriction.restrictionsForTourist(api.currentUserId);
+      dietaryRestriction.restrictionsForCurrentTourist();
 
   /// The restrictions attached to one dish (`food_dietary_restriction`).
   Future<List<DietaryRestriction>> foodDietaryRestrictions(int foodId) =>

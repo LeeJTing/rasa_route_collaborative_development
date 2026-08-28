@@ -110,16 +110,11 @@ class _DashboardViewState extends State<DashboardView> {
         appBar: AppTopBar(
           title: 'Dashboard',
           showBackButton: false,
-          onProfileTap: () =>
-              Navigator.pushNamed(context, AppRoutes.profile),
+          onProfileTap: () => Navigator.pushNamed(context, AppRoutes.profile),
         ),
         body: Consumer<DashboardViewModel>(
           builder:
-              (
-                BuildContext context,
-                DashboardViewModel viewModel,
-                Widget? _,
-              ) {
+              (BuildContext context, DashboardViewModel viewModel, Widget? _) {
                 _applyCameraRequest(viewModel);
                 _syncSearchField(viewModel);
 
@@ -251,7 +246,8 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumFoodCount: viewModel.distribution.maximumFoodCount,
+              maximumRestaurantCount:
+                  viewModel.distribution.maximumRestaurantCount,
             ),
           ),
 
@@ -277,6 +273,15 @@ class _DashboardViewState extends State<DashboardView> {
                   onTap: viewModel.locateTourist,
                   busy: viewModel.locating,
                 ),
+              ],
+              // Presenter tool (dev builds only, Android only): teleports the
+              // OS-level GPS so the map can be demoed "at" a preset spot
+              // without moving the device. Wired through the ViewModel so this
+              // View never touches a shared client (see `DashboardViewModel`).
+              if (Env.appEnv != 'prod' &&
+                  viewModel.mockGpsSupported) ...<Widget>[
+                const SizedBox(height: AppSpacing.sm),
+                _MockGpsButton(viewModel: viewModel),
               ],
             ],
           ),
@@ -374,8 +379,7 @@ class _DashboardViewState extends State<DashboardView> {
             child: RegionScoreCard(
               availability: viewModel.selectedRegion!,
               onDismiss: viewModel.dismissRegionCard,
-              onExplore: () =>
-                  viewModel.openRegion(viewModel.selectedRegion!),
+              onExplore: () => viewModel.openRegion(viewModel.selectedRegion!),
             ),
           ),
 
@@ -415,94 +419,94 @@ class _DashboardViewState extends State<DashboardView> {
     return ColoredBox(
       color: AppColors.background,
       child: FlutterMap(
-      mapController: _mapController,
-      options: MapOptions(
-        initialCenter: LatLng(
-          viewModel.centreLatitude,
-          viewModel.centreLongitude,
-        ),
-        initialZoom: viewModel.zoom,
-        minZoom: viewModel.minimumZoom,
-        maxZoom: viewModel.maximumZoom,
-        // REQ102_1 - the camera can never leave Malaysia.
-        cameraConstraint: CameraConstraint.containCenter(
-          bounds: LatLngBounds(
-            LatLng(viewModel.malaysiaSouth, viewModel.malaysiaWest),
-            LatLng(viewModel.malaysiaNorth, viewModel.malaysiaEast),
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: LatLng(
+            viewModel.centreLatitude,
+            viewModel.centreLongitude,
           ),
+          initialZoom: viewModel.zoom,
+          minZoom: viewModel.minimumZoom,
+          maxZoom: viewModel.maximumZoom,
+          // REQ102_1 - the camera can never leave Malaysia.
+          cameraConstraint: CameraConstraint.containCenter(
+            bounds: LatLngBounds(
+              LatLng(viewModel.malaysiaSouth, viewModel.malaysiaWest),
+              LatLng(viewModel.malaysiaNorth, viewModel.malaysiaEast),
+            ),
+          ),
+          // REQ102_2 / REQ102_4 - pinch to zoom, but no rotation: a rotated
+          // heatmap makes the state labels unreadable and buys nothing.
+          interactionOptions: const InteractionOptions(
+            flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+          ),
+          onMapReady: () {
+            _mapReady = true;
+            // The ViewModel usually asks for its first camera position before
+            // the map is ready to move; one rebuild here replays it.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() {});
+            });
+          },
+          onTap: (TapPosition _, LatLng point) =>
+              viewModel.onMapTapped(point.latitude, point.longitude),
+          // REQ102_12 / REQ102_13 - crossing the predefined zoom level here is
+          // what swaps the heatmap for the detailed map, and back.
+          // Deferred by a microtask: flutter_map can report a camera change from
+          // inside a build, and notifying listeners there would be a setState
+          // during build. The microtask runs once the frame has unwound.
+          onPositionChanged: (MapCamera camera, bool _) {
+            final LatLng centre = camera.center;
+            final double zoom = camera.zoom;
+            final LatLngBounds bounds = camera.visibleBounds;
+            Future<void>.microtask(() {
+              if (!mounted) return;
+              viewModel.onCameraChanged(
+                latitude: centre.latitude,
+                longitude: centre.longitude,
+                zoom: zoom,
+                south: bounds.south,
+                west: bounds.west,
+                north: bounds.north,
+                east: bounds.east,
+              );
+            });
+          },
         ),
-        // REQ102_2 / REQ102_4 - pinch to zoom, but no rotation: a rotated
-        // heatmap makes the state labels unreadable and buys nothing.
-        interactionOptions: const InteractionOptions(
-          flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-        ),
-        onMapReady: () {
-          _mapReady = true;
-          // The ViewModel usually asks for its first camera position before
-          // the map is ready to move; one rebuild here replays it.
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) setState(() {});
-          });
-        },
-        onTap: (TapPosition _, LatLng point) =>
-            viewModel.onMapTapped(point.latitude, point.longitude),
-        // REQ102_12 / REQ102_13 - crossing the predefined zoom level here is
-        // what swaps the heatmap for the detailed map, and back.
-        // Deferred by a microtask: flutter_map can report a camera change from
-        // inside a build, and notifying listeners there would be a setState
-        // during build. The microtask runs once the frame has unwound.
-        onPositionChanged: (MapCamera camera, bool _) {
-          final LatLng centre = camera.center;
-          final double zoom = camera.zoom;
-          final LatLngBounds bounds = camera.visibleBounds;
-          Future<void>.microtask(() {
-            if (!mounted) return;
-            viewModel.onCameraChanged(
-              latitude: centre.latitude,
-              longitude: centre.longitude,
-              zoom: zoom,
-              south: bounds.south,
-              west: bounds.west,
-              north: bounds.north,
-              east: bounds.east,
-            );
-          });
-        },
-      ),
-      children: <Widget>[
-        // UC300 BF-1 - the detailed view is the real OpenStreetMap surface.
-        TileLayer(
-          urlTemplate: Env.osmTileUrl,
-          userAgentPackageName: 'com.rasaroute.app',
-        ),
-
-        // REQ102_1 - the map covers only Malaysia. One polygon over the whole
-        // world with the coastlines cut out of it, filled with the scaffold
-        // cream, so the tiles only show through inside the country. Drawn
-        // before the pins so it never covers one.
-        if (viewModel.showCountryMask)
-          PolygonLayer(
-            polygons: <Polygon>[
-              Polygon(
-                points: _wholeWorld,
-                holePointsList: viewModel.countryMaskOutlines
-                    .map(
-                      (CountryOutline outline) => outline.ring
-                          .map(
-                            (GeoPoint point) =>
-                                LatLng(point.latitude, point.longitude),
-                          )
-                          .toList(growable: false),
-                    )
-                    .toList(growable: false),
-                color: AppColors.background,
-                borderStrokeWidth: 0,
-              ),
-            ],
+        children: <Widget>[
+          // UC300 BF-1 - the detailed view is the real OpenStreetMap surface.
+          TileLayer(
+            urlTemplate: Env.osmTileUrl,
+            userAgentPackageName: 'com.rasaroute.app',
           ),
 
-        // REQ102_32 - restaurant and submitted-landmark pins.
-        MarkerLayer(
+          // REQ102_1 - the map covers only Malaysia. One polygon over the whole
+          // world with the coastlines cut out of it, filled with the scaffold
+          // cream, so the tiles only show through inside the country. Drawn
+          // before the pins so it never covers one.
+          if (viewModel.showCountryMask)
+            PolygonLayer(
+              polygons: <Polygon>[
+                Polygon(
+                  points: _wholeWorld,
+                  holePointsList: viewModel.countryMaskOutlines
+                      .map(
+                        (CountryOutline outline) => outline.ring
+                            .map(
+                              (GeoPoint point) =>
+                                  LatLng(point.latitude, point.longitude),
+                            )
+                            .toList(growable: false),
+                      )
+                      .toList(growable: false),
+                  color: AppColors.background,
+                  borderStrokeWidth: 0,
+                ),
+              ],
+            ),
+
+          // REQ102_32 - restaurant and submitted-landmark pins.
+          MarkerLayer(
             markers: viewModel.pins
                 .map(
                   (MapPin pin) => Marker(
@@ -511,7 +515,8 @@ class _DashboardViewState extends State<DashboardView> {
                     height: AppSizes.mapPinSize,
                     child: _PinMarker(
                       pin: pin,
-                      selected: viewModel.selectedPin?.referenceId ==
+                      selected:
+                          viewModel.selectedPin?.referenceId ==
                               pin.referenceId &&
                           viewModel.selectedPin?.kind == pin.kind,
                       onTap: () => viewModel.selectPin(pin),
@@ -521,21 +526,21 @@ class _DashboardViewState extends State<DashboardView> {
                 .toList(growable: false),
           ),
 
-        // The tourist's own position (REQ102_7).
-        if (viewModel.location.isKnown)
-          MarkerLayer(
-            markers: <Marker>[
-              Marker(
-                point: LatLng(
-                  viewModel.location.latitude,
-                  viewModel.location.longitude,
+          // The tourist's own position (REQ102_7).
+          if (viewModel.location.isKnown)
+            MarkerLayer(
+              markers: <Marker>[
+                Marker(
+                  point: LatLng(
+                    viewModel.location.latitude,
+                    viewModel.location.longitude,
+                  ),
+                  width: 22,
+                  height: 22,
+                  child: const _CurrentLocationDot(),
                 ),
-                width: 22,
-                height: 22,
-                child: const _CurrentLocationDot(),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );
@@ -609,6 +614,86 @@ class _CurrentLocationDot extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// Presenter tool (dev builds only, Android only): opens a picker of preset
+/// Malaysian spots and teleports the OS-level GPS there, so the dashboard can
+/// be demoed "at" that location without moving the device. Wired through
+/// `DashboardViewModel` to `MockLocationService` (the vendored
+/// `fluttermocklocation` plugin); requires Android Developer Options >
+/// "Select mock location app" to point at this app.
+///
+/// A toggle: while a mock is live the button turns into "Stop mock", which
+/// clears the OS test provider and lets the real GPS drive the map again.
+class _MockGpsButton extends StatelessWidget {
+  const _MockGpsButton({required this.viewModel});
+
+  final DashboardViewModel viewModel;
+
+  static const List<({String label, double lat, double lon})> _presets =
+      <({String label, double lat, double lon})>[
+        (label: 'KL', lat: 3.1390, lon: 101.6869),
+        (label: 'Penang', lat: 5.4141, lon: 100.3288),
+        (label: 'Kota Kinabalu', lat: 5.9804, lon: 116.0735),
+        (label: 'Kuching', lat: 1.5535, lon: 110.3593),
+        (label: 'Outside MY', lat: 1.3521, lon: 103.8198),
+        (label: 'At sea', lat: 3.0, lon: 100.2),
+      ];
+
+  @override
+  Widget build(BuildContext context) {
+    final bool active = viewModel.mockGpsActive;
+    return IconButton.filledTonal(
+      tooltip: active ? 'Stop GPS mock (dev)' : 'Mock GPS (dev)',
+      style: active
+          ? IconButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: AppColors.onPrimary,
+            )
+          : null,
+      icon: Icon(active ? Icons.location_off : Icons.my_location),
+      onPressed: active ? () => _stopMock(context) : () => _openPicker(context),
+    );
+  }
+
+  Future<void> _stopMock(BuildContext context) async {
+    await viewModel.stopMockGps();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('GPS mock stopped (dev)')));
+  }
+
+  Future<void> _openPicker(BuildContext context) async {
+    final ({double lat, double lon})? choice =
+        await showModalBottomSheet<({double lat, double lon})>(
+          context: context,
+          builder: (BuildContext sheetContext) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: <Widget>[
+                  for (final ({String label, double lat, double lon}) p
+                      in _presets)
+                    ActionChip(
+                      label: Text(p.label),
+                      onPressed: () =>
+                          Navigator.pop(sheetContext, (lat: p.lat, lon: p.lon)),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+    if (choice == null || !context.mounted) return;
+    final String? error = await viewModel.setMockGps(choice.lat, choice.lon);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(error ?? 'GPS mocked (dev)')));
+  }
 }
 
 /// M3, and the two "showing the whole country instead" explanations.

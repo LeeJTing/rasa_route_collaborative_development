@@ -35,8 +35,8 @@ class RegionScoreCard extends StatelessWidget {
     final int percent = (availability.score * 100).round();
     return DashboardMapCard(
       title: availability.region.name,
-      subtitle: availability.maximumFoodCount == 0
-          ? 'No local food mapped in Malaysia yet'
+      subtitle: availability.maximumRestaurantCount == 0
+          ? 'No restaurants mapped in Malaysia yet'
           : 'Availability score $percent% of the best-served state',
       onDismiss: onDismiss,
       leading: Container(
@@ -48,16 +48,16 @@ class RegionScoreCard extends StatelessWidget {
         ),
         alignment: Alignment.center,
         child: Text(
-          '${availability.availableFoodCount}',
+          '${availability.restaurantCount}',
           style: AppTextStyles.titleMedium.copyWith(color: AppColors.onPrimary),
         ),
       ),
       facts: <String>[
-        '${availability.availableFoodCount} distinct local food'
-            '${availability.availableFoodCount == 1 ? '' : 's'} available here',
-        '${availability.occurrenceCount} restaurant'
-            '${availability.occurrenceCount == 1 ? '' : 's'} and submitted '
-            'landmark${availability.occurrenceCount == 1 ? '' : 's'} serving them',
+        '${availability.restaurantCount} restaurant'
+            '${availability.restaurantCount == 1 ? '' : 's'} and submitted '
+            'landmark${availability.restaurantCount == 1 ? '' : 's'} here',
+        '${availability.foodCount} distinct local food'
+            '${availability.foodCount == 1 ? '' : 's'} between them',
       ],
       actionLabel: 'Explore ${availability.region.name}',
       onAction: onExplore,
