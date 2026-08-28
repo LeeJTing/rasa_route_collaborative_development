@@ -247,7 +247,8 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumFoodCount: viewModel.distribution.maximumFoodCount,
+              maximumRestaurantCount:
+                  viewModel.distribution.maximumRestaurantCount,
             ),
           ),
 

@@ -8,7 +8,7 @@ import '../../../domain_model/exploration_filter.dart';
 /// Smart Filtering - the dropdown, multiple-row filter selection bar
 /// (REQ102_23, A7).
 ///
-/// One row per group: a fixed label pill ("Meal", "Category", "Taste",
+/// One row per group: a fixed labelpill ("Meal", "Category", "Taste",
 /// "Type"), a separator, then the options as chips. Collapsed, a row scrolls
 /// horizontally exactly as in the Figma frame; the chevron expands it into a
 /// wrap so every option is reachable - the Taste group alone has 23 of them
@@ -19,6 +19,13 @@ import '../../../domain_model/exploration_filter.dart';
 /// the head of each row does the same thing explicitly, and is selected
 /// whenever the group is unset - so the row behaves like a radio group and
 /// needs no separate reset.
+///
+/// **The panel is capped and scrolls.** Expanded, a row wraps its options onto
+/// as many lines as it needs, and Taste alone has 23 of them - four groups open
+/// at once ran past the bottom of the screen, which took the panel's own
+/// controls with it. The rows now scroll inside
+/// `AppSizes.filterPanelMaxHeight` and the match count stays pinned below
+/// them, so there is always somewhere to read the result and always a way out.
 ///
 /// Widgets in a `widgets/` folder are driven entirely by constructor
 /// parameters and callbacks - they never read a ViewModel themselves, and they
@@ -53,7 +60,11 @@ class MapFilterPanel extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
-      child: Container(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxHeight: AppSizes.filterPanelMaxHeight,
+        ),
+        child: Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: AppRadius.cardRadius,
@@ -70,26 +81,38 @@ class MapFilterPanel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            for (final ExplorationFilterGroup group
-                in ExplorationFilterGroup.values)
-              _FilterRow(
-                label: labelFor(group),
-                options: optionsFor(group),
-                selection: selectionFor(group),
-                expanded: isExpanded(group),
-                onToggleOption: (String option) => onToggleOption(group, option),
-                onClearGroup: () => onClearGroup(group),
-                onToggleExpanded: () => onToggleExpanded(group),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    for (final ExplorationFilterGroup group
+                        in ExplorationFilterGroup.values)
+                      _FilterGroupSection(
+                        label: labelFor(group),
+                        options: optionsFor(group),
+                        selection: selectionFor(group),
+                        expanded: isExpanded(group),
+                        onToggleOption: (String option) =>
+                            onToggleOption(group, option),
+                        onClearGroup: () => onClearGroup(group),
+                        onToggleExpanded: () => onToggleExpanded(group),
+                      ),
+                  ],
+                ),
               ),
+            ),
           ],
+        ),
         ),
       ),
     );
   }
 }
 
-class _FilterRow extends StatelessWidget {
-  const _FilterRow({
+class _FilterGroupSection extends StatelessWidget {
+  const _FilterGroupSection({
     required this.label,
     required this.options,
     required this.selection,
@@ -124,83 +147,57 @@ class _FilterRow extends StatelessWidget {
     ];
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          SizedBox(
-            width: AppSizes.filterGroupLabelWidth,
-            height: AppSizes.filterChipTapHeight,
-            child: Center(
-              child: _GroupLabel(label: label, selected: selection != null),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          Container(
-            width: 1,
-            height: AppSizes.filterChipHeight,
-            color: AppColors.outline,
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: expanded
-                ? Wrap(
-                    spacing: AppSpacing.xs,
-                    runSpacing: 0,
-                    children: chips,
-                  )
-                : SizedBox(
-                    height: AppSizes.filterChipTapHeight,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: chips.length,
-                      separatorBuilder: (_, _) =>
-                          const SizedBox(width: AppSpacing.xs),
-                      itemBuilder: (_, int index) => chips[index],
-                    ),
-                  ),
-          ),
           InkWell(
             onTap: onToggleExpanded,
-            customBorder: const CircleBorder(),
             child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.xs),
-              child: Icon(
-                expanded
-                    ? Icons.keyboard_arrow_up
-                    : Icons.keyboard_arrow_down,
-                size: 16,
-                color: AppColors.textSecondary,
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+              child: Row(
+                children: <Widget>[
+                  Text(
+                    label,
+                    style: AppTextStyles.labelSmall.copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: AppSizes.inlineNoticeIconSize,
+                    color: AppColors.textSecondary,
+                  ),
+                ],
               ),
             ),
           ),
+          const SizedBox(height: AppSpacing.xs),
+          if (expanded)
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.xs,
+              children: chips,
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: <Widget>[
+                  for (int i = 0; i < chips.length; i++) ...<Widget>[
+                    chips[i],
+                    if (i < chips.length - 1)
+                      const SizedBox(width: AppSpacing.sm),
+                  ],
+                ],
+              ),
+            ),
         ],
       ),
     );
   }
-}
-
-class _GroupLabel extends StatelessWidget {
-  const _GroupLabel({required this.label, required this.selected});
-
-  final String label;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    height: AppSizes.filterChipHeight,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: selected ? AppColors.primaryContainer : AppColors.surfaceVariant,
-      borderRadius: BorderRadius.circular(AppRadius.sm),
-    ),
-    child: Text(
-      label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: AppTextStyles.labelSmall.copyWith(color: AppColors.textPrimary),
-    ),
-  );
 }
 
 class _FilterChip extends StatelessWidget {
@@ -217,31 +214,24 @@ class _FilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => InkWell(
     onTap: onTap,
-    borderRadius: BorderRadius.circular(AppRadius.sm),
-    // The tap area is taller than the pill it draws. Filter chips are tapped
-    // repeatedly - one after another across four rows - so the target has to
-    // forgive a few pixels.
-    child: SizedBox(
-      height: AppSizes.filterChipTapHeight,
-      child: Center(
-        child: Container(
-          height: AppSizes.filterChipHeight,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-          decoration: BoxDecoration(
-            color: selected ? AppColors.primary : AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadius.sm),
-            border: Border.all(
-              color: selected ? AppColors.primary : AppColors.outline,
-            ),
-          ),
-          child: Text(
-            label,
-            style: AppTextStyles.labelSmall.copyWith(
-              color: selected ? AppColors.onPrimary : AppColors.textPrimary,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
+    borderRadius: BorderRadius.circular(AppRadius.pill),
+    child: Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: selected ? AppColors.primary : AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(
+          color: selected ? AppColors.primary : AppColors.outline,
+        ),
+      ),
+      child: Text(
+        label,
+        style: AppTextStyles.labelSmall.copyWith(
+          color: selected ? AppColors.onPrimary : AppColors.textPrimary,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
         ),
       ),
     ),

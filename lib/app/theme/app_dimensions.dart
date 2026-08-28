@@ -195,6 +195,11 @@ abstract final class AppSizes {
   /// 48 would make the panel taller than the map it is filtering.
   static const double filterChipTapHeight = 40;
 
+  /// Ceiling on the filter panel. Open every group and the Taste row alone
+  /// wraps to five lines - past this the rows scroll instead of the panel
+  /// growing off the screen and taking its own close control with it.
+  static const double filterPanelMaxHeight = 340;
+
   /// The fixed label pill ("Meal", "Category", "Taste", "Type") that opens a
   /// filter row.
   static const double filterGroupLabelWidth = 72;
