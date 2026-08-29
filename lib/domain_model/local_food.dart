@@ -19,7 +19,7 @@ class LocalFood {
     this.pronunciationText = '',
     this.audioGuideUrl,
     this.synonyms = const <String>[],
-    this.imageUrl,
+    this.imageUrls = const <String>[],
     this.isFavourite = false,
   });
 
@@ -68,17 +68,14 @@ class LocalFood {
   /// Alternate names parsed from the `synonyms` text column.
   final List<String> synonyms;
 
-  /// First image from local_food_image. null if missing.
-  final String? imageUrl;
+  /// Ordered gallery from `local_food_image`.
+  final List<String> imageUrls;
+
+  /// First gallery image used by compact list and recommendation cards.
+  String? get imageUrl => imageUrls.isEmpty ? null : imageUrls.first;
 
   /// Whether current user has favourited this. Set by repo from favourite_food table.
   final bool isFavourite;
-
-  // NOTE: no toJson/fromJson here - domain models carry no JSON per the
-  // developer guideline (§10). Serialisation lives on [LocalFoodDataModel]
-  // in lib/model/data_models/. If a call site needs to reconstruct a
-  // LocalFood from cache, it should read a data-model JSON blob and call
-  // LocalFoodDataModel.fromJson(...).toDomain() instead.
 
   /// Immutable copy-with.
   LocalFood copyWith({
@@ -97,7 +94,7 @@ class LocalFood {
     String? pronunciationText,
     String? audioGuideUrl,
     List<String>? synonyms,
-    String? imageUrl,
+    List<String>? imageUrls,
     bool? isFavourite,
   }) => LocalFood(
     id: id ?? this.id,
@@ -115,11 +112,7 @@ class LocalFood {
     pronunciationText: pronunciationText ?? this.pronunciationText,
     audioGuideUrl: audioGuideUrl ?? this.audioGuideUrl,
     synonyms: synonyms ?? this.synonyms,
-    imageUrl: imageUrl ?? this.imageUrl,
+    imageUrls: imageUrls ?? this.imageUrls,
     isFavourite: isFavourite ?? this.isFavourite,
   );
-
-  @override
-  String toString() =>
-      'LocalFood(id: $id, name: $name, category: $category, isFavourite: $isFavourite)';
 }

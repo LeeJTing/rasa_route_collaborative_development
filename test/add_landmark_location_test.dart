@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rasa_route_collaborative_development/model/data_models/location_data_model.dart';
+import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/view_models/add_landmark_view_model.dart';
 
 void main() {
@@ -9,7 +9,7 @@ void main() {
       await vm.onInit();
       // Device fix in Kuala Lumpur.
       vm.onCurrentLocationChanged(
-        LocationDataModel(
+        TouristLocation(
           latitude: 3.1390,
           longitude: 101.6869,
           accuracyMeters: 10,
@@ -32,7 +32,7 @@ void main() {
         // Device fix is in Singapore (outside Malaysia) - the 100m check passes
         // but the Malaysia/land check must reject it.
         vm.onCurrentLocationChanged(
-          LocationDataModel(
+          TouristLocation(
             latitude: 1.3521,
             longitude: 103.8198,
             accuracyMeters: 10,
@@ -58,7 +58,7 @@ void main() {
         await vm.onInit();
         // Device fix in the strait - adjusted pin stays in the strait.
         vm.onCurrentLocationChanged(
-          LocationDataModel(
+          TouristLocation(
             latitude: 3.0,
             longitude: 100.2,
             accuracyMeters: 10,
@@ -81,7 +81,7 @@ void main() {
         await vm.onInit();
         // Real device GPS fix: Kuala Lumpur.
         vm.onCurrentLocationChanged(
-          LocationDataModel(
+          TouristLocation(
             latitude: 3.1390,
             longitude: 101.6869,
             accuracyMeters: 10,
@@ -107,7 +107,7 @@ void main() {
       final AddLandmarkViewModel vm = AddLandmarkViewModel();
       await vm.onInit();
       vm.onCurrentLocationChanged(
-        LocationDataModel(
+        TouristLocation(
           latitude: 3.1390,
           longitude: 101.6869,
           accuracyMeters: 10,

@@ -1,6 +1,6 @@
 import '../../core/json_model.dart';
 
-/// Wire shape of `public.restaurant_item` - one dish on one restaurant's menu.
+/// Wire shape of one row in `public.restaurant_item`.
 class RestaurantItemDataModel implements JsonModel {
   const RestaurantItemDataModel({
     required this.restaurantItemId,
@@ -9,48 +9,32 @@ class RestaurantItemDataModel implements JsonModel {
     required this.restaurantItemName,
     this.ingredients,
     this.foodImgUrl,
-    this.seasonal,
     this.foodCategory,
     this.restaurantItemPrice,
   });
 
-  /// `restaurant_item.restaurant_item_id` (bigint identity, PK).
   final int restaurantItemId;
-
-  /// FK -> `restaurant.restaurant_id`.
   final int restaurantId;
-
-  /// FK -> `local_food.local_food_id`.
   final int localFoodId;
-
-  /// Restaurant-specific label shown on the menu.
   final String restaurantItemName;
-
-  /// Restaurant-specific ingredients, when the source states them.
   final String? ingredients;
-
-  /// Image associated with this restaurant-specific menu item.
   final String? foodImgUrl;
-
-  final String? seasonal;
   final String? foodCategory;
   final double? restaurantItemPrice;
 
-  factory RestaurantItemDataModel.fromJson(Map<String, dynamic> json) {
-    return RestaurantItemDataModel(
-      restaurantItemId: JsonReader.asInt(json['restaurant_item_id']),
-      restaurantId: JsonReader.asInt(json['restaurant_id']),
-      localFoodId: JsonReader.asInt(json['local_food_id']),
-      restaurantItemName: JsonReader.asString(json['restaurant_item_name']),
-      ingredients: JsonReader.asStringOrNull(json['ingredients']),
-      foodImgUrl: JsonReader.asStringOrNull(json['food_img_url']),
-      seasonal: JsonReader.asStringOrNull(json['seasonal']),
-      foodCategory: JsonReader.asStringOrNull(json['food_category']),
-      restaurantItemPrice: JsonReader.asDoubleOrNull(
-        json['restaurant_item_price'],
-      ),
-    );
-  }
+  factory RestaurantItemDataModel.fromJson(Map<String, dynamic> json) =>
+      RestaurantItemDataModel(
+        restaurantItemId: JsonReader.asInt(json['restaurant_item_id']),
+        restaurantId: JsonReader.asInt(json['restaurant_id']),
+        localFoodId: JsonReader.asInt(json['local_food_id']),
+        restaurantItemName: JsonReader.asString(json['restaurant_item_name']),
+        ingredients: JsonReader.asStringOrNull(json['ingredients']),
+        foodImgUrl: JsonReader.asStringOrNull(json['food_img_url']),
+        foodCategory: JsonReader.asStringOrNull(json['food_category']),
+        restaurantItemPrice: JsonReader.asDoubleOrNull(
+          json['restaurant_item_price'],
+        ),
+      );
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -60,7 +44,6 @@ class RestaurantItemDataModel implements JsonModel {
     'restaurant_item_name': restaurantItemName,
     'ingredients': ingredients,
     'food_img_url': foodImgUrl,
-    'seasonal': seasonal,
     'food_category': foodCategory,
     'restaurant_item_price': restaurantItemPrice,
   };

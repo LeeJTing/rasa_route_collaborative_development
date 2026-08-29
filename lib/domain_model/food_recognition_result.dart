@@ -16,10 +16,36 @@ class FoodRecognitionResult {
     this.priceMin = 0,
     this.priceMax = 0,
     this.confidence = 1.0,
+    this.localFoodConfidence = 1.0,
+    this.imageQuality = 'good',
+    this.imageQualityIssues = const <String>[],
+    this.dietaryRestrictions = const <String>[],
   });
 
   /// Whether the photo shows a Malaysian local food.
   final bool isLocalFood;
+
+  /// How confident (0..1) Gemini is in the [isLocalFood] judgement
+  /// SPECIFICALLY - separate from [confidence], which is about naming the
+  /// dish. A clearly-photographed burger can score high [confidence] while
+  /// whether it's a Malaysian Ramly-style or a Western-chain burger stays a
+  /// close call. `1.0` when unknown (picker/manual entry).
+  final double localFoodConfidence;
+
+  /// Usability of the PHOTO itself: "good" | "acceptable" | "poor". A poor
+  /// photo (blurry, too dark/bright, strong colour cast) makes every other
+  /// field less trustworthy - see `FoodRecognitionLogic.isPoorImageQuality`.
+  final String imageQuality;
+
+  /// The specific problems behind a non-"good" [imageQuality] - e.g.
+  /// `["blurry", "too_dark"]`. Empty when the photo is fine.
+  final List<String> imageQualityIssues;
+
+  /// Dietary restrictions that apply to the recognised food, using the
+  /// canonical `dietary_restriction.restriction_name` strings. Carried to
+  /// the `food_dietary_restriction` association table when the food becomes a
+  /// new catalogue row - NOT a `local_food` column.
+  final List<String> dietaryRestrictions;
 
   /// How confident (0..1) Gemini is in the single recognised food. Only
   /// meaningful for a single-result outcome (a full analysis or a high-

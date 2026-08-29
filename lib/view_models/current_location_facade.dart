@@ -1,8 +1,5 @@
 import '../domain_model/tourist_location.dart';
 import 'dashboard_view_model.dart';
-import 'add_landmark_view_model.dart';
-import 'restaurant_recommendation_view_model.dart';
-
 
 /// VIEWMODEL FACADE (inbound).
 ///
@@ -72,8 +69,6 @@ class CurrentLocationFacade {
     // Static entry points first - these hold the value whether or not a
     // ViewModel instance happens to be alive right now.
     try {
-
-
       DashboardViewModel.onCurrentLocationChanged(location);
     } catch (_) {
       // One broken ViewModel must not stop the others from updating.

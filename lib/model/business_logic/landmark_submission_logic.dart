@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/submitted_landmark.dart';
-import '../data_models/location_data_model.dart';
+import '../../domain_model/tourist_location.dart';
 import '../repositories/landmark_repository_facade.dart';
 import 'location_rules.dart';
 
@@ -65,6 +65,19 @@ class LandmarkSubmissionLogic {
   /// nobody is signed in / the session can't be resolved yet.
   Future<String?> currentTouristId() => repository.auth.currentTouristId();
 
+  /// One submitted landmark (with its dishes and opening hours) for the
+  /// detail screen - flat passthrough to the repository. Null when the id
+  /// matches nothing.
+  Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) =>
+      repository.landmark.getSubmittedLandmarkById(landmarkId);
+
+  /// Every submitted landmark [touristId] has contributed dishes to, newest
+  /// first - flat passthrough to the repository (see the repository doc for
+  /// why the contributor lives on `landmark_item`, not `submitted_landmark`).
+  Future<List<SubmittedLandmark>> getSubmittedLandmarksByTourist(
+    String touristId,
+  ) => repository.landmark.getSubmittedLandmarksByTourist(touristId);
+
   /// Uploads a captured photo - a food's photo, or the landmark's
   /// signboard/stall photo - to Supabase Storage and returns what the row
   /// stores: the object name (`image_id`) and its public URL (`image_url`).
@@ -109,10 +122,10 @@ class LandmarkSubmissionLogic {
   /// assumes that rather than re-checking it, since completeness isn't this
   /// method's concern.
   String? validateOperatingHours(
-      Map<Weekday, List<OpeningHour>> operatingHours,
-      ) {
+    Map<Weekday, List<OpeningHour>> operatingHours,
+  ) {
     for (final MapEntry<Weekday, List<OpeningHour>> entry
-    in operatingHours.entries) {
+        in operatingHours.entries) {
       final String dayName = _dayNames[entry.key]!;
       final List<OpeningHour> openRows = entry.value
           .where((OpeningHour hour) => hour.status == DayStatus.open)
@@ -153,11 +166,11 @@ class LandmarkSubmissionLogic {
   /// suggestion is known. A warning only - the tourist can still enter any
   /// valid price.
   String? suggestedPriceWarning(
-      String foodName,
-      double price,
-      double priceMin,
-      double priceMax,
-      ) {
+    String foodName,
+    double price,
+    double priceMin,
+    double priceMax,
+  ) {
     if (priceMin <= 0 || priceMax < priceMin) return null;
     if (price < priceMin || price > priceMax) {
       return 'Suggested price for $foodName is '
@@ -176,10 +189,10 @@ class LandmarkSubmissionLogic {
     final double dLon = _degToRad(lon2 - lon1);
     final double a =
         math.sin(dLat / 2) * math.sin(dLat / 2) +
-            math.cos(_degToRad(lat1)) *
-                math.cos(_degToRad(lat2)) *
-                math.sin(dLon / 2) *
-                math.sin(dLon / 2);
+        math.cos(_degToRad(lat1)) *
+            math.cos(_degToRad(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
     final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     return earthRadiusMetres * c;
   }
@@ -192,17 +205,17 @@ class LandmarkSubmissionLogic {
   /// [current] itself has no fix yet - nothing to compare the adjustment
   /// against.
   bool isWithinAllowedRange(
-      LocationDataModel current,
-      double adjustedLat,
-      double adjustedLon,
-      ) {
+    TouristLocation current,
+    double adjustedLat,
+    double adjustedLon,
+  ) {
     if (!current.isKnown) return true;
     return _distanceMetres(
-      current.latitude,
-      current.longitude,
-      adjustedLat,
-      adjustedLon,
-    ) <=
+          current.latitude,
+          current.longitude,
+          adjustedLat,
+          adjustedLon,
+        ) <=
         100;
   }
 
@@ -233,6 +246,10 @@ class LandmarkSubmissionLogic {
       id: 0,
       landmarkId: 0, // Assigned once the landmark itself is saved.
       touristId: touristId,
+      // The curated catalogue row this dish resolves to - `entry.food.id`
+      // when it is already in `local_food` (id != 0), else 0 (a brand-new
+      // food gets its id backfilled after the Option-C catalogue insert).
+      localFoodId: entry.food.id,
       dish: entry.food.name,
       // LocalFood has no dedicated `variant` field (see FoodRecognitionLogic
       // - it is carried as a synonym instead).
@@ -280,7 +297,11 @@ class LandmarkSubmissionLogic {
   ///    under it (A13.1), then add just the new item(s) and keep its
   ///    existing opening hours (A13.2) rather than overwriting them;
   ///  - otherwise: save the new landmark as a brand new submission.
-  Future<void> submitLandmark({
+  ///
+  /// @return the assigned `landmark_id`, or `0` when no new landmark was
+  ///         created (a matching restaurant already exists). The submit flow
+  ///         uses it to backfill brand-new foods' ids onto the items (Option C).
+  Future<int> submitLandmark({
     required String restaurantName,
     required double? latitude,
     required double? longitude,
@@ -296,7 +317,7 @@ class LandmarkSubmissionLogic {
     if (existing != null) {
       // TODO: A13/A13.1/A13.2/A20 handling once SubmittedLandmarkRepository
       // exposes "add item to existing landmark" and "reactivate" methods.
-      return;
+      return 0;
     }
 
     // Build the landmark + its items here, from the raw, already-validated
@@ -323,6 +344,28 @@ class LandmarkSubmissionLogic {
           .expand((List<OpeningHour> rows) => rows)
           .toList(growable: false),
     );
-    await repository.landmark.save(landmark);
+    final int landmarkId = await repository.landmark.save(landmark);
+    return landmarkId;
+  }
+
+  /// Option C backfill: after genuinely-new foods are written to `local_food`,
+  /// point the just-saved `landmark_item` rows at them (their `local_food_id`
+  /// was 0 at insert time because the rows did not exist yet). Best-effort - a
+  /// failed link must not fail the submission that already succeeded.
+  Future<void> linkNewFoodsToLandmark(
+    int landmarkId,
+    Map<String, int> foodIds,
+  ) async {
+    for (final MapEntry<String, int> entry in foodIds.entries) {
+      try {
+        await repository.landmark.linkItemToFood(
+          landmarkId,
+          entry.key,
+          entry.value,
+        );
+      } catch (_) {
+        // Ignored - the landmark and its items are already saved.
+      }
+    }
   }
 }

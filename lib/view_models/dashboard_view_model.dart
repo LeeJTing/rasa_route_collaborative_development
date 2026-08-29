@@ -15,6 +15,32 @@ import '../model/business_logic/discovery_logic_facade.dart';
 /// Which of the two dashboard maps is showing (REQ102_12, REQ102_13).
 enum DashboardMapMode { heatmap, detailed }
 
+/// Temporary hand-off for the dashboard map -> landmark detail jump.
+///
+/// Routes pass no arguments (Developer Guideline, section 7.2 "Open
+/// decision") and a ViewModel takes no constructor parameters (Rule 1), so
+/// when the map's "View Landmark" button is tapped the dashboard stashes the
+/// tapped pin's `landmark_id` here right before pushing
+/// `AppRoutes.landmarkPlaceDetail`, and `LandmarkPlaceDetailView` reads-and-
+/// clears it in `initState` - the same pattern `LandmarkDraftHandoff` uses
+/// for the recognition flow.
+class MapSelectionHandoff {
+  factory MapSelectionHandoff() => _instance;
+
+  MapSelectionHandoff._();
+
+  static final MapSelectionHandoff _instance = MapSelectionHandoff._();
+
+  /// The `submitted_landmark.landmark_id` behind the tapped landmark pin.
+  int? pendingLandmarkId;
+
+  int? takeLandmarkId() {
+    final int? value = pendingLandmarkId;
+    pendingLandmarkId = null;
+    return value;
+  }
+}
+
 /// ViewModel for `DashboardView` - REQ102, the Local Food Dashboard &
 /// Regional Exploration Module, following UC300.
 
@@ -45,13 +71,71 @@ class DashboardViewModel extends BaseViewModel {
   /// The most recent GPS fix, shared by every instance of this ViewModel.
   static TouristLocation get sharedLocation => _sharedLocation;
 
+  // ===========================================================================
+  // Somebody else changed the map
+  // ===========================================================================
+  //
+  //   RestaurantMonitor -> UpdateRestaurantFacade.publishMapDataChanged()
+  //                     -> DashboardViewModel.onMapDataChanged()   [here]
+  //
+  // Static for the same reason the location fix is: the prompt has to survive
+  // this ViewModel being disposed and rebuilt, or switching tabs would quietly
+  // lose it.
+
+  static int _pendingNewLandmarks = 0;
+  static bool _mapUpdatePending = false;
+
+  /// **Called by `UpdateRestaurantFacade`, which `RestaurantMonitor` calls.**
+  /// Nothing else should call it.
+  ///
+  /// Note it only raises a flag. Re-fetching here would swap the map out from
+  /// under a tourist mid-read; the dashboard asks first.
+  static void onMapDataChanged({required int newLandmarks}) {
+    _mapUpdatePending = true;
+    _pendingNewLandmarks = newLandmarks;
+    for (final DashboardViewModel viewModel in Set<DashboardViewModel>.of(
+      _live,
+    )) {
+      viewModel.safeNotifyListeners();
+    }
+  }
+
+  /// Whether the map on screen has fallen behind the database.
+  bool get mapUpdateAvailable => _mapUpdatePending;
+
+  /// What the prompt says. Names a number when there is one, because "2 new
+  /// landmarks" is worth tapping and "something changed" is not.
+  String get mapUpdateMessage => _pendingNewLandmarks > 0
+      ? '$_pendingNewLandmarks new landmark'
+            '${_pendingNewLandmarks == 1 ? '' : 's'} added by other tourists.'
+      : 'The map has new places since you opened it.';
+
+  /// The Update button. Drops the caches, re-reads whichever view is showing,
+  /// and leaves the camera exactly where it was.
+  Future<void> applyMapUpdate() async {
+    _mapUpdatePending = false;
+    _pendingNewLandmarks = 0;
+    discoveryLogic.clearMapCache();
+    safeNotifyListeners();
+    await _reloadActiveView();
+  }
+
+  /// Dismissed without refreshing. The next change re-raises it.
+  void dismissMapUpdate() {
+    if (!_mapUpdatePending) return;
+    _mapUpdatePending = false;
+    _pendingNewLandmarks = 0;
+    safeNotifyListeners();
+  }
+
   /// **Called by `CurrentLocationFacade`, which `LocationMonitor` calls.**
   /// Nothing else should call it.
   static void onCurrentLocationChanged(TouristLocation location) {
     final bool lost = _sharedLocation.isKnown && !location.isKnown;
     _sharedLocation = location;
-    for (final DashboardViewModel viewModel
-        in Set<DashboardViewModel>.of(_live)) {
+    for (final DashboardViewModel viewModel in Set<DashboardViewModel>.of(
+      _live,
+    )) {
       viewModel._onLocationPushed(lost: lost);
     }
   }
@@ -169,7 +253,8 @@ class DashboardViewModel extends BaseViewModel {
   bool _filterPanelOpen = false;
   bool get filterPanelOpen => _filterPanelOpen;
 
-  final Set<ExplorationFilterGroup> _expandedGroups = <ExplorationFilterGroup>{};
+  final Set<ExplorationFilterGroup> _expandedGroups =
+      <ExplorationFilterGroup>{};
   bool isGroupExpanded(ExplorationFilterGroup group) =>
       _expandedGroups.contains(group);
 
@@ -430,6 +515,41 @@ class DashboardViewModel extends BaseViewModel {
   }
 
   // ===========================================================================
+  // Dev GPS mock (presenter tool, Android only)
+  // ===========================================================================
+  //
+  //   _MockGpsButton -> DashboardViewModel -> DiscoveryLogicFacade
+  //                 -> MapExplorationLogic -> LocationRepository
+  //                 -> MockLocationService (OS test provider)
+  //
+  // While a mock is active `LocationMonitor` holds the mocked fix and ignores
+  // the real GPS, so the map stays put until the mock is stopped.
+
+  /// Whether this build can mock the OS GPS (Android, non-web). The View hides
+  /// the dev control when false.
+  bool get mockGpsSupported => discoveryLogic.mockGpsSupported;
+
+  /// Whether a mock is live right now.
+  bool get mockGpsActive => discoveryLogic.mockGpsActive;
+
+  /// Teleports the OS GPS to a preset spot. Returns an error message, or null
+  /// on success.
+  Future<String?> setMockGps(double latitude, double longitude) async {
+    final String? error = await discoveryLogic.setMockGps(
+      latitude: latitude,
+      longitude: longitude,
+    );
+    safeNotifyListeners();
+    return error;
+  }
+
+  /// Stops mocking and lets the real GPS drive the map again.
+  Future<void> stopMockGps() async {
+    await discoveryLogic.stopMockGps();
+    safeNotifyListeners();
+  }
+
+  // ===========================================================================
   // Camera commands
   // ===========================================================================
 
@@ -557,15 +677,22 @@ class DashboardViewModel extends BaseViewModel {
     safeNotifyListeners();
   }
 
-  /// A11-4 - open the full Restaurant Details page.
+  /// A11-4 - open the full details page for the selected pin: the full
+  /// Restaurant Details page for a system restaurant, or the full Landmark
+  /// Details page for a tourist-submitted landmark. The landmark screen has
+  /// no route arguments, so the pin's `landmark_id` rides the
+  /// [MapSelectionHandoff] instead.
   void openSelectedPin() {
     final MapPin? pin = _selectedPin;
     if (pin == null) return;
-    AppNavigator.push(
-      pin.kind == MapPinKind.landmark
-          ? AppRoutes.landmarkDetail
-          : AppRoutes.restaurantDetail,
-    );
+    if (pin.kind == MapPinKind.landmark) {
+      final int? landmarkId = int.tryParse(pin.referenceId);
+      if (landmarkId == null || landmarkId <= 0) return;
+      MapSelectionHandoff().pendingLandmarkId = landmarkId;
+      AppNavigator.push(AppRoutes.landmarkPlaceDetail);
+      return;
+    }
+    AppNavigator.push(AppRoutes.restaurantDetail);
   }
 
   // ===========================================================================
@@ -598,7 +725,7 @@ class DashboardViewModel extends BaseViewModel {
 
   /// A7-3 - tick or untick one option, then recalculate (REQ102_28) and
   /// redraw (REQ102_29).
-   /// A7-3 - choose one option in a group, then recalculate (REQ102_28) and
+  /// A7-3 - choose one option in a group, then recalculate (REQ102_28) and
   /// redraw (REQ102_29).
   ///
   /// One option per group: picking a different one replaces what was there,
@@ -849,25 +976,37 @@ class DashboardViewModel extends BaseViewModel {
   /// pins on screen until the new set arrives, because those pins are still
   /// the right answer; blanking them every camera nudge just made the map
   /// flicker. Either way the camera is untouched.
-  Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
-    if (clearFirst && _pins.isNotEmpty) {
-      _pins = const <MapPin>[];
-      safeNotifyListeners();
-    }
+  bool _pinsInFlight = false;
 
-    _lastPinLatitude = _centreLatitude;
-    _lastPinLongitude = _centreLongitude;
-    _lastPinZoom = _zoom;
-    _pins = await discoveryLogic.mapPins(
-      filter: _filter,
-      localFoodId: _selectedFood?.id,
-      south: _viewportSouth,
-      west: _viewportWest,
-      north: _viewportNorth,
-      east: _viewportEast,
-      fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
-      fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
-    );
+  Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
+    // A mode switch and a settled camera can both ask at once. One query is
+    // enough; the debounce will fire again if the map has moved since.
+    if (_pinsInFlight) return;
+    _pinsInFlight = true;
+    try {
+      if (clearFirst && _pins.isNotEmpty) {
+        _pins = const <MapPin>[];
+        safeNotifyListeners();
+      }
+
+      _lastPinLatitude = _centreLatitude;
+      _lastPinLongitude = _centreLongitude;
+      _lastPinZoom = _zoom;
+      _pins = await discoveryLogic.mapPins(
+        filter: _filter,
+        localFoodId: _selectedFood?.id,
+        south: _viewportSouth,
+        west: _viewportWest,
+        north: _viewportNorth,
+        east: _viewportEast,
+        fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
+        fromLongitude: _sharedLocation.isKnown
+            ? _sharedLocation.longitude
+            : null,
+      );
+    } finally {
+      _pinsInFlight = false;
+    }
   }, silent: true);
 
   /// Has the viewport moved or scaled enough that the pins on screen could

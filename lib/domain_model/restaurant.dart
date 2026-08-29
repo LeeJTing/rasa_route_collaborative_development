@@ -40,29 +40,4 @@ class Restaurant {
   final double? distanceMetres;
   final int? reviewCount;
   final List<RestaurantItem> items;
-
-  String get distanceLabel {
-    final double? metres = distanceMetres;
-    if (metres == null) return 'Distance unavailable';
-    if (metres < 1000) return '${metres.round()} m';
-    return '${(metres / 1000).toStringAsFixed(1)} km';
-  }
-
-  Restaurant copyWith({double? distanceMetres, List<RestaurantItem>? items}) =>
-      Restaurant(
-        id: id,
-        name: name,
-        category: category,
-        address: address,
-        rating: rating,
-        latitude: latitude,
-        longitude: longitude,
-        phone: phone,
-        website: website,
-        imageUrl: imageUrl,
-        openingHours: openingHours,
-        distanceMetres: distanceMetres ?? this.distanceMetres,
-        reviewCount: reviewCount,
-        items: items ?? this.items,
-      );
 }

@@ -14,6 +14,8 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   final CurrentLocationFacade locationFacade = CurrentLocationFacade();
   final UpdateRestaurantFacade restaurantFacade = UpdateRestaurantFacade();
 
+  static const int _restaurantLimit = 20;
+
   TouristLocation _location = TouristLocation.unknown;
   List<Restaurant> _restaurants = const <Restaurant>[];
   RestaurantSource _source = RestaurantSource.google;
@@ -35,7 +37,7 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   Future<void> loadNearbyRestaurants() => runGuarded(() async {
     _restaurants = await discoveryLogic.getQuickModeRestaurants(
       location: _location,
-      limit: 30,
+      limit: _restaurantLimit,
     );
     _sort();
   });
@@ -48,6 +50,13 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   void toggleExpanded(int id) {
     _expandedIds.contains(id) ? _expandedIds.remove(id) : _expandedIds.add(id);
     safeNotifyListeners();
+  }
+
+  String distanceLabel(Restaurant restaurant) {
+    final double? metres = restaurant.distanceMetres;
+    if (metres == null) return 'Distance unavailable';
+    if (metres < 1000) return '${metres.round()} m';
+    return '${(metres / 1000).toStringAsFixed(1)} km';
   }
 
   void _sort() {

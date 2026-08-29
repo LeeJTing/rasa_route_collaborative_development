@@ -80,6 +80,22 @@ class LandmarkDraftHandoff {
   double pendingPriceMin = 0;
   double pendingPriceMax = 0;
 
+  /// Gemini's confidence (0..1) in [pendingRecognizedFood]'s dish name. Set by
+  /// the recognition screen so `AddLandmarkView` can attach it to the
+  /// submitted food, where the catalogue-growth gate (`FoodRecognitionLogic
+  /// .registerNewDishes`) demands a HIGH bar before writing a new `local_food`
+  /// row. `0` means unknown/never catalogue-insert eligible. Survives the
+  /// detail-screen round trip because `pushAddLandmark` only overwrites it
+  /// when a value is explicitly passed.
+  double pendingConfidence = 0;
+
+  /// Dietary restrictions (canonical `dietary_restriction.restriction_name`
+  /// strings) for [pendingRecognizedFood], carried to the
+  /// `food_dietary_restriction` association table when it becomes a new
+  /// catalogue row - NOT a `local_food` column, so it does not ride on
+  /// `LocalFood`.
+  List<String> pendingDietaryRestrictions = const <String>[];
+
   LocalFood? takeRecognizedFood() {
     final LocalFood? value = pendingRecognizedFood;
     pendingRecognizedFood = null;
@@ -123,6 +139,18 @@ class LandmarkDraftHandoff {
     return value;
   }
 
+  double takeConfidence() {
+    final double value = pendingConfidence;
+    pendingConfidence = 0;
+    return value;
+  }
+
+  List<String> takeDietaryRestrictions() {
+    final List<String> value = pendingDietaryRestrictions;
+    pendingDietaryRestrictions = const <String>[];
+    return value;
+  }
+
   /// Stashes [food] and [image] for the food-detail screen
   /// (`LandmarkDetailView`, at `AppRoutes.landmarkDetail`) and
   /// navigates there - the one shared implementation of "go view details
@@ -140,12 +168,18 @@ class LandmarkDraftHandoff {
     bool isLocalFood = true,
     double priceMin = 0,
     double priceMax = 0,
+    double confidence = 0,
+    List<String> dietaryRestrictions = const <String>[],
   }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
     pendingIsLocalFood = isLocalFood;
     pendingPriceMin = priceMin;
     pendingPriceMax = priceMax;
+    pendingDietaryRestrictions = dietaryRestrictions;
+    // Only overwrite when a real confidence is passed - a later re-push
+    // without one (e.g. from the detail screen) must keep the value set here.
+    if (confidence > 0) pendingConfidence = confidence;
     AppNavigator.push(AppRoutes.landmarkDetail);
   }
 
@@ -160,12 +194,17 @@ class LandmarkDraftHandoff {
     bool isLocalFood = true,
     double priceMin = 0,
     double priceMax = 0,
+    double confidence = 0,
+    List<String> dietaryRestrictions = const <String>[],
   }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
     pendingIsLocalFood = isLocalFood;
     pendingPriceMin = priceMin;
     pendingPriceMax = priceMax;
+    pendingDietaryRestrictions = dietaryRestrictions;
+    // Only overwrite when a real confidence is passed - see pushLandmarkDetail.
+    if (confidence > 0) pendingConfidence = confidence;
     AppNavigator.push(AppRoutes.addLandmark);
   }
 
@@ -180,6 +219,8 @@ class LandmarkDraftHandoff {
     pendingIsLocalFood = true;
     pendingPriceMin = 0;
     pendingPriceMax = 0;
+    pendingConfidence = 0;
+    pendingDietaryRestrictions = const <String>[];
   }
 }
 
@@ -234,9 +275,19 @@ typedef AdditionalFoodCaptureResult = ({
 class FoodRecognitionViewModel extends BaseViewModel {
   FoodRecognitionViewModel({
     @visibleForTesting LandmarkLogicFacade? landmarkLogic,
+    @visibleForTesting this.minimumLoadingDuration = const Duration(seconds: 3),
   }) : landmarkLogic = landmarkLogic ?? LandmarkLogicFacade();
 
   final LandmarkLogicFacade landmarkLogic;
+
+  /// How long the "Analysing image..." loading state must stay up at minimum
+  /// after a capture / manual name entry / picker enrichment starts. Gemini
+  /// itself can take longer - this only guarantees a FLOOR, so the
+  /// recognised-food card (and the "View Details" data carried with it) is
+  /// never shown while the result is still settling. `Duration.zero` in
+  /// tests, so they don't each wait out the floor.
+  @visibleForTesting
+  final Duration minimumLoadingDuration;
 
   // --- MODE ---
   FoodRecognitionPurpose _purpose = FoodRecognitionPurpose.food;
@@ -266,10 +317,33 @@ class FoodRecognitionViewModel extends BaseViewModel {
   double _priceMin = 0;
   double _priceMax = 0;
 
+  /// Dietary restrictions (canonical names) for the recognised food, carried
+  /// to the `food_dietary_restriction` association table when it becomes a
+  /// new catalogue row - NOT on `LocalFood` (dietary is an association).
+  List<String> _dietaryRestrictions = const <String>[];
+
   /// Gemini's confidence (0..1) in the recognised food - surfaced in the UI
-  /// so a shaky result is never presented as certain. `1.0` when unknown
-  /// (picker selection / manual name entry - the tourist drove the result).
+  /// so a shaky result is never presented as certain. For manual name entry
+  /// this is the name-vs-photo verification confidence, so a name Gemini
+  /// can't confirm comes back low and the low-confidence cue fires. `1.0`
+  /// when unknown (picker selection - the tourist chose).
   double _confidence = 1.0;
+
+  /// Whether a manually-typed name was verified against the photo and found
+  /// NOT to match it (with decent confidence) - the card warns "this photo
+  /// doesn't look like X" and the typed name can NOT be added; the tourist
+  /// can only keep the detected food.
+  bool _nameMismatch = false;
+
+  /// What the photo actually shows, in Gemini's words, when [_nameMismatch].
+  String? _observedFoodName;
+
+  /// The name the tourist typed, kept only to render the mismatch warning
+  /// ("this photo doesn't look like `<typed>`") when Gemini could not
+  /// confirm it against the photo. A mismatched typed name can NEVER become
+  /// the recognised dish - the tourist must keep the detected food instead -
+  /// so no details for it are held.
+  String? _typedName;
 
   XFile? get capturedImage => _capturedImage;
   LocalFood? get recognizedFood => _recognizedFood;
@@ -280,14 +354,38 @@ class FoodRecognitionViewModel extends BaseViewModel {
   bool get isLocalFood => _isLocalFood;
   double get priceMin => _priceMin;
   double get priceMax => _priceMax;
+  List<String> get dietaryRestrictions => _dietaryRestrictions;
   double get confidence => _confidence;
+  bool get nameMismatch => _nameMismatch;
+  String? get observedFoodName => _observedFoodName;
+
+  /// The name the tourist typed, kept for the mismatch warning while Gemini
+  /// has not confirmed it; null when there is nothing pending.
+  String? get typedName => _typedName;
 
   /// Whether the current recognition is shaky enough to ask the tourist to
   /// verify it. The threshold itself is a domain rule and lives in
   /// `FoodRecognitionLogic.isLowConfidence` - this getter just surfaces the
   /// already-decided answer so the View never compares numbers itself.
-  bool get isLowConfidence =>
-      landmarkLogic.foodRecognition.isLowConfidence(_confidence);
+  bool get isLowConfidence => landmarkLogic.isLowConfidence(_confidence);
+
+  /// Keeps [isProcessing] true until [minimumLoadingDuration] has elapsed
+  /// since [startedAt]. The result is already stored by the time this runs -
+  /// the loading state simply stays up so the card does not appear (and the
+  /// tourist cannot act on it) until the data has had time to render.
+  Future<void> _holdLoadingUntil(DateTime startedAt) async {
+    final Duration elapsed = DateTime.now().difference(startedAt);
+    final Duration remaining = minimumLoadingDuration - elapsed;
+    if (remaining > Duration.zero) {
+      await Future<void>.delayed(remaining);
+    }
+  }
+
+  /// REQ106_1 - ask for the OS camera permission before the View opens the
+  /// camera preview. The View calls this instead of a shared client; the
+  /// request travels ViewModel -> facade -> logic -> repository -> device.
+  Future<bool> requestCameraPermission() =>
+      landmarkLogic.requestCameraPermission();
 
   /// Capture image and send to Gemini for recognition (REQ106_1, REQ106_2).
   /// Used for both [FoodRecognitionPurpose.food] and
@@ -300,16 +398,22 @@ class FoodRecognitionViewModel extends BaseViewModel {
     _recognizedFood = null;
     _multipleResults = [];
     notifyListeners();
+    // Loading floor: Gemini may return fast, but the result card must not
+    // appear (and look half-rendered) before the data has had time to
+    // settle - see [minimumLoadingDuration].
+    final DateTime startedAt = DateTime.now();
 
     try {
       _capturedImage = image;
       final List<int> bytes = await image.readAsBytes();
-      final FoodRecognitionResult result = await landmarkLogic.foodRecognition
-          .recognizeFood(bytes);
+      final FoodRecognitionResult result = await landmarkLogic.recognizeFood(
+        bytes,
+      );
       _isLocalFood = result.isLocalFood;
       _priceMin = result.priceMin;
       _priceMax = result.priceMax;
       _confidence = result.confidence;
+      _dietaryRestrictions = result.dietaryRestrictions;
       if (result.candidates.length > 1) {
         // Gemini was unsure between a few likely dishes (A5) - show the
         // top-3 picker instead of a single result.
@@ -319,8 +423,12 @@ class FoodRecognitionViewModel extends BaseViewModel {
         _recognizedFood = result.candidates.first;
         _multipleResults = [];
       }
+      // Result is stored but isProcessing stays true until the floor is met.
+      await _holdLoadingUntil(startedAt);
       notifyListeners();
     } catch (e) {
+      // Errors surface immediately - the floor is for settling SUCCESS data,
+      // not for holding a failure message hostage.
       _recognitionError = _humaniseError(e);
       notifyListeners();
     } finally {
@@ -337,8 +445,9 @@ class FoodRecognitionViewModel extends BaseViewModel {
   /// single-result card settles. This is what fills the result card and
   /// "View Details" (and the suggested price range) for the picked dish;
   /// without it a non-catalogue pick would show only its name.
-  /// The picked food is set immediately so the picker closes; the enrichment
-  /// then swaps in the full record when it arrives.
+  /// The picked food is set immediately so the picker closes; the loading
+  /// state then stays up through the enrichment (plus the [minimumLoadingDuration]
+  /// floor) so the sparse name-only pick is never shown as the settled answer.
   Future<void> selectFromMultiple(LocalFood food) async {
     _recognizedFood = food;
     _multipleResults = [];
@@ -353,50 +462,73 @@ class FoodRecognitionViewModel extends BaseViewModel {
 
     final XFile? image = _capturedImage;
     if (image == null) return; // No photo to enrich with - keep the pick.
+    final DateTime startedAt = DateTime.now();
+    _isProcessing = true;
+    notifyListeners();
     try {
       final List<int> bytes = await image.readAsBytes();
-      final resolved = await landmarkLogic.foodRecognition.resolveByName(
-        bytes,
-        food.name,
-      );
+      final resolved = await landmarkLogic.enrichCandidate(bytes, food.name);
       _recognizedFood = resolved.food;
       _priceMin = resolved.priceMin;
       _priceMax = resolved.priceMax;
+      _dietaryRestrictions = resolved.dietaryRestrictions;
+      await _holdLoadingUntil(startedAt);
       notifyListeners();
     } catch (_) {
       // Gemini/catalogue hiccup - keep the picked (possibly name-only) food
       // rather than dropping the selection. The tourist can retry via the
       // manual name entry.
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
     }
   }
 
   /// Manual fallback: the tourist types the food name when Gemini's
   /// candidates don't include the right dish (see
-  /// `FoodRecognitionLogic.resolveByName`). Resolves it (catalogue match, else
-  /// a full Gemini analysis with the typed name) and shows the single-result
-  /// card for it, exactly like a confident recognition.
+  /// `FoodRecognitionLogic.resolveByName`). When Gemini confirms the typed
+  /// name matches the photo, the single-result card shows it. When it does
+  /// NOT match, the detected food is kept, a "this doesn't look like
+  /// `<typed name>`" warning is shown, and the typed name can NOT be added -
+  /// the tourist can only keep the detected food (see [dismissNameMismatch]).
   Future<void> enterFoodName(String name) async {
     final String trimmed = name.trim();
     if (trimmed.isEmpty) return;
     _isProcessing = true;
     _recognitionError = null;
     notifyListeners();
+    // Same loading floor as [captureAndRecognize] - the manually-resolved
+    // card must not appear before its data has had time to settle.
+    final DateTime startedAt = DateTime.now();
     try {
       final XFile? image = _capturedImage;
       if (image == null) {
         _recognitionError = 'No captured photo to analyse - capture one first.';
       } else {
         final List<int> bytes = await image.readAsBytes();
-        final resolved = await landmarkLogic.foodRecognition.resolveByName(
-          bytes,
-          trimmed,
-        );
-        _recognizedFood = resolved.food;
-        _priceMin = resolved.priceMin;
-        _priceMax = resolved.priceMax;
+        final resolved = await landmarkLogic.resolveByName(bytes, trimmed);
         _multipleResults = [];
-        _isLocalFood = true;
-        _confidence = 1.0; // The tourist named it - treat as certain.
+        if (resolved.nameMatchesPhoto) {
+          // Gemini confirms the typed name IS what the photo shows - use it.
+          _recognizedFood = resolved.food;
+          _priceMin = resolved.priceMin;
+          _priceMax = resolved.priceMax;
+          _isLocalFood = resolved.isLocalFood;
+          _confidence = resolved.matchConfidence;
+          _dietaryRestrictions = resolved.dietaryRestrictions;
+          _nameMismatch = false;
+          _observedFoodName = null;
+          _typedName = null;
+        } else {
+          // Gemini can't confirm the typed name - the detected food stays
+          // and the tourist is told the typed dish can't be added. The typed
+          // name is NOT applied under any circumstances: a photo that
+          // doesn't show a dish must never become that dish.
+          _nameMismatch = true;
+          _observedFoodName = resolved.observedFood;
+          _typedName = trimmed;
+        }
+        await _holdLoadingUntil(startedAt);
       }
       notifyListeners();
     } catch (e) {
@@ -423,6 +555,8 @@ class FoodRecognitionViewModel extends BaseViewModel {
       isLocalFood: _isLocalFood,
       priceMin: _priceMin,
       priceMax: _priceMax,
+      confidence: _confidence,
+      dietaryRestrictions: _dietaryRestrictions,
     );
   }
 
@@ -445,6 +579,8 @@ class FoodRecognitionViewModel extends BaseViewModel {
       isLocalFood: _isLocalFood,
       priceMin: _priceMin,
       priceMax: _priceMax,
+      confidence: _confidence,
+      dietaryRestrictions: _dietaryRestrictions,
     );
   }
 
@@ -469,6 +605,17 @@ class FoodRecognitionViewModel extends BaseViewModel {
     ));
   }
 
+  /// "Keep the detected food" - the ONLY action on a mismatch warning. The
+  /// typed name (which Gemini could not confirm against the photo) is
+  /// discarded; what Gemini identified stays.
+  void dismissNameMismatch() {
+    if (!_nameMismatch) return;
+    _nameMismatch = false;
+    _observedFoodName = null;
+    _typedName = null;
+    notifyListeners();
+  }
+
   /// Clear and retry
   void clearAndRetry() {
     _capturedImage = null;
@@ -478,6 +625,10 @@ class FoodRecognitionViewModel extends BaseViewModel {
     _isLocalFood = true;
     _priceMin = 0;
     _priceMax = 0;
+    _dietaryRestrictions = const <String>[];
+    _nameMismatch = false;
+    _observedFoodName = null;
+    _typedName = null;
     _extractedRestaurantName = null;
     notifyListeners();
   }
@@ -500,8 +651,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
 
     try {
       final List<int> bytes = await image.readAsBytes();
-      final String restaurantName = await landmarkLogic.submission
-          .analyzeSignboard(bytes);
+      final String restaurantName = await landmarkLogic.analyzeSignboard(bytes);
       _capturedImage = image;
       _extractedRestaurantName = restaurantName;
     } catch (e) {
@@ -524,7 +674,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
 
     try {
       final List<int> bytes = await image.readAsBytes();
-      await landmarkLogic.submission.analyzeStall(bytes);
+      await landmarkLogic.analyzeStall(bytes);
       _capturedImage = image;
     } catch (e) {
       _recognitionError = _humaniseError(e);

@@ -10,8 +10,13 @@ class RestaurantExpandedInfo extends StatelessWidget {
 
   final List<RestaurantItem> items;
 
+  static const int _previewItemLimit = 4;
+
   @override
   Widget build(BuildContext context) {
+    final List<RestaurantItem> previewItems = items
+        .take(_previewItemLimit)
+        .toList(growable: false);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
@@ -29,7 +34,7 @@ class RestaurantExpandedInfo extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             )
           else
-            ...items.map(
+            ...previewItems.map(
               (RestaurantItem item) => Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.md),
                 child: Row(

@@ -43,6 +43,7 @@ class _MainShellViewState extends State<MainShellView> {
 
   @override
   Widget build(BuildContext context) {
+    assert(_tabs.length == MainShellViewModel.tabCount);
     return ChangeNotifierProvider<MainShellViewModel>.value(
       value: _viewModel,
       child: Consumer<MainShellViewModel>(

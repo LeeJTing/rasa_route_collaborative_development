@@ -9,7 +9,6 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
-import '../../shared_client/device_capability_manager/device_capability_manager.dart';
 import '../../view_models/food_recognition_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 import 'widgets/multiple_results_card.dart';
@@ -82,13 +81,13 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
 
   Future<void> _initCamera() async {
     // Android 6+/iOS need the OS camera permission before the live preview
-    // can open. Request it explicitly (wrapped in `DeviceCapabilityManager`,
-    // the one place `permission_handler` is touched) instead of relying on
-    // the CameraException that initialize() would otherwise surface - this
-    // View owns the CameraController directly (REQ106_1), so it owns the
-    // permission gate too.
-    final bool cameraGranted = await DeviceCapabilityManager()
-        .requestCameraPermission();
+    // can open. Request it explicitly - routed through the ViewModel's
+    // facade chain, where the repository is the only thing that touches
+    // `permission_handler` - instead of relying on the CameraException that
+    // initialize() would otherwise surface. This View still owns the
+    // CameraController directly (REQ106_1), but the permission check itself
+    // stays out of the View.
+    final bool cameraGranted = await _viewModel.requestCameraPermission();
     if (!cameraGranted) {
       if (mounted) {
         setState(() {
@@ -172,27 +171,27 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
 
     final XFile image = await controller.takePicture();
 
+    // EVERY purpose crops to its on-screen frame guide before analysis. The
+    // guide is only a visual overlay - Gemini never sees it - so without
+    // cropping, whatever sits outside the frame is still sent and still
+    // judged. For food that meant the guide was purely decorative: nearby
+    // dishes, table clutter and packaging all reached Gemini, inflating
+    // `foodCount` ("please capture only one food") and giving it competing
+    // subjects to identify. Cropping makes what the tourist framed the same
+    // as what is actually analysed.
+    final XFile framed = await _cropToFrame(
+      image,
+      _frameFactorsFor(viewModel.purpose),
+    );
+
     switch (viewModel.purpose) {
       case FoodRecognitionPurpose.food:
       case FoodRecognitionPurpose.additionalFood:
-        await viewModel.captureAndRecognize(image);
+        await viewModel.captureAndRecognize(framed);
       case FoodRecognitionPurpose.signboard:
-        // Crop the captured photo to the on-screen frame guide before
-        // analysis - the guide is only a visual overlay, invisible to
-        // Gemini, so without this a signboard captured outside the frame
-        // still passes. Cropped, it gets physically clipped and reported as
-        // incomplete.
-        final XFile signboardFramed = await _cropToFrame(
-          image,
-          _frameFactorsFor(FoodRecognitionPurpose.signboard),
-        );
-        await viewModel.captureSignboard(signboardFramed);
+        await viewModel.captureSignboard(framed);
       case FoodRecognitionPurpose.stall:
-        final XFile stallFramed = await _cropToFrame(
-          image,
-          _frameFactorsFor(FoodRecognitionPurpose.stall),
-        );
-        await viewModel.captureStallImage(stallFramed);
+        await viewModel.captureStallImage(framed);
     }
   }
 
@@ -367,6 +366,10 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           capturedImage: viewModel.capturedImage,
           isLocalFood: viewModel.isLocalFood,
           isLowConfidence: viewModel.isLowConfidence,
+          nameMismatch: viewModel.nameMismatch,
+          observedFoodName: viewModel.observedFoodName,
+          typedName: viewModel.typedName,
+          onDismissNameMismatch: viewModel.dismissNameMismatch,
           onViewDetails: viewModel.proceedToViewDetails,
           // Non-local food: details + "View Details" stay, but there is no
           // "Add New Landmark" - it must never become a landmark.
@@ -387,6 +390,10 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           capturedImage: viewModel.capturedImage,
           isLocalFood: viewModel.isLocalFood,
           isLowConfidence: viewModel.isLowConfidence,
+          nameMismatch: viewModel.nameMismatch,
+          observedFoodName: viewModel.observedFoodName,
+          typedName: viewModel.typedName,
+          onDismissNameMismatch: viewModel.dismissNameMismatch,
           // Same "View Details" as the primary capture; the detail screen's
           // confirm then returns this food to the existing form (see
           // LandmarkDetailViewModel.returnToFormAsAdditionalFood) rather
@@ -787,14 +794,22 @@ class _LoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          CircularProgressIndicator(),
-          SizedBox(height: AppSpacing.md),
-          Text('Analysing image...', style: AppTextStyles.bodyMedium),
+          const CircularProgressIndicator(),
+          const SizedBox(height: AppSpacing.md),
+          const Text('Analysing image...', style: AppTextStyles.bodyMedium),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Recognition may take some time - please wait patiently.',
+            textAlign: TextAlign.center,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
         ],
       ),
     );

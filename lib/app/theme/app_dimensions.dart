@@ -195,6 +195,11 @@ abstract final class AppSizes {
   /// 48 would make the panel taller than the map it is filtering.
   static const double filterChipTapHeight = 40;
 
+  /// Ceiling on the filter panel. Open every group and the Taste row alone
+  /// wraps to five lines - past this the rows scroll instead of the panel
+  /// growing off the screen and taking its own close control with it.
+  static const double filterPanelMaxHeight = 340;
+
   /// The fixed label pill ("Meal", "Category", "Taste", "Type") that opens a
   /// filter row.
   static const double filterGroupLabelWidth = 72;
@@ -255,6 +260,9 @@ abstract final class AppSizes {
   /// Standard small icon (inline with body text).
   static const double iconSmall = 18;
 
+  /// Compact icon used inside dense catalogue and restaurant metadata rows.
+  static const double iconCompact = 16;
+
   /// Standard medium icon (section headers, notices).
   static const double iconMedium = 24;
 
@@ -266,6 +274,18 @@ abstract final class AppSizes {
 
   /// Max body width of `FoodComparisonView` (two columns side by side).
   static const double comparisonMaxWidth = 720;
+
+  /// `LandmarkPlaceDetailView`'s photo, sized by `imageCategory` (signboard
+  /// vs stall) rather than one fixed height for both - a stall photo is
+  /// captured tall (see `AppLayoutRatios.stallFrameHeightFactor`), and
+  /// forcing it into a short, wide frame with `BoxFit.cover` was cropping
+  /// away most of it. A signboard photo is captured wide/short, so it fits
+  /// the shorter frame fine.
+  static const double landmarkPhotoHeightWide = 140;
+  static const double landmarkPhotoHeightTall = 280;
+
+  /// Fallback when `imageCategory` is unknown - splits the difference.
+  static const double landmarkPhotoHeightDefault = 180;
 }
 
 /// Camera-frame guide proportions (REQ106_1) - fractions of the viewfinder's
@@ -298,4 +318,8 @@ abstract final class AppLayoutRatios {
 
   /// The result popup's max height as a fraction of the screen height.
   static const double popupMaxHeightFraction = 0.8;
+
+  /// Initial and maximum heights for the catalogue filter bottom sheet.
+  static const double catalogueFilterSheetInitial = 0.8;
+  static const double catalogueFilterSheetMaximum = 0.92;
 }

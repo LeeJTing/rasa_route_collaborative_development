@@ -6,9 +6,16 @@ import '../../../domain_model/local_food.dart';
 import '../../common_widgets/app_tag_chip.dart';
 
 class FoodOverviewCard extends StatelessWidget {
-  const FoodOverviewCard({super.key, required this.food});
+  const FoodOverviewCard({
+    super.key,
+    required this.food,
+    required this.onPlayPronunciation,
+    required this.isStartingPronunciation,
+  });
 
   final LocalFood food;
+  final VoidCallback onPlayPronunciation;
+  final bool isStartingPronunciation;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -55,7 +62,7 @@ class FoodOverviewCard extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'Tap to hear • Tap again to replay',
+                    'Pronunciation guide',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: AppColors.accentRust,
                     ),
@@ -68,8 +75,13 @@ class FoodOverviewCard extends StatelessWidget {
               shape: const CircleBorder(),
               child: IconButton(
                 tooltip: 'Play pronunciation',
-                onPressed: () {},
-                icon: const Icon(Icons.volume_up, color: AppColors.textPrimary),
+                onPressed: isStartingPronunciation ? null : onPlayPronunciation,
+                icon: isStartingPronunciation
+                    ? const SizedBox.square(
+                        dimension: AppSizes.iconSmall,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.volume_up_rounded),
               ),
             ),
           ],

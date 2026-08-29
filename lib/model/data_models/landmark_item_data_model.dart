@@ -7,6 +7,7 @@ class LandmarkItemDataModel implements JsonModel {
     required this.landmarkItemId,
     required this.landmarkId,
     required this.touristId,
+    this.localFoodId,
     this.dish,
     this.variant,
     this.foodCategory,
@@ -16,6 +17,8 @@ class LandmarkItemDataModel implements JsonModel {
     this.imageUrl,
     this.imageId,
     this.itemPrice,
+    this.priceMin,
+    this.priceMax,
     this.seasonal,
     this.cookingStyle,
     this.mealType,
@@ -29,6 +32,12 @@ class LandmarkItemDataModel implements JsonModel {
 
   /// FK -> `tourist.tourist_id` (uuid).
   final String touristId;
+
+  /// FK -> `local_food.local_food_id`, nullable. The curated dish this item
+  /// resolves to - mirrors `restaurant_item.local_food_id`. Null when the
+  /// submitted dish has no catalogue row yet (brand-new food, backfilled
+  /// after the Option-C insert) or could not be matched.
+  final int? localFoodId;
 
   final String? dish;
   final String? variant;
@@ -44,6 +53,13 @@ class LandmarkItemDataModel implements JsonModel {
   final String? imageId;
 
   final double? itemPrice;
+
+  /// `landmark_item.price_min` / `price_max` - Gemini's suggested selling
+  /// range for this dish (MYR), carried on the submitted item (see
+  /// `LandmarkItem.priceMin`). Null when Gemini supplied no range.
+  final double? priceMin;
+  final double? priceMax;
+
   final String? seasonal;
   final String? cookingStyle;
   final String? mealType;
@@ -53,6 +69,7 @@ class LandmarkItemDataModel implements JsonModel {
       landmarkItemId: JsonReader.asInt(json['landmark_item_id']),
       landmarkId: JsonReader.asInt(json['landmark_id']),
       touristId: JsonReader.asString(json['tourist_id']),
+      localFoodId: JsonReader.asIntOrNull(json['local_food_id']),
       dish: JsonReader.asStringOrNull(json['dish']),
       variant: JsonReader.asStringOrNull(json['variant']),
       foodCategory: JsonReader.asStringOrNull(json['food_category']),
@@ -64,6 +81,8 @@ class LandmarkItemDataModel implements JsonModel {
       imageUrl: JsonReader.asStringOrNull(json['image_url']),
       imageId: JsonReader.asStringOrNull(json['image_id']),
       itemPrice: JsonReader.asDoubleOrNull(json['item_price']),
+      priceMin: JsonReader.asDoubleOrNull(json['price_min']),
+      priceMax: JsonReader.asDoubleOrNull(json['price_max']),
       seasonal: JsonReader.asStringOrNull(json['seasonal']),
       cookingStyle: JsonReader.asStringOrNull(json['cooking_style']),
       mealType: JsonReader.asStringOrNull(json['meal_type']),
@@ -75,6 +94,7 @@ class LandmarkItemDataModel implements JsonModel {
     'landmark_item_id': landmarkItemId,
     'landmark_id': landmarkId,
     'tourist_id': touristId,
+    'local_food_id': localFoodId,
     'dish': dish,
     'variant': variant,
     'food_category': foodCategory,
@@ -84,6 +104,8 @@ class LandmarkItemDataModel implements JsonModel {
     'image_url': imageUrl,
     'image_id': imageId,
     'item_price': itemPrice,
+    'price_min': priceMin,
+    'price_max': priceMax,
     'seasonal': seasonal,
     'cooking_style': cookingStyle,
     'meal_type': mealType,

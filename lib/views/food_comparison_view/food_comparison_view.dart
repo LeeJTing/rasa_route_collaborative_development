@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../domain_model/food_comparison.dart';
 import '../../view_models/food_comparison_view_model.dart';
+import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
 import 'widgets/comparison_insight_card.dart';
 import 'widgets/comparison_notice.dart';
@@ -59,14 +60,10 @@ class _FoodComparisonViewState extends State<FoodComparisonView> {
           Widget? child,
         ) {
           return Scaffold(
-            appBar: AppBar(
-              leading: IconButton(
-                onPressed: viewModel.goBack,
-                tooltip: 'Back to local foods',
-                icon: const Icon(Icons.arrow_back_rounded),
-              ),
-              title: const Text('Food comparison'),
-            ),
+          appBar: AppTopBar(
+          title: 'Food Comparison',
+          showBackButton: true,
+          ),
             body: _body(viewModel),
           );
         },
