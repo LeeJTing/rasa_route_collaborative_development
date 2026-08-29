@@ -118,19 +118,25 @@ abstract final class Env {
       _read(_keyGeminiApiKeyLandmark, fallback: geminiApiKey);
 
   /// Optional UC500-specific model; falls back to [geminiModel] when unset.
+  /// Shares the same fallback list as [geminiModel] - see
+  /// [geminiFallbackModels].
   static String get geminiModelLandmark =>
       _read(_keyGeminiModelLandmark, fallback: geminiModel);
 
   /// Ordered models to try when the primary Gemini model is temporarily
   /// unavailable (HTTP 429 rate-limited / 5xx high demand, e.g. 503).
-  /// Comma-separated in `.env` (`GEMINI_FALLBACK_MODELS`); defaults to three
+  /// Shared by BOTH [geminiModel] (food recognition) and
+  /// [geminiModelLandmark] (UC500's `GeminiLandmarkService`): every request
+  /// rotates through this same list in `GeminiService._modelRotation`,
+  /// regardless of which primary model started it.
+  /// Comma-separated in `.env` (`GEMINI_FALLBACK_MODELS`); defaults to four
   /// common Gemini models when unset. See `GeminiService._generate`.
   static List<String> get geminiFallbackModels {
     const List<String> defaults = <String>[
       'gemini-3.6-flash',
       'gemini-3.5-flash',
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-3.7-flash',
     ];
     final String raw = _read(_keyGeminiFallbackModels);
     if (raw.isEmpty) return defaults;
