@@ -1,6 +1,7 @@
 import '../../domain_model/food_comparison.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/local_food.dart';
+import '../../shared_client/device_capability_manager/device_capability_manager.dart';
 import 'food_comparison_logic.dart';
 import 'food_knowledge_logic.dart';
 import 'food_recommendation_logic.dart';
@@ -18,6 +19,7 @@ class FoodLogicFacade {
   final FoodKnowledgeLogic knowledge = FoodKnowledgeLogic();
   final FoodComparisonLogic comparison = FoodComparisonLogic();
   final FoodRecommendationLogic recommendation = FoodRecommendationLogic();
+  final DeviceCapabilityManager deviceCapabilities = DeviceCapabilityManager();
 
   // =========================================================================
   // Forwarded Logic
@@ -48,6 +50,19 @@ class FoodLogicFacade {
   Future<List<FoodPairing>> getFoodPairingRecommendations(int foodId) =>
       recommendation.getPairingRecommendations(foodId);
 
+  Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) async {
+    final DevicePronunciationPlaybackResult result = await deviceCapabilities
+        .playPronunciation(foodName: food.name, audioUrl: food.audioGuideUrl);
+    return switch (result) {
+      DevicePronunciationPlaybackResult.curatedAudio =>
+        PronunciationPlaybackResult.curatedAudio,
+      DevicePronunciationPlaybackResult.deviceVoice =>
+        PronunciationPlaybackResult.deviceVoice,
+      DevicePronunciationPlaybackResult.unavailable =>
+        PronunciationPlaybackResult.unavailable,
+    };
+  }
+
   // --- Food comparison ------------------------------------------------------
 
   Future<FoodComparison> buildComparison(List<int> foodIds) =>
@@ -59,3 +74,6 @@ class FoodLogicFacade {
   LocalFood? bestValueFood(FoodComparison result) =>
       comparison.bestValueFood(result);
 }
+
+/// Stable business-layer result exposed to presentation code.
+enum PronunciationPlaybackResult { curatedAudio, deviceVoice, unavailable }

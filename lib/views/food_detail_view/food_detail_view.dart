@@ -103,7 +103,11 @@ class _FoodDetailViewState extends State<FoodDetailView> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          FoodOverviewCard(food: food),
+          FoodOverviewCard(
+            food: food,
+            isStartingPronunciation: vm.isStartingPronunciation,
+            onPlayPronunciation: () => _playPronunciation(context, vm),
+          ),
           const SizedBox(height: AppSpacing.lg),
           FoodSectionCard(
             child: Column(
@@ -217,6 +221,19 @@ class _FoodDetailViewState extends State<FoodDetailView> {
       ),
     ),
   );
+
+  Future<void> _playPronunciation(
+    BuildContext context,
+    FoodDetailViewModel viewModel,
+  ) async {
+    await viewModel.playPronunciation();
+    if (!context.mounted) return;
+    final String? message = viewModel.takePronunciationMessage();
+    if (message == null) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 }
 
 class _InformationItem extends StatelessWidget {
