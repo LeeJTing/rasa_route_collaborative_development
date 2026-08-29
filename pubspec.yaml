@@ -12,6 +12,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_dotenv: ^6.0.1
   supabase_flutter: ^2.17.2
+  audioplayers: ^6.8.1
+  flutter_tts: ^4.2.5
 
   # @visibleForTesting test seams (pure annotations, ships with the Flutter SDK).
   meta: ^1.9.1

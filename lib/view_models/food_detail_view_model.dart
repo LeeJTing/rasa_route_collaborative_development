@@ -15,6 +15,8 @@ class FoodDetailViewModel extends BaseViewModel {
   List<String> _allergyWarnings = const <String>[];
   LocalFood? _collidedFood;
   bool _isFoodInformationExpanded = false;
+  bool _isStartingPronunciation = false;
+  String? _pronunciationMessage;
 
   LocalFood? get food => _food;
   bool get isLiked => _isLiked;
@@ -22,6 +24,8 @@ class FoodDetailViewModel extends BaseViewModel {
   List<String> get allergyWarnings => _allergyWarnings;
   LocalFood? get collidedFood => _collidedFood;
   bool get isFoodInformationExpanded => _isFoodInformationExpanded;
+  bool get isStartingPronunciation => _isStartingPronunciation;
+  String? get pronunciationMessage => _pronunciationMessage;
 
   @override
   Future<void> onInit() => loadFood(foodId);
@@ -46,4 +50,64 @@ class FoodDetailViewModel extends BaseViewModel {
     _isFoodInformationExpanded = !_isFoodInformationExpanded;
     safeNotifyListeners();
   }
+
+  Future<void> playPronunciation() async {
+    final LocalFood? currentFood = _food;
+    if (currentFood == null || _isStartingPronunciation) return;
+    _isStartingPronunciation = true;
+    _pronunciationMessage = null;
+    safeNotifyListeners();
+    try {
+      final PronunciationPlaybackResult result = await foodLogic
+          .playPronunciation(currentFood);
+      _pronunciationMessage = switch (result) {
+        PronunciationPlaybackResult.curatedAudio => null,
+        PronunciationPlaybackResult.deviceVoice =>
+          'Using your device voice because the recorded audio is unavailable.',
+        PronunciationPlaybackResult.unavailable =>
+          'Pronunciation audio is unavailable on this device.',
+      };
+    } finally {
+      _isStartingPronunciation = false;
+      safeNotifyListeners();
+    }
+  }
+
+  String? takePronunciationMessage() {
+    final String? message = _pronunciationMessage;
+    _pronunciationMessage = null;
+    return message;
+  }
+
+  Future<void> _loadPairings() async {
+    _pairingTimedOut = false;
+    try {
+      _foodPairings = await foodLogic
+          .getFoodPairingRecommendations(foodId)
+          .timeout(_pairingTimeout);
+    } catch (_) {
+      _foodPairings = const <FoodPairing>[];
+      _pairingTimedOut = true;
+    }
+  }
+
+  LocalFood _withFavourite(LocalFood food, bool isFavourite) => LocalFood(
+    id: food.id,
+    name: food.name,
+    description: food.description,
+    origin: food.origin,
+    culturalBackground: food.culturalBackground,
+    ingredients: food.ingredients,
+    category: food.category,
+    cookingStyle: food.cookingStyle,
+    mealType: food.mealType,
+    foodType: food.foodType,
+    tastes: food.tastes,
+    mainTaste: food.mainTaste,
+    pronunciationText: food.pronunciationText,
+    audioGuideUrl: food.audioGuideUrl,
+    synonyms: food.synonyms,
+    imageUrls: food.imageUrls,
+    isFavourite: isFavourite,
+  );
 }

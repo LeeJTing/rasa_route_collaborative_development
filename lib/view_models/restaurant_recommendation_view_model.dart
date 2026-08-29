@@ -14,7 +14,7 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   final CurrentLocationFacade locationFacade = CurrentLocationFacade();
   final UpdateRestaurantFacade restaurantFacade = UpdateRestaurantFacade();
 
-  static const int _restaurantLimit = 30;
+  static const int _restaurantLimit = 20;
 
   TouristLocation _location = TouristLocation.unknown;
   List<Restaurant> _restaurants = const <Restaurant>[];
