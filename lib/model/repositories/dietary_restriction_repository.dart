@@ -85,18 +85,36 @@ class DietaryRestrictionRepository {
         .toList(growable: false);
   }
 
+  /// All food-to-restriction links in one request, grouped for queue ranking.
+  /// A bulk query avoids one Supabase round trip for every swipe card.
+  Future<Map<int, Set<int>>> restrictionIdsByFood() async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableFoodDietaryRestriction,
+      columns: 'local_food_id, dietary_restriction_id',
+    );
+    final Map<int, Set<int>> grouped = <int, Set<int>>{};
+    for (final Map<String, dynamic> row in rows) {
+      final int? foodId = JsonReader.asIntOrNull(row['local_food_id']);
+      final int? restrictionId = JsonReader.asIntOrNull(
+        row['dietary_restriction_id'],
+      );
+      if (foodId == null || restrictionId == null) continue;
+      grouped.putIfAbsent(foodId, () => <int>{}).add(restrictionId);
+    }
+    return grouped;
+  }
+
   /// Parses one link row. Returns null when the embedded restriction is null
   /// so a food with no dietary restriction is allowed (treated as none).
   DietaryRestriction? _fromRow(Map<String, dynamic> row) {
     final Map<String, dynamic> embedded = JsonReader.asMap(
       row['dietary_restriction'],
     );
-    if (embedded['dietary_restriction_id'] == null) return null;
-    final DietaryRestrictionDataModel data =
-        DietaryRestrictionDataModel.fromJson(embedded);
-    return DietaryRestriction(
-      id: data.dietaryRestrictionId,
-      name: data.restrictionName,
-    );
+    final int? id = JsonReader.asIntOrNull(embedded['dietary_restriction_id']);
+    if (id == null) return null;
+    final String name =
+        JsonReader.asStringOrNull(embedded['restriction_name']) ??
+        'Restriction $id';
+    return DietaryRestriction(id: id, name: name);
   }
 }

@@ -1,11 +1,9 @@
-import 'package:meta/meta.dart' show visibleForTesting;
-
+import '../../domain_model/restaurant.dart';
+import '../../domain_model/origin_verification.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
-import '../../domain_model/origin_verification.dart';
 import '../../domain_model/region.dart';
-import '../../domain_model/restaurant.dart';
 import '../../domain_model/swipe_session.dart';
 import 'auth_repository.dart';
 import 'camera_repository.dart';
@@ -32,29 +30,10 @@ import 'swipe_repository.dart';
 /// separate repositories. It groups the repositories for one subject area and
 /// re-exposes them as a single flat API. No business rules live here.
 class DiscoveryRepositoryFacade {
-  DiscoveryRepositoryFacade({
-    @visibleForTesting RestaurantRepository? restaurant,
-    @visibleForTesting RecognitionRepository? recognition,
-    @visibleForTesting MapRepository? map,
-    @visibleForTesting FoodKnowledgeRepository? food,
-    @visibleForTesting DietaryRestrictionRepository? dietaryRestriction,
-    @visibleForTesting SwipeRepository? swipe,
-    @visibleForTesting AuthRepository? auth,
-  }) : restaurant = restaurant ?? RestaurantRepository(),
-       recognition = recognition ?? RecognitionRepository(),
-       map = map ?? MapRepository(),
-       food = food ?? FoodKnowledgeRepository(),
-       dietaryRestriction =
-           dietaryRestriction ?? DietaryRestrictionRepository(),
-       swipe = swipe ?? SwipeRepository(),
-       auth = auth ?? AuthRepository();
+  DiscoveryRepositoryFacade();
 
-  final RestaurantRepository restaurant;
-  final RecognitionRepository recognition;
-  final FoodKnowledgeRepository food;
-  final DietaryRestrictionRepository dietaryRestriction;
-  final SwipeRepository swipe;
-  final AuthRepository auth;
+  final RestaurantRepository restaurant = RestaurantRepository();
+  final RecognitionRepository recognition = RecognitionRepository();
 
   /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
   final MapRepository map;
@@ -85,16 +64,8 @@ class DiscoveryRepositoryFacade {
     String touristId,
   ) => dietaryRestriction.restrictionsForTourist(touristId);
 
-  Future<Map<int, Set<int>>> dietaryRestrictionIdsByFood() async {
-    final Map<int, List<int>> restrictions =
-        await dietaryRestriction.restrictionIdsByFood();
-    return restrictions.map(
-      (int foodId, List<int> ids) => MapEntry<int, Set<int>>(
-        foodId,
-        ids.toSet(),
-      ),
-    );
-  }
+  Future<Map<int, Set<int>>> dietaryRestrictionIdsByFood() =>
+      dietaryRestriction.restrictionIdsByFood();
 
   Future<List<Region>> malaysiaRegions() => map.malaysiaRegions();
 

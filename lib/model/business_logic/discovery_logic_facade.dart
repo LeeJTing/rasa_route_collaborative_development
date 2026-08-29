@@ -36,6 +36,26 @@ class DiscoveryLogicFacade {
   final MatchesRecommendationLogic matchesRecommendation;
   final MapExplorationLogic mapExploration = MapExplorationLogic();
 
+  // ---------------------------------------------------------------------------
+  // Dev GPS mock (Android-only presenter tool), re-exposed flat.
+  // ---------------------------------------------------------------------------
+
+  /// Whether this build can mock the OS GPS (Android, non-web). Views hide the
+  /// dev control when false.
+  bool get mockGpsSupported => mapExploration.mockGpsSupported;
+
+  /// Whether a mock is live right now.
+  bool get mockGpsActive => mapExploration.mockGpsActive;
+
+  /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error message,
+  /// or null on success.
+  Future<String?> setMockGps({
+    required double latitude,
+    required double longitude,
+  }) => mapExploration.setMockGps(latitude: latitude, longitude: longitude);
+
+  /// Stops mocking and resumes real GPS fixes.
+  Future<void> stopMockGps() => mapExploration.stopMockGps();
   // ===========================================================================
   // REQ103 - state-localised Swipe Mode.
   // ===========================================================================
@@ -72,27 +92,6 @@ class DiscoveryLogicFacade {
 
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
       restaurantDiscovery.findById(restaurantId);
-
-  // ---------------------------------------------------------------------------
-  // Dev GPS mock (Android-only presenter tool), re-exposed flat.
-  // ---------------------------------------------------------------------------
-
-  /// Whether this build can mock the OS GPS (Android, non-web). Views hide the
-  /// dev control when false.
-  bool get mockGpsSupported => mapExploration.mockGpsSupported;
-
-  /// Whether a mock is live right now.
-  bool get mockGpsActive => mapExploration.mockGpsActive;
-
-  /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error message,
-  /// or null on success.
-  Future<String?> setMockGps({
-    required double latitude,
-    required double longitude,
-  }) => mapExploration.setMockGps(latitude: latitude, longitude: longitude);
-
-  /// Stops mocking and resumes real GPS fixes.
-  Future<void> stopMockGps() => mapExploration.stopMockGps();
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
