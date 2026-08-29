@@ -3,6 +3,7 @@ import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/map.dart';
+import '../../domain_model/map_place.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/tourist_location.dart';
@@ -37,6 +38,32 @@ class MapExplorationLogic {
   final FoodRepositoryFacade foodRepository = FoodRepositoryFacade();
 
   // ===========================================================================
+  // Dev GPS mock (Android-only presenter tool)
+  // ===========================================================================
+  //
+  // Teleports the OS-level GPS so a demo can be "at" a preset spot without
+  // moving the device. The state lives in `MockLocationService`, behind
+  // `LocationRepository`, so `LocationMonitor` can hold the mocked fix and
+  // ignore the real GPS for exactly as long as the mock is active.
+
+  /// Whether this build can mock the OS GPS (Android, non-web). Views hide
+  /// the dev control when false.
+  bool get mockGpsSupported => repository.location.mockSupported;
+
+  /// Whether a mock is live right now.
+  bool get mockGpsActive => repository.location.mockActive;
+
+  /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error
+  /// message, or null on success.
+  Future<String?> setMockGps({
+    required double latitude,
+    required double longitude,
+  }) => repository.location.setMockLocation(latitude, longitude);
+
+  /// Stops mocking and resumes real GPS fixes.
+  Future<void> stopMockGps() => repository.location.stopMockLocation();
+
+  // ===========================================================================
   // Map geometry constants
   // ===========================================================================
 
@@ -51,6 +78,7 @@ class MapExplorationLogic {
   /// is unavailable or outside Malaysia.
   static const double malaysiaCentreLatitude = 4.10;
   static const double malaysiaCentreLongitude = 109.50;
+
   ///
   /// 4.7, not 5.3: Malaysia's bounding box is 20.3 degrees of longitude wide,
   /// and at 5.3 that does not fit a 390pt phone - Sabah fell off the right
@@ -73,6 +101,29 @@ class MapExplorationLogic {
 
   /// Where a city search result settles the map (REQ102_22).
   static const double cityZoom = 13;
+
+  /// Where a restaurant or landmark search result settles - street level.
+  static const double addressZoom = 16;
+
+  /// What people type instead of a state's official name.
+  ///
+  /// Without these, searching "Penang" surfaces George Town and Penang Hill
+  /// but never the state itself, because the catalogue calls it Pulau Pinang.
+  /// Keyed by region code.
+  static const Map<String, List<String>> stateAliases = <String, List<String>>{
+    'PNG': <String>['Penang'],
+    'MLK': <String>['Malacca'],
+    'NSN': <String>['N. Sembilan', 'Negri Sembilan'],
+    'KUL': <String>['KL', 'WP Kuala Lumpur'],
+    'PJY': <String>['WP Putrajaya'],
+    'LBN': <String>['WP Labuan'],
+    'TRG': <String>['Trengganu'],
+    'PLS': <String>['Perlis Indera Kayangan'],
+  };
+
+  /// How many location results the list shows. Enough to find what you meant,
+  /// short enough to scan.
+  static const int maximumPlaceResults = 12;
 
   /// Where Find Me and the initial GPS centring settle the map
   /// (REQ102_8, REQ102_9).
@@ -112,16 +163,21 @@ class MapExplorationLogic {
   ];
 
   /// C3 / REQ102_25.
+  ///
+  /// Four cuisines, per JT's updated requirement. **`Sabah` and `Sarawak` were
+  /// dropped from the filter but still exist in `local_food.food_category`** -
+  /// 23 of the 102 catalogue rows carry one of them. Those dishes are still
+  /// searchable and still counted when no category filter is set; they simply
+  /// cannot be filtered *to*, and picking any category now excludes them.
   static const List<String> categoryOptions = <String>[
     'Malay',
     'Chinese',
     'Indian',
     'Nyonya',
-    'Sabah',
-    'Sarawak',
   ];
 
-  /// C4 / REQ102_26.
+  /// C4 / REQ102_26. Order follows the requirement, not the alphabet, so the
+  /// row reads the way the spec does.
   static const List<String> tasteOptions = <String>[
     'Sweet',
     'Salty',
@@ -130,6 +186,7 @@ class MapExplorationLogic {
     'Umami',
     'Spicy',
     'Mild',
+    'Buttery',
     'Peppery',
     'Savoury',
     'Rich',
@@ -144,7 +201,6 @@ class MapExplorationLogic {
     'Fermented',
     'Tangy',
     'Fragrant',
-    'Buttery',
     'Refreshing',
   ];
 
@@ -180,6 +236,13 @@ class MapExplorationLogic {
 
   Future<List<Region>> regions() => repository.map.malaysiaRegions();
 
+  /// Throws away the cached map data so the next read goes to Supabase.
+  ///
+  /// Called when the tourist accepts the "map has been updated" prompt, and
+  /// worth calling after this app submits a landmark of its own - otherwise the
+  /// tourist's own contribution takes up to `MapRepository.cacheTtl` to appear.
+  void clearMapCache() => repository.map.clearCache();
+
   /// REQ102_1 - the tight coastline, which the painted overview clips to.
   Future<List<CountryOutline>> outlines() => repository.map.malaysiaOutlines();
 
@@ -208,9 +271,9 @@ class MapExplorationLogic {
 
   /// Recomputes the whole heatmap for the current [filter].
   ///
-  /// C1: a state's score is the number of distinct local foods available in it
-  /// divided by the maximum any state reached, so the best-served state is 1.0
-  /// (green, REQ102_16) and a state with nothing is 0.0 (grey). Passing
+  /// C1: a state's score is the number of **restaurants** in it divided by the
+  /// maximum any state reached, so the best-served state is 1.0 (green,
+  /// REQ102_16) and a state with nothing is 0.0 (grey). Passing
   /// [localFoodId] narrows the calculation to one dish, which is REQ102_33 -
   /// the map redrawn around a searched food.
   ///
@@ -221,8 +284,15 @@ class MapExplorationLogic {
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
   }) async {
-    final List<Region> allRegions = await regions();
-    final List<LocalFood> catalogue = await foodRepository.getFoods();
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      regions(),
+      foodRepository.getFoods(),
+      repository.map.foodOccurrences(),
+    ]);
+    final List<Region> allRegions = gathered[0] as List<Region>;
+    final List<LocalFood> catalogue = gathered[1] as List<LocalFood>;
+    final List<FoodOccurrence> rawOccurrences =
+        gathered[2] as List<FoodOccurrence>;
 
     final List<LocalFood> matching = catalogue
         .where(
@@ -236,16 +306,18 @@ class MapExplorationLogic {
         .map((LocalFood food) => food.id)
         .toSet();
 
-    final List<FoodOccurrence> occurrences = await _resolvedOccurrences(
+    final List<FoodOccurrence> occurrences = _resolve(
+      rawOccurrences,
       catalogue,
     );
 
-    // state code -> the distinct local foods served in it
+    // Two tallies per state: the places (what the gradient measures) and the
+    // distinct dishes (context on the state card).
+    final Map<String, Set<String>> placesByRegion = <String, Set<String>>{
+      for (final Region region in allRegions) region.code: <String>{},
+    };
     final Map<String, Set<int>> foodsByRegion = <String, Set<int>>{
       for (final Region region in allRegions) region.code: <int>{},
-    };
-    final Map<String, int> occurrencesByRegion = <String, int>{
-      for (final Region region in allRegions) region.code: 0,
     };
 
     for (final FoodOccurrence occurrence in occurrences) {
@@ -256,34 +328,37 @@ class MapExplorationLogic {
         occurrence.longitude,
       );
       if (region == null) continue;
+      // Keyed by source and id, so one restaurant counts once however many
+      // matching dishes are on its menu.
+      placesByRegion[region.code]!.add(
+        '${occurrence.source.name}:${occurrence.sourceId}',
+      );
       foodsByRegion[region.code]!.add(occurrence.localFoodId);
-      occurrencesByRegion[region.code] =
-          occurrencesByRegion[region.code]! + 1;
     }
 
     int maximum = 0;
-    for (final Set<int> foods in foodsByRegion.values) {
-      if (foods.length > maximum) maximum = foods.length;
+    for (final Set<String> places in placesByRegion.values) {
+      if (places.length > maximum) maximum = places.length;
     }
 
     final List<RegionAvailability> availability = allRegions
         .map((Region region) {
-          final int available = foodsByRegion[region.code]!.length;
+          final int restaurants = placesByRegion[region.code]!.length;
           return RegionAvailability(
             region: region,
-            availableFoodCount: available,
-            maximumFoodCount: maximum,
+            restaurantCount: restaurants,
+            maximumRestaurantCount: maximum,
             // REQ102_17 - the gradient between green and grey is generated
             // from this, never picked per state.
-            score: maximum == 0 ? 0 : available / maximum,
-            occurrenceCount: occurrencesByRegion[region.code]!,
+            score: maximum == 0 ? 0 : restaurants / maximum,
+            foodCount: foodsByRegion[region.code]!.length,
           );
         })
         .toList(growable: false);
 
     return FoodDistribution(
       regions: availability,
-      maximumFoodCount: maximum,
+      maximumRestaurantCount: maximum,
       matchingFoodCount: matching.length,
     );
   }
@@ -313,7 +388,20 @@ class MapExplorationLogic {
     double? fromLongitude,
     int limit = 200,
   }) async {
-    final List<LocalFood> catalogue = await foodRepository.getFoods();
+    // Catalogue, occurrences and opening hours are independent reads. Fetched
+    // together they cost one round trip instead of three; cached, they cost
+    // nothing at all on a pan.
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      foodRepository.getFoods(),
+      repository.map.foodOccurrences(),
+      repository.map.openingHours(),
+    ]);
+    final List<LocalFood> catalogue = gathered[0] as List<LocalFood>;
+    final List<FoodOccurrence> rawOccurrences =
+        gathered[1] as List<FoodOccurrence>;
+    final Map<String, List<OpeningHour>> hours =
+        gathered[2] as Map<String, List<OpeningHour>>;
+
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
@@ -326,16 +414,29 @@ class MapExplorationLogic {
         .map((LocalFood food) => food.id)
         .toSet();
 
-    final List<FoodOccurrence> occurrences = await _resolvedOccurrences(
+    final List<FoodOccurrence> occurrences = _resolve(
+      rawOccurrences,
       catalogue,
     );
-    final Map<String, List<OpeningHour>> hours = await repository.map
-        .openingHours();
+
+    // A dish only has to match the catalogue when the tourist is actually
+    // looking for one - a filter is active or a specific dish search is set.
+    // An unresolved submitted landmark (free-text dish, `localFoodId` 0) still
+    // has valid coordinates, so with nothing filtering the map it deserves a
+    // pin; it just cannot honestly be matched against a criterion it was never
+    // checked against, so it is excluded the moment a criterion exists. This
+    // is deliberately different from `distribution()`, where an unmatched dish
+    // counting by no state is the honest outcome for a diversity score.
+    final bool requiresCatalogueMatch =
+        localFoodId != null || filter.selectionCount > 0;
 
     // One pin per place, gathering every matching dish served there.
     final Map<String, _PinBuilder> byPlace = <String, _PinBuilder>{};
     for (final FoodOccurrence occurrence in occurrences) {
-      if (!matchingIds.contains(occurrence.localFoodId)) continue;
+      if (requiresCatalogueMatch &&
+          !matchingIds.contains(occurrence.localFoodId)) {
+        continue;
+      }
       if (south != null && occurrence.latitude < south) continue;
       if (north != null && occurrence.latitude > north) continue;
       if (west != null && occurrence.longitude < west) continue;
@@ -466,12 +567,31 @@ class MapExplorationLogic {
     final String needle = keyword.trim().toLowerCase();
     if (needle.isEmpty) return ExplorationSearchResults.empty;
 
-    final List<PlaceSuggestion> places = <PlaceSuggestion>[];
+    // States, the place table and the food catalogue are independent reads.
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      regions(),
+      repository.map.places(),
+      foodRepository.searchFoods(keyword),
+      repository.map.foodOccurrences(),
+    ]);
+    final List<Region> allRegions = gathered[0] as List<Region>;
+    final List<MapPlace> catalogue = gathered[1] as List<MapPlace>;
+    final List<LocalFood> foods = gathered[2] as List<LocalFood>;
+    final List<FoodOccurrence> occurrences =
+        gathered[3] as List<FoodOccurrence>;
 
-    // REQ102_18 - states first, so "Penang" lands on the state, not a suburb.
-    for (final Region region in await regions()) {
-      if (region.name.toLowerCase().contains(needle)) {
-        places.add(
+    final List<_ScoredPlace> scored = <_ScoredPlace>[];
+
+    // REQ102_18 - states.
+    for (final Region region in allRegions) {
+      final int score = _score(needle, <String>[
+        region.name,
+        ...?stateAliases[region.code],
+      ]);
+      if (score == 0) continue;
+      scored.add(
+        _ScoredPlace(
+          score,
           PlaceSuggestion(
             name: region.name,
             subtitle: 'State',
@@ -480,37 +600,154 @@ class MapExplorationLogic {
             longitude: region.centreLongitude,
             zoom: region.defaultZoom,
           ),
-        );
-      }
+        ),
+      );
     }
 
-    // REQ102_19 - then cities and notable locations.
-    for (final Region region in await regions()) {
-      for (final RegionPlace place in region.places) {
-        if (place.name.toLowerCase().contains(needle)) {
-          places.add(
-            PlaceSuggestion(
-              name: place.name,
-              subtitle: place.regionName,
-              kind: PlaceKind.city,
-              latitude: place.latitude,
-              longitude: place.longitude,
-              zoom: cityZoom,
+    // REQ102_19 / REQ102_20 - cities, towns, areas and notable locations, each
+    // matched on its name and on the alternates people actually type.
+    for (final MapPlace place in catalogue) {
+      final int score = _score(needle, <String>[place.name, ...place.aliases]);
+      if (score == 0) continue;
+      scored.add(
+        _ScoredPlace(
+          score,
+          PlaceSuggestion(
+            name: place.name,
+            subtitle: '${_label(place.kind)} - ${place.stateName}',
+            kind: _suggestionKind(place.kind),
+            latitude: place.latitude,
+            longitude: place.longitude,
+            zoom: place.zoom,
+          ),
+        ),
+      );
+    }
+
+    // The fallback that keeps search working when the place table is empty or
+    // unreachable: the region catalogue's own handful of cities.
+    if (catalogue.isEmpty) {
+      for (final Region region in allRegions) {
+        for (final RegionPlace place in region.places) {
+          final int score = _score(needle, <String>[place.name]);
+          if (score == 0) continue;
+          scored.add(
+            _ScoredPlace(
+              score,
+              PlaceSuggestion(
+                name: place.name,
+                subtitle: place.regionName,
+                kind: PlaceKind.city,
+                latitude: place.latitude,
+                longitude: place.longitude,
+                zoom: cityZoom,
+              ),
             ),
           );
         }
       }
     }
 
-    // REQ102_30 / REQ102_31 - the same keyword against the food catalogue.
-    final List<LocalFood> foods = await foodRepository.searchFoods(keyword);
+    // Addresses: the places already on the map answer "where is X" too, and a
+    // tourist searching a restaurant name expects to find it.
+    final Set<String> seenAddresses = <String>{};
+    for (final FoodOccurrence occurrence in occurrences) {
+      final int score = _score(needle, <String>[occurrence.placeName]);
+      if (score == 0) continue;
+      final String key = '${occurrence.source.name}:${occurrence.sourceId}';
+      if (!seenAddresses.add(key)) continue;
+      scored.add(
+        _ScoredPlace(
+          // One step below a named place: a restaurant called "Penang Village"
+          // must not outrank Penang.
+          score - 1,
+          PlaceSuggestion(
+            name: occurrence.placeName,
+            subtitle: occurrence.source == FoodOccurrenceSource.restaurant
+                ? 'Restaurant'
+                : 'Submitted landmark',
+            kind: PlaceKind.address,
+            latitude: occurrence.latitude,
+            longitude: occurrence.longitude,
+            zoom: addressZoom,
+          ),
+        ),
+      );
+    }
+
+    scored.sort((_ScoredPlace a, _ScoredPlace b) {
+      final int byScore = b.score.compareTo(a.score);
+      if (byScore != 0) return byScore;
+      // Same score: broader things first, then alphabetically.
+      final int byKind = a.suggestion.kind.index.compareTo(
+        b.suggestion.kind.index,
+      );
+      if (byKind != 0) return byKind;
+      return a.suggestion.name.compareTo(b.suggestion.name);
+    });
 
     return ExplorationSearchResults(
       keyword: keyword.trim(),
-      places: List<PlaceSuggestion>.unmodifiable(places),
+      places: List<PlaceSuggestion>.unmodifiable(
+        scored
+            .take(maximumPlaceResults)
+            .map((_ScoredPlace entry) => entry.suggestion),
+      ),
       foods: foods,
     );
   }
+
+  /// How well [candidates] answer what was typed. 0 means no match.
+  ///
+  /// Ranked rather than a flat `contains`, because with 148 places a bare
+  /// substring match buries the obvious answer: typing "kl" should offer Kuala
+  /// Lumpur and KLCC before Kluang and Kuala Selangor.
+  static int _score(String needle, List<String> candidates) {
+    int best = 0;
+    for (final String candidate in candidates) {
+      final String value = candidate.toLowerCase().trim();
+      if (value.isEmpty) continue;
+      if (value == needle) {
+        best = _scoreExact;
+      } else if (value.startsWith(needle)) {
+        if (best < _scorePrefix) best = _scorePrefix;
+      } else if (_startsAWord(value, needle)) {
+        // "alor" finding "Jalan Alor" - a word boundary is a much better
+        // signal than a substring landing mid-word.
+        if (best < _scoreWord) best = _scoreWord;
+      } else if (value.contains(needle)) {
+        if (best < _scoreContains) best = _scoreContains;
+      }
+      if (best == _scoreExact) break;
+    }
+    return best;
+  }
+
+  static bool _startsAWord(String value, String needle) {
+    for (final String word in value.split(RegExp(r'[\s,./-]+'))) {
+      if (word.startsWith(needle)) return true;
+    }
+    return false;
+  }
+
+  static const int _scoreExact = 100;
+  static const int _scorePrefix = 60;
+  static const int _scoreWord = 40;
+  static const int _scoreContains = 20;
+
+  static PlaceKind _suggestionKind(MapPlaceKind kind) => switch (kind) {
+    MapPlaceKind.city => PlaceKind.city,
+    MapPlaceKind.town => PlaceKind.town,
+    MapPlaceKind.area => PlaceKind.area,
+    MapPlaceKind.landmark => PlaceKind.landmark,
+  };
+
+  static String _label(MapPlaceKind kind) => switch (kind) {
+    MapPlaceKind.city => 'City',
+    MapPlaceKind.town => 'Town',
+    MapPlaceKind.area => 'Area',
+    MapPlaceKind.landmark => 'Landmark',
+  };
 
   // ===========================================================================
   // Location (REQ102_6 - REQ102_9)
@@ -534,10 +771,20 @@ class MapExplorationLogic {
   /// catalogue name and synonyms here; an unmatched dish keeps id 0 and is
   /// therefore counted by no state, which is the honest outcome - the app
   /// cannot claim a landmark serves a local food it cannot identify.
-  Future<List<FoodOccurrence>> _resolvedOccurrences(
+  /// Restaurant occurrences already carry a `local_food_id`. Submitted
+  /// landmarks carry only free text, so their `dish` is matched against the
+  /// catalogue name and synonyms here; an unmatched dish keeps id 0 and is
+  /// therefore counted by no state, which is the honest outcome - the app
+  /// cannot claim a landmark serves a local food it cannot identify.
+  ///
+  /// Pure and synchronous: both inputs are already in hand, so this no longer
+  /// hides a repository call behind an await.
+  List<FoodOccurrence> _resolve(
+    List<FoodOccurrence> raw,
     List<LocalFood> catalogue,
-  ) async {
-    final List<FoodOccurrence> raw = await repository.map.foodOccurrences();
+  ) {
+    // Nothing to match against, so nothing to rewrite.
+    if (raw.every((FoodOccurrence o) => o.localFoodId != 0)) return raw;
 
     final Map<String, int> idByName = <String, int>{};
     for (final LocalFood food in catalogue) {
@@ -562,6 +809,10 @@ class MapExplorationLogic {
             foodName: occurrence.foodName,
             latitude: occurrence.latitude,
             longitude: occurrence.longitude,
+            placeImageUrl: occurrence.placeImageUrl,
+            placeCategory: occurrence.placeCategory,
+            placeRating: occurrence.placeRating,
+            itemPrice: occurrence.itemPrice,
           );
         })
         .toList(growable: false);
@@ -592,8 +843,7 @@ class MapExplorationLogic {
     for (int i = 0, j = boundary.length - 1; i < boundary.length; j = i++) {
       final GeoPoint a = boundary[i];
       final GeoPoint b = boundary[j];
-      final bool straddles =
-          (a.latitude > latitude) != (b.latitude > latitude);
+      final bool straddles = (a.latitude > latitude) != (b.latitude > latitude);
       if (!straddles) continue;
       final double crossing =
           (b.longitude - a.longitude) *
@@ -654,4 +904,12 @@ class _PinBuilder {
     final int to = high.round();
     return from == to ? 'RM$from' : 'RM$from-$to';
   }
+}
+
+/// One search hit with the score that ordered it.
+class _ScoredPlace {
+  const _ScoredPlace(this.score, this.suggestion);
+
+  final int score;
+  final PlaceSuggestion suggestion;
 }

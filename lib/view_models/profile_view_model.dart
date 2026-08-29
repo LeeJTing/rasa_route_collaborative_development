@@ -1,3 +1,5 @@
+import '../app/routing/app_navigator.dart';
+import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
 import '../model/business_logic/tourist_information_logic_facade.dart';
 
@@ -17,4 +19,9 @@ class ProfileViewModel extends BaseViewModel {
 
   final TouristInformationLogicFacade touristLogic =
       TouristInformationLogicFacade();
+
+  /// "Submitted Landmarks" - open the tourist's contribution history.
+  void openSubmittedLandmarks() {
+    AppNavigator.push(AppRoutes.landmarkHistory);
+  }
 }

@@ -23,13 +23,13 @@ class DietaryRestrictionRepository {
     );
     return rows
         .map((Map<String, dynamic> row) {
-          final DietaryRestrictionDataModel data =
-              DietaryRestrictionDataModel.fromJson(row);
-          return DietaryRestriction(
-            id: data.dietaryRestrictionId,
-            name: data.restrictionName,
-          );
-        })
+      final DietaryRestrictionDataModel data =
+      DietaryRestrictionDataModel.fromJson(row);
+      return DietaryRestriction(
+        id: data.dietaryRestrictionId,
+        name: data.restrictionName,
+      );
+    })
         .toList(growable: false);
   }
 
@@ -49,11 +49,30 @@ class DietaryRestrictionRepository {
         .toList(growable: false);
   }
 
-  /// The restrictions a tourist holds via `user_dietary_restriction`. Returns
-  /// an empty list when [touristId] is blank (nobody signed in).
+  /// Every dish's dietary-restriction ids (`food_dietary_restriction` joined
+  /// with `dietary_restriction`) as `local_food_id -> [dietary_restriction_id]`.
+  ///
+  /// One query for the whole catalogue, so pairing never needs an N+1 lookup
+  /// per dish. Dishes without any restriction are simply absent from the map.
+  Future<Map<int, List<int>>> restrictionIdsByFood() async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableFoodDietaryRestriction,
+      columns:
+      'local_food_id, dietary_restriction(dietary_restriction_id, restriction_name)',
+    );
+    final Map<int, List<int>> ids = <int, List<int>>{};
+    for (final Map<String, dynamic> row in rows) {
+      final int? foodId = JsonReader.asIntOrNull(row['local_food_id']);
+      final DietaryRestriction? restriction = _fromRow(row);
+      if (foodId == null || restriction == null) continue;
+      ids.putIfAbsent(foodId, () => <int>[]).add(restriction.id);
+    }
+    return ids;
+  }
+
   Future<List<DietaryRestriction>> restrictionsForTourist(
-    String touristId,
-  ) async {
+      String touristId,
+      ) async {
     if (touristId.isEmpty) return const <DietaryRestriction>[];
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableUserDietaryRestriction,
@@ -66,36 +85,18 @@ class DietaryRestrictionRepository {
         .toList(growable: false);
   }
 
-  /// All food-to-restriction links in one request, grouped for queue ranking.
-  /// A bulk query avoids one Supabase round trip for every swipe card.
-  Future<Map<int, Set<int>>> restrictionIdsByFood() async {
-    final List<Map<String, dynamic>> rows = await api.selectAll(
-      APIManager.tableFoodDietaryRestriction,
-      columns: 'local_food_id, dietary_restriction_id',
-    );
-    final Map<int, Set<int>> grouped = <int, Set<int>>{};
-    for (final Map<String, dynamic> row in rows) {
-      final int? foodId = JsonReader.asIntOrNull(row['local_food_id']);
-      final int? restrictionId = JsonReader.asIntOrNull(
-        row['dietary_restriction_id'],
-      );
-      if (foodId == null || restrictionId == null) continue;
-      grouped.putIfAbsent(foodId, () => <int>{}).add(restrictionId);
-    }
-    return grouped;
-  }
-
   /// Parses one link row. Returns null when the embedded restriction is null
   /// so a food with no dietary restriction is allowed (treated as none).
   DietaryRestriction? _fromRow(Map<String, dynamic> row) {
     final Map<String, dynamic> embedded = JsonReader.asMap(
       row['dietary_restriction'],
     );
-    final int? id = JsonReader.asIntOrNull(embedded['dietary_restriction_id']);
-    if (id == null) return null;
-    final String name =
-        JsonReader.asStringOrNull(embedded['restriction_name']) ??
-        'Restriction $id';
-    return DietaryRestriction(id: id, name: name);
+    if (embedded['dietary_restriction_id'] == null) return null;
+    final DietaryRestrictionDataModel data =
+        DietaryRestrictionDataModel.fromJson(embedded);
+    return DietaryRestriction(
+      id: data.dietaryRestrictionId,
+      name: data.restrictionName,
+    );
   }
 }

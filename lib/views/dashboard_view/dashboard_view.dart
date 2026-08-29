@@ -17,6 +17,7 @@ import 'widgets/map_controls.dart';
 import 'widgets/map_filter_panel.dart';
 import 'widgets/map_search_bar.dart';
 import 'widgets/map_search_results_panel.dart';
+import 'widgets/map_update_banner.dart';
 import 'widgets/heatmap_scale.dart';
 import 'widgets/map_selection_cards.dart';
 import 'widgets/region_heatmap_layer.dart';
@@ -245,7 +246,8 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumFoodCount: viewModel.distribution.maximumFoodCount,
+              maximumRestaurantCount:
+                  viewModel.distribution.maximumRestaurantCount,
             ),
           ),
 
@@ -271,6 +273,15 @@ class _DashboardViewState extends State<DashboardView> {
                   onTap: viewModel.locateTourist,
                   busy: viewModel.locating,
                 ),
+              ],
+              // Presenter tool (dev builds only, Android only): teleports the
+              // OS-level GPS so the map can be demoed "at" a preset spot
+              // without moving the device. Wired through the ViewModel so this
+              // View never touches a shared client (see `DashboardViewModel`).
+              if (Env.appEnv != 'prod' &&
+                  viewModel.mockGpsSupported) ...<Widget>[
+                const SizedBox(height: AppSpacing.sm),
+                _MockGpsButton(viewModel: viewModel),
               ],
             ],
           ),
@@ -338,6 +349,16 @@ class _DashboardViewState extends State<DashboardView> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              // Above the rest: it is the only one asking for a decision.
+              if (viewModel.mapUpdateAvailable) ...<Widget>[
+                MapUpdateBanner(
+                  message: viewModel.mapUpdateMessage,
+                  onUpdate: viewModel.applyMapUpdate,
+                  onDismiss: viewModel.dismissMapUpdate,
+                  busy: viewModel.isBusy,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
               if (viewModel.notice != null) ...<Widget>[
                 _NoticeBanner(
                   message: viewModel.notice!,
@@ -618,6 +639,86 @@ class _CurrentLocationDot extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// Presenter tool (dev builds only, Android only): opens a picker of preset
+/// Malaysian spots and teleports the OS-level GPS there, so the dashboard can
+/// be demoed "at" that location without moving the device. Wired through
+/// `DashboardViewModel` to `MockLocationService` (the vendored
+/// `fluttermocklocation` plugin); requires Android Developer Options >
+/// "Select mock location app" to point at this app.
+///
+/// A toggle: while a mock is live the button turns into "Stop mock", which
+/// clears the OS test provider and lets the real GPS drive the map again.
+class _MockGpsButton extends StatelessWidget {
+  const _MockGpsButton({required this.viewModel});
+
+  final DashboardViewModel viewModel;
+
+  static const List<({String label, double lat, double lon})> _presets =
+      <({String label, double lat, double lon})>[
+        (label: 'KL', lat: 3.1390, lon: 101.6869),
+        (label: 'Penang', lat: 5.4141, lon: 100.3288),
+        (label: 'Kota Kinabalu', lat: 5.9804, lon: 116.0735),
+        (label: 'Kuching', lat: 1.5535, lon: 110.3593),
+        (label: 'Outside MY', lat: 1.3521, lon: 103.8198),
+        (label: 'At sea', lat: 3.0, lon: 100.2),
+      ];
+
+  @override
+  Widget build(BuildContext context) {
+    final bool active = viewModel.mockGpsActive;
+    return IconButton.filledTonal(
+      tooltip: active ? 'Stop GPS mock (dev)' : 'Mock GPS (dev)',
+      style: active
+          ? IconButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: AppColors.onPrimary,
+            )
+          : null,
+      icon: Icon(active ? Icons.location_off : Icons.my_location),
+      onPressed: active ? () => _stopMock(context) : () => _openPicker(context),
+    );
+  }
+
+  Future<void> _stopMock(BuildContext context) async {
+    await viewModel.stopMockGps();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('GPS mock stopped (dev)')));
+  }
+
+  Future<void> _openPicker(BuildContext context) async {
+    final ({double lat, double lon})? choice =
+        await showModalBottomSheet<({double lat, double lon})>(
+          context: context,
+          builder: (BuildContext sheetContext) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: <Widget>[
+                  for (final ({String label, double lat, double lon}) p
+                      in _presets)
+                    ActionChip(
+                      label: Text(p.label),
+                      onPressed: () =>
+                          Navigator.pop(sheetContext, (lat: p.lat, lon: p.lon)),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+    if (choice == null || !context.mounted) return;
+    final String? error = await viewModel.setMockGps(choice.lat, choice.lon);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(error ?? 'GPS mocked (dev)')));
+  }
 }
 
 /// M3, and the two "showing the whole country instead" explanations.

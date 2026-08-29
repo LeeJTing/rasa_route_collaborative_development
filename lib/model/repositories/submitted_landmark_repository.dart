@@ -1,6 +1,12 @@
+import 'dart:developer' as developer;
+
+import '../../core/json_model.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../shared_client/api_manager/api_manager.dart';
+import '../data_models/landmark_item_data_model.dart';
+import '../data_models/opening_hours_data_model.dart';
+import '../data_models/submitted_landmark_data_model.dart';
 
 /// Tourist-contributed landmarks and the dishes attached to them.
 ///
@@ -69,6 +75,9 @@ class SubmittedLandmarkRepository {
       await api.insertRow(APIManager.tableLandmarkItem, <String, dynamic>{
         'landmark_id': landmarkId,
         'tourist_id': item.touristId,
+        // The curated dish this item resolves to; null when it is not in the
+        // catalogue yet (a brand-new food - backfilled after Option-C).
+        'local_food_id': item.localFoodId > 0 ? item.localFoodId : null,
         'dish': dish,
         'variant': item.variant,
         'food_category': item.foodCategory,
@@ -87,6 +96,23 @@ class SubmittedLandmarkRepository {
     }
   }
 
+  /// Option C backfill: points the item(s) of [landmarkId] whose `dish` text
+  /// equals [dishName] at [localFoodId]. The item was saved before its
+  /// brand-new `local_food` row existed, so `local_food_id` was null; this
+  /// fills it in now that the id is known. `dish` was written verbatim from
+  /// the recognized food name, so an exact equality filter is the match.
+  Future<void> linkItemToFood(
+    int landmarkId,
+    String dishName,
+    int localFoodId,
+  ) async {
+    await api.updateRow(
+      APIManager.tableLandmarkItem,
+      <String, Object?>{'local_food_id': localFoodId},
+      eq: <String, Object?>{'landmark_id': landmarkId, 'dish': dishName},
+    );
+  }
+
   /// A20: reactivate a frozen landmark - sets its `status` back to
   /// [LandmarkStatus.available] so it is re-queued for display.
   Future<void> reactivate(int landmarkId) async {
@@ -95,6 +121,235 @@ class SubmittedLandmarkRepository {
       <String, Object?>{'status': LandmarkStatus.available.name},
       eq: <String, Object?>{'landmark_id': landmarkId},
     );
+  }
+
+  /// Reads ONE submitted landmark with everything its detail screen needs:
+  /// the `submitted_landmark` row, its `landmark_item` dishes and its
+  /// `opening_hours`. Returns null when no such landmark exists. Rows are
+  /// parsed by their data models and composed into the domain
+  /// `SubmittedLandmark` here - the repository's one job (see class doc).
+  Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) async {
+    final Map<String, dynamic>? landmarkRow;
+    final List<Map<String, dynamic>> itemRows;
+    final List<Map<String, dynamic>> hourRows;
+    try {
+      final List<Object?> results = await Future.wait(<Future<Object?>>[
+        api.selectOne(
+          APIManager.tableSubmittedLandmark,
+          columns:
+              'landmark_id, landmark_name, longitude, latitude, category, '
+              'reported_count, status, image_url, image_id, image_category',
+          eq: <String, Object?>{'landmark_id': landmarkId},
+        ),
+        api.selectAll(
+          APIManager.tableLandmarkItem,
+          eq: <String, Object?>{'landmark_id': landmarkId},
+          orderBy: 'landmark_item_id',
+        ),
+        api.selectAll(
+          APIManager.tableOpeningHours,
+          columns:
+              'opening_hours_id, day, opening_time, closing_time, '
+              'landmark_id, restaurant_id',
+          eq: <String, Object?>{'landmark_id': landmarkId},
+        ),
+      ]);
+      landmarkRow = results[0] as Map<String, dynamic>?;
+      itemRows = results[1] as List<Map<String, dynamic>>;
+      hourRows = results[2] as List<Map<String, dynamic>>;
+    } catch (error, stackTrace) {
+      developer.log(
+        'Submitted-landmark detail query failed.',
+        name: 'SubmittedLandmarkRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load this landmark. Check your connection and try again.',
+      );
+    }
+    if (landmarkRow == null) return null;
+    return _toDomain(landmarkRow, itemRows, hourRows);
+  }
+
+  /// `submitted_landmark` + `landmark_item` + `opening_hours` rows -> the
+  /// `SubmittedLandmark` domain model. Each table is parsed by its own data
+  /// model before composition.
+  SubmittedLandmark _toDomain(
+    Map<String, dynamic> landmarkRow,
+    List<Map<String, dynamic>> itemRows,
+    List<Map<String, dynamic>> hourRows,
+  ) {
+    final SubmittedLandmarkDataModel landmark =
+        SubmittedLandmarkDataModel.fromJson(landmarkRow);
+    final List<LandmarkItem> items = <LandmarkItem>[
+      for (final Map<String, dynamic> itemRow in itemRows)
+        _toItem(LandmarkItemDataModel.fromJson(itemRow)),
+    ];
+    final List<OpeningHour> hours = <OpeningHour>[
+      for (final Map<String, dynamic> hourRow in hourRows)
+        if (_toOpeningHour(hourRow) case final OpeningHour hour) hour,
+    ];
+    return SubmittedLandmark(
+      id: landmark.landmarkId,
+      name: landmark.landmarkName ?? '',
+      latitude: landmark.latitude,
+      longitude: landmark.longitude,
+      category: landmark.category ?? '',
+      reportedCount: landmark.reportedCount,
+      status: landmark.status?.toLowerCase() == LandmarkStatus.frozen.name
+          ? LandmarkStatus.frozen
+          : LandmarkStatus.available,
+      imageUrl: landmark.imageUrl,
+      imageId: landmark.imageId,
+      imageCategory: landmark.imageCategory,
+      items: items,
+      openingHours: hours,
+    );
+  }
+
+  /// `landmark_item` row -> `LandmarkItem`. The `[FAKE]` test marker written
+  /// by [addItems] is stripped back into [LandmarkItem.isFake].
+  LandmarkItem _toItem(LandmarkItemDataModel data) {
+    final String dish = data.dish ?? '';
+    final bool fake = dish.startsWith('[FAKE] ');
+    return LandmarkItem(
+      id: data.landmarkItemId,
+      landmarkId: data.landmarkId,
+      touristId: data.touristId,
+      localFoodId: data.localFoodId ?? 0,
+      dish: fake ? dish.substring('[FAKE] '.length) : dish,
+      variant: data.variant ?? '',
+      foodCategory: data.foodCategory ?? '',
+      description: data.description ?? '',
+      origin: data.origin ?? '',
+      culturalBackground: data.culturalBackground ?? '',
+      imageUrl: data.imageUrl,
+      imageId: data.imageId,
+      price: data.itemPrice,
+      priceMin: data.priceMin ?? 0,
+      priceMax: data.priceMax ?? 0,
+      seasonal: data.seasonal ?? '',
+      cookingStyle: data.cookingStyle ?? '',
+      mealType: data.mealType ?? '',
+      isFake: fake,
+    );
+  }
+
+  /// `opening_hours` row -> `OpeningHour`. Null times mean the day is
+  /// recorded as closed - the same convention `MapRepository` uses for map
+  /// pins. Returns null when the day text doesn't parse.
+  OpeningHour? _toOpeningHour(Map<String, dynamic> row) {
+    final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
+    final Weekday? day = _weekday(data.day);
+    if (day == null) return null;
+    final int? opensAt = _minutesOfDay(data.openingTime);
+    final int? closesAt = _minutesOfDay(data.closingTime);
+    return OpeningHour(
+      id: data.openingHoursId,
+      day: day,
+      status: opensAt == null || closesAt == null
+          ? DayStatus.closed
+          : DayStatus.open,
+      opensAt: opensAt,
+      closesAt: closesAt,
+    );
+  }
+
+  static Weekday? _weekday(String value) {
+    final String name = value.trim().toLowerCase();
+    for (final Weekday day in Weekday.values) {
+      if (day.name == name) return day;
+    }
+    return null;
+  }
+
+  /// `"HH:MM:SS"` -> minutes since midnight.
+  static int? _minutesOfDay(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final List<String> parts = value.split(':');
+    if (parts.length < 2) return null;
+    final int? hour = int.tryParse(parts[0]);
+    final int? minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) return null;
+    return hour * 60 + minute;
+  }
+
+  /// Every submitted landmark this tourist has contributed dishes to, newest
+  /// first. `submitted_landmark` itself has no contributor column - the
+  /// contributor is recorded per dish on `landmark_item.tourist_id` - so a
+  /// landmark counts as "theirs" when at least one of its dishes carries
+  /// their id. Each landmark carries its dishes so a list tile can show
+  /// counts/names; opening hours are left to the detail screen
+  /// ([getSubmittedLandmarkById]), which fetches them on demand.
+  ///
+  /// One tourist can contribute to MANY landmarks, so the queries are bounded
+  /// to their rows (via `tourist_id` then an `in` filter) - never "all
+  /// submitted landmarks".
+  Future<List<SubmittedLandmark>> getSubmittedLandmarksByTourist(
+    String touristId,
+  ) async {
+    try {
+      final List<Map<String, dynamic>> mine = await api.selectAll(
+        APIManager.tableLandmarkItem,
+        columns: 'landmark_id',
+        eq: <String, Object?>{'tourist_id': touristId},
+      );
+      if (mine.isEmpty) return const <SubmittedLandmark>[];
+      final Set<int> ids = <int>{
+        for (final Map<String, dynamic> row in mine)
+          if (JsonReader.asInt(row['landmark_id']) != 0)
+            JsonReader.asInt(row['landmark_id']),
+      };
+      if (ids.isEmpty) return const <SubmittedLandmark>[];
+      final List<int> idList = ids.toList();
+
+      final List<Map<String, dynamic>> landmarkRows = await api.selectAll(
+        APIManager.tableSubmittedLandmark,
+        columns:
+            'landmark_id, landmark_name, longitude, latitude, category, '
+            'reported_count, status, image_url, image_id, image_category',
+        inFilter: <String, List<Object?>>{'landmark_id': idList},
+        orderBy: 'landmark_id',
+        ascending: false,
+      );
+      final List<Map<String, dynamic>> itemRows = await api.selectAll(
+        APIManager.tableLandmarkItem,
+        inFilter: <String, List<Object?>>{'landmark_id': idList},
+        orderBy: 'landmark_item_id',
+      );
+
+      // Group each landmark's dish rows so _toDomain composes them per row.
+      final Map<int, List<Map<String, dynamic>>> itemRowsById =
+          <int, List<Map<String, dynamic>>>{};
+      for (final Map<String, dynamic> row in itemRows) {
+        final int landmarkId = JsonReader.asInt(row['landmark_id']);
+        itemRowsById
+            .putIfAbsent(landmarkId, () => <Map<String, dynamic>>[])
+            .add(row);
+      }
+
+      return <SubmittedLandmark>[
+        for (final Map<String, dynamic> landmarkRow in landmarkRows)
+          _toDomain(
+            landmarkRow,
+            itemRowsById[JsonReader.asInt(landmarkRow['landmark_id'])] ??
+                const <Map<String, dynamic>>[],
+            const <Map<String, dynamic>>[], // hours: detail screen fetches them
+          ),
+      ];
+    } catch (error, stackTrace) {
+      developer.log(
+        'Submitted-landmark history query failed.',
+        name: 'SubmittedLandmarkRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load your submitted landmarks. '
+        'Check your connection and try again.',
+      );
+    }
   }
 
   /// Uploads a captured photo - a food's own photo, OR the landmark's
@@ -115,11 +370,21 @@ class SubmittedLandmarkRepository {
       bytes: bytes,
       path: objectName,
     );
+    // The object key the SDK returns should be the bare path we sent. Guard
+    // against SDKs that return it already prefixed with the bucket name - if
+    // that prefix leaked into the public URL the path would double the bucket
+    // segment (".../public/landmark-images/landmark-images/photo/...") and
+    // Supabase would answer 404 NoSuchKey, which is exactly the blank-card
+    // symptom. Stripping it is a no-op when the key was already bare.
+    final String objectKey =
+        path.startsWith('${APIManager.storageBucketLandmarkImages}/')
+        ? path.substring(APIManager.storageBucketLandmarkImages.length + 1)
+        : path;
     final String? url = api.resolveImageUrl(
-      path,
+      objectKey,
       bucket: APIManager.storageBucketLandmarkImages,
     );
-    return (id: path, url: url ?? '');
+    return (id: objectKey, url: url ?? '');
   }
 
   Future<void> _insertOpeningHours(

@@ -7,13 +7,13 @@ import '../../core/view_state.dart';
 import '../../domain_model/local_food.dart';
 import '../../view_models/food_detail_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../food_recommendation_view/food_recommendation_view.dart';
 import '../common_widgets/app_image.dart';
+import '../food_recommendation_view/widgets/similar_food_card.dart';
 import 'widgets/food_hero_card.dart';
 import 'widgets/food_notice_banner.dart';
 import 'widgets/food_overview_card.dart';
-import 'widgets/food_pairing_list.dart';
 import 'widgets/food_section_card.dart';
-import 'widgets/recommendation_strip.dart';
 
 class FoodDetailView extends StatefulWidget {
   const FoodDetailView({super.key});
@@ -38,7 +38,7 @@ class _FoodDetailViewState extends State<FoodDetailView> {
     if (_initialised) return;
     _initialised = true;
     final Object? argument = ModalRoute.of(context)?.settings.arguments;
-    _viewModel.loadFood(argument is int ? argument : 1);
+    _viewModel.loadFood(argument is int ? argument : 0);
   }
 
   @override
@@ -103,7 +103,11 @@ class _FoodDetailViewState extends State<FoodDetailView> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          FoodOverviewCard(food: food),
+          FoodOverviewCard(
+            food: food,
+            isStartingPronunciation: vm.isStartingPronunciation,
+            onPlayPronunciation: () => _playPronunciation(context, vm),
+          ),
           const SizedBox(height: AppSpacing.lg),
           FoodSectionCard(
             child: Column(
@@ -139,7 +143,7 @@ class _FoodDetailViewState extends State<FoodDetailView> {
               title: 'Collision Food',
               child: FoodNoticeBanner(
                 message:
-                    '${food.name} can also refer to ${vm.collidedFood!.name}. Tap to compare the dishes.',
+                '${food.name} can also refer to ${vm.collidedFood!.name}. Tap to compare the dishes.',
                 type: FoodNoticeType.caution,
                 onTap: () => vm.loadFood(vm.collidedFood!.id),
               ),
@@ -149,19 +153,13 @@ class _FoodDetailViewState extends State<FoodDetailView> {
           FoodSectionCard(
             title: 'Pairing Recommendations',
             subtitle: 'Flavours that complement this dish',
-            child: vm.pairingTimedOut
-                ? TextButton.icon(
-                    onPressed: vm.retryPairings,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Pairing service timed out — retry'),
-                  )
-                : FoodPairingList(pairings: vm.foodPairings),
+            child: FoodRecommendationView(foodId: vm.foodId),
           ),
           const SizedBox(height: AppSpacing.lg),
           FoodSectionCard(
             title: 'Similar Food',
             subtitle: 'Similar local favourites',
-            child: RecommendationStrip(
+            child: SimilarFoodCard(
               foods: vm.similarFoods,
               onTap: (LocalFood next) => vm.loadFood(next.id),
             ),
@@ -172,10 +170,10 @@ class _FoodDetailViewState extends State<FoodDetailView> {
   }
 
   Future<void> _showEnlargedImage(
-    BuildContext context,
-    LocalFood food,
-    int initialIndex,
-  ) => showDialog<void>(
+      BuildContext context,
+      LocalFood food,
+      int initialIndex,
+      ) => showDialog<void>(
     context: context,
     barrierColor: AppColors.scrim,
     builder: (BuildContext dialogContext) => Dialog(
@@ -195,7 +193,7 @@ class _FoodDetailViewState extends State<FoodDetailView> {
                   source: food.imageUrls.isEmpty ? null : food.imageUrls[index],
                   fit: BoxFit.contain,
                   semanticLabel:
-                      '${food.name} image ${index + 1} of ${food.imageUrls.length}',
+                  '${food.name} image ${index + 1} of ${food.imageUrls.length}',
                 ),
               ),
             ),
@@ -217,6 +215,19 @@ class _FoodDetailViewState extends State<FoodDetailView> {
       ),
     ),
   );
+
+  Future<void> _playPronunciation(
+    BuildContext context,
+    FoodDetailViewModel viewModel,
+  ) async {
+    await viewModel.playPronunciation();
+    if (!context.mounted) return;
+    final String? message = viewModel.takePronunciationMessage();
+    if (message == null) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 }
 
 class _InformationItem extends StatelessWidget {

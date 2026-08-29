@@ -52,6 +52,11 @@ app.*.map.json
 .env.local
 .env.*.local
 .idea/caches/deviceStreaming.xml
+
+# Generated pronunciation artifacts are stored in Supabase, not Git.
+/outputs/azure_pronunciation_audio/
+/outputs/azure_pronunciation_txt/*.txt
+/outputs/azure_pronunciation_txt/*.csv
 .idea/libraries/Dart_SDK.xml
 .idea/libraries/Flutter_Plugins.xml
 assets/images/figma/.gitkeep

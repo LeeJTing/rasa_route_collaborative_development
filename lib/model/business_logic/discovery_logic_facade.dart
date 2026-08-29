@@ -73,6 +73,27 @@ class DiscoveryLogicFacade {
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
       restaurantDiscovery.findById(restaurantId);
 
+  // ---------------------------------------------------------------------------
+  // Dev GPS mock (Android-only presenter tool), re-exposed flat.
+  // ---------------------------------------------------------------------------
+
+  /// Whether this build can mock the OS GPS (Android, non-web). Views hide the
+  /// dev control when false.
+  bool get mockGpsSupported => mapExploration.mockGpsSupported;
+
+  /// Whether a mock is live right now.
+  bool get mockGpsActive => mapExploration.mockGpsActive;
+
+  /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error message,
+  /// or null on success.
+  Future<String?> setMockGps({
+    required double latitude,
+    required double longitude,
+  }) => mapExploration.setMockGps(latitude: latitude, longitude: longitude);
+
+  /// Stops mocking and resumes real GPS fixes.
+  Future<void> stopMockGps() => mapExploration.stopMockGps();
+
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
     required int limit,
@@ -155,6 +176,10 @@ class DiscoveryLogicFacade {
 
   /// REQ102_1 - every Malaysian state, with its outline.
   Future<List<Region>> regions() => mapExploration.regions();
+
+  /// Drops the cached map data so the next read is fresh - what the dashboard
+  /// calls when the tourist accepts the update prompt.
+  void clearMapCache() => mapExploration.clearMapCache();
 
   /// REQ102_1 - the tight coastline, which the painted overview clips to.
   Future<List<CountryOutline>> countryOutlines() => mapExploration.outlines();

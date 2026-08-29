@@ -1,10 +1,11 @@
 import 'package:meta/meta.dart' show visibleForTesting;
 
-import '../../domain_model/restaurant.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/origin_verification.dart';
 import '../../domain_model/region.dart';
+import '../../domain_model/restaurant.dart';
 import '../../domain_model/swipe_session.dart';
 import 'auth_repository.dart';
 import 'camera_repository.dart';
@@ -65,6 +66,11 @@ class DiscoveryRepositoryFacade {
   /// `FoodRecognitionView`.
   final CameraRepository camera = CameraRepository();
 
+  /// 3-step origin verification for a dish name (Option C gate) - three
+  /// separately-framed Gemini questions, fail-closed.
+  Future<OriginVerification> verifyDishOrigin(String dishName) =>
+      recognition.verifyDishOrigin(dishName);
+
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
@@ -79,8 +85,16 @@ class DiscoveryRepositoryFacade {
     String touristId,
   ) => dietaryRestriction.restrictionsForTourist(touristId);
 
-  Future<Map<int, Set<int>>> dietaryRestrictionIdsByFood() =>
-      dietaryRestriction.restrictionIdsByFood();
+  Future<Map<int, Set<int>>> dietaryRestrictionIdsByFood() async {
+    final Map<int, List<int>> restrictions =
+        await dietaryRestriction.restrictionIdsByFood();
+    return restrictions.map(
+      (int foodId, List<int> ids) => MapEntry<int, Set<int>>(
+        foodId,
+        ids.toSet(),
+      ),
+    );
+  }
 
   Future<List<Region>> malaysiaRegions() => map.malaysiaRegions();
 

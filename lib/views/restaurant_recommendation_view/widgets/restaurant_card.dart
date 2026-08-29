@@ -10,12 +10,14 @@ class RestaurantCard extends StatelessWidget {
   const RestaurantCard({
     super.key,
     required this.restaurant,
+    required this.distanceLabel,
     required this.expanded,
     required this.onExpand,
     required this.onTap,
   });
 
   final Restaurant restaurant;
+  final String distanceLabel;
   final bool expanded;
   final VoidCallback onExpand;
   final VoidCallback onTap;
@@ -60,7 +62,7 @@ class RestaurantCard extends StatelessWidget {
                           children: <Widget>[
                             const Icon(
                               Icons.star,
-                              size: 16,
+                              size: AppSizes.iconCompact,
                               color: AppColors.secondary,
                             ),
                             const SizedBox(width: AppSpacing.xs),
@@ -70,8 +72,11 @@ class RestaurantCard extends StatelessWidget {
                                   : '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount})',
                             ),
                             const SizedBox(width: AppSpacing.md),
-                            const Icon(Icons.location_on_outlined, size: 16),
-                            Text(restaurant.distanceLabel),
+                            const Icon(
+                              Icons.location_on_outlined,
+                              size: AppSizes.iconCompact,
+                            ),
+                            Text(distanceLabel),
                           ],
                         ),
                         if (restaurant.category.isNotEmpty) ...<Widget>[

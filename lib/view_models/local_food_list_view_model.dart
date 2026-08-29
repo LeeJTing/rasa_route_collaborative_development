@@ -8,10 +8,9 @@ enum FoodFilterGroup { category, mealType, taste, foodType }
 
 /// Search, filters, favourites and compare-selection state for the catalogue.
 class LocalFoodListViewModel extends BaseViewModel {
-  LocalFoodListViewModel({FoodLogicFacade? foodLogic})
-    : foodLogic = foodLogic ?? FoodLogicFacade();
+  LocalFoodListViewModel();
 
-  final FoodLogicFacade foodLogic;
+  final FoodLogicFacade foodLogic = FoodLogicFacade();
 
   static const Map<FoodFilterGroup, List<String>> filterOptions =
       <FoodFilterGroup, List<String>>{
@@ -186,9 +185,8 @@ class LocalFoodListViewModel extends BaseViewModel {
       await foodLogic.toggleFavouriteFood(id);
       _foods = _foods
           .map(
-            (LocalFood food) => food.id == id
-                ? food.copyWith(isFavourite: !food.isFavourite)
-                : food,
+            (LocalFood food) =>
+                food.id == id ? _withFavourite(food, !food.isFavourite) : food,
           )
           .toList(growable: false);
       safeNotifyListeners();
@@ -211,4 +209,24 @@ class LocalFoodListViewModel extends BaseViewModel {
     _isSelecting = false;
     safeNotifyListeners();
   }
+
+  LocalFood _withFavourite(LocalFood food, bool isFavourite) => LocalFood(
+    id: food.id,
+    name: food.name,
+    description: food.description,
+    origin: food.origin,
+    culturalBackground: food.culturalBackground,
+    ingredients: food.ingredients,
+    category: food.category,
+    cookingStyle: food.cookingStyle,
+    mealType: food.mealType,
+    foodType: food.foodType,
+    tastes: food.tastes,
+    mainTaste: food.mainTaste,
+    pronunciationText: food.pronunciationText,
+    audioGuideUrl: food.audioGuideUrl,
+    synonyms: food.synonyms,
+    imageUrls: food.imageUrls,
+    isFavourite: isFavourite,
+  );
 }

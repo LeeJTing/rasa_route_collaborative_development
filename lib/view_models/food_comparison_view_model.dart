@@ -17,10 +17,9 @@ import '../model/business_logic/food_logic_facade.dart';
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
 class FoodComparisonViewModel extends BaseViewModel {
-  FoodComparisonViewModel({FoodLogicFacade? foodLogic})
-    : foodLogic = foodLogic ?? FoodLogicFacade();
+  FoodComparisonViewModel();
 
-  final FoodLogicFacade foodLogic;
+  final FoodLogicFacade foodLogic = FoodLogicFacade();
 
   static const int _minimumSelection = 2;
 
@@ -42,9 +41,7 @@ class FoodComparisonViewModel extends BaseViewModel {
   /// Best dietary match for the tourist's restrictions, if any.
   LocalFood? get recommendedFood {
     final FoodComparison? current = _comparison;
-    return current == null
-        ? null
-        : foodLogic.bestDietaryMatch(current);
+    return current == null ? null : foodLogic.bestDietaryMatch(current);
   }
 
   /// Best-priced dish - no restaurant price data yet, so always `null` and

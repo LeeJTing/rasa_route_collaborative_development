@@ -172,6 +172,18 @@ class AddLandmarkViewModel extends BaseViewModel
   /// "Recognised Food" card can show the same thumbnail the tourist saw
   /// there - see [setRecognizedFoodImage].
   XFile? _recognizedFoodImage;
+
+  /// Gemini's confidence in the recognized primary dish's name, carried from
+  /// the recognition screen through `LandmarkDraftHandoff` - the catalogue-
+  /// growth gate (`FoodRecognitionLogic.registerNewDishes`) demands a high
+  /// bar before writing a new `local_food` row.
+  double _recognizedFoodConfidence = 0;
+
+  /// Dietary restrictions (canonical names) for the recognized primary dish,
+  /// carried via `LandmarkDraftHandoff` - written to the
+  /// `food_dietary_restriction` association table when it becomes a new
+  /// catalogue row.
+  List<String> _recognizedFoodDietaryRestrictions = const <String>[];
   List<LandmarkFoodEntry> _additionalFoods = <LandmarkFoodEntry>[];
 
   /// Per-entry soft price guidance, keyed by the form-local
@@ -192,11 +204,18 @@ class AddLandmarkViewModel extends BaseViewModel
   /// - matching the real `OpeningHours` table directly, where each row is
   /// independently `(day, status, opening_time, closing_time)`, not a
   /// day-level wrapper around a list.
+  ///
+  /// Defaults to [DayStatus.unknown], not [DayStatus.closed] - a tourist
+  /// submitting a new landmark typically only knows it was open at the
+  /// moment they were standing there, not its full weekly schedule.
+  /// Defaulting to "closed" made an active (and usually false) claim that
+  /// the place is shut every day; "unknown" honestly says "we don't have
+  /// this information yet," which is exactly what that status exists for.
   Map<Weekday, List<OpeningHour>> _operatingHours =
       <Weekday, List<OpeningHour>>{
         for (final Weekday day in Weekday.values)
           day: <OpeningHour>[
-            OpeningHour(id: 0, day: day, status: DayStatus.closed),
+            OpeningHour(id: 0, day: day, status: DayStatus.unknown),
           ],
       };
 
@@ -280,7 +299,11 @@ class AddLandmarkViewModel extends BaseViewModel
     LocalFood food, {
     double priceMin = 0,
     double priceMax = 0,
+    double confidence = 0,
+    List<String> dietaryRestrictions = const <String>[],
   }) {
+    _recognizedFoodConfidence = confidence;
+    _recognizedFoodDietaryRestrictions = dietaryRestrictions;
     _primaryFood = _primaryFood == null
         ? LandmarkFoodEntry.newEntry(
             food: food,
@@ -848,6 +871,9 @@ class AddLandmarkViewModel extends BaseViewModel
             priceMax: _primaryFood!.priceMax,
             imageUrl: primaryPhoto?.url,
             imageId: primaryPhoto?.id,
+            confidence: _recognizedFoodConfidence,
+            isLocalFood: true,
+            dietaryRestrictions: _recognizedFoodDietaryRestrictions,
           ),
           for (int i = 0; i < _additionalFoods.length; i++)
             FoodSubmission(

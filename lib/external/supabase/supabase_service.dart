@@ -82,6 +82,7 @@ class SupabaseService {
     String table, {
     String columns = '*',
     Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, List<Object?>>? inFilter,
     String? orderBy,
     bool ascending = true,
     int? limit,
@@ -89,6 +90,12 @@ class SupabaseService {
     dynamic query = _client.from(table).select(columns);
     for (final MapEntry<String, Object?> filter in eq.entries) {
       query = query.eq(filter.key, filter.value as Object);
+    }
+    final Map<String, List<Object?>> inValues =
+        inFilter ?? const <String, List<Object?>>{};
+    for (final MapEntry<String, List<Object?>> filter in inValues.entries) {
+      if (filter.value.isEmpty) continue;
+      query = query.inFilter(filter.key, filter.value);
     }
     if (orderBy != null) {
       query = query.order(orderBy, ascending: ascending);
