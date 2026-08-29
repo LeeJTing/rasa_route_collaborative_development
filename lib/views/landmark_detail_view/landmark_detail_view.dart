@@ -66,6 +66,12 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
       priceMin: LandmarkDraftHandoff().takePriceMin(),
       priceMax: LandmarkDraftHandoff().takePriceMax(),
     );
+    // Dietary restrictions for the recognised food, carried onto the
+    // `food_dietary_restriction` association table if it becomes a new
+    // catalogue row.
+    _viewModel.setDietaryRestrictions(
+      LandmarkDraftHandoff().takeDietaryRestrictions(),
+    );
 
     _viewModel.onInit();
   }

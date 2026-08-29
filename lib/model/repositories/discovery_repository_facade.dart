@@ -1,4 +1,5 @@
 import '../../domain_model/restaurant.dart';
+import '../../domain_model/origin_verification.dart';
 import 'camera_repository.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
@@ -34,6 +35,11 @@ class DiscoveryRepositoryFacade {
   /// REQ106_1 - the camera permission that gates photo capture on
   /// `FoodRecognitionView`.
   final CameraRepository camera = CameraRepository();
+
+  /// 3-step origin verification for a dish name (Option C gate) - three
+  /// separately-framed Gemini questions, fail-closed.
+  Future<OriginVerification> verifyDishOrigin(String dishName) =>
+      recognition.verifyDishOrigin(dishName);
 
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 }

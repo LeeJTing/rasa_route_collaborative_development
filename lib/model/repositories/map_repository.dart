@@ -291,20 +291,21 @@ class MapRepository {
     final List<Map<String, dynamic>> landmarks;
     final List<Map<String, dynamic>> items;
     try {
-      final List<List<Map<String, dynamic>>> rows = await Future.wait(
-        <Future<List<Map<String, dynamic>>>>[
-          api.selectAll(
-            APIManager.tableSubmittedLandmark,
-            columns:
-                'landmark_id, landmark_name, latitude, longitude, status, '
-                'image_url, category',
-          ),
-          api.selectAll(
-            APIManager.tableLandmarkItem,
-            columns: 'landmark_id, dish, image_url, item_price, food_category',
-          ),
-        ],
-      );
+      final List<List<Map<String, dynamic>>> rows =
+          await Future.wait(<Future<List<Map<String, dynamic>>>>[
+            api.selectAll(
+              APIManager.tableSubmittedLandmark,
+              columns:
+                  'landmark_id, landmark_name, latitude, longitude, status, '
+                  'image_url, category',
+            ),
+            api.selectAll(
+              APIManager.tableLandmarkItem,
+              columns:
+                  'landmark_id, local_food_id, dish, image_url, item_price, '
+                  'food_category',
+            ),
+          ]);
       landmarks = rows[0];
       items = rows[1];
     } catch (_) {
@@ -334,12 +335,12 @@ class MapRepository {
 
       out.add(
         FoodOccurrence(
-          // No local_food_id on landmark_item - the dish text is resolved
-          // against the catalogue by MapExplorationLogic.
+          // The item's local_food_id (mirrors restaurant_item); a 0/absent
+          // id falls back to name matching in MapExplorationLogic._resolve.
           sourceId: '${_asInt(place['landmark_id'])}',
           source: FoodOccurrenceSource.submittedLandmark,
           placeName: _asString(place['landmark_name']),
-          localFoodId: 0,
+          localFoodId: _asInt(item['local_food_id']),
           foodName: _asString(item['dish']),
           latitude: latitude,
           longitude: longitude,

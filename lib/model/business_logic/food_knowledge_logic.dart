@@ -1,3 +1,4 @@
+import '../../domain_model/dietary_restriction.dart';
 import '../repositories/food_repository_facade.dart';
 import '../../domain_model/local_food.dart';
 
@@ -29,6 +30,10 @@ class FoodKnowledgeLogic {
   /// Toggle favourite status (add if missing, remove if present).
   Future<void> toggleFavouriteFood(int localFoodId) =>
       repository.toggleFavourite(localFoodId);
+
+  /// The signed-in tourist's favourited food ids (empty when signed out),
+  /// used to prioritise similar foods.
+  Future<Set<int>> favouriteFoodIds() => repository.favouriteFoodIds();
 
   Future<LocalFood> getFoodDetails(int foodId) async {
     final LocalFood? food = await repository.getFoodById(foodId);
@@ -77,5 +82,30 @@ class FoodKnowledgeLogic {
       warnings.add('People with nut allergies should avoid this dish.');
     }
     return warnings;
+  }
+
+  Future<List<int>> touristDietaryRestrictionIds() async {
+    try {
+      final List<DietaryRestriction> restrictions =
+      await repository.touristDietaryRestrictions();
+      return restrictions
+          .map((DietaryRestriction r) => r.id)
+          .toList(growable: false);
+    } catch (_) {
+      return const <int>[];
+    }
+  }
+
+  /// Every dish's dietary-restriction ids (`food_dietary_restriction`) in one
+  /// query, used by pairing to exclude confirmed conflicts before Gemini.
+  ///
+  /// Fails soft: an unavailable relation degrades to "no labels" so pairing
+  /// still runs.
+  Future<Map<int, List<int>>> foodDietaryRestrictionIds() async {
+    try {
+      return await repository.foodDietaryRestrictionIds();
+    } catch (_) {
+      return const <int, List<int>>{};
+    }
   }
 }

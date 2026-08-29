@@ -38,6 +38,32 @@ class MapExplorationLogic {
   final FoodRepositoryFacade foodRepository = FoodRepositoryFacade();
 
   // ===========================================================================
+  // Dev GPS mock (Android-only presenter tool)
+  // ===========================================================================
+  //
+  // Teleports the OS-level GPS so a demo can be "at" a preset spot without
+  // moving the device. The state lives in `MockLocationService`, behind
+  // `LocationRepository`, so `LocationMonitor` can hold the mocked fix and
+  // ignore the real GPS for exactly as long as the mock is active.
+
+  /// Whether this build can mock the OS GPS (Android, non-web). Views hide
+  /// the dev control when false.
+  bool get mockGpsSupported => repository.location.mockSupported;
+
+  /// Whether a mock is live right now.
+  bool get mockGpsActive => repository.location.mockActive;
+
+  /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error
+  /// message, or null on success.
+  Future<String?> setMockGps({
+    required double latitude,
+    required double longitude,
+  }) => repository.location.setMockLocation(latitude, longitude);
+
+  /// Stops mocking and resumes real GPS fixes.
+  Future<void> stopMockGps() => repository.location.stopMockLocation();
+
+  // ===========================================================================
   // Map geometry constants
   // ===========================================================================
 
@@ -137,16 +163,21 @@ class MapExplorationLogic {
   ];
 
   /// C3 / REQ102_25.
+  ///
+  /// Four cuisines, per JT's updated requirement. **`Sabah` and `Sarawak` were
+  /// dropped from the filter but still exist in `local_food.food_category`** -
+  /// 23 of the 102 catalogue rows carry one of them. Those dishes are still
+  /// searchable and still counted when no category filter is set; they simply
+  /// cannot be filtered *to*, and picking any category now excludes them.
   static const List<String> categoryOptions = <String>[
     'Malay',
     'Chinese',
     'Indian',
     'Nyonya',
-    'Sabah',
-    'Sarawak',
   ];
 
-  /// C4 / REQ102_26.
+  /// C4 / REQ102_26. Order follows the requirement, not the alphabet, so the
+  /// row reads the way the spec does.
   static const List<String> tasteOptions = <String>[
     'Sweet',
     'Salty',
@@ -155,6 +186,7 @@ class MapExplorationLogic {
     'Umami',
     'Spicy',
     'Mild',
+    'Buttery',
     'Peppery',
     'Savoury',
     'Rich',
@@ -169,7 +201,6 @@ class MapExplorationLogic {
     'Fermented',
     'Tangy',
     'Fragrant',
-    'Buttery',
     'Refreshing',
   ];
 
@@ -240,9 +271,9 @@ class MapExplorationLogic {
 
   /// Recomputes the whole heatmap for the current [filter].
   ///
-  /// C1: a state's score is the number of distinct local foods available in it
-  /// divided by the maximum any state reached, so the best-served state is 1.0
-  /// (green, REQ102_16) and a state with nothing is 0.0 (grey). Passing
+  /// C1: a state's score is the number of **restaurants** in it divided by the
+  /// maximum any state reached, so the best-served state is 1.0 (green,
+  /// REQ102_16) and a state with nothing is 0.0 (grey). Passing
   /// [localFoodId] narrows the calculation to one dish, which is REQ102_33 -
   /// the map redrawn around a searched food.
   ///
@@ -280,12 +311,13 @@ class MapExplorationLogic {
       catalogue,
     );
 
-    // state code -> the distinct local foods served in it
+    // Two tallies per state: the places (what the gradient measures) and the
+    // distinct dishes (context on the state card).
+    final Map<String, Set<String>> placesByRegion = <String, Set<String>>{
+      for (final Region region in allRegions) region.code: <String>{},
+    };
     final Map<String, Set<int>> foodsByRegion = <String, Set<int>>{
       for (final Region region in allRegions) region.code: <int>{},
-    };
-    final Map<String, int> occurrencesByRegion = <String, int>{
-      for (final Region region in allRegions) region.code: 0,
     };
 
     for (final FoodOccurrence occurrence in occurrences) {
@@ -296,33 +328,37 @@ class MapExplorationLogic {
         occurrence.longitude,
       );
       if (region == null) continue;
+      // Keyed by source and id, so one restaurant counts once however many
+      // matching dishes are on its menu.
+      placesByRegion[region.code]!.add(
+        '${occurrence.source.name}:${occurrence.sourceId}',
+      );
       foodsByRegion[region.code]!.add(occurrence.localFoodId);
-      occurrencesByRegion[region.code] = occurrencesByRegion[region.code]! + 1;
     }
 
     int maximum = 0;
-    for (final Set<int> foods in foodsByRegion.values) {
-      if (foods.length > maximum) maximum = foods.length;
+    for (final Set<String> places in placesByRegion.values) {
+      if (places.length > maximum) maximum = places.length;
     }
 
     final List<RegionAvailability> availability = allRegions
         .map((Region region) {
-          final int available = foodsByRegion[region.code]!.length;
+          final int restaurants = placesByRegion[region.code]!.length;
           return RegionAvailability(
             region: region,
-            availableFoodCount: available,
-            maximumFoodCount: maximum,
+            restaurantCount: restaurants,
+            maximumRestaurantCount: maximum,
             // REQ102_17 - the gradient between green and grey is generated
             // from this, never picked per state.
-            score: maximum == 0 ? 0 : available / maximum,
-            occurrenceCount: occurrencesByRegion[region.code]!,
+            score: maximum == 0 ? 0 : restaurants / maximum,
+            foodCount: foodsByRegion[region.code]!.length,
           );
         })
         .toList(growable: false);
 
     return FoodDistribution(
       regions: availability,
-      maximumFoodCount: maximum,
+      maximumRestaurantCount: maximum,
       matchingFoodCount: matching.length,
     );
   }
