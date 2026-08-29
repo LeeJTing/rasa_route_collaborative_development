@@ -31,42 +31,36 @@ class FoodComparisonLogic {
       throw Exception('Select at least 2 local foods to compare.');
     }
 
-    // =========================================================================
-    // TEMPORARY TEST HARDCODE - DELETE THIS BLOCK AFTER TESTING.
-    //
-    // Pretends that:
-    //   * the signed-in tourist holds dietary_restriction_id 1, and
-    //   * local_food 1 is linked to dietary_restriction_id 1,
-    // so the "May contain ..." warning is forced to appear on food 1.
-    //
-    // To restore the real database behaviour, replace this block with:
-    //   final List<DietaryRestriction> touristRestrictions =
-    //       await repository.touristDietaryRestrictions();
-    //   final Set<int> touristRestrictionIds = touristRestrictions
-    //       .map((DietaryRestriction r) => r.id).toSet();
-    //   final Map<int, Set<int>> foodRestrictionIds = <int, Set<int>>{};
-    //   for (final LocalFood food in foods) {
-    //     final List<DietaryRestriction> foodRestrictions =
-    //         await repository.foodDietaryRestrictions(food.id);
-    //     foodRestrictionIds[food.id] =
-    //         foodRestrictions.map((DietaryRestriction r) => r.id).toSet();
-    //   }
-    // =========================================================================
-    final List<DietaryRestriction> touristRestrictions =
-        const <DietaryRestriction>[
-          DietaryRestriction(id: 3, name: 'Pescatarian'),
-        ];
+    // Dietary safety is best-effort: if the restriction relation queries fail
+    // (e.g. the `dietary_restriction(...)` FK embed isn't set up in Supabase),
+    // degrade to "no conflicts" instead of crashing with a PostgrestException.
+    List<DietaryRestriction> touristRestrictions;
+    try {
+      touristRestrictions = await repository.touristDietaryRestrictions();
+    } catch (_) {
+      touristRestrictions = const <DietaryRestriction>[];
+    }
     final Set<int> touristRestrictionIds = touristRestrictions
         .map((DietaryRestriction r) => r.id)
         .toSet();
-    final Map<int, Set<int>> foodRestrictionIds = <int, Set<int>>{
-      for (final LocalFood food in foods)
-        food.id: <int>{if (food.id == 3) 3},
-    };
+    final Map<int, Set<int>> foodRestrictionIds = <int, Set<int>>{};
+    for (final LocalFood food in foods) {
+      List<DietaryRestriction> restrictions;
+      try {
+        restrictions = await repository.foodDietaryRestrictions(food.id);
+      } catch (_) {
+        restrictions = const <DietaryRestriction>[];
+      }
+      foodRestrictionIds[food.id] = restrictions
+          .map((DietaryRestriction restriction) => restriction.id)
+          .toSet();
+    }
 
     return FoodComparison(
       foodIds: foods.map((LocalFood food) => food.id).toList(growable: false),
-      foodNames: foods.map((LocalFood food) => food.name).toList(growable: false),
+      foodNames: foods
+          .map((LocalFood food) => food.name)
+          .toList(growable: false),
       rows: _buildRows(foods),
       foods: foods,
       activeTouristRestrictions: touristRestrictions
@@ -130,10 +124,7 @@ class FoodComparisonLogic {
         .where((DietaryRestriction r) => matched.contains(r.id))
         .map((DietaryRestriction r) => _restrictionMessage(r.name))
         .join('; ');
-    return DietaryAssessment(
-      isSuitable: false,
-      message: message,
-    );
+    return DietaryAssessment(isSuitable: false, message: message);
   }
 
   /// Turns a restriction name into a user-facing warning phrase, e.g.
@@ -157,10 +148,7 @@ class FoodComparisonLogic {
       _row('Meal type', foods.map((LocalFood f) => f.mealType).toList()),
       _row('Food type', foods.map((LocalFood f) => f.foodType).toList()),
       _row('Taste', foods.map((LocalFood f) => f.tastes.join(', ')).toList()),
-      _row(
-        'Description',
-        foods.map((LocalFood f) => f.description).toList(),
-      ),
+      _row('Description', foods.map((LocalFood f) => f.description).toList()),
     ];
   }
 

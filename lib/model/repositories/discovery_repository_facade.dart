@@ -1,6 +1,5 @@
-import 'package:meta/meta.dart' show visibleForTesting;
-
 import '../../domain_model/restaurant.dart';
+import '../../domain_model/origin_verification.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
@@ -31,29 +30,10 @@ import 'swipe_repository.dart';
 /// separate repositories. It groups the repositories for one subject area and
 /// re-exposes them as a single flat API. No business rules live here.
 class DiscoveryRepositoryFacade {
-  DiscoveryRepositoryFacade({
-    @visibleForTesting RestaurantRepository? restaurant,
-    @visibleForTesting RecognitionRepository? recognition,
-    @visibleForTesting MapRepository? map,
-    @visibleForTesting FoodKnowledgeRepository? food,
-    @visibleForTesting DietaryRestrictionRepository? dietaryRestriction,
-    @visibleForTesting SwipeRepository? swipe,
-    @visibleForTesting AuthRepository? auth,
-  }) : restaurant = restaurant ?? RestaurantRepository(),
-       recognition = recognition ?? RecognitionRepository(),
-       map = map ?? MapRepository(),
-       food = food ?? FoodKnowledgeRepository(),
-       dietaryRestriction =
-           dietaryRestriction ?? DietaryRestrictionRepository(),
-       swipe = swipe ?? SwipeRepository(),
-       auth = auth ?? AuthRepository();
+  DiscoveryRepositoryFacade();
 
-  final RestaurantRepository restaurant;
-  final RecognitionRepository recognition;
-  final FoodKnowledgeRepository food;
-  final DietaryRestrictionRepository dietaryRestriction;
-  final SwipeRepository swipe;
-  final AuthRepository auth;
+  final RestaurantRepository restaurant = RestaurantRepository();
+  final RecognitionRepository recognition = RecognitionRepository();
 
   /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
   final MapRepository map;
@@ -64,6 +44,11 @@ class DiscoveryRepositoryFacade {
   /// REQ106_1 - the camera permission that gates photo capture on
   /// `FoodRecognitionView`.
   final CameraRepository camera = CameraRepository();
+
+  /// 3-step origin verification for a dish name (Option C gate) - three
+  /// separately-framed Gemini questions, fail-closed.
+  Future<OriginVerification> verifyDishOrigin(String dishName) =>
+      recognition.verifyDishOrigin(dishName);
 
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 

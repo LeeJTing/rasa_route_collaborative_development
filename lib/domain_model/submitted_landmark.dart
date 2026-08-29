@@ -66,6 +66,7 @@ class LandmarkItem {
     required this.id,
     required this.landmarkId,
     required this.touristId,
+    this.localFoodId = 0,
     required this.dish,
     required this.variant,
     required this.foodCategory,
@@ -86,6 +87,14 @@ class LandmarkItem {
   final int id;
   final int landmarkId;
   final String touristId;
+
+  /// The curated `local_food` row this dish resolves to (mirrors
+  /// `restaurant_item.local_food_id`). `0` when there is no catalogue row
+  /// yet - a brand-new food gets its id backfilled after the Option-C
+  /// catalogue insert, and an unmatched dish stays 0 (the map then falls
+  /// back to name matching).
+  final int localFoodId;
+
   final String dish;
   final String variant;
   final String foodCategory;
@@ -138,6 +147,9 @@ class FoodSubmission {
     this.priceMax = 0,
     this.imageUrl,
     this.imageId,
+    this.confidence = 0,
+    this.isLocalFood = false,
+    this.dietaryRestrictions = const <String>[],
   });
 
   final LocalFood food;
@@ -156,4 +168,22 @@ class FoodSubmission {
   /// food has no photo (e.g. a name-typed food) - the repository writes null.
   final String? imageUrl;
   final String? imageId;
+
+  /// Gemini's confidence (0..1) in this dish's NAME, carried from the
+  /// recognition screen so the catalogue-growth gate can demand a HIGH bar
+  /// before writing a new `local_food` row. `0` when unknown (never
+  /// catalogue-insert eligible).
+  final double confidence;
+
+  /// Whether Gemini judged this dish Malaysian local food. Only true dishes
+  /// may be added to the shared `local_food` catalogue.
+  final bool isLocalFood;
+
+  /// Dietary restrictions that apply to this dish (canonical
+  /// `dietary_restriction.restriction_name` strings), from Gemini's full
+  /// analysis. Written to the `food_dietary_restriction` ASSOCIATION table
+  /// when the dish becomes a new catalogue row - deliberately carried here,
+  /// not on `LocalFood`, because dietary is an association, not a `local_food`
+  /// column.
+  final List<String> dietaryRestrictions;
 }

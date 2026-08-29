@@ -91,9 +91,14 @@ class MapSearchResultsPanel extends StatelessWidget {
         if (results.places.isNotEmpty) const _GroupHeading('Location'),
         ...results.places.map(
           (PlaceSuggestion place) => _ResultTile(
-            icon: place.kind == PlaceKind.state
-                ? Icons.map_outlined
-                : Icons.place_outlined,
+            icon: switch (place.kind) {
+              PlaceKind.state => Icons.map_outlined,
+              PlaceKind.city => Icons.location_city_outlined,
+              PlaceKind.town => Icons.holiday_village_outlined,
+              PlaceKind.area => Icons.explore_outlined,
+              PlaceKind.landmark => Icons.star_outline,
+              PlaceKind.address => Icons.storefront_outlined,
+            },
             title: place.name,
             subtitle: place.subtitle,
             onTap: () => onPlaceSelected(place),

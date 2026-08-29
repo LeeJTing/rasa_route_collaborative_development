@@ -2,6 +2,7 @@ import '../../domain_model/food_comparison.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
+import '../../shared_client/device_capability_manager/device_capability_manager.dart';
 import 'food_comparison_logic.dart';
 import 'food_knowledge_logic.dart';
 import 'food_recommendation_logic.dart';
@@ -19,6 +20,7 @@ class FoodLogicFacade {
   final FoodKnowledgeLogic knowledge = FoodKnowledgeLogic();
   final FoodComparisonLogic comparison = FoodComparisonLogic();
   final FoodRecommendationLogic recommendation = FoodRecommendationLogic();
+  final DeviceCapabilityManager deviceCapabilities = DeviceCapabilityManager();
 
   // =========================================================================
   // Forwarded Logic
@@ -70,12 +72,25 @@ class FoodLogicFacade {
       selected,
       catalogue,
     );
-    final Set<int> ids = similarities
-        .map((FoodSimilarity similarity) => similarity.similarLocalFoodId)
-        .toSet();
-    final List<LocalFood> ranked = catalogue
-        .where((LocalFood food) => ids.contains(food.id))
-        .toList(growable: false);
+
+    // Prioritise for the signed-in tourist: favourites, and the tastes they
+    // prefer (derived from their favourite dishes), rank higher. There is no
+    // per-user food-preference table yet, so preferences are inferred from the
+    // favourite collection.
+    final Set<int> favouriteIds = await knowledge.favouriteFoodIds();
+    final Set<String> preferredTastes = <String>{};
+    for (final LocalFood food in catalogue) {
+      if (favouriteIds.contains(food.id)) {
+        preferredTastes.addAll(food.tastes);
+      }
+    }
+
+    final List<LocalFood> ranked = recommendation.prioritizeSimilar(
+      similarities: similarities,
+      catalogue: catalogue,
+      favouriteIds: favouriteIds,
+      preferredTastes: preferredTastes,
+    );
     if (ranked.length >= 3) return ranked;
 
     const List<int> fallbackIds = <int>[9, 10, 4];
@@ -91,7 +106,32 @@ class FoodLogicFacade {
       (LocalFood food) => food.id == foodId,
       orElse: () => throw Exception('Local food not found.'),
     );
-    return recommendation.pairingsFor(selected, catalogue);
+    // Dietary-safety ids from the DB relations (`user_dietary_restriction` and
+    // `food_dietary_restriction`); conflicting foods are excluded before the
+    // prompt, so only the food data reaches Gemini.
+    final List<int> touristRestrictionIds =
+        await knowledge.touristDietaryRestrictionIds();
+    final Map<int, List<int>> foodRestrictionIds =
+        await knowledge.foodDietaryRestrictionIds();
+    return recommendation.pairingsFor(
+      selected,
+      catalogue,
+      touristDietaryRestrictionIds: touristRestrictionIds,
+      foodDietaryRestrictionIds: foodRestrictionIds,
+    );
+  }
+
+  Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) async {
+    final DevicePronunciationPlaybackResult result = await deviceCapabilities
+        .playPronunciation(foodName: food.name, audioUrl: food.audioGuideUrl);
+    return switch (result) {
+      DevicePronunciationPlaybackResult.curatedAudio =>
+        PronunciationPlaybackResult.curatedAudio,
+      DevicePronunciationPlaybackResult.deviceVoice =>
+        PronunciationPlaybackResult.deviceVoice,
+      DevicePronunciationPlaybackResult.unavailable =>
+        PronunciationPlaybackResult.unavailable,
+    };
   }
 
   // --- Food comparison ------------------------------------------------------
@@ -105,3 +145,6 @@ class FoodLogicFacade {
   LocalFood? bestValueFood(FoodComparison result) =>
       comparison.bestValueFood(result);
 }
+
+/// Stable business-layer result exposed to presentation code.
+enum PronunciationPlaybackResult { curatedAudio, deviceVoice, unavailable }

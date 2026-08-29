@@ -79,6 +79,7 @@ class _RestaurantRecommendationViewState
                                 final restaurant = vm.restaurants[index];
                                 return RestaurantCard(
                                   restaurant: restaurant,
+                                  distanceLabel: vm.distanceLabel(restaurant),
                                   expanded: vm.isExpanded(restaurant.id),
                                   onExpand: () =>
                                       vm.toggleExpanded(restaurant.id),
@@ -111,30 +112,31 @@ class _NearbyBanner extends StatelessWidget {
       color: AppColors.bannerInfoBackground,
       borderRadius: AppRadius.cardRadius,
     ),
-    child: const Row(
+    child: Row(
       children: <Widget>[
-        SizedBox.square(
+        const SizedBox.square(
           dimension: AppSizes.bannerIcon,
           child: CircleAvatar(
             backgroundColor: AppColors.success,
             child: Icon(Icons.check, color: AppColors.onPrimary),
           ),
         ),
-        SizedBox(width: AppSpacing.md),
+        const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
                 'Showing Nearby Restaurants',
-                style: TextStyle(
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: AppColors.bannerInfoText,
-                  fontWeight: FontWeight.w600,
                 ),
               ),
               Text(
                 'Sorted by nearest distance',
-                style: TextStyle(color: AppColors.bannerInfoText),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.bannerInfoText,
+                ),
               ),
             ],
           ),

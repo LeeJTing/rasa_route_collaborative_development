@@ -56,6 +56,18 @@ abstract final class AppRoutes {
   static const String restaurantSignboard = '/restaurant-signboard';
   static const String landmarkDetail = '/landmark-detail';
 
+  /// Full details of a tourist-submitted landmark, opened from the map's
+  /// "View Landmark" button. Distinct from [landmarkDetail], which is the
+  /// recognized-food detail screen in the capture flow.
+  static const String landmarkPlaceDetail = '/landmark-place-detail';
+
+  /// One dish attached to a tourist-submitted landmark, opened by tapping a
+  /// dish card on [landmarkPlaceDetail]. Distinct from [foodDetail] (the
+  /// catalogue's `LocalFood` detail screen, fetched by id) - this reads
+  /// straight off the `LandmarkItem` already in hand via
+  /// `LandmarkItemHandoff`, no network fetch.
+  static const String landmarkItemDetail = '/landmark-item-detail';
+
   /// Every registered name - used by tests to assert the route table is
   /// complete.
   static const List<String> all = <String>[
@@ -79,5 +91,7 @@ abstract final class AppRoutes {
     addLandmark,
     restaurantSignboard,
     landmarkDetail,
+    landmarkPlaceDetail,
+    landmarkItemDetail,
   ];
 }

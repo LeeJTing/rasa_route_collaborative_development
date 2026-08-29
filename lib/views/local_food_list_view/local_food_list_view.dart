@@ -13,9 +13,7 @@ import 'widgets/food_search_bar.dart';
 import 'widgets/local_food_card.dart';
 
 class LocalFoodListView extends StatefulWidget {
-  const LocalFoodListView({super.key, @visibleForTesting this.viewModel});
-
-  final LocalFoodListViewModel? viewModel;
+  const LocalFoodListView({super.key});
 
   @override
   State<LocalFoodListView> createState() => _LocalFoodListViewState();
@@ -28,7 +26,7 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
   @override
   void initState() {
     super.initState();
-    _viewModel = widget.viewModel ?? LocalFoodListViewModel();
+    _viewModel = LocalFoodListViewModel();
     _viewModel.onInit();
     _searchController = TextEditingController();
   }
@@ -237,8 +235,8 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
           value: vm,
           child: DraggableScrollableSheet(
             expand: false,
-            initialChildSize: 0.8,
-            maxChildSize: 0.92,
+            initialChildSize: AppLayoutRatios.catalogueFilterSheetInitial,
+            maxChildSize: AppLayoutRatios.catalogueFilterSheetMaximum,
             builder: (BuildContext context, ScrollController controller) =>
                 Consumer<LocalFoodListViewModel>(
                   builder:

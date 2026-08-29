@@ -12,6 +12,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_dotenv: ^6.0.1
   supabase_flutter: ^2.17.2
+  audioplayers: ^6.8.1
+  flutter_tts: ^4.2.5
 
   # @visibleForTesting test seams (pure annotations, ships with the Flutter SDK).
   meta: ^1.9.1
@@ -33,6 +35,17 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
 
+  # Opens an external app/URL - used to hand a landmark's coordinates off to
+  # Google Maps for turn-by-turn directions (LandmarkPlaceDetailView).
+  url_launcher: ^6.3.1
+
+  # Dev-only OS-level GPS mock (Android) so a demo can teleport the app's
+  # location without moving - isolated in `lib/external/location/`.
+  # Vendored into packages/ so a `stopMockLocation()` (cancel the repeat
+  # timer + remove the Android test provider) could be added - the pub.dev
+  # release has no way to stop mocking.
+  fluttermocklocation:
+    path: packages/fluttermocklocation
   # Persistent state-scoped Swipe Mode sessions (REQ103_4 - REQ103_6).
   shared_preferences: ^2.5.5
 

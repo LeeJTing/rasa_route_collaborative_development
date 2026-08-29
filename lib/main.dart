@@ -6,6 +6,7 @@ import 'app/app.dart';
 import 'app/config/env.dart';
 import 'external/supabase/supabase_service.dart';
 import 'model/background_process/location_monitor.dart';
+import 'model/background_process/restaurant_monitor.dart';
 import 'shared_client/local_storage_manager/local_storage_manager.dart';
 
 /// Application entry point.
@@ -25,4 +26,8 @@ Future<void> main() async {
   // Background processes - stream GPS fixes to any ViewModel that listens
   // (e.g. AddLandmarkView's location picker).
   unawaited(LocationMonitor().start());
+
+  // Watches for landmarks other tourists submit, so the dashboard can offer to
+  // refresh instead of quietly going stale.
+  unawaited(RestaurantMonitor().start());
 }
