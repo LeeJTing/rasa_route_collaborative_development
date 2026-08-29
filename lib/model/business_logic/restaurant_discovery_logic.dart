@@ -2,15 +2,18 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
 import 'dart:math' as math;
+import 'package:meta/meta.dart' show visibleForTesting;
 
 /// Finding and filtering restaurants.
 ///
 /// A business-logic class knows exactly one thing below it: a **repository
 /// facade**. It never sees a repository, a shared client or Flutter.
 class RestaurantDiscoveryLogic {
-  RestaurantDiscoveryLogic();
+  RestaurantDiscoveryLogic({
+    @visibleForTesting DiscoveryRepositoryFacade? discoveryRepository,
+  }) : repository = discoveryRepository ?? DiscoveryRepositoryFacade();
 
-  final DiscoveryRepositoryFacade repository = DiscoveryRepositoryFacade();
+  final DiscoveryRepositoryFacade repository;
 
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
@@ -98,29 +101,35 @@ class RestaurantDiscoveryLogic {
     return matches.take(limit).toList(growable: false);
   }
 
-  /// Starts at 1 km and expands silently until the nearest results are found.
+  /// Quick Mode starts at 1 km and expands silently until [limit] nearest
+  /// restaurants are found or the 10 km Use Case boundary is reached.
+  ///
+  /// When the boundary contains fewer than [limit] restaurants, every
+  /// available restaurant in that boundary is returned.
   Future<List<Restaurant>> nearbyWithAutomaticExpansion({
     required TouristLocation location,
     required int limit,
     double initialRadiusKm = 1,
     double radiusStepKm = 1,
-    double maximumRadiusKm = 20,
+    double maximumRadiusKm = 10,
   }) async {
     final List<Restaurant> measured = _measure(
       await repository.getRestaurants(),
       location,
     );
     double radiusKm = initialRadiusKm;
+    List<Restaurant> available = const <Restaurant>[];
     while (radiusKm <= maximumRadiusKm) {
       final List<Restaurant> results = _withinRadius(
         measured,
         radiusKm: radiusKm,
         limit: limit,
       );
-      if (results.isNotEmpty || !location.isKnown) return results;
+      available = results;
+      if (results.length >= limit || !location.isKnown) return results;
       radiusKm += radiusStepKm;
     }
-    return const <Restaurant>[];
+    return available;
   }
 
   double _distanceMetres(double lat1, double lon1, double lat2, double lon2) {
