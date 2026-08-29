@@ -33,6 +33,9 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
 
+  # Persistent state-scoped Swipe Mode sessions (REQ103_4 - REQ103_6).
+  shared_preferences: ^2.5.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -12,6 +12,9 @@ class RestaurantDiscoveryLogic {
 
   final DiscoveryRepositoryFacade repository = DiscoveryRepositoryFacade();
 
+  Future<Restaurant?> findById(int restaurantId) =>
+      repository.getRestaurantById(restaurantId);
+
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
     required double radiusKm,

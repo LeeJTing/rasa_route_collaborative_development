@@ -145,10 +145,17 @@ class FoodKnowledgeRepository {
   }
 
   Future<Set<int>> _getFavouriteFoodIds() async {
+    return favouriteFoodIdsForTourist(api.currentUserId);
+  }
+
+  /// Reads favourites for an explicitly resolved tourist. Swipe Mode uses the
+  /// temporary development tourist until the authentication module is live.
+  Future<Set<int>> favouriteFoodIdsForTourist(String touristId) async {
+    if (touristId.isEmpty) return <int>{};
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableFavouriteFood,
       columns: 'local_food_id',
-      eq: <String, Object?>{'tourist_id': api.currentUserId},
+      eq: <String, Object?>{'tourist_id': touristId},
     );
     return rows
         .map((Map<String, dynamic> row) => row['local_food_id'])

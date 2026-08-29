@@ -45,6 +45,7 @@ abstract final class AppRoutes {
   // --- Restaurant ------------------------------------------------------------
 
   static const String restaurantRecommendation = '/restaurant-recommendation';
+  static const String matchesRecommendation = '/matches-recommendation';
   static const String restaurantDetail = '/restaurant-detail';
   static const String restaurantItemList = '/restaurant-item-list';
 
@@ -71,6 +72,7 @@ abstract final class AppRoutes {
     foodComparison,
     foodRecommendation,
     restaurantRecommendation,
+    matchesRecommendation,
     restaurantDetail,
     restaurantItemList,
     landmarkHistory,

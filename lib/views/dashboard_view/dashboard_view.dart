@@ -109,16 +109,11 @@ class _DashboardViewState extends State<DashboardView> {
         appBar: AppTopBar(
           title: 'Dashboard',
           showBackButton: false,
-          onProfileTap: () =>
-              Navigator.pushNamed(context, AppRoutes.profile),
+          onProfileTap: () => Navigator.pushNamed(context, AppRoutes.profile),
         ),
         body: Consumer<DashboardViewModel>(
           builder:
-              (
-                BuildContext context,
-                DashboardViewModel viewModel,
-                Widget? _,
-              ) {
+              (BuildContext context, DashboardViewModel viewModel, Widget? _) {
                 _applyCameraRequest(viewModel);
                 _syncSearchField(viewModel);
 
@@ -300,9 +295,34 @@ class _DashboardViewState extends State<DashboardView> {
               onToggle: viewModel.toggleSwipePanel,
               contextLabel: viewModel.contextLabel,
               matchesCount: viewModel.matchesCount,
+              currentFood: viewModel.currentSwipeFood,
+              previousFood: viewModel.previousSwipeFood,
+              nextFood: viewModel.nextSwipeFood,
+              currentFoodRestricted: viewModel.currentSwipeFoodRestricted,
+              currentFoodLiked: viewModel.currentSwipeFoodLiked,
+              loading: viewModel.swipeLoading,
+              errorMessage: viewModel.swipeError,
+              showResumePrompt: viewModel.showSwipeResumePrompt,
+              stateName: viewModel.swipeStateName,
+              savedCardCount: viewModel.savedSwipeCardCount,
+              savedLikeCount: viewModel.savedSwipeLikeCount,
+              savedRestaurantCount: viewModel.savedSwipeRestaurantCount,
+              likeRevision: viewModel.swipeLikeRevision,
+              onPrevious: viewModel.showPreviousSwipeFood,
+              onNext: viewModel.showNextSwipeFood,
+              onFoodTap: (food) => Navigator.pushNamed(
+                context,
+                AppRoutes.foodDetail,
+                arguments: food.id,
+              ),
+              onLike: viewModel.likeCurrentSwipeFood,
+              onHeartTap: viewModel.toggleCurrentSwipeFoodLike,
+              onContinue: viewModel.continueSwipeSession,
+              onStartNew: viewModel.startNewSwipeSession,
               onMatchesTap: () => Navigator.pushNamed(
                 context,
-                AppRoutes.restaurantRecommendation,
+                AppRoutes.matchesRecommendation,
+                arguments: viewModel.matchesRecommendationRequest,
               ),
             ),
           ),
@@ -363,8 +383,7 @@ class _DashboardViewState extends State<DashboardView> {
             child: RegionScoreCard(
               availability: viewModel.selectedRegion!,
               onDismiss: viewModel.dismissRegionCard,
-              onExplore: () =>
-                  viewModel.openRegion(viewModel.selectedRegion!),
+              onExplore: () => viewModel.openRegion(viewModel.selectedRegion!),
             ),
           ),
 
@@ -404,94 +423,94 @@ class _DashboardViewState extends State<DashboardView> {
     return ColoredBox(
       color: AppColors.background,
       child: FlutterMap(
-      mapController: _mapController,
-      options: MapOptions(
-        initialCenter: LatLng(
-          viewModel.centreLatitude,
-          viewModel.centreLongitude,
-        ),
-        initialZoom: viewModel.zoom,
-        minZoom: viewModel.minimumZoom,
-        maxZoom: viewModel.maximumZoom,
-        // REQ102_1 - the camera can never leave Malaysia.
-        cameraConstraint: CameraConstraint.containCenter(
-          bounds: LatLngBounds(
-            LatLng(viewModel.malaysiaSouth, viewModel.malaysiaWest),
-            LatLng(viewModel.malaysiaNorth, viewModel.malaysiaEast),
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: LatLng(
+            viewModel.centreLatitude,
+            viewModel.centreLongitude,
           ),
+          initialZoom: viewModel.zoom,
+          minZoom: viewModel.minimumZoom,
+          maxZoom: viewModel.maximumZoom,
+          // REQ102_1 - the camera can never leave Malaysia.
+          cameraConstraint: CameraConstraint.containCenter(
+            bounds: LatLngBounds(
+              LatLng(viewModel.malaysiaSouth, viewModel.malaysiaWest),
+              LatLng(viewModel.malaysiaNorth, viewModel.malaysiaEast),
+            ),
+          ),
+          // REQ102_2 / REQ102_4 - pinch to zoom, but no rotation: a rotated
+          // heatmap makes the state labels unreadable and buys nothing.
+          interactionOptions: const InteractionOptions(
+            flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+          ),
+          onMapReady: () {
+            _mapReady = true;
+            // The ViewModel usually asks for its first camera position before
+            // the map is ready to move; one rebuild here replays it.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() {});
+            });
+          },
+          onTap: (TapPosition _, LatLng point) =>
+              viewModel.onMapTapped(point.latitude, point.longitude),
+          // REQ102_12 / REQ102_13 - crossing the predefined zoom level here is
+          // what swaps the heatmap for the detailed map, and back.
+          // Deferred by a microtask: flutter_map can report a camera change from
+          // inside a build, and notifying listeners there would be a setState
+          // during build. The microtask runs once the frame has unwound.
+          onPositionChanged: (MapCamera camera, bool _) {
+            final LatLng centre = camera.center;
+            final double zoom = camera.zoom;
+            final LatLngBounds bounds = camera.visibleBounds;
+            Future<void>.microtask(() {
+              if (!mounted) return;
+              viewModel.onCameraChanged(
+                latitude: centre.latitude,
+                longitude: centre.longitude,
+                zoom: zoom,
+                south: bounds.south,
+                west: bounds.west,
+                north: bounds.north,
+                east: bounds.east,
+              );
+            });
+          },
         ),
-        // REQ102_2 / REQ102_4 - pinch to zoom, but no rotation: a rotated
-        // heatmap makes the state labels unreadable and buys nothing.
-        interactionOptions: const InteractionOptions(
-          flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-        ),
-        onMapReady: () {
-          _mapReady = true;
-          // The ViewModel usually asks for its first camera position before
-          // the map is ready to move; one rebuild here replays it.
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) setState(() {});
-          });
-        },
-        onTap: (TapPosition _, LatLng point) =>
-            viewModel.onMapTapped(point.latitude, point.longitude),
-        // REQ102_12 / REQ102_13 - crossing the predefined zoom level here is
-        // what swaps the heatmap for the detailed map, and back.
-        // Deferred by a microtask: flutter_map can report a camera change from
-        // inside a build, and notifying listeners there would be a setState
-        // during build. The microtask runs once the frame has unwound.
-        onPositionChanged: (MapCamera camera, bool _) {
-          final LatLng centre = camera.center;
-          final double zoom = camera.zoom;
-          final LatLngBounds bounds = camera.visibleBounds;
-          Future<void>.microtask(() {
-            if (!mounted) return;
-            viewModel.onCameraChanged(
-              latitude: centre.latitude,
-              longitude: centre.longitude,
-              zoom: zoom,
-              south: bounds.south,
-              west: bounds.west,
-              north: bounds.north,
-              east: bounds.east,
-            );
-          });
-        },
-      ),
-      children: <Widget>[
-        // UC300 BF-1 - the detailed view is the real OpenStreetMap surface.
-        TileLayer(
-          urlTemplate: Env.osmTileUrl,
-          userAgentPackageName: 'com.rasaroute.app',
-        ),
-
-        // REQ102_1 - the map covers only Malaysia. One polygon over the whole
-        // world with the coastlines cut out of it, filled with the scaffold
-        // cream, so the tiles only show through inside the country. Drawn
-        // before the pins so it never covers one.
-        if (viewModel.showCountryMask)
-          PolygonLayer(
-            polygons: <Polygon>[
-              Polygon(
-                points: _wholeWorld,
-                holePointsList: viewModel.countryMaskOutlines
-                    .map(
-                      (CountryOutline outline) => outline.ring
-                          .map(
-                            (GeoPoint point) =>
-                                LatLng(point.latitude, point.longitude),
-                          )
-                          .toList(growable: false),
-                    )
-                    .toList(growable: false),
-                color: AppColors.background,
-                borderStrokeWidth: 0,
-              ),
-            ],
+        children: <Widget>[
+          // UC300 BF-1 - the detailed view is the real OpenStreetMap surface.
+          TileLayer(
+            urlTemplate: Env.osmTileUrl,
+            userAgentPackageName: 'com.rasaroute.app',
           ),
 
-        // REQ102_32 - restaurant and submitted-landmark pins.
-        MarkerLayer(
+          // REQ102_1 - the map covers only Malaysia. One polygon over the whole
+          // world with the coastlines cut out of it, filled with the scaffold
+          // cream, so the tiles only show through inside the country. Drawn
+          // before the pins so it never covers one.
+          if (viewModel.showCountryMask)
+            PolygonLayer(
+              polygons: <Polygon>[
+                Polygon(
+                  points: _wholeWorld,
+                  holePointsList: viewModel.countryMaskOutlines
+                      .map(
+                        (CountryOutline outline) => outline.ring
+                            .map(
+                              (GeoPoint point) =>
+                                  LatLng(point.latitude, point.longitude),
+                            )
+                            .toList(growable: false),
+                      )
+                      .toList(growable: false),
+                  color: AppColors.background,
+                  borderStrokeWidth: 0,
+                ),
+              ],
+            ),
+
+          // REQ102_32 - restaurant and submitted-landmark pins.
+          MarkerLayer(
             markers: viewModel.pins
                 .map(
                   (MapPin pin) => Marker(
@@ -500,7 +519,8 @@ class _DashboardViewState extends State<DashboardView> {
                     height: AppSizes.mapPinSize,
                     child: _PinMarker(
                       pin: pin,
-                      selected: viewModel.selectedPin?.referenceId ==
+                      selected:
+                          viewModel.selectedPin?.referenceId ==
                               pin.referenceId &&
                           viewModel.selectedPin?.kind == pin.kind,
                       onTap: () => viewModel.selectPin(pin),
@@ -510,21 +530,21 @@ class _DashboardViewState extends State<DashboardView> {
                 .toList(growable: false),
           ),
 
-        // The tourist's own position (REQ102_7).
-        if (viewModel.location.isKnown)
-          MarkerLayer(
-            markers: <Marker>[
-              Marker(
-                point: LatLng(
-                  viewModel.location.latitude,
-                  viewModel.location.longitude,
+          // The tourist's own position (REQ102_7).
+          if (viewModel.location.isKnown)
+            MarkerLayer(
+              markers: <Marker>[
+                Marker(
+                  point: LatLng(
+                    viewModel.location.latitude,
+                    viewModel.location.longitude,
+                  ),
+                  width: 22,
+                  height: 22,
+                  child: const _CurrentLocationDot(),
                 ),
-                width: 22,
-                height: 22,
-                child: const _CurrentLocationDot(),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );

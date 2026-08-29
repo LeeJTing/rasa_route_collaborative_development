@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:meta/meta.dart' show visibleForTesting;
+
 import '../app/routing/app_navigator.dart';
 import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
@@ -8,7 +10,10 @@ import '../domain_model/exploration_search.dart';
 import '../domain_model/food_distribution.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/map.dart';
+import '../domain_model/matches_recommendation.dart';
 import '../domain_model/region.dart';
+import '../domain_model/swipe_mode.dart';
+import '../domain_model/swipe_session.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
 
@@ -19,7 +24,8 @@ enum DashboardMapMode { heatmap, detailed }
 /// Regional Exploration Module, following UC300.
 
 class DashboardViewModel extends BaseViewModel {
-  DashboardViewModel() {
+  DashboardViewModel({@visibleForTesting DiscoveryLogicFacade? discoveryLogic})
+    : discoveryLogic = discoveryLogic ?? DiscoveryLogicFacade() {
     _live.add(this);
   }
 
@@ -50,13 +56,14 @@ class DashboardViewModel extends BaseViewModel {
   static void onCurrentLocationChanged(TouristLocation location) {
     final bool lost = _sharedLocation.isKnown && !location.isKnown;
     _sharedLocation = location;
-    for (final DashboardViewModel viewModel
-        in Set<DashboardViewModel>.of(_live)) {
+    for (final DashboardViewModel viewModel in Set<DashboardViewModel>.of(
+      _live,
+    )) {
       viewModel._onLocationPushed(lost: lost);
     }
   }
 
-  final DiscoveryLogicFacade discoveryLogic = DiscoveryLogicFacade();
+  final DiscoveryLogicFacade discoveryLogic;
 
   // ===========================================================================
   // Map view + camera
@@ -131,6 +138,7 @@ class DashboardViewModel extends BaseViewModel {
   List<RegionAvailability> get regionScores => _distribution.regions;
 
   List<MapPin> _pins = const <MapPin>[];
+  int _pinLoadRevision = 0;
   List<MapPin> get pins => _pins;
 
   List<CountryOutline> _countryOutlines = const <CountryOutline>[];
@@ -169,7 +177,8 @@ class DashboardViewModel extends BaseViewModel {
   bool _filterPanelOpen = false;
   bool get filterPanelOpen => _filterPanelOpen;
 
-  final Set<ExplorationFilterGroup> _expandedGroups = <ExplorationFilterGroup>{};
+  final Set<ExplorationFilterGroup> _expandedGroups =
+      <ExplorationFilterGroup>{};
   bool isGroupExpanded(ExplorationFilterGroup group) =>
       _expandedGroups.contains(group);
 
@@ -225,6 +234,7 @@ class DashboardViewModel extends BaseViewModel {
   ///        [showFoodInTargetFrame], never by assigning here.
   LocalFood? _selectedFood;
   LocalFood? get selectedFood => _selectedFood;
+  bool _targetFrameOwnsSelection = false;
 
   // ===========================================================================
   // Location (REQ102_6 - REQ102_9, REQ102_14)
@@ -257,6 +267,74 @@ class DashboardViewModel extends BaseViewModel {
 
   bool _swipePanelExpanded = false;
 
+  SwipeModePreparation? _swipePreparation;
+  SwipeSession? _swipeSession;
+  bool _swipeLoading = false;
+  String? _swipeError;
+  bool _showSwipeResumePrompt = false;
+  int _swipeLikeRevision = 0;
+  int _swipePrepareRevision = 0;
+
+  bool get swipeLoading => _swipeLoading;
+  String? get swipeError => _swipeError;
+  bool get showSwipeResumePrompt => _showSwipeResumePrompt;
+  String get swipeStateName => _swipePreparation?.stateName ?? 'this state';
+  int get swipeLikeRevision => _swipeLikeRevision;
+
+  int get savedSwipeCardCount {
+    final SwipeSession? saved = _swipePreparation?.savedSession;
+    if (saved == null || saved.candidateFoodIds.isEmpty) return 0;
+    return (saved.currentIndex + 1).clamp(0, saved.candidateFoodIds.length);
+  }
+
+  int get savedSwipeLikeCount =>
+      _swipePreparation?.savedSession?.likedFoodIds.length ?? 0;
+
+  int get savedSwipeRestaurantCount =>
+      _swipePreparation?.savedRestaurantCount ?? 0;
+
+  List<LocalFood> get swipeQueue {
+    final SwipeModePreparation? preparation = _swipePreparation;
+    if (preparation == null) return const <LocalFood>[];
+    final Map<int, LocalFood> byId = <int, LocalFood>{
+      for (final LocalFood food in preparation.queue) food.id: food,
+    };
+    final List<int> ids =
+        _swipeSession?.candidateFoodIds ??
+        preparation.queue.map((LocalFood food) => food.id).toList();
+    return ids.map((int id) => byId[id]).whereType<LocalFood>().toList();
+  }
+
+  LocalFood? get currentSwipeFood {
+    final List<LocalFood> queue = swipeQueue;
+    final int index = _swipeSession?.currentIndex ?? 0;
+    return index >= 0 && index < queue.length ? queue[index] : null;
+  }
+
+  LocalFood? get previousSwipeFood {
+    final List<LocalFood> queue = swipeQueue;
+    final int index = (_swipeSession?.currentIndex ?? 0) - 1;
+    return index >= 0 && index < queue.length ? queue[index] : null;
+  }
+
+  LocalFood? get nextSwipeFood {
+    final List<LocalFood> queue = swipeQueue;
+    final int index = (_swipeSession?.currentIndex ?? 0) + 1;
+    return index >= 0 && index < queue.length ? queue[index] : null;
+  }
+
+  bool get currentSwipeFoodRestricted {
+    final int? foodId = currentSwipeFood?.id;
+    return foodId != null &&
+        (_swipePreparation?.restrictedFoodIds.contains(foodId) ?? false);
+  }
+
+  bool get currentSwipeFoodLiked {
+    final int? foodId = currentSwipeFood?.id;
+    return foodId != null &&
+        (_swipeSession?.likedFoodIds.contains(foodId) ?? false);
+  }
+
   /// REQ103_1 calls the Discovery Layer Bar "a sliding bottom-sheet", so it has
   /// a collapsed peek and an expanded state. It starts collapsed: expanded it
   /// is 236pt, which is 40% of the map on a 390x844 phone, and until REQ103
@@ -266,6 +344,86 @@ class DashboardViewModel extends BaseViewModel {
   void toggleSwipePanel() {
     _swipePanelExpanded = !_swipePanelExpanded;
     safeNotifyListeners();
+    if (_swipePanelExpanded) {
+      if (_swipePreparation == null) {
+        _prepareSwipeModeForActiveState();
+      } else if (!_showSwipeResumePrompt) {
+        showFoodInTargetFrame(currentSwipeFood);
+      }
+    } else {
+      showFoodInTargetFrame(null);
+    }
+  }
+
+  Future<void> continueSwipeSession() async {
+    final SwipeModePreparation? preparation = _swipePreparation;
+    if (preparation == null || _swipeLoading) return;
+    await _runSwipeCommand(() async {
+      _swipeSession = await discoveryLogic.continueSwipeSession(preparation);
+      _showSwipeResumePrompt = false;
+      showFoodInTargetFrame(currentSwipeFood);
+    });
+  }
+
+  Future<void> startNewSwipeSession() async {
+    final SwipeModePreparation? preparation = _swipePreparation;
+    if (preparation == null || _swipeLoading) return;
+    await _runSwipeCommand(() async {
+      _swipeSession = await discoveryLogic.startNewSwipeSession(preparation);
+      _showSwipeResumePrompt = false;
+      showFoodInTargetFrame(currentSwipeFood);
+    });
+  }
+
+  Future<void> showPreviousSwipeFood() => _moveSwipeFoodBy(-1);
+
+  Future<void> showNextSwipeFood() => _moveSwipeFoodBy(1);
+
+  Future<void> _moveSwipeFoodBy(int amount) async {
+    final SwipeSession? session = _swipeSession;
+    if (session == null || _swipeLoading) return;
+    final int requested = session.currentIndex + amount;
+    if (requested < 0 || requested >= session.candidateFoodIds.length) return;
+    await _runSwipeCommand(() async {
+      _swipeSession = await discoveryLogic.moveSwipeSession(session, requested);
+      showFoodInTargetFrame(currentSwipeFood);
+    }, showLoading: false);
+  }
+
+  Future<void> likeCurrentSwipeFood() async {
+    final SwipeSession? session = _swipeSession;
+    final LocalFood? food = currentSwipeFood;
+    if (session == null ||
+        food == null ||
+        currentSwipeFoodLiked ||
+        _swipeLoading) {
+      return;
+    }
+    await _runSwipeCommand(() async {
+      _swipeSession = await discoveryLogic.likeSwipeFood(session, food.id);
+      _swipeLikeRevision++;
+    }, showLoading: false);
+  }
+
+  /// The card gesture only adds a match, while the explicit heart control is
+  /// a toggle so a tourist can remove an accidental match in place.
+  Future<void> toggleCurrentSwipeFoodLike() async {
+    final SwipeSession? session = _swipeSession;
+    final LocalFood? food = currentSwipeFood;
+    if (session == null || food == null || _swipeLoading) return;
+
+    if (!currentSwipeFoodLiked) {
+      await likeCurrentSwipeFood();
+      return;
+    }
+
+    await _runSwipeCommand(() async {
+      _swipeSession = await discoveryLogic.removeSwipeFoodLike(
+        session,
+        food.id,
+      );
+      _swipeLikeRevision++;
+    }, showLoading: false);
   }
 
   /// REQ102_10 - the Discovery Layer Bar appears with the detailed map view.
@@ -341,6 +499,7 @@ class DashboardViewModel extends BaseViewModel {
   @override
   void dispose() {
     _pinRefreshTimer?.cancel();
+    _swipePrepareRevision++;
     _live.remove(this);
     super.dispose();
   }
@@ -481,10 +640,14 @@ class DashboardViewModel extends BaseViewModel {
       _mode = next;
       _selectedRegion = null;
       _selectedPin = null;
-      if (next == DashboardMapMode.heatmap) _heatmapResetToken++;
+      if (next == DashboardMapMode.heatmap) {
+        _heatmapResetToken++;
+        _leaveSwipeModeForHeatmap();
+      }
       safeNotifyListeners();
       if (_mode == DashboardMapMode.detailed) {
         _loadPins();
+        _prepareSwipeModeForActiveState();
       } else {
         _loadHeatmap();
       }
@@ -512,6 +675,7 @@ class DashboardViewModel extends BaseViewModel {
     _pinRefreshTimer?.cancel();
     _pinRefreshTimer = Timer(_pinRefreshDelay, () {
       if (_mode != DashboardMapMode.detailed) return;
+      _refreshSwipeModeRegion();
       if (!_viewportChangedSinceLastPinLoad()) return;
       _loadPins();
     });
@@ -561,10 +725,17 @@ class DashboardViewModel extends BaseViewModel {
   void openSelectedPin() {
     final MapPin? pin = _selectedPin;
     if (pin == null) return;
+    final int? referenceId = int.tryParse(pin.referenceId);
+    if (referenceId == null) {
+      _notice = 'This place does not have a valid details reference.';
+      safeNotifyListeners();
+      return;
+    }
     AppNavigator.push(
       pin.kind == MapPinKind.landmark
           ? AppRoutes.landmarkDetail
           : AppRoutes.restaurantDetail,
+      arguments: referenceId,
     );
   }
 
@@ -598,7 +769,7 @@ class DashboardViewModel extends BaseViewModel {
 
   /// A7-3 - tick or untick one option, then recalculate (REQ102_28) and
   /// redraw (REQ102_29).
-   /// A7-3 - choose one option in a group, then recalculate (REQ102_28) and
+  /// A7-3 - choose one option in a group, then recalculate (REQ102_28) and
   /// redraw (REQ102_29).
   ///
   /// One option per group: picking a different one replaces what was there,
@@ -692,6 +863,7 @@ class DashboardViewModel extends BaseViewModel {
   ///
   /// @param food (search) - the Local Food row the tourist tapped.
   void selectSearchedFood(LocalFood food) {
+    _targetFrameOwnsSelection = false;
     _selectedFood = food;
     _searchPanelOpen = false;
     _searchKeyword = food.name;
@@ -724,6 +896,10 @@ class DashboardViewModel extends BaseViewModel {
   ///        `DiscoveryLogicFacade.mapPins(localFoodId:)` and
   ///        `foodDistribution(localFoodId:)`.
   void showFoodInTargetFrame(LocalFood? food) {
+    // An asynchronous session preparation/command may finish after the sheet
+    // has been collapsed. It must not reactivate the Swipe-owned map filter.
+    if (food != null && !_swipePanelExpanded) return;
+    _targetFrameOwnsSelection = food != null;
     if (_selectedFood?.id == food?.id) return;
     _selectedFood = food;
     safeNotifyListeners();
@@ -737,6 +913,7 @@ class DashboardViewModel extends BaseViewModel {
     _searchResults = ExplorationSearchResults.empty;
     _searchMessage = null;
     _searchPanelOpen = false;
+    _targetFrameOwnsSelection = false;
     _selectedFood = null;
     safeNotifyListeners();
     if (hadFood) _reloadActiveView();
@@ -782,7 +959,17 @@ class DashboardViewModel extends BaseViewModel {
   /// REQ103_14 - the Matches count on the Discovery Layer Bar. Always zero
   /// until the swipe deck lands with REQ103; the badge exists now because
   /// REQ102_10 puts the panel on screen.
-  int get matchesCount => 0;
+  int get matchesCount => _swipeSession?.likedFoodIds.length ?? 0;
+
+  MatchesRecommendationRequest get matchesRecommendationRequest =>
+      MatchesRecommendationRequest(
+        stateCode: _swipePreparation?.stateCode ?? '',
+        stateName: _swipePreparation?.stateName ?? '',
+        origin: TouristLocation(
+          latitude: _centreLatitude,
+          longitude: _centreLongitude,
+        ),
+      );
 
   // ===========================================================================
   // Retry
@@ -828,7 +1015,92 @@ class DashboardViewModel extends BaseViewModel {
   Future<void> _reloadActiveView() =>
       isHeatmapView ? _loadHeatmap() : _loadPins(clearFirst: true);
 
+  Future<void> _refreshSwipeModeRegion() async {
+    final Region? region = await discoveryLogic.regionAt(
+      _centreLatitude,
+      _centreLongitude,
+    );
+    if (region == null || region.code == _swipePreparation?.stateCode) return;
+    await _prepareSwipeModeForActiveState();
+  }
+
+  Future<void> _prepareSwipeModeForActiveState() async {
+    if (!isDetailedView) return;
+    final int revision = ++_swipePrepareRevision;
+    _swipeLoading = true;
+    _swipeError = null;
+    safeNotifyListeners();
+    try {
+      final SwipeModePreparation preparation = await discoveryLogic
+          .prepareSwipeMode(
+            latitude: _centreLatitude,
+            longitude: _centreLongitude,
+          );
+      if (revision != _swipePrepareRevision || !isDetailedView) return;
+      _swipePreparation = preparation;
+      _swipeSession = null;
+      _showSwipeResumePrompt = preparation.savedSession != null;
+      if (!_showSwipeResumePrompt) {
+        _swipeSession = await discoveryLogic.startNewSwipeSession(preparation);
+      }
+      if (_swipePanelExpanded && !_showSwipeResumePrompt) {
+        showFoodInTargetFrame(currentSwipeFood);
+      }
+    } catch (error) {
+      if (revision != _swipePrepareRevision) return;
+      _swipeError = _humaniseSwipeError(error);
+      _swipePreparation = null;
+      _swipeSession = null;
+      _showSwipeResumePrompt = false;
+      if (_swipePanelExpanded) showFoodInTargetFrame(null);
+    } finally {
+      if (revision == _swipePrepareRevision) {
+        _swipeLoading = false;
+        safeNotifyListeners();
+      }
+    }
+  }
+
+  Future<void> _runSwipeCommand(
+    Future<void> Function() command, {
+    bool showLoading = true,
+  }) async {
+    if (showLoading) _swipeLoading = true;
+    _swipeError = null;
+    safeNotifyListeners();
+    try {
+      await command();
+    } catch (error) {
+      _swipeError = _humaniseSwipeError(error);
+    } finally {
+      if (showLoading) _swipeLoading = false;
+      safeNotifyListeners();
+    }
+  }
+
+  static String _humaniseSwipeError(Object error) {
+    final String message = error.toString();
+    return message.startsWith('Exception: ')
+        ? message.substring('Exception: '.length)
+        : message;
+  }
+
+  void _leaveSwipeModeForHeatmap() {
+    _swipePrepareRevision++;
+    _swipePanelExpanded = false;
+    _swipePreparation = null;
+    _swipeSession = null;
+    _swipeLoading = false;
+    _swipeError = null;
+    _showSwipeResumePrompt = false;
+    if (_targetFrameOwnsSelection) {
+      _selectedFood = null;
+      _targetFrameOwnsSelection = false;
+    }
+  }
+
   Future<void> _loadHeatmap() => runGuarded(() async {
+    _pinLoadRevision++;
     // Leaving the detailed view invalidates its pins.
     if (_pins.isNotEmpty) {
       _pins = const <MapPin>[];
@@ -850,6 +1122,8 @@ class DashboardViewModel extends BaseViewModel {
   /// the right answer; blanking them every camera nudge just made the map
   /// flicker. Either way the camera is untouched.
   Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
+    final int revision = ++_pinLoadRevision;
+    final int? requestedFoodId = _activePinFoodId;
     if (clearFirst && _pins.isNotEmpty) {
       _pins = const <MapPin>[];
       safeNotifyListeners();
@@ -858,9 +1132,9 @@ class DashboardViewModel extends BaseViewModel {
     _lastPinLatitude = _centreLatitude;
     _lastPinLongitude = _centreLongitude;
     _lastPinZoom = _zoom;
-    _pins = await discoveryLogic.mapPins(
+    final List<MapPin> loadedPins = await discoveryLogic.mapPins(
       filter: _filter,
-      localFoodId: _selectedFood?.id,
+      localFoodId: requestedFoodId,
       south: _viewportSouth,
       west: _viewportWest,
       north: _viewportNorth,
@@ -868,7 +1142,15 @@ class DashboardViewModel extends BaseViewModel {
       fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
       fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
     );
+    if (revision != _pinLoadRevision || requestedFoodId != _activePinFoodId) {
+      return;
+    }
+    _pins = loadedPins;
   }, silent: true);
+
+  int? get _activePinFoodId => _targetFrameOwnsSelection && !_swipePanelExpanded
+      ? null
+      : _selectedFood?.id;
 
   /// Has the viewport moved or scaled enough that the pins on screen could
   /// differ from the ones already fetched?
@@ -922,7 +1204,10 @@ class DashboardViewModel extends BaseViewModel {
       _selectedPin = null;
       // Put the illustration back to its resting scale, so returning to the
       // overview never lands on a half-pinched canvas.
-      if (next == DashboardMapMode.heatmap) _heatmapResetToken++;
+      if (next == DashboardMapMode.heatmap) {
+        _heatmapResetToken++;
+        _leaveSwipeModeForHeatmap();
+      }
     }
 
     safeNotifyListeners();
@@ -930,6 +1215,7 @@ class DashboardViewModel extends BaseViewModel {
     if (changed) {
       if (next == DashboardMapMode.detailed) {
         _loadPins();
+        _prepareSwipeModeForActiveState();
       } else {
         _loadHeatmap();
       }

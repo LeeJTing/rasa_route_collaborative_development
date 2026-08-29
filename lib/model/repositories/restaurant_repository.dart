@@ -41,6 +41,27 @@ class RestaurantRepository {
     )
   ''';
 
+  Future<Restaurant?> getRestaurantById(int restaurantId) async {
+    try {
+      final Map<String, dynamic>? row = await api.selectOne(
+        APIManager.tableRestaurant,
+        columns: _selectColumns,
+        eq: <String, Object?>{'restaurant_id': restaurantId},
+      );
+      return row == null ? null : _toDomain(row);
+    } catch (error, stackTrace) {
+      developer.log(
+        'Restaurant detail query failed for restaurant $restaurantId.',
+        name: 'RestaurantRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load restaurant details. Check your connection and try again.',
+      );
+    }
+  }
+
   Future<List<Restaurant>> getRestaurants() async {
     try {
       final List<Map<String, dynamic>> rows = await api.selectAll(
