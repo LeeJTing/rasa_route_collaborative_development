@@ -59,11 +59,11 @@ class GeminiService {
   ///
   /// [apiKey]/[model] - see [describeImage]'s doc.
   Future<String> generateText(
-      String prompt, {
-        int retries = 1,
-        String? apiKey,
-        String? model,
-      }) async {
+    String prompt, {
+    int retries = 1,
+    String? apiKey,
+    String? model,
+  }) async {
     Object? lastError;
     for (int attempt = 0; attempt <= retries; attempt++) {
       try {
@@ -82,9 +82,12 @@ class GeminiService {
   }
 
   /// Ordered models to try for one request: the requested [model] (or the
-  /// shared default) first, then [Env.geminiFallbackModels]. If the primary
-  /// model is temporarily unavailable (HTTP 429/5xx - high demand, common on
-  /// loaded/free tiers), the next model in the list is tried automatically.
+  /// shared default) first, then [Env.geminiFallbackModels]. The same shared
+  /// fallback list is used whether the primary is [Env.geminiModel] (shared
+  /// service) or [Env.geminiModelLandmark] (UC500's `GeminiLandmarkService`).
+  /// If the primary model is temporarily unavailable (HTTP 429/5xx - high
+  /// demand, common on loaded/free tiers), the next model in the list is
+  /// tried automatically.
   List<String> _modelRotation(String? model) {
     final String primary = model ?? Env.geminiModel;
     final List<String> rotation = <String>[primary];
@@ -95,10 +98,10 @@ class GeminiService {
   }
 
   Future<String> _generate(
-      List<Map<String, Object?>> parts, {
-        String? apiKey,
-        String? model,
-      }) async {
+    List<Map<String, Object?>> parts, {
+    String? apiKey,
+    String? model,
+  }) async {
     Object? lastError;
     for (final String candidate in _modelRotation(model)) {
       try {
@@ -119,10 +122,10 @@ class GeminiService {
   /// One HTTP POST to a single Gemini [model]. Throws [_GeminiTransientException]
   /// for 429/5xx so [._generate] can fail over to the next model.
   Future<String> _postToModel(
-      List<Map<String, Object?>> parts, {
-        required String apiKey,
-        required String model,
-      }) async {
+    List<Map<String, Object?>> parts, {
+    required String apiKey,
+    required String model,
+  }) async {
     final HttpClient client = HttpClient();
     try {
       final HttpClientRequest request = await client
@@ -153,13 +156,13 @@ class GeminiService {
       }
 
       final Map<String, dynamic> decoded =
-      jsonDecode(body) as Map<String, dynamic>;
+          jsonDecode(body) as Map<String, dynamic>;
       final List<dynamic>? candidates = decoded['candidates'] as List<dynamic>?;
       if (candidates == null || candidates.isEmpty) return '';
 
       final Map<String, dynamic> content =
           candidates.first['content'] as Map<String, dynamic>? ??
-              const <String, dynamic>{};
+          const <String, dynamic>{};
       final List<dynamic>? responseParts = content['parts'] as List<dynamic>?;
       if (responseParts == null || responseParts.isEmpty) return '';
 
@@ -180,7 +183,7 @@ class GeminiService {
   /// defaults - see [describeImage]'s doc for why.
   Uri endpoint({String? apiKey, String? model}) => Uri.parse(
     'https://generativelanguage.googleapis.com/v1beta/models/'
-        '${model ?? Env.geminiModel}:generateContent?key=${apiKey ?? Env.geminiApiKey}',
+    '${model ?? Env.geminiModel}:generateContent?key=${apiKey ?? Env.geminiApiKey}',
   );
 
   // ---------------------------------------------------------------------------
