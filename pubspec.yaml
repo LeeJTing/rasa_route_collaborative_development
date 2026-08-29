@@ -46,6 +46,8 @@ dependencies:
   # release has no way to stop mocking.
   fluttermocklocation:
     path: packages/fluttermocklocation
+  # Persistent state-scoped Swipe Mode sessions (REQ103_4 - REQ103_6).
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:
