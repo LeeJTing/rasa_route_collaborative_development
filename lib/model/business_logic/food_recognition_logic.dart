@@ -1,7 +1,9 @@
 import 'package:meta/meta.dart' show visibleForTesting;
 
+import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_recognition_result.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/origin_verification.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../repositories/discovery_repository_facade.dart';
 import '../repositories/food_repository_facade.dart';
@@ -94,6 +96,17 @@ class FoodRecognitionLogic {
     return FoodNameMatcher.bestMatch(name, catalogue);
   }
 
+  /// Gemini's full analysis is authoritative on WHICH dish a photo shows, but
+  /// it must never overwrite an existing `local_food` record: if [fromGemini]
+  /// is already curated, the stored row - its authoritative details AND its
+  /// id (so a submitted `landmark_item` links to it instead of arriving
+  /// unlinked with `local_food_id = 0`) - wins over the freshly-generated
+  /// copy. Returns [fromGemini] itself only when there is no curated match.
+  Future<LocalFood> _preferCuratedOverGemini(LocalFood fromGemini) async {
+    final LocalFood? match = await _matchCatalogue(fromGemini.name);
+    return match ?? fromGemini;
+  }
+
   /// Recognises the food in [imageBytes] (REQ106_2, UC500 two-phase flow):
   ///  1. A quick, name-only Gemini call (`RecognitionRepository.identifyFoodName`).
   ///  2. If that name (or a whole-word variant of it - "nasi lemak ayam"
@@ -149,15 +162,19 @@ class FoodRecognitionLogic {
       final analysis = await discoveryRepository.recognition.analyzeFoodFull(
         imageBytes,
       );
+      // The full analysis decides WHICH dish this is - but if that dish is
+      // already curated, the stored row (data + id) wins over Gemini's copy.
+      final LocalFood food = await _preferCuratedOverGemini(analysis.food);
       return FoodRecognitionResult(
         isLocalFood: analysis.isLocal,
-        candidates: <LocalFood>[analysis.food],
+        candidates: <LocalFood>[food],
         priceMin: analysis.priceMin,
         priceMax: analysis.priceMax,
         confidence: analysis.confidence,
         localFoodConfidence: analysis.localConfidence,
         imageQuality: analysis.imageQuality,
         imageQualityIssues: analysis.imageQualityIssues,
+        dietaryRestrictions: analysis.dietaryRestrictions,
       );
     }
 
@@ -187,6 +204,7 @@ class FoodRecognitionLogic {
     double localFoodConfidence = quick.localFoodConfidence;
     String imageQuality = quick.imageQuality;
     List<String> imageQualityIssues = quick.imageQualityIssues;
+    List<String> dietaryRestrictions = const <String>[];
     if (candidates.length > 1) {
       result = candidates.take(3).toList(growable: false);
     } else {
@@ -205,13 +223,16 @@ class FoodRecognitionLogic {
         final analysis = await discoveryRepository.recognition.analyzeFoodFull(
           imageBytes,
         );
-        result = <LocalFood>[analysis.food];
+        // Same rule as the not-local branch: an existing curated row always
+        // beats Gemini's fresh copy - never overwrite `local_food` data.
+        result = <LocalFood>[await _preferCuratedOverGemini(analysis.food)];
         priceMin = analysis.priceMin;
         priceMax = analysis.priceMax;
         confidence = analysis.confidence;
         localFoodConfidence = analysis.localConfidence;
         imageQuality = analysis.imageQuality;
         imageQualityIssues = analysis.imageQualityIssues;
+        dietaryRestrictions = analysis.dietaryRestrictions;
       }
     }
 
@@ -224,6 +245,7 @@ class FoodRecognitionLogic {
       localFoodConfidence: localFoodConfidence,
       imageQuality: imageQuality,
       imageQualityIssues: imageQualityIssues,
+      dietaryRestrictions: dietaryRestrictions,
     );
   }
 
@@ -234,11 +256,14 @@ class FoodRecognitionLogic {
   ///
   /// Always sends the typed name AND the captured image to Gemini
   /// (`RecognitionRepository.analyzeFoodByName`) to check the claim first
-  /// (decision: "always verify", not a catalogue fast-path). Only once the
-  /// photo is verified to show the typed name is the curated catalogue row
-  /// preferred for the details; otherwise what Gemini actually saw
-  /// ([..observedFood]) comes back so the UI can warn instead of silently
-  /// accepting a mismatched landmark.
+  /// (decision: "always verify", not a catalogue fast-path). The curated
+  /// catalogue row is preferred for the typed dish's details whenever one
+  /// exists (Gemini must never overwrite existing `local_food` data) - but
+  /// only after verification. When the photo does NOT show the typed name,
+  /// what Gemini actually saw ([..observedFood]) comes back so the UI can
+  /// warn instead of silently accepting a mismatched landmark; if the tourist
+  /// then confirms the typed name anyway, the curated row (with its id) is
+  /// what gets carried, never Gemini's copy.
   Future<
     ({
       LocalFood food,
@@ -248,6 +273,7 @@ class FoodRecognitionLogic {
       double matchConfidence,
       bool isLocalFood,
       String observedFood,
+      List<String> dietaryRestrictions,
     })
   >
   resolveByName(List<int> imageBytes, String name) async {
@@ -259,17 +285,36 @@ class FoodRecognitionLogic {
     LocalFood food = analysis.food;
     double priceMin = analysis.priceMin;
     double priceMax = analysis.priceMax;
+    bool isLocalFood = analysis.isLocal;
+    List<String> dietaryRestrictions = analysis.dietaryRestrictions;
     // The catalogue lookup is a details optimisation, never a substitute for
-    // checking the photo - it only fills in the (more reliable) curated
-    // details once Gemini has confirmed the typed name is what the photo
-    // actually shows.
-    if (analysis.nameMatchesPhoto) {
-      final LocalFood? match = await _matchCatalogue(trimmed);
-      if (match != null) {
-        food = match;
-        priceMin = 0;
-        priceMax = 0;
-      }
+    // checking the photo - it fills in the (more reliable) curated details
+    // for the typed dish whenever one exists, whether or not the photo
+    // matched. A mismatch still warns via [observedFood]; if the tourist
+    // confirms the typed name anyway, the carried food is the curated row -
+    // never Gemini's overwrite of it - and its id is what links the eventual
+    // `landmark_item` to the existing `local_food`.
+    final LocalFood? match = await _matchCatalogue(trimmed);
+    if (match != null) {
+      food = match;
+      priceMin = 0;
+      priceMax = 0;
+      // A curated row IS Malaysian local food by definition - the observed
+      // photo's localness is irrelevant once the tourist commits to a
+      // curated dish.
+      isLocalFood = true;
+    } else if (!analysis.nameMatchesPhoto) {
+      // Gemini could not verify the typed name AND there is no curated row
+      // for it. Its response describes the dish it actually SAW (the
+      // observed food) - carrying that as the typed dish would put one
+      // dish's name on another dish's details (a "Char Siew" name riding on
+      // a Ramly burger's details). Carry a name-only entry for exactly what
+      // the tourist typed instead: if they confirm it anyway, that is the
+      // dish that gets added, with no borrowed details.
+      food = _nameOnlyFood(trimmed, '');
+      priceMin = 0;
+      priceMax = 0;
+      dietaryRestrictions = const <String>[];
     }
     return (
       food: food,
@@ -277,8 +322,9 @@ class FoodRecognitionLogic {
       priceMax: priceMax,
       nameMatchesPhoto: analysis.nameMatchesPhoto,
       matchConfidence: analysis.matchConfidence,
-      isLocalFood: analysis.isLocal,
+      isLocalFood: isLocalFood,
       observedFood: analysis.observedFood,
+      dietaryRestrictions: dietaryRestrictions,
     );
   }
 
@@ -286,13 +332,25 @@ class FoodRecognitionLogic {
   /// These candidates came FROM the photo, so no name-vs-photo verification
   /// is needed - this just fills in full details: the catalogue row if there
   /// is one, else a Gemini name+image analysis of the picked dish.
-  Future<({LocalFood food, double priceMin, double priceMax})> enrichCandidate(
-    List<int> imageBytes,
-    String name,
-  ) async {
+  Future<
+    ({
+      LocalFood food,
+      double priceMin,
+      double priceMax,
+      List<String> dietaryRestrictions,
+    })
+  >
+  enrichCandidate(List<int> imageBytes, String name) async {
     final String trimmed = name.trim();
     final LocalFood? match = await _matchCatalogue(trimmed);
-    if (match != null) return (food: match, priceMin: 0.0, priceMax: 0.0);
+    if (match != null) {
+      return (
+        food: match,
+        priceMin: 0.0,
+        priceMax: 0.0,
+        dietaryRestrictions: const <String>[],
+      );
+    }
     final analysis = await discoveryRepository.recognition.analyzeFoodByName(
       imageBytes,
       trimmed,
@@ -301,6 +359,7 @@ class FoodRecognitionLogic {
       food: analysis.food,
       priceMin: analysis.priceMin,
       priceMax: analysis.priceMax,
+      dietaryRestrictions: analysis.dietaryRestrictions,
     );
   }
 
@@ -336,11 +395,59 @@ class FoodRecognitionLogic {
   ///
   /// Best-effort: the caller has already saved the landmark, so a catalogue
   /// write failure must not fail the submission.
-  Future<void> registerNewDishes(List<FoodSubmission> foods) async {
+
+  /// PRE-SUBMIT gate: every food being added that is NOT a direct catalogue
+  /// link (`id == 0`, not fake) must pass the 3-step origin verification
+  /// BEFORE the landmark is saved. If any fails, this throws
+  /// [LandmarkVerificationRejectedException] and the caller must not save the
+  /// landmark - a non-Malaysian dish must never become a landmark at all, not
+  /// merely be kept out of the catalogue.
+  ///
+  /// Catalogue-linked foods (`id != 0`) skip the gate - they were already
+  /// vetted when they entered the curated list.
+  Future<void> verifyNewFoodsOrThrow(List<FoodSubmission> foods) async {
+    for (final FoodSubmission entry in foods) {
+      if (entry.isFake) continue;
+      final LocalFood food = entry.food;
+      if (food.id != 0) continue; // Already a curated row - direct link.
+      final OriginVerification verification = await discoveryRepository
+          .verifyDishOrigin(food.name);
+      if (verification.verdict != OriginVerdict.accept) {
+        throw LandmarkVerificationRejectedException(
+          '"${food.name}" does not appear to be Malaysian local food, so it '
+          'cannot be added as a new landmark.',
+        );
+      }
+    }
+  }
+
+  /// Returns the dishes actually written, keyed by the dish name the caller
+  /// wrote onto `landmark_item.dish` (the recognized `food.name` verbatim), so
+  /// the submit flow can backfill those items' `local_food_id` now that the
+  /// new rows exist.
+  ///
+  /// [alreadyVerified] - set true when the caller ran [verifyNewFoodsOrThrow]
+  /// first (the submit flow does), so the 3-step gate is not paid for twice.
+  Future<Map<String, int>> registerNewDishes(
+    List<FoodSubmission> foods, {
+    bool alreadyVerified = false,
+  }) async {
     final List<LocalFood> catalogue = await foodRepository.getFoods();
     // Working copy, so a dish written earlier in this loop is seen by the
     // matcher for the ones after it (dedupe within one submission).
     final List<LocalFood> working = List<LocalFood>.of(catalogue);
+    // Reference lookups fetched ONCE, so normalising the association links
+    // for every new dish does not re-query `food_preference` /
+    // `dietary_restriction` per dish.
+    final ({Map<String, int> tastes, Map<String, int> categories})
+    preferenceLookup = await foodRepository.preferenceIdLookup();
+    final Map<String, int> restrictionIdByName = <String, int>{
+      for (final DietaryRestriction restriction
+          in await foodRepository.dietaryRestrictions())
+        restriction.name.trim().toLowerCase(): restriction.id,
+    };
+
+    final Map<String, int> inserted = <String, int>{};
     for (final FoodSubmission entry in foods) {
       if (entry.isFake) continue;
       final LocalFood food = entry.food;
@@ -348,8 +455,86 @@ class FoodRecognitionLogic {
       if (!entry.isLocalFood) continue;
       if (entry.confidence < _catalogueInsertConfidence) continue;
       if (FoodNameMatcher.bestMatch(food.name, working) != null) continue;
+
+      // 3-step origin verification - a single self-scored Gemini answer is
+      // exactly what let Soto Ayam through, so a brand-new dish must pass
+      // three SEPARATELY-framed checks before it may be written to the
+      // shared, curated catalogue. A check counts as Malaysian for (a) origin,
+      // (b) adopted/naturalized or (d) shared regional; at least 2 of 3 must
+      // agree (accept). Anything less is NOT inserted. Skipped entirely when
+      // the submit flow already ran [verifyNewFoodsOrThrow] first.
+      if (!alreadyVerified) {
+        final OriginVerification verification = await discoveryRepository
+            .verifyDishOrigin(food.name);
+        if (verification.verdict != OriginVerdict.accept) continue;
+      }
+
       final LocalFood? saved = await foodRepository.insertFood(food);
-      if (saved != null) working.add(saved);
+      if (saved != null) {
+        working.add(saved);
+        inserted[food.name] = saved.id;
+        await _linkAssociations(
+          saved.id,
+          entry,
+          preferenceLookup,
+          restrictionIdByName,
+        );
+      }
     }
+    return inserted;
   }
+
+  /// Writes the `local_food_preference` (tastes + category) and
+  /// `food_dietary_restriction` links for a freshly-inserted dish, matching
+  /// the scraper's link shapes. Names are normalised against the canonical
+  /// reference rows (unknown names are skipped); duplicates are dropped by
+  /// the repository. Best-effort per link - a failed link never fails the
+  /// insert that already succeeded.
+  Future<void> _linkAssociations(
+    int localFoodId,
+    FoodSubmission entry,
+    ({Map<String, int> tastes, Map<String, int> categories}) preferenceLookup,
+    Map<String, int> restrictionIdByName,
+  ) async {
+    final LocalFood food = entry.food;
+    final List<int> tasteIds = <int>[
+      for (final String taste in food.tastes)
+        if (preferenceLookup.tastes[taste.trim().toLowerCase()]
+            case final int id)
+          id,
+    ];
+    final int mainTasteId =
+        preferenceLookup.tastes[food.mainTaste.trim().toLowerCase()] ?? 0;
+    final int? categoryId =
+        preferenceLookup.categories[food.category.trim().toLowerCase()];
+    await foodRepository.linkFoodPreferences(
+      localFoodId,
+      tasteIds: tasteIds,
+      mainTasteId: mainTasteId,
+      categoryId: categoryId,
+    );
+
+    final List<int> restrictionIds = <int>[
+      for (final String name in entry.dietaryRestrictions)
+        if (restrictionIdByName[name.trim().toLowerCase()] case final int id)
+          id,
+    ];
+    await foodRepository.linkFoodDietaryRestrictions(
+      localFoodId,
+      restrictionIds,
+    );
+  }
+}
+
+/// Thrown by [FoodRecognitionLogic.verifyNewFoodsOrThrow] when a dish that is
+/// NOT already in the catalogue fails the 3-step origin verification - the
+/// landmark must not be saved. `toString` returns the message cleanly so a
+/// ViewModel can surface it directly.
+class LandmarkVerificationRejectedException implements Exception {
+  LandmarkVerificationRejectedException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

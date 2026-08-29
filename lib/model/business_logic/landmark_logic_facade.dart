@@ -49,15 +49,22 @@ class LandmarkLogicFacade {
       double matchConfidence,
       bool isLocalFood,
       String observedFood,
+      List<String> dietaryRestrictions,
     })
   >
   resolveByName(List<int> imageBytes, String name) =>
       foodRecognition.resolveByName(imageBytes, name);
 
-  Future<({LocalFood food, double priceMin, double priceMax})> enrichCandidate(
-    List<int> imageBytes,
-    String name,
-  ) => foodRecognition.enrichCandidate(imageBytes, name);
+  Future<
+    ({
+      LocalFood food,
+      double priceMin,
+      double priceMax,
+      List<String> dietaryRestrictions,
+    })
+  >
+  enrichCandidate(List<int> imageBytes, String name) =>
+      foodRecognition.enrichCandidate(imageBytes, name);
 
   bool isLowConfidence(double confidence) =>
       foodRecognition.isLowConfidence(confidence);
@@ -76,6 +83,17 @@ class LandmarkLogicFacade {
       submission.analyzeStall(imageBytes);
 
   Future<String?> currentTouristId() => submission.currentTouristId();
+
+  /// One submitted landmark (with its dishes and opening hours) for the
+  /// detail screen - flat passthrough to the submission logic.
+  Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) =>
+      submission.getSubmittedLandmarkById(landmarkId);
+
+  /// Every submitted landmark the tourist has contributed dishes to, newest
+  /// first - flat passthrough to the submission logic.
+  Future<List<SubmittedLandmark>> getSubmittedLandmarksByTourist(
+    String touristId,
+  ) => submission.getSubmittedLandmarksByTourist(touristId);
 
   Future<({String id, String url})> uploadImage(List<int> bytes) =>
       submission.uploadImage(bytes);
@@ -120,7 +138,13 @@ class LandmarkLogicFacade {
     required List<FoodSubmission> foods,
     required Map<Weekday, List<OpeningHour>> operatingHours,
   }) async {
-    await submission.submitLandmark(
+    // Pre-submit gate: a dish that is NOT already a catalogue link must pass
+    // the 3-step origin verification BEFORE the landmark is saved. A rejection
+    // throws here (before any persistence), so the user sees why and nothing
+    // is written.
+    await foodRecognition.verifyNewFoodsOrThrow(foods);
+
+    final int landmarkId = await submission.submitLandmark(
       restaurantName: restaurantName,
       latitude: latitude,
       longitude: longitude,
@@ -135,9 +159,16 @@ class LandmarkLogicFacade {
     // Option C - best-effort catalogue growth. The landmark write is the one
     // the tourist confirmed; a catalogue insert that fails (e.g. the RLS
     // migration not applied yet) must not fail the submission that already
-    // succeeded.
+    // succeeded. alreadyVerified: the 3-step gate already ran above.
     try {
-      await foodRecognition.registerNewDishes(foods);
+      final Map<String, int> newFoodIds = await foodRecognition
+          .registerNewDishes(foods, alreadyVerified: true);
+      if (landmarkId != 0 && newFoodIds.isNotEmpty) {
+        // The new rows' ids were 0 at item-insert time - point the just-saved
+        // items at them now, so the map resolves the pins like restaurant
+        // pins do.
+        await submission.linkNewFoodsToLandmark(landmarkId, newFoodIds);
+      }
     } catch (_) {
       // Ignored - the landmark was already saved.
     }

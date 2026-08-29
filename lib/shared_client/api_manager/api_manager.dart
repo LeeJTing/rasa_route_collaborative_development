@@ -47,6 +47,7 @@ class APIManager {
   static const String tableLandmarkItem = 'landmark_item';
   static const String tableFoodPreference = 'food_preference';
   static const String tableDietaryRestriction = 'dietary_restriction';
+  static const String tableLocalFoodPreference = 'local_food_preference';
 
   /// Searchable geography for the dashboard: cities, towns, areas and notable
   /// locations (REQ102_19). Read-only - seeded by migration.
@@ -71,6 +72,7 @@ class APIManager {
     String table, {
     String columns = '*',
     Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, List<Object?>>? inFilter,
     String? orderBy,
     bool ascending = true,
     int? limit,
@@ -78,6 +80,7 @@ class APIManager {
     table,
     columns: columns,
     eq: eq,
+    inFilter: inFilter,
     orderBy: orderBy,
     ascending: ascending,
     limit: limit,

@@ -370,7 +370,6 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           observedFoodName: viewModel.observedFoodName,
           typedName: viewModel.typedName,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
-          onAcceptTypedName: viewModel.acceptTypedName,
           onViewDetails: viewModel.proceedToViewDetails,
           // Non-local food: details + "View Details" stay, but there is no
           // "Add New Landmark" - it must never become a landmark.
@@ -395,7 +394,6 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           observedFoodName: viewModel.observedFoodName,
           typedName: viewModel.typedName,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
-          onAcceptTypedName: viewModel.acceptTypedName,
           // Same "View Details" as the primary capture; the detail screen's
           // confirm then returns this food to the existing form (see
           // LandmarkDetailViewModel.returnToFormAsAdditionalFood) rather
@@ -796,14 +794,22 @@ class _LoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          CircularProgressIndicator(),
-          SizedBox(height: AppSpacing.md),
-          Text('Analysing image...', style: AppTextStyles.bodyMedium),
+          const CircularProgressIndicator(),
+          const SizedBox(height: AppSpacing.md),
+          const Text('Analysing image...', style: AppTextStyles.bodyMedium),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Recognition may take some time - please wait patiently.',
+            textAlign: TextAlign.center,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
         ],
       ),
     );

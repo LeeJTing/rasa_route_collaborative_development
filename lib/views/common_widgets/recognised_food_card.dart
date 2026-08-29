@@ -7,6 +7,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
 import '../../domain_model/local_food.dart';
+import 'app_tag_chip.dart';
 
 /// The "Recognised Food" card - the same card shown on `AddLandmarkView`
 /// ("Form 1") and `LandmarkDetailView` ("View Details"). Thumbnail on the
@@ -113,10 +114,12 @@ class _RecognisedFoodCardState extends State<RecognisedFoodCard> {
             ),
             if (showDetails) ...<Widget>[
               const SizedBox(height: AppSpacing.sm),
-              // if (food.taste.isNotEmpty) ...<Widget>[
-              //   _ExpandedTasteTags(tags: food.taste),
-              //   const SizedBox(height: AppSpacing.sm),
-              // ],
+              // Gemini's taste tags for the recognised dish (from the full
+              // analysis), rendered as taste-styled chips.
+              if (food.tastes.isNotEmpty) ...<Widget>[
+                _ExpandedTasteTags(tags: food.tastes),
+                const SizedBox(height: AppSpacing.sm),
+              ],
               if (food.description.isNotEmpty) ...<Widget>[
                 _ExpandedTextField(
                   label: 'Description',
@@ -148,41 +151,31 @@ class _RecognisedFoodCardState extends State<RecognisedFoodCard> {
   }
 }
 
-// /// Taste tags, shown in the expanded details - chip styling per the theme.
-// class _ExpandedTasteTags extends StatelessWidget {
-//   const _ExpandedTasteTags({required this.tags});
+/// Taste tags, shown in the expanded details - chip styling per the theme.
+class _ExpandedTasteTags extends StatelessWidget {
+  const _ExpandedTasteTags({required this.tags});
 
-//   final List<String> tags;
+  final List<String> tags;
 
-//   @override
-//   Widget build(BuildContext context) {
-//     return Column(
-//       crossAxisAlignment: CrossAxisAlignment.start,
-//       children: <Widget>[
-//         Text('Taste', style: AppTextStyles.detailLabel),
-//         const SizedBox(height: AppSpacing.xs),
-//         Wrap(
-//           spacing: AppSpacing.xs,
-//           runSpacing: AppSpacing.xs,
-//           children: <Widget>[
-//             for (final String tag in tags)
-//               Container(
-//                 padding: const EdgeInsets.symmetric(
-//                   horizontal: AppSpacing.sm,
-//                   vertical: AppSpacing.xs,
-//                 ),
-//                 decoration: BoxDecoration(
-//                   color: AppColors.tasteTagBackground,
-//                   borderRadius: BorderRadius.circular(AppRadius.pill),
-//                 ),
-//                 child: Text(tag, style: AppTextStyles.tasteTag),
-//               ),
-//           ],
-//         ),
-//       ],
-//     );
-//   }
-// }
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('Taste', style: AppTextStyles.detailLabel),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: <Widget>[
+            for (final String tag in tags)
+              AppTagChip(label: tag, style: AppTagStyle.taste),
+          ],
+        ),
+      ],
+    );
+  }
+}
 
 /// A label-above-value field for the longer details (Description, Cooking
 /// Style, Cultural Background).

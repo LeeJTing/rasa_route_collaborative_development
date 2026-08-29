@@ -33,6 +33,10 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
 
+  # Opens an external app/URL - used to hand a landmark's coordinates off to
+  # Google Maps for turn-by-turn directions (LandmarkPlaceDetailView).
+  url_launcher: ^6.3.1
+
   # Dev-only OS-level GPS mock (Android) so a demo can teleport the app's
   # location without moving - isolated in `lib/external/location/`.
   # Vendored into packages/ so a `stopMockLocation()` (cancel the repeat
