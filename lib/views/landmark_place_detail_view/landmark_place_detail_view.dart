@@ -16,6 +16,7 @@ import '../common_widgets/app_tag_chip.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
 import '../common_widgets/landmark_item_formatting.dart';
+import 'widgets/report_landmark_sheet.dart';
 
 /// Full details of a tourist-submitted landmark (A11-4 "View Landmark"),
 /// reached from the dashboard map's pin sheet. Shows the landmark's photo,
@@ -57,6 +58,33 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
     super.dispose();
   }
 
+  /// Opens the report bottom sheet and, on a successful submit, shows the
+  /// confirmation SnackBar - mirrors the catalogue restaurant detail's
+  /// report flow (see `RestaurantDetailView._showReportSheet`).
+  Future<void> _showReportSheet(
+    SubmittedLandmark landmark,
+    LandmarkPlaceDetailViewModel viewModel,
+  ) async {
+    final bool? submitted = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
+      builder: (BuildContext sheetContext) => ReportLandmarkSheet(
+        landmarkName: landmark.name,
+        onSubmit: viewModel.submitReport,
+      ),
+    );
+    if (!mounted || submitted != true || !viewModel.reportSubmitted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Report selected for this UI preview. Backend submission is not available yet.',
+        ),
+      ),
+    );
+    viewModel.consumeReportSubmitted();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<LandmarkPlaceDetailViewModel>.value(
@@ -90,7 +118,10 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
                       title: 'No landmark to show',
                     );
                   }
-                  return _LandmarkDetails(landmark: landmark);
+                  return _LandmarkDetails(
+                    landmark: landmark,
+                    onReport: () => _showReportSheet(landmark, viewModel),
+                  );
                 },
           ),
         ),
@@ -102,9 +133,13 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
 /// The ready-state content - the landmark's header (photo, name, category,
 /// location), its opening hours, and its dishes.
 class _LandmarkDetails extends StatelessWidget {
-  const _LandmarkDetails({required this.landmark});
+  const _LandmarkDetails({required this.landmark, required this.onReport});
 
   final SubmittedLandmark landmark;
+
+  /// Opens the report sheet - wired in `_LandmarkPlaceDetailViewState` so it
+  /// can reach the ViewModel's `submitReport` and show the confirmation.
+  final VoidCallback onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -148,6 +183,15 @@ class _LandmarkDetails extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
           ],
+        const SizedBox(height: AppSpacing.lg),
+        // Report affordance - mirrors the catalogue restaurant detail's
+        // "Report Restaurant" button: lets a tourist flag an incorrect
+        // submitted-landmark pin. UI-only for now, like the restaurant one.
+        OutlinedButton.icon(
+          onPressed: onReport,
+          icon: const Icon(Icons.flag_outlined, color: AppColors.error),
+          label: const Text('Report Landmark'),
+        ),
       ],
     );
   }
@@ -402,7 +446,11 @@ class _MetaLine extends StatelessWidget {
 /// (`google.com/maps/search`), which opens the Google Maps app if it's
 /// installed, or falls back to a browser otherwise - the same behaviour on
 /// Android and iOS without needing platform-specific URI schemes.
-Future<void> _openInGoogleMaps(BuildContext context, double lat, double lon) async {
+Future<void> _openInGoogleMaps(
+  BuildContext context,
+  double lat,
+  double lon,
+) async {
   final Uri uri = Uri.parse(
     'https://www.google.com/maps/search/?api=1&query=$lat,$lon',
   );
@@ -553,7 +601,10 @@ class _DishCard extends StatelessWidget {
                       runSpacing: AppSpacing.xs,
                       children: <Widget>[
                         if (item.mealType.isNotEmpty)
-                          AppTagChip(label: item.mealType, style: AppTagStyle.meal),
+                          AppTagChip(
+                            label: item.mealType,
+                            style: AppTagStyle.meal,
+                          ),
                         if (item.foodCategory.isNotEmpty)
                           AppTagChip(
                             label: item.foodCategory,
@@ -574,10 +625,7 @@ class _DishCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),
-              const Icon(
-                Icons.chevron_right,
-                color: AppColors.textSecondary,
-              ),
+              const Icon(Icons.chevron_right, color: AppColors.textSecondary),
             ],
           ),
         ),

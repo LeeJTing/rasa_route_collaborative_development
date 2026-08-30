@@ -28,9 +28,12 @@ class RestaurantRecommendationViewModel extends BaseViewModel
 
   @override
   Future<void> onInit() async {
-    locationFacade.register(this);
-    restaurantFacade.register(this);
     _location = locationFacade.latest;
+    // A9 obtains the fix before navigating here. Register without replaying
+    // that same fix, otherwise onCurrentLocationChanged and this initial load
+    // race each other and issue duplicate Supabase requests.
+    locationFacade.register(this, replayLatest: false);
+    restaurantFacade.register(this);
     await loadNearbyRestaurants();
   }
 

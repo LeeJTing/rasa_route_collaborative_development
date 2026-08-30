@@ -42,6 +42,7 @@ class APIManager {
   static const String tableFavouriteFood = 'favourite_food';
   static const String tableRestaurant = 'restaurant';
   static const String tableRestaurantItem = 'restaurant_item';
+  static const String tableTourist = 'tourist';
   static const String tableOpeningHours = 'opening_hours';
   static const String tableSubmittedLandmark = 'submitted_landmark';
   static const String tableLandmarkItem = 'landmark_item';
@@ -76,6 +77,8 @@ class APIManager {
     String? orderBy,
     bool ascending = true,
     int? limit,
+    int? rangeStart,
+    int? rangeEnd,
   }) => _supabase.selectAll(
     table,
     columns: columns,
@@ -84,6 +87,8 @@ class APIManager {
     orderBy: orderBy,
     ascending: ascending,
     limit: limit,
+    rangeStart: rangeStart,
+    rangeEnd: rangeEnd,
   );
 
   Future<Map<String, dynamic>?> selectOne(

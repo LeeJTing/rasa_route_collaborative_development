@@ -287,12 +287,12 @@ class _DashboardViewState extends State<DashboardView> {
           ),
         ),
 
-        // REQ102_11 - Quick Mode, detailed view only, fix inside Malaysia only.
+        // A9 - tapping obtains a fresh GPS fix before navigation.
         if (viewModel.showQuickModeButton)
           Positioned(
             left: AppSpacing.lg,
             bottom: _swipePanelHeight(viewModel) + AppSpacing.sm,
-            child: MapQuickModeButton(onTap: viewModel.openQuickMode),
+            child: MapQuickModeButton(onTap: () => viewModel.openQuickMode()),
           ),
 
         // REQ102_10 - the Swipe Mode panel.
@@ -306,9 +306,34 @@ class _DashboardViewState extends State<DashboardView> {
               onToggle: viewModel.toggleSwipePanel,
               contextLabel: viewModel.contextLabel,
               matchesCount: viewModel.matchesCount,
+              currentFood: viewModel.currentSwipeFood,
+              previousFood: viewModel.previousSwipeFood,
+              nextFood: viewModel.nextSwipeFood,
+              currentFoodRestricted: viewModel.currentSwipeFoodRestricted,
+              currentFoodLiked: viewModel.currentSwipeFoodLiked,
+              loading: viewModel.swipeLoading,
+              errorMessage: viewModel.swipeError,
+              showResumePrompt: viewModel.showSwipeResumePrompt,
+              stateName: viewModel.swipeStateName,
+              savedCardCount: viewModel.savedSwipeCardCount,
+              savedLikeCount: viewModel.savedSwipeLikeCount,
+              savedRestaurantCount: viewModel.savedSwipeRestaurantCount,
+              likeRevision: viewModel.swipeLikeRevision,
+              onPrevious: viewModel.showPreviousSwipeFood,
+              onNext: viewModel.showNextSwipeFood,
+              onFoodTap: (food) => Navigator.pushNamed(
+                context,
+                AppRoutes.foodDetail,
+                arguments: food.id,
+              ),
+              onLike: viewModel.likeCurrentSwipeFood,
+              onHeartTap: viewModel.toggleCurrentSwipeFoodLike,
+              onContinue: viewModel.continueSwipeSession,
+              onStartNew: viewModel.startNewSwipeSession,
               onMatchesTap: () => Navigator.pushNamed(
                 context,
-                AppRoutes.restaurantRecommendation,
+                AppRoutes.matchesRecommendation,
+                arguments: viewModel.matchesRecommendationRequest,
               ),
             ),
           ),

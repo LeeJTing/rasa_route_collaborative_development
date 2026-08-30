@@ -1,12 +1,18 @@
+import 'package:meta/meta.dart' show visibleForTesting;
+
 import '../../domain_model/exploration_filter.dart';
 import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/map.dart';
+import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
+import '../../domain_model/swipe_mode.dart';
+import '../../domain_model/swipe_session.dart';
 import '../../domain_model/tourist_location.dart';
 import 'food_discovery_logic.dart';
 import 'map_exploration_logic.dart';
+import 'matches_recommendation_logic.dart';
 import 'restaurant_discovery_logic.dart';
 
 /// Finding food in the real world: restaurants, menus, photo recognition and
@@ -17,11 +23,17 @@ import 'restaurant_discovery_logic.dart';
 /// facade fans out to as many business-logic classes as the feature needs. No
 /// business rules live here, and it never imports Flutter.
 class DiscoveryLogicFacade {
-  DiscoveryLogicFacade();
+  DiscoveryLogicFacade({
+    @visibleForTesting FoodDiscoveryLogic? foodDiscovery,
+    @visibleForTesting MatchesRecommendationLogic? matchesRecommendation,
+  }) : foodDiscovery = foodDiscovery ?? FoodDiscoveryLogic(),
+       matchesRecommendation =
+           matchesRecommendation ?? MatchesRecommendationLogic();
 
   final RestaurantDiscoveryLogic restaurantDiscovery =
       RestaurantDiscoveryLogic();
-  final FoodDiscoveryLogic foodDiscovery = FoodDiscoveryLogic();
+  final FoodDiscoveryLogic foodDiscovery;
+  final MatchesRecommendationLogic matchesRecommendation;
   final MapExplorationLogic mapExploration = MapExplorationLogic();
 
   // ---------------------------------------------------------------------------
@@ -44,12 +56,61 @@ class DiscoveryLogicFacade {
 
   /// Stops mocking and resumes real GPS fixes.
   Future<void> stopMockGps() => mapExploration.stopMockGps();
+  // ===========================================================================
+  // REQ103 - state-localised Swipe Mode.
+  // ===========================================================================
+
+  Future<SwipeModePreparation> prepareSwipeMode({
+    required double latitude,
+    required double longitude,
+  }) =>
+      foodDiscovery.prepareSwipeMode(latitude: latitude, longitude: longitude);
+
+  Future<SwipeSession> startNewSwipeSession(SwipeModePreparation preparation) =>
+      foodDiscovery.startNewSession(preparation);
+
+  Future<SwipeSession> continueSwipeSession(SwipeModePreparation preparation) =>
+      foodDiscovery.continueSession(preparation);
+
+  Future<SwipeSession> moveSwipeSession(
+    SwipeSession session,
+    int requestedIndex,
+  ) => foodDiscovery.moveToIndex(session, requestedIndex);
+
+  Future<SwipeSession> likeSwipeFood(SwipeSession session, int foodId) =>
+      foodDiscovery.likeFood(session, foodId);
+
+  Future<SwipeSession> removeSwipeFoodLike(SwipeSession session, int foodId) =>
+      foodDiscovery.removeLike(session, foodId);
+
+  Future<MatchesRecommendationResult> getMatchesRecommendations(
+    MatchesRecommendationRequest request,
+  ) => matchesRecommendation.recommendations(request);
+
+  Future<SwipeSession> removeMatchedFood(SwipeSession session, int foodId) =>
+      matchesRecommendation.removeLike(session, foodId);
+
+  Future<Restaurant?> getRestaurantById(int restaurantId) =>
+      restaurantDiscovery.findById(restaurantId);
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
     required int limit,
   }) => restaurantDiscovery.nearbyWithAutomaticExpansion(
     location: location,
+    limit: limit,
+  );
+
+  /// Nearby restaurant data shared by discovery experiences such as Matches.
+  /// Quick Mode keeps its named forwarding method so its existing contract is
+  /// not changed by the Matches feature.
+  Future<List<Restaurant>> getNearbyRestaurants({
+    required TouristLocation location,
+    required double radiusKm,
+    required int limit,
+  }) => restaurantDiscovery.nearby(
+    location: location,
+    radiusKm: radiusKm,
     limit: limit,
   );
 

@@ -45,6 +45,11 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
   late final TextEditingController _restaurantNameController;
   final FocusNode _restaurantNameFocusNode = FocusNode();
 
+  /// Last signboard-extraction version applied to `_restaurantNameController`
+  /// (see the force-sync in `build` - a fresh extraction must overwrite the
+  /// tourist's typed name even while the field is focused).
+  int _appliedRestaurantNameVersion = 0;
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +75,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
     _restaurantNameController = TextEditingController(
       text: _viewModel.restaurantName,
     );
+    _appliedRestaurantNameVersion = _viewModel.extractedRestaurantNameVersion;
     _viewModel.onInit();
   }
 
@@ -108,10 +114,18 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                   AddLandmarkViewModel viewModel,
                   Widget? _,
                 ) {
-                  // Sync the restaurant-name field from the ViewModel only while
-                  // it isn't focused, so an auto-fill from signboard capture
-                  // shows up without fighting the tourist's own typing.
-                  if (!_restaurantNameFocusNode.hasFocus &&
+                  // A fresh signboard result must overwrite the tourist's
+                  // typed name even while the field is focused (the field
+                  // regains focus when the capture route pops back). Detect
+                  // it via the ViewModel's extraction version and force-sync;
+                  // otherwise fall back to the focus-guarded sync, so normal
+                  // auto-fill shows up without fighting the tourist's typing.
+                  if (_appliedRestaurantNameVersion !=
+                      viewModel.extractedRestaurantNameVersion) {
+                    _restaurantNameController.text = viewModel.restaurantName;
+                    _appliedRestaurantNameVersion =
+                        viewModel.extractedRestaurantNameVersion;
+                  } else if (!_restaurantNameFocusNode.hasFocus &&
                       _restaurantNameController.text !=
                           viewModel.restaurantName) {
                     _restaurantNameController.text = viewModel.restaurantName;
@@ -848,7 +862,7 @@ class _DayRow extends StatelessWidget {
   }
 }
 
-/// Opening/closing time selector - a dropdown list of every half-hour mark
+/// Opening/closing time selector - a dropdown list of every 15-minute mark
 /// from "00:00" through "24:00" inclusive ("24:00" is its own distinct
 /// option, meaning "open until midnight," not the same slot as "00:00").
 /// Replaces the old wheel-style `showTimePicker` dialog - the tourist picks
@@ -860,7 +874,7 @@ class _TimeDropdown extends StatelessWidget {
   final int? minutes;
   final ValueChanged<int> onChanged;
 
-  static const int _stepMinutes = 30;
+  static const int _stepMinutes = 15;
   static const int _maxMinutes = 24 * 60; // 1440 = "24:00"
 
   static String _label(int totalMinutes) {
@@ -871,7 +885,7 @@ class _TimeDropdown extends StatelessWidget {
   }
 
   /// Rounds to the nearest valid dropdown entry - guards against a stored
-  /// value that doesn't land exactly on a half-hour mark (DropdownButton
+  /// value that doesn't land exactly on a 15-minute mark (DropdownButton
   /// throws if its value doesn't match one of its items exactly).
   static int? _snap(int? value) {
     if (value == null) return null;

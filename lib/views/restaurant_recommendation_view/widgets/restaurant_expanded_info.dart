@@ -46,6 +46,7 @@ class RestaurantExpandedInfo extends StatelessWidget {
                         source: item.imageUrl,
                         borderRadius: AppRadius.cardRadius,
                         semanticLabel: item.foodName,
+                        fallback: const _FoodImageFallback(),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
@@ -84,8 +85,31 @@ class RestaurantExpandedInfo extends StatelessWidget {
                 ),
               ),
             ),
+          if (items.length > _previewItemLimit)
+            Center(
+              child: Text(
+                'Showing $_previewItemLimit of ${items.length} local foods · '
+                'Tap the restaurant for all',
+                textAlign: TextAlign.center,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+              ),
+            ),
         ],
       ),
     );
   }
+}
+
+class _FoodImageFallback extends StatelessWidget {
+  const _FoodImageFallback();
+
+  @override
+  Widget build(BuildContext context) => const ColoredBox(
+    color: AppColors.surfaceVariant,
+    child: Center(
+      child: Icon(Icons.ramen_dining, color: AppColors.textSecondary),
+    ),
+  );
 }
