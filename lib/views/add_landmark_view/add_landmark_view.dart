@@ -45,6 +45,11 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
   late final TextEditingController _restaurantNameController;
   final FocusNode _restaurantNameFocusNode = FocusNode();
 
+  /// Last signboard-extraction version applied to `_restaurantNameController`
+  /// (see the force-sync in `build` - a fresh extraction must overwrite the
+  /// tourist's typed name even while the field is focused).
+  int _appliedRestaurantNameVersion = 0;
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +75,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
     _restaurantNameController = TextEditingController(
       text: _viewModel.restaurantName,
     );
+    _appliedRestaurantNameVersion = _viewModel.extractedRestaurantNameVersion;
     _viewModel.onInit();
   }
 
@@ -108,10 +114,18 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                   AddLandmarkViewModel viewModel,
                   Widget? _,
                 ) {
-                  // Sync the restaurant-name field from the ViewModel only while
-                  // it isn't focused, so an auto-fill from signboard capture
-                  // shows up without fighting the tourist's own typing.
-                  if (!_restaurantNameFocusNode.hasFocus &&
+                  // A fresh signboard result must overwrite the tourist's
+                  // typed name even while the field is focused (the field
+                  // regains focus when the capture route pops back). Detect
+                  // it via the ViewModel's extraction version and force-sync;
+                  // otherwise fall back to the focus-guarded sync, so normal
+                  // auto-fill shows up without fighting the tourist's typing.
+                  if (_appliedRestaurantNameVersion !=
+                      viewModel.extractedRestaurantNameVersion) {
+                    _restaurantNameController.text = viewModel.restaurantName;
+                    _appliedRestaurantNameVersion =
+                        viewModel.extractedRestaurantNameVersion;
+                  } else if (!_restaurantNameFocusNode.hasFocus &&
                       _restaurantNameController.text !=
                           viewModel.restaurantName) {
                     _restaurantNameController.text = viewModel.restaurantName;

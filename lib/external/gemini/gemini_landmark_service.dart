@@ -688,7 +688,10 @@ $_imageQualityRules
   }
 
   /// Analyze signboard image to extract restaurant name (REQ106_31, REQ106_37)
-  /// Returns: extracted text + frame status
+  /// Returns: extracted text + frame status. Multilingual-aware - Malaysian
+  /// signs mix Malay/English (Latin), Chinese, Tamil and Jawi; the prompt
+  /// romanises non-Latin names into [SignboardAnalysisResponse.textDetected]
+  /// and keeps the exact displayed text in [SignboardAnalysisResponse.nameOriginalScript].
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<SignboardAnalysisResponse> analyzeSignboardImage({
     required List<int> imageBytes,
@@ -710,6 +713,11 @@ $_imageQualityRules
     const String prompt = '''
   Analyze this restaurant/stall signboard photo.
 
+  Malaysian signboards commonly mix scripts: Malay and English (Latin),
+  Simplified/Traditional Chinese, Tamil, and Jawi (Malay written in Arabic
+  script). Read text in ALL of these scripts - never refuse or report
+  "unreadable" just because the name is not in Latin letters.
+
   The "frame" means the four edges of the image itself. A signboard is ONLY
   "fully in frame" when its ENTIRE outline - all four corners and edges -
   sits fully inside the image with clear margin and is not cut off anywhere.
@@ -726,7 +734,27 @@ $_imageQualityRules
   Steps:
   1. Locate the signboard and check its position against the four edges.
   2. Is this a valid restaurant/stall signboard? (yes/no)
-  3. Extract ALL visible text (restaurant name, slogan, etc.).
+  3. Identify the RESTAURANT NAME - usually the largest, most prominent
+     text on the signboard. Return ONLY the name. NEVER include:
+       - lot numbers or addresses ("Lot 12", "Lot No. 12", "No. 12",
+         "Jalan Ampang", "Jln Tun Razak", postcodes like "50450")
+       - phone numbers ("Tel: 012-345 6789", "HP 0123456789",
+         "+60 12-345 6789")
+       - slogans, "Open"/"Buka" signs, or operating hours.
+     When words like "Restoran", "Restaurant", "Kedai", "Kopitiam",
+     "茶餐室" are part of the name, KEEP them - do not strip or drop them.
+     If a lot number or phone number appears on the signboard, leave it
+     out of "textDetected" entirely.
+  4. Transcribe the name faithfully from the signboard.
+
+  For non-Latin names (Chinese/Tamil/Jawi):
+  - "textDetected" = the romanised (Latin) form using the most common
+    Malaysian spelling (pinyin for Chinese, romanised Tamil/Jawi). If
+    unsure, transcribe phonetically so it is still usable in the app.
+  - "nameOriginalScript" = the exact characters exactly as they appear on
+    the signboard.
+  For Latin-script names both fields carry the same text and
+  "languageScript" is "latin".
 
   IMPORTANT: the name being readable does NOT mean the signboard is fully in
   frame. Judge completeness ONLY by whether any part of the signboard is
@@ -735,7 +763,9 @@ $_imageQualityRules
   Return ONLY raw JSON, no markdown fences, no extra text:
   {
     "signboardStatus": "detected|not_detected|unclear",
-    "textDetected": "Extracted text or null",
+    "textDetected": "restaurant name only - no lot number, address, or phone number, or null",
+    "nameOriginalScript": "exact displayed name or null if Latin",
+    "languageScript": "latin|chinese|tamil|jawi|mixed",
     "signboardImageStatus": "complete|partially_captured|obstructed",
     "confidence": 0.0-1.0
   }
@@ -751,6 +781,9 @@ $_imageQualityRules
     return SignboardAnalysisResponse(
       signboardStatus: (json['signboardStatus'] as String?) ?? 'unclear',
       textDetected: json['textDetected'] as String?,
+      nameOriginalScript: json['nameOriginalScript'] as String?,
+      languageScript:
+          (json['languageScript'] as String?)?.trim().toLowerCase() ?? 'latin',
       signboardImageStatus:
           (json['signboardImageStatus'] as String?) ?? 'unclear',
       confidence: ((json['confidence'] as num?) ?? 0).toDouble(),
