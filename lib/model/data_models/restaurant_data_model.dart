@@ -2,8 +2,8 @@ import '../../core/json_model.dart';
 
 /// Wire shape of `public.restaurant`.
 ///
-/// `reported_times` and `status` shown in an earlier ERD are not present in the
-/// current database schema.
+/// The model mirrors the current `restaurant` table, including its moderation
+/// [status].
 class RestaurantDataModel implements JsonModel {
   const RestaurantDataModel({
     required this.restaurantId,
@@ -18,6 +18,7 @@ class RestaurantDataModel implements JsonModel {
     this.openingHours,
     this.restaurantImageId,
     this.restaurantImageUrl,
+    this.status,
   });
 
   /// `restaurant.restaurant_id` (bigint identity, PK).
@@ -42,6 +43,7 @@ class RestaurantDataModel implements JsonModel {
 
   final String? restaurantImageId;
   final String? restaurantImageUrl;
+  final String? status;
 
   factory RestaurantDataModel.fromJson(Map<String, dynamic> json) {
     return RestaurantDataModel(
@@ -59,6 +61,7 @@ class RestaurantDataModel implements JsonModel {
       restaurantImageUrl: JsonReader.asStringOrNull(
         json['restaurant_image_url'],
       ),
+      status: JsonReader.asStringOrNull(json['status']),
     );
   }
 
@@ -76,5 +79,6 @@ class RestaurantDataModel implements JsonModel {
     'opening_hours': openingHours,
     'restaurant_image_id': restaurantImageId,
     'restaurant_image_url': restaurantImageUrl,
+    'status': status,
   };
 }

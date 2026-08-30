@@ -63,7 +63,7 @@ class FoodDetailViewModel extends BaseViewModel {
       _pronunciationMessage = switch (result) {
         PronunciationPlaybackResult.curatedAudio => null,
         PronunciationPlaybackResult.deviceVoice =>
-          'Using your device voice because the recorded audio is unavailable.',
+          'Using your device voice for this pronunciation.',
         PronunciationPlaybackResult.unavailable =>
           'Pronunciation audio is unavailable on this device.',
       };
@@ -78,36 +78,4 @@ class FoodDetailViewModel extends BaseViewModel {
     _pronunciationMessage = null;
     return message;
   }
-
-  Future<void> _loadPairings() async {
-    _pairingTimedOut = false;
-    try {
-      _foodPairings = await foodLogic
-          .getFoodPairingRecommendations(foodId)
-          .timeout(_pairingTimeout);
-    } catch (_) {
-      _foodPairings = const <FoodPairing>[];
-      _pairingTimedOut = true;
-    }
-  }
-
-  LocalFood _withFavourite(LocalFood food, bool isFavourite) => LocalFood(
-    id: food.id,
-    name: food.name,
-    description: food.description,
-    origin: food.origin,
-    culturalBackground: food.culturalBackground,
-    ingredients: food.ingredients,
-    category: food.category,
-    cookingStyle: food.cookingStyle,
-    mealType: food.mealType,
-    foodType: food.foodType,
-    tastes: food.tastes,
-    mainTaste: food.mainTaste,
-    pronunciationText: food.pronunciationText,
-    audioGuideUrl: food.audioGuideUrl,
-    synonyms: food.synonyms,
-    imageUrls: food.imageUrls,
-    isFavourite: isFavourite,
-  );
 }

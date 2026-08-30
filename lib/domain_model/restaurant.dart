@@ -23,6 +23,7 @@ class Restaurant {
     required this.openingHours,
     this.distanceMetres,
     this.reviewCount,
+    this.status,
     this.items = const <RestaurantItem>[],
   });
 
@@ -39,5 +40,6 @@ class Restaurant {
   final List<OpeningHour> openingHours;
   final double? distanceMetres;
   final int? reviewCount;
+  final String? status;
   final List<RestaurantItem> items;
 }

@@ -1,6 +1,9 @@
-import '../../domain_model/restaurant.dart';
+import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/origin_verification.dart';
+import '../../domain_model/restaurant.dart';
+import '../../domain_model/restaurant_item.dart';
 import 'camera_repository.dart';
+import 'dietary_restriction_repository.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
 import 'recognition_repository.dart';
@@ -24,6 +27,8 @@ class DiscoveryRepositoryFacade {
   DiscoveryRepositoryFacade();
 
   final RestaurantRepository restaurant = RestaurantRepository();
+  final DietaryRestrictionRepository dietaryRestriction =
+      DietaryRestrictionRepository();
   final RecognitionRepository recognition = RecognitionRepository();
 
   /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
@@ -42,4 +47,17 @@ class DiscoveryRepositoryFacade {
       recognition.verifyDishOrigin(dishName);
 
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
+
+  Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) =>
+      restaurant.getRestaurantsByIds(restaurantIds);
+
+  Future<List<RestaurantItem>> getRestaurantItemsByRestaurantIds(
+    List<int> restaurantIds,
+  ) => restaurant.getRestaurantItemsByRestaurantIds(restaurantIds);
+
+  Future<List<DietaryRestriction>> getCurrentDietaryRestrictions() =>
+      dietaryRestriction.restrictionsForCurrentTourist();
+
+  Future<Map<int, List<int>>> getRestrictionIdsByFood() =>
+      dietaryRestriction.restrictionIdsByFood();
 }
