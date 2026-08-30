@@ -109,10 +109,10 @@ class FoodLogicFacade {
     // Dietary-safety ids from the DB relations (`user_dietary_restriction` and
     // `food_dietary_restriction`); conflicting foods are excluded before the
     // prompt, so only the food data reaches Gemini.
-    final List<int> touristRestrictionIds =
-        await knowledge.touristDietaryRestrictionIds();
-    final Map<int, List<int>> foodRestrictionIds =
-        await knowledge.foodDietaryRestrictionIds();
+    final List<int> touristRestrictionIds = await knowledge
+        .touristDietaryRestrictionIds();
+    final Map<int, List<int>> foodRestrictionIds = await knowledge
+        .foodDietaryRestrictionIds();
     return recommendation.pairingsFor(
       selected,
       catalogue,
@@ -123,7 +123,11 @@ class FoodLogicFacade {
 
   Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) async {
     final DevicePronunciationPlaybackResult result = await deviceCapabilities
-        .playPronunciation(foodName: food.name, audioUrl: food.audioGuideUrl);
+        .playPronunciation(
+          foodName: food.name,
+          audioUrl: food.audioGuideUrl,
+          fallbackText: food.pronunciationText,
+        );
     return switch (result) {
       DevicePronunciationPlaybackResult.curatedAudio =>
         PronunciationPlaybackResult.curatedAudio,

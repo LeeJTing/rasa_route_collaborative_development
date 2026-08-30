@@ -158,6 +158,7 @@ class DeviceCapabilityManager {
   Future<DevicePronunciationPlaybackResult> playPronunciation({
     required String foodName,
     String? audioUrl,
+    String? fallbackText,
   }) async {
     try {
       await _audioPlayer?.stop();
@@ -186,7 +187,10 @@ class DeviceCapabilityManager {
       await _pronunciationTts.setSpeechRate(0.42);
       await _pronunciationTts.setPitch(1.0);
       await _pronunciationTts.setVolume(1.0);
-      final Object? result = await _pronunciationTts.speak(foodName);
+      final String spokenText = fallbackText?.trim().isNotEmpty == true
+          ? fallbackText!.trim()
+          : foodName;
+      final Object? result = await _pronunciationTts.speak(spokenText);
       if (result == 1) return DevicePronunciationPlaybackResult.deviceVoice;
     } catch (_) {
       // Converted to a stable result below so callers do not handle plugin

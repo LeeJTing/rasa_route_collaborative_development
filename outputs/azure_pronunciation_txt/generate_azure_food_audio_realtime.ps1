@@ -4,6 +4,7 @@ param(
     [string]$Voice = 'ms-MY-YasminNeural',
     [string]$EnglishVoice = 'en-SG-LunaNeural',
     [switch]$RegenerateEnglishNames,
+    [string]$FoodIds = '',
     [switch]$DryRun,
     [string]$OutputFormat = 'audio-24khz-160kbitrate-mono-mp3'
 )
@@ -11,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $sourcePath = Join-Path $PSScriptRoot 'local_food_source.json'
 $englishTermsPath = Join-Path $PSScriptRoot 'english_pronunciation_terms.json'
+$pronunciationOverridesPath = Join-Path $PSScriptRoot 'pronunciation_overrides.json'
 $outputRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'azure_pronunciation_audio'
 $runDirectory = Join-Path $outputRoot ('realtime_{0}' -f $Voice)
 $audioDirectory = Join-Path $runDirectory 'audio'
@@ -25,6 +27,8 @@ if (-not (Test-Path -LiteralPath $englishTermsPath)) {
 
 $parsedFoods = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json
 $foods = @($parsedFoods | ForEach-Object { $_ })
+$pronunciationOverrides = Get-Content -LiteralPath $pronunciationOverridesPath -Raw |
+    ConvertFrom-Json
 $parsedEnglishTerms = Get-Content -LiteralPath $englishTermsPath -Raw | ConvertFrom-Json
 $englishTerms = @($parsedEnglishTerms | ForEach-Object { [string]$_ } |
     Sort-Object Length -Descending)
@@ -33,6 +37,16 @@ if ($foods.Count -eq 0) {
 }
 if ($englishTerms.Count -eq 0) {
     throw 'The English pronunciation term list is empty.'
+}
+if (-not [string]::IsNullOrWhiteSpace($FoodIds)) {
+    $foodIdList = [int[]]@($FoodIds.Split(',') | ForEach-Object {
+        [int]$_.Trim()
+    })
+    $requestedIds = [Collections.Generic.HashSet[int]]::new($foodIdList)
+    $foods = @($foods | Where-Object { $requestedIds.Contains([int]$_.local_food_id) })
+    if ($foods.Count -ne $requestedIds.Count) {
+        throw 'One or more requested FoodIds were not found in local_food_source.json.'
+    }
 }
 
 function ConvertTo-FileSlug {
@@ -52,12 +66,31 @@ function New-PronunciationSsml {
         [Parameter(Mandatory = $true)][string]$FoodName,
         [Parameter(Mandatory = $true)][string]$MalayVoice,
         [Parameter(Mandatory = $true)][string]$LocalEnglishVoice,
-        [Parameter(Mandatory = $true)][string[]]$EnglishTerms
+        [Parameter(Mandatory = $true)][string[]]$EnglishTerms,
+        [string]$SpokenText,
+        [string]$OverrideVoice
     )
 
     $escapedTerms = $EnglishTerms | ForEach-Object { [Regex]::Escape($_) }
-    $pattern = '(?i)(?<![A-Za-z])(?:{0})(?![A-Za-z])' -f ($escapedTerms -join '|')
+    $singleTermPattern = '(?:{0})' -f ($escapedTerms -join '|')
+    # Detect whether any whole English term occurs in the food name. A mixed
+    # name is then spoken by one voice below; this regex does not split audio.
+    $pattern = '(?i)(?<![A-Za-z]){0}(?:[\s-]+{0})*(?![A-Za-z])' -f $singleTermPattern
     $matches = [Regex]::Matches($FoodName, $pattern)
+    if (-not [string]::IsNullOrWhiteSpace($SpokenText)) {
+        $effectiveVoice = if ([string]::IsNullOrWhiteSpace($OverrideVoice)) {
+            $MalayVoice
+        }
+        else {
+            $OverrideVoice
+        }
+        $language = if ($effectiveVoice -eq $LocalEnglishVoice) { 'en-SG' } else { 'ms-MY' }
+        $escapedSpokenText = [Security.SecurityElement]::Escape($SpokenText)
+        return [pscustomobject]@{
+            HasEnglish = $effectiveVoice -eq $LocalEnglishVoice
+            Ssml = '<speak version="1.0" xml:lang="{0}"><voice name="{1}" xml:lang="{0}">{2}</voice></speak>' -f $language, $effectiveVoice, $escapedSpokenText
+        }
+    }
     if ($matches.Count -eq 0) {
         $escapedName = [Security.SecurityElement]::Escape($FoodName)
         return [pscustomobject]@{
@@ -66,27 +99,13 @@ function New-PronunciationSsml {
         }
     }
 
-    $voiceSegments = [Collections.Generic.List[string]]::new()
-    $cursor = 0
-    foreach ($match in $matches) {
-        if ($match.Index -gt $cursor) {
-            $localText = $FoodName.Substring($cursor, $match.Index - $cursor)
-            $escapedLocalText = [Security.SecurityElement]::Escape($localText)
-            [void]$voiceSegments.Add(('<voice name="{0}" xml:lang="ms-MY">{1}</voice>' -f $MalayVoice, $escapedLocalText))
-        }
-        $escapedEnglishText = [Security.SecurityElement]::Escape($match.Value)
-        [void]$voiceSegments.Add(('<voice name="{0}" xml:lang="en-SG">{1}</voice>' -f $LocalEnglishVoice, $escapedEnglishText))
-        $cursor = $match.Index + $match.Length
-    }
-    if ($cursor -lt $FoodName.Length) {
-        $localText = $FoodName.Substring($cursor)
-        $escapedLocalText = [Security.SecurityElement]::Escape($localText)
-        [void]$voiceSegments.Add(('<voice name="{0}" xml:lang="ms-MY">{1}</voice>' -f $MalayVoice, $escapedLocalText))
-    }
-
+    # One voice reads the complete mixed name. Switching voices inside a short
+    # food name inserts audible gaps even when adjacent English words are
+    # grouped into one segment.
+    $escapedName = [Security.SecurityElement]::Escape($FoodName)
     return [pscustomobject]@{
         HasEnglish = $true
-        Ssml = '<speak version="1.0" xml:lang="ms-MY">{0}</speak>' -f ($voiceSegments -join '')
+        Ssml = '<speak version="1.0" xml:lang="en-SG"><voice name="{0}" xml:lang="en-SG">{1}</voice></speak>' -f $LocalEnglishVoice, $escapedName
     }
 }
 
@@ -95,8 +114,11 @@ $voiceListUri = 'https://{0}.tts.speech.microsoft.com/cognitiveservices/voices/l
 $synthesisUri = 'https://{0}.tts.speech.microsoft.com/cognitiveservices/v1' -f $Region
 
 $pronunciationPlan = @($foods | ForEach-Object {
+    $overrideProperty = $pronunciationOverrides.PSObject.Properties[[string]$_.local_food_id]
+    $override = if ($null -eq $overrideProperty) { $null } else { $overrideProperty.Value }
     $pronunciation = New-PronunciationSsml -FoodName ([string]$_.food_name) `
-        -MalayVoice $Voice -LocalEnglishVoice $EnglishVoice -EnglishTerms $englishTerms
+        -MalayVoice $Voice -LocalEnglishVoice $EnglishVoice -EnglishTerms $englishTerms `
+        -SpokenText ([string]$override.spoken_text) -OverrideVoice ([string]$override.voice)
     [pscustomobject]@{
         local_food_id = $_.local_food_id
         food_name = $_.food_name

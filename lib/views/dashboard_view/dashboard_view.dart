@@ -287,12 +287,12 @@ class _DashboardViewState extends State<DashboardView> {
           ),
         ),
 
-        // REQ102_11 - Quick Mode, detailed view only, fix inside Malaysia only.
+        // A9 - tapping obtains a fresh GPS fix before navigation.
         if (viewModel.showQuickModeButton)
           Positioned(
             left: AppSpacing.lg,
             bottom: _swipePanelHeight(viewModel) + AppSpacing.sm,
-            child: MapQuickModeButton(onTap: viewModel.openQuickMode),
+            child: MapQuickModeButton(onTap: () => viewModel.openQuickMode()),
           ),
 
         // REQ102_10 - the Swipe Mode panel.
