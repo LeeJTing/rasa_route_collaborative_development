@@ -13,6 +13,7 @@ class FoodAnalysisResponse implements JsonModel {
     required this.cookingStyle,
     required this.mealType,
     required this.foodCategory,
+    this.foodType = '',
     required this.isMalaysianLocalFood,
     required this.culturalBackground,
     required this.foodStatus,
@@ -59,6 +60,13 @@ class FoodAnalysisResponse implements JsonModel {
 
   /// Food category (e.g., "Malay", "Chinese", "Indian", "Nyonya", "Sabah", "Sarawak")
   final String foodCategory;
+
+  /// The app's catalogue dish type: "Food" | "Beverage" | "Fruit" | "Dessert"
+  /// | "Kuih" - or "none" (or empty) when the item is NOT an addable dish
+  /// type (a snack, packaged item, canned/bottled drink, confectionery...).
+  /// Drives the "Malaysian product but can't be added" gate in
+  /// `FoodRecognitionLogic` (see `FoodRecognitionResult.fitsCatalogueCategory`).
+  final String foodType;
 
   /// Is this a Malaysian local food? (REQ106_10)
   final bool isMalaysianLocalFood;
@@ -161,6 +169,7 @@ class FoodAnalysisResponse implements JsonModel {
     'cookingStyle': cookingStyle,
     'mealType': mealType,
     'foodCategory': foodCategory,
+    'foodType': foodType,
     'isMalaysianLocalFood': isMalaysianLocalFood,
     'culturalBackground': culturalBackground,
     'foodStatus': foodStatus,
@@ -191,6 +200,7 @@ class FoodAnalysisResponse implements JsonModel {
     String? cookingStyle,
     String? mealType,
     String? foodCategory,
+    String? foodType,
     bool? isMalaysianLocalFood,
     String? culturalBackground,
     String? foodStatus,
@@ -219,6 +229,7 @@ class FoodAnalysisResponse implements JsonModel {
     cookingStyle: cookingStyle ?? this.cookingStyle,
     mealType: mealType ?? this.mealType,
     foodCategory: foodCategory ?? this.foodCategory,
+    foodType: foodType ?? this.foodType,
     isMalaysianLocalFood: isMalaysianLocalFood ?? this.isMalaysianLocalFood,
     culturalBackground: culturalBackground ?? this.culturalBackground,
     foodStatus: foodStatus ?? this.foodStatus,
