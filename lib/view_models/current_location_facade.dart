@@ -52,10 +52,12 @@ class CurrentLocationFacade {
   /// Most recent fix, so a ViewModel registering late is not left blank.
   TouristLocation get latest => _latest;
 
-  void register(CurrentLocationListener listener) {
+  void register(CurrentLocationListener listener, {bool replayLatest = true}) {
     if (_listeners.contains(listener)) return;
     _listeners.add(listener);
-    if (_latest.isKnown) listener.onCurrentLocationChanged(_latest);
+    if (replayLatest && _latest.isKnown) {
+      listener.onCurrentLocationChanged(_latest);
+    }
   }
 
   void unregister(CurrentLocationListener listener) =>

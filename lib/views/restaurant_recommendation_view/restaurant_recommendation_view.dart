@@ -67,7 +67,7 @@ class _RestaurantRecommendationViewState
                     _SourceTabs(source: vm.source, onChanged: vm.selectSource),
                     Expanded(
                       child: vm.restaurants.isEmpty
-                          ? const _EmptySource()
+                          ? _EmptySource(source: vm.source)
                           : ListView.separated(
                               padding: AppSpacing.screenPadding.copyWith(
                                 bottom: AppSpacing.xl,
@@ -173,13 +173,20 @@ class _SourceTabs extends StatelessWidget {
 }
 
 class _EmptySource extends StatelessWidget {
-  const _EmptySource();
+  const _EmptySource({required this.source});
+
+  final RestaurantSource source;
 
   @override
-  Widget build(BuildContext context) => const Center(
+  Widget build(BuildContext context) => Center(
     child: Padding(
       padding: AppSpacing.screenPadding,
-      child: Text('No submitted restaurant landmarks are available yet.'),
+      child: Text(
+        source == RestaurantSource.submitted
+            ? 'No submitted restaurant landmarks are available yet.'
+            : 'No open restaurants matching your dietary restrictions were found within 10 km.',
+        textAlign: TextAlign.center,
+      ),
     ),
   );
 }

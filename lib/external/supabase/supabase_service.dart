@@ -86,6 +86,8 @@ class SupabaseService {
     String? orderBy,
     bool ascending = true,
     int? limit,
+    int? rangeStart,
+    int? rangeEnd,
   }) async {
     dynamic query = _client.from(table).select(columns);
     for (final MapEntry<String, Object?> filter in eq.entries) {
@@ -102,6 +104,9 @@ class SupabaseService {
     }
     if (limit != null) {
       query = query.limit(limit);
+    }
+    if (rangeStart != null && rangeEnd != null) {
+      query = query.range(rangeStart, rangeEnd);
     }
     final List<dynamic> rows = await query as List<dynamic>;
     return rows.cast<Map<String, dynamic>>();

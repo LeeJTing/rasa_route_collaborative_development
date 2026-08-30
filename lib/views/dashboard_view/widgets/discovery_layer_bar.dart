@@ -3,45 +3,13 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../app/theme/app_text_styles.dart';
+import '../../../domain_model/local_food.dart';
 
-/// REQ102_10 - the Swipe Mode panel, shown as soon as the detailed map view is
-/// active.
+/// REQ103's constructor-driven Discovery Layer Bar.
 ///
-/// REQ103_1 describes it as "a sliding bottom-sheet", so it has two states.
-/// **Collapsed is the resting state**: a 66pt peek carrying the grabber, what
-/// the map is currently filtered to, and the Matches count. Expanded it grows
-/// to the 236pt frame from the Figma "Detialed Map View" - a 167 x 218 Target
-/// Frame centred over the bottom of the map with a queue card either side.
-///
-/// It starts collapsed deliberately. Expanded, the bar covers 40% of the map
-/// on a 390 x 844 phone, and until REQ103 fills it there is nothing inside
-/// worth that much of the screen.
-///
-/// **Scope.** REQ102 requires the panel to *appear*; the localised food queue,
-/// the horizontal swipe into the Target Frame, the tap gestures, the Matches
-/// list and the state-scoped session are all REQ103. This widget is the frame
-/// REQ103 fills in: give the card slots real content, and wire [onMatchesTap]
-/// to the Matches page.
-///
-/// **Wiring the map to the Target Frame (REQ103_8).** When a card settles in
-/// the frame, call `DashboardViewModel.showFoodInTargetFrame(food)`. That one
-/// call rescores the heatmap and re-pins the detailed map for that dish; pass
-/// null when the deck empties or Swipe Mode closes. Nothing else needs
-/// touching - do not reach for `mapPins` or `foodDistribution` from here.
-///
-/// The path the food takes:
-///
-/// ```text
-/// card in Target Frame
-///   -> DashboardViewModel.showFoodInTargetFrame(food)   @param food (swipe mode)
-///        -> _selectedFood
-///        -> DiscoveryLogicFacade.mapPins(localFoodId: food.id)         [pins]
-///        -> DiscoveryLogicFacade.foodDistribution(localFoodId: food.id) [heatmap]
-/// ```
-///
-/// Widgets in a `widgets/` folder are driven entirely by constructor
-/// parameters and callbacks - they never read a ViewModel themselves, and they
-/// style from the theme rather than raw values.
+/// Horizontal movement changes the card in the Target Frame; double tap likes
+/// it. The ViewModel owns the queue/session and tells the dashboard map which
+/// food is active, while this widget owns gesture recognition and animation.
 class DiscoveryLayerBar extends StatelessWidget {
   const DiscoveryLayerBar({
     super.key,
@@ -50,74 +18,201 @@ class DiscoveryLayerBar extends StatelessWidget {
     required this.onMatchesTap,
     required this.expanded,
     required this.onToggle,
+    required this.currentFood,
+    required this.previousFood,
+    required this.nextFood,
+    required this.currentFoodRestricted,
+    required this.currentFoodLiked,
+    required this.loading,
+    required this.errorMessage,
+    required this.showResumePrompt,
+    required this.stateName,
+    required this.savedCardCount,
+    required this.savedLikeCount,
+    required this.savedRestaurantCount,
+    required this.likeRevision,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onFoodTap,
+    required this.onLike,
+    required this.onHeartTap,
+    required this.onContinue,
+    required this.onStartNew,
   });
 
-  /// What the map is currently narrowed to - "All local food", a dish name, or
-  /// the active filter count.
   final String contextLabel;
-
-  /// REQ103_14 - increments as the tourist likes food cards. Zero until the
-  /// swipe deck is implemented.
   final int matchesCount;
-
   final VoidCallback onMatchesTap;
-
   final bool expanded;
-
-  /// Tapping the header, or dragging it up and down.
   final VoidCallback onToggle;
+  final LocalFood? currentFood;
+  final LocalFood? previousFood;
+  final LocalFood? nextFood;
+  final bool currentFoodRestricted;
+  final bool currentFoodLiked;
+  final bool loading;
+  final String? errorMessage;
+  final bool showResumePrompt;
+  final String stateName;
+  final int savedCardCount;
+  final int savedLikeCount;
+  final int savedRestaurantCount;
+  final int likeRevision;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final ValueChanged<LocalFood> onFoodTap;
+  final VoidCallback onLike;
+  final VoidCallback onHeartTap;
+  final VoidCallback onContinue;
+  final VoidCallback onStartNew;
 
   @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      height: expanded
-          ? AppSizes.discoveryLayerBarHeight
-          : AppSizes.discoveryLayerBarCollapsedHeight,
-      decoration: const BoxDecoration(
-        color: AppColors.background,
-        borderRadius: AppRadius.sheetRadius,
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: AppColors.shadow,
-            blurRadius: 14,
-            offset: Offset(0, -2),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          _Header(
-            contextLabel: contextLabel,
-            matchesCount: matchesCount,
-            expanded: expanded,
-            onToggle: onToggle,
-            onMatchesTap: onMatchesTap,
-          ),
-          if (expanded)
-            const Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  _QueueCardSlot(),
-                  SizedBox(width: AppSpacing.sm),
-                  _TargetFrameSlot(),
-                  SizedBox(width: AppSpacing.sm),
-                  _QueueCardSlot(),
-                ],
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: const Duration(milliseconds: 220),
+    curve: Curves.easeOutCubic,
+    height: expanded
+        ? AppSizes.discoveryLayerBarHeight
+        : AppSizes.discoveryLayerBarCollapsedHeight,
+    decoration: const BoxDecoration(
+      color: AppColors.background,
+      borderRadius: AppRadius.sheetRadius,
+      boxShadow: <BoxShadow>[
+        BoxShadow(
+          color: AppColors.shadow,
+          blurRadius: 14,
+          offset: Offset(0, -2),
+        ),
+      ],
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _Header(
+          contextLabel: contextLabel,
+          matchesCount: matchesCount,
+          expanded: expanded,
+          onToggle: onToggle,
+          onMatchesTap: onMatchesTap,
+        ),
+        if (expanded)
+          Expanded(
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.bottomCenter,
+                minHeight:
+                    AppSizes.discoveryLayerBarHeight -
+                    AppSizes.discoveryLayerBarCollapsedHeight,
+                maxHeight:
+                    AppSizes.discoveryLayerBarHeight -
+                    AppSizes.discoveryLayerBarCollapsedHeight,
+                child: SizedBox(
+                  height:
+                      AppSizes.discoveryLayerBarHeight -
+                      AppSizes.discoveryLayerBarCollapsedHeight,
+                  child: _body(),
+                ),
               ),
             ),
-        ],
+          ),
+      ],
+    ),
+  );
+
+  Widget _body() {
+    if (loading) {
+      return const Center(
+        child: SizedBox(
+          width: AppSizes.iconMedium,
+          height: AppSizes.iconMedium,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    if (errorMessage != null) {
+      return _MessageState(
+        icon: Icons.cloud_off_outlined,
+        message: errorMessage!,
+      );
+    }
+    if (showResumePrompt) {
+      return _ResumePrompt(
+        stateName: stateName,
+        savedCardCount: savedCardCount,
+        savedLikeCount: savedLikeCount,
+        savedRestaurantCount: savedRestaurantCount,
+        onContinue: onContinue,
+        onStartNew: onStartNew,
+      );
+    }
+    final LocalFood? food = currentFood;
+    if (food == null) {
+      return const _MessageState(
+        icon: Icons.restaurant_menu,
+        message: 'No local food with a serving location was found here.',
+      );
+    }
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragEnd: (DragEndDetails details) {
+        final double velocity = details.primaryVelocity ?? 0;
+        if (velocity < -80 && nextFood != null) onNext();
+        if (velocity > 80 && previousFood != null) onPrevious();
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.sm,
+          0,
+          AppSpacing.sm,
+          AppSpacing.sm,
+        ),
+        child: LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            const double gapWidth = AppSpacing.sm * 2;
+            const double naturalQueueWidth =
+                AppSizes.discoveryQueueCardWidth * 0.45;
+            const double naturalTotalWidth =
+                AppSizes.discoveryTargetCardWidth +
+                naturalQueueWidth * 2 +
+                gapWidth;
+            final double scale = constraints.maxWidth < naturalTotalWidth
+                ? constraints.maxWidth / naturalTotalWidth
+                : 1;
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                _QueueCard(
+                  food: previousFood,
+                  onTap: onPrevious,
+                  width: naturalQueueWidth * scale,
+                ),
+                SizedBox(width: AppSpacing.sm * scale),
+                _TargetFoodCard(
+                  food: food,
+                  restricted: currentFoodRestricted,
+                  liked: currentFoodLiked,
+                  likeRevision: likeRevision,
+                  width: AppSizes.discoveryTargetCardWidth * scale,
+                  onTap: () => onFoodTap(food),
+                  onLike: onLike,
+                  onHeartTap: onHeartTap,
+                ),
+                SizedBox(width: AppSpacing.sm * scale),
+                _QueueCard(
+                  food: nextFood,
+                  onTap: onNext,
+                  width: naturalQueueWidth * scale,
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 }
 
-/// The grabber row. Doubles as the drag handle and the tap target.
 class _Header extends StatelessWidget {
   const _Header({
     required this.contextLabel,
@@ -134,129 +229,334 @@ class _Header extends StatelessWidget {
   final VoidCallback onMatchesTap;
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onToggle,
-      // Drag the sheet the way the gesture suggests: up opens, down closes.
-      onVerticalDragEnd: (DragEndDetails details) {
-        final double velocity = details.primaryVelocity ?? 0;
-        if (velocity < -80 && !expanded) onToggle();
-        if (velocity > 80 && expanded) onToggle();
-      },
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          AppSpacing.sm,
-          AppSpacing.lg,
-          AppSpacing.sm,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.outline,
-                borderRadius: BorderRadius.circular(AppRadius.pill),
-              ),
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: onToggle,
+    onVerticalDragEnd: (DragEndDetails details) {
+      final double velocity = details.primaryVelocity ?? 0;
+      if (velocity < -80 && !expanded) onToggle();
+      if (velocity > 80 && expanded) onToggle();
+    },
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.sm,
+        AppSpacing.lg,
+        AppSpacing.sm,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Container(
+            width: 36,
+            height: AppSpacing.xs,
+            decoration: BoxDecoration(
+              color: AppColors.outline,
+              borderRadius: BorderRadius.circular(AppRadius.pill),
             ),
-            const SizedBox(height: AppSpacing.sm),
-            Row(
-              children: <Widget>[
-                const Icon(
-                  Icons.swipe_outlined,
-                  size: 16,
-                  color: AppColors.primary,
-                ),
-                const SizedBox(width: AppSpacing.xs),
-                Expanded(
-                  child: Text(
-                    expanded ? 'Swipe Mode' : contextLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.labelSmall.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: <Widget>[
+              const Icon(
+                Icons.swipe_outlined,
+                size: AppSizes.iconSmall,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Text(
+                  expanded ? 'Swipe Mode' : contextLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.labelSmall.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                _MatchesPill(count: matchesCount, onTap: onMatchesTap),
+              ),
+              _MatchesPill(count: matchesCount, onTap: onMatchesTap),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _TargetFoodCard extends StatelessWidget {
+  const _TargetFoodCard({
+    required this.food,
+    required this.restricted,
+    required this.liked,
+    required this.likeRevision,
+    required this.onTap,
+    required this.width,
+    required this.onLike,
+    required this.onHeartTap,
+  });
+
+  final LocalFood food;
+  final bool restricted;
+  final bool liked;
+  final int likeRevision;
+  final VoidCallback onTap;
+  final double width;
+  final VoidCallback onLike;
+  final VoidCallback onHeartTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    key: const Key('swipe-target-card'),
+    onTap: onTap,
+    onDoubleTap: onLike,
+    child: AnimatedOpacity(
+      duration: const Duration(milliseconds: 180),
+      opacity: restricted ? 0.55 : 1,
+      child: Container(
+        width: width,
+        height: AppSizes.discoveryTargetCardHeight * 0.7,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: AppRadius.cardRadius,
+          border: Border.all(
+            color: restricted ? AppColors.textDisabled : AppColors.primary,
+            width: 2,
+          ),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(
+              color: AppColors.shadow,
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          children: <Widget>[
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Expanded(child: _FoodImage(food: food)),
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        food.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.titleSmall,
+                      ),
+                      Text(
+                        restricted
+                            ? 'Dietary caution • placed last'
+                            : 'Double tap to match',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.labelSmall.copyWith(
+                          color: restricted
+                              ? AppColors.error
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
+            ),
+            Positioned(
+              top: AppSpacing.sm,
+              right: AppSpacing.sm,
+              child: IconButton(
+                key: const Key('swipe-like-button'),
+                tooltip: liked ? 'Already matched' : 'Like this food',
+                onPressed: onHeartTap,
+                icon: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 260),
+                  transitionBuilder:
+                      (Widget child, Animation<double> animation) =>
+                          ScaleTransition(scale: animation, child: child),
+                  child: Icon(
+                    liked ? Icons.favorite : Icons.favorite_border,
+                    key: ValueKey<String>('like-$liked-$likeRevision'),
+                    color: liked ? AppColors.error : AppColors.surface,
+                    size: AppSizes.iconMedium,
+                    shadows: const <Shadow>[
+                      Shadow(color: AppColors.scrim, blurRadius: AppSpacing.xs),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
-/// REQ103_3 - the active zone in the centre of the Layer Bar. Outlined in the
-/// brand colour so it reads as the target even while empty.
-class _TargetFrameSlot extends StatelessWidget {
-  const _TargetFrameSlot();
+class _QueueCard extends StatelessWidget {
+  const _QueueCard({
+    required this.food,
+    required this.onTap,
+    required this.width,
+  });
+
+  final LocalFood? food;
+  final VoidCallback onTap;
+  final double width;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: AppSizes.discoveryTargetCardWidth,
-    height: AppSizes.discoveryTargetCardHeight * 0.7,
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: AppRadius.cardRadius,
-      border: Border.all(color: AppColors.primary, width: 2),
-      boxShadow: const <BoxShadow>[
-        BoxShadow(color: AppColors.shadow, blurRadius: 12, offset: Offset(0, 4)),
-      ],
+  Widget build(BuildContext context) => SizedBox(
+    width: width,
+    child: food == null
+        ? const SizedBox.shrink()
+        : GestureDetector(
+            onTap: onTap,
+            child: Container(
+              height: AppSizes.discoveryQueueCardHeight * 0.62,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: AppRadius.cardRadius,
+                border: Border.all(color: AppColors.outline),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: <Widget>[
+                  Expanded(child: _FoodImage(food: food!)),
+                  Padding(
+                    padding: const EdgeInsets.all(AppSpacing.xs),
+                    child: Text(
+                      food!.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.labelSmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+  );
+}
+
+class _FoodImage extends StatelessWidget {
+  const _FoodImage({required this.food});
+
+  final LocalFood food;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? imageUrl = food.imageUrl;
+    if (imageUrl == null || imageUrl.isEmpty) return _fallback();
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => _fallback(),
+    );
+  }
+
+  Widget _fallback() => const ColoredBox(
+    color: AppColors.surfaceVariant,
+    child: Center(child: Icon(Icons.restaurant_menu, color: AppColors.primary)),
+  );
+}
+
+class _ResumePrompt extends StatelessWidget {
+  const _ResumePrompt({
+    required this.stateName,
+    required this.savedCardCount,
+    required this.savedLikeCount,
+    required this.savedRestaurantCount,
+    required this.onContinue,
+    required this.onStartNew,
+  });
+
+  final String stateName;
+  final int savedCardCount;
+  final int savedLikeCount;
+  final int savedRestaurantCount;
+  final VoidCallback onContinue;
+  final VoidCallback onStartNew;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      AppSpacing.lg,
+      AppSpacing.xs,
+      AppSpacing.lg,
+      AppSpacing.md,
     ),
-    padding: const EdgeInsets.all(AppSpacing.sm),
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: <Widget>[
-        const Icon(Icons.swipe_outlined, size: 26, color: AppColors.primary),
-        const SizedBox(height: AppSpacing.xs),
         Text(
-          'Target Frame',
-          style: AppTextStyles.titleSmall.copyWith(
-            color: AppColors.primary,
-            fontSize: 13,
-          ),
+          'Continue your $stateName session?',
+          style: AppTextStyles.titleSmall,
         ),
-        const SizedBox(height: 2),
-        Text(
-          'Swipe Mode arrives with the Food Discovery module (REQ103).',
-          textAlign: TextAlign.center,
-          style: AppTextStyles.bodySmall.copyWith(fontSize: 10),
+        const SizedBox(height: AppSpacing.sm),
+        Wrap(
+          spacing: AppSpacing.sm,
+          children: <Widget>[
+            Text('$savedCardCount cards', style: AppTextStyles.bodySmall),
+            Text('$savedLikeCount liked', style: AppTextStyles.bodySmall),
+            Text(
+              '$savedRestaurantCount restaurants',
+              style: AppTextStyles.bodySmall,
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: OutlinedButton(
+                onPressed: onStartNew,
+                child: const Text('Start New'),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: FilledButton(
+                onPressed: onContinue,
+                child: const Text('Continue'),
+              ),
+            ),
+          ],
         ),
       ],
     ),
   );
 }
 
-/// The cards queued either side of the Target Frame.
-class _QueueCardSlot extends StatelessWidget {
-  const _QueueCardSlot();
+class _MessageState extends StatelessWidget {
+  const _MessageState({required this.icon, required this.message});
+
+  final IconData icon;
+  final String message;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: AppSizes.discoveryQueueCardWidth * 0.45,
-    height: AppSizes.discoveryQueueCardHeight * 0.62,
-    decoration: BoxDecoration(
-      color: AppColors.surface.withValues(alpha: 0.8),
-      borderRadius: AppRadius.cardRadius,
-      border: Border.all(color: AppColors.outline),
-    ),
-    child: const Center(
-      child: Icon(
-        Icons.restaurant_menu,
-        size: 18,
-        color: AppColors.textDisabled,
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: AppSpacing.cardPadding,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, color: AppColors.textDisabled),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: AppTextStyles.bodySmall,
+          ),
+        ],
       ),
     ),
   );
 }
 
-/// REQ103_14 - the floating Matches badge.
 class _MatchesPill extends StatelessWidget {
   const _MatchesPill({required this.count, required this.onTap});
 
@@ -267,7 +567,7 @@ class _MatchesPill extends StatelessWidget {
   Widget build(BuildContext context) => Material(
     color: AppColors.secondary,
     borderRadius: BorderRadius.circular(AppRadius.pill),
-    elevation: 1,
+    elevation: AppSizes.cardElevation,
     shadowColor: AppColors.shadow,
     child: InkWell(
       onTap: onTap,
