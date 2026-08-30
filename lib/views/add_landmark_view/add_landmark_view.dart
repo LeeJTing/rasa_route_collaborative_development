@@ -862,7 +862,7 @@ class _DayRow extends StatelessWidget {
   }
 }
 
-/// Opening/closing time selector - a dropdown list of every half-hour mark
+/// Opening/closing time selector - a dropdown list of every 15-minute mark
 /// from "00:00" through "24:00" inclusive ("24:00" is its own distinct
 /// option, meaning "open until midnight," not the same slot as "00:00").
 /// Replaces the old wheel-style `showTimePicker` dialog - the tourist picks
@@ -874,7 +874,7 @@ class _TimeDropdown extends StatelessWidget {
   final int? minutes;
   final ValueChanged<int> onChanged;
 
-  static const int _stepMinutes = 30;
+  static const int _stepMinutes = 15;
   static const int _maxMinutes = 24 * 60; // 1440 = "24:00"
 
   static String _label(int totalMinutes) {
@@ -885,7 +885,7 @@ class _TimeDropdown extends StatelessWidget {
   }
 
   /// Rounds to the nearest valid dropdown entry - guards against a stored
-  /// value that doesn't land exactly on a half-hour mark (DropdownButton
+  /// value that doesn't land exactly on a 15-minute mark (DropdownButton
   /// throws if its value doesn't match one of its items exactly).
   static int? _snap(int? value) {
     if (value == null) return null;
