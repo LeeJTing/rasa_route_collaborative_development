@@ -1150,7 +1150,7 @@ void openSelectedPin() {
   /// What a filter change or a food search triggers: the previous answer is
   /// stale, so the pins go before the new query runs.
   Future<void> _reloadActiveView() =>
-      isHeatmapView ? _loadHeatmap() : _loadPins(clearFirst: true);
+      isHeatmapView ? _loadHeatmap() : _loadPins();
 
   Future<void> _refreshSwipeModeRegion() async {
     final Region? region = await discoveryLogic.regionAt(
@@ -1249,24 +1249,12 @@ void openSelectedPin() {
     );
   }, silent: _distribution.regions.isNotEmpty);
 
-  /// [clearFirst] wipes the pins before the query rather than swapping them
-  /// when it returns.
-  ///
-  /// Only a filter change or a food search does that - there the old pins are
-  /// answering a question the tourist has already moved on from, so leaving
-  /// them up reads as the map ignoring you. Panning and zooming keep their
-  /// pins on screen until the new set arrives, because those pins are still
-  /// the right answer; blanking them every camera nudge just made the map
-  /// flicker. Either way the camera is untouched.
-  bool _pinsInFlight = false;
-
-  Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
+  /// Keeps the current pins visible while the next result loads. The revision
+  /// check prevents a slower request for an older Swipe card from replacing
+  /// the locations belonging to the food currently in the Target Frame.
+  Future<void> _loadPins() => runGuarded(() async {
     final int revision = ++_pinLoadRevision;
     final int? requestedFoodId = _activePinFoodId;
-    if (clearFirst && _pins.isNotEmpty) {
-      _pins = const <MapPin>[];
-      safeNotifyListeners();
-    }
 
     _lastPinLatitude = _centreLatitude;
     _lastPinLongitude = _centreLongitude;

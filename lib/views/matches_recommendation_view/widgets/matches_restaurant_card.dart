@@ -74,7 +74,7 @@ class MatchesRestaurantCard extends StatelessWidget {
                           ),
                           _IconLabel(
                             icon: Icons.location_on_outlined,
-                            label: restaurant.distanceLabel,
+                            label: _distanceLabel(restaurant.distanceMetres),
                           ),
                         ],
                       ),
@@ -142,6 +142,12 @@ class MatchesRestaurantCard extends StatelessWidget {
     if (prices.isEmpty) return null;
     prices.sort();
     return prices.first;
+  }
+
+  String _distanceLabel(double? distanceMetres) {
+    if (distanceMetres == null) return 'Distance unavailable';
+    if (distanceMetres < 1000) return '${distanceMetres.round()} m';
+    return '${(distanceMetres / 1000).toStringAsFixed(1)} km';
   }
 }
 

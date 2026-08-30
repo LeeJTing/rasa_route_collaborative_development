@@ -64,7 +64,7 @@ class SubmittedLandmarkRecommendationCard extends StatelessWidget {
                         ),
                         const SizedBox(width: AppSpacing.xs),
                         Text(
-                          landmark.distanceLabel,
+                          _distanceLabel(landmark.distanceMetres),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -103,9 +103,14 @@ class SubmittedLandmarkRecommendationCard extends StatelessWidget {
         OutlinedButton.icon(
           onPressed: onTap,
           icon: const Icon(Icons.info_outline),
-          label: const Text('View Landmark Preview'),
+          label: const Text('View Landmark Details'),
         ),
       ],
     ),
   );
+
+  String _distanceLabel(double distanceMetres) {
+    if (distanceMetres < 1000) return '${distanceMetres.round()} m';
+    return '${(distanceMetres / 1000).toStringAsFixed(1)} km';
+  }
 }

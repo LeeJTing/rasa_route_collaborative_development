@@ -39,7 +39,7 @@ class RestaurantDetailHeader extends StatelessWidget {
             const Spacer(),
             const Icon(Icons.location_on_outlined),
             const SizedBox(width: AppSpacing.xs),
-            Text(restaurant.distanceLabel),
+            Text(_distanceLabel(restaurant.distanceMetres)),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
@@ -52,5 +52,11 @@ class RestaurantDetailHeader extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  String _distanceLabel(double? distanceMetres) {
+    if (distanceMetres == null) return 'Distance unavailable';
+    if (distanceMetres < 1000) return '${distanceMetres.round()} m';
+    return '${(distanceMetres / 1000).toStringAsFixed(1)} km';
   }
 }

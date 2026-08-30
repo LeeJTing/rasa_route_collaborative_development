@@ -40,7 +40,7 @@ void main() {
                 MatchedFoodRecommendations(
                   food: testMatchedFood,
                   restaurants: <Restaurant>[
-                    testRestaurant.copyWith(distanceMetres: 2500),
+                    _restaurantAtDistance(testRestaurant, 2500),
                   ],
                   submittedLandmarks: const <SubmittedLandmarkRecommendation>[],
                 ),
@@ -121,3 +121,23 @@ void main() {
     },
   );
 }
+
+Restaurant _restaurantAtDistance(
+  Restaurant restaurant,
+  double distanceMetres,
+) => Restaurant(
+  id: restaurant.id,
+  name: restaurant.name,
+  category: restaurant.category,
+  address: restaurant.address,
+  rating: restaurant.rating,
+  latitude: restaurant.latitude,
+  longitude: restaurant.longitude,
+  phone: restaurant.phone,
+  website: restaurant.website,
+  imageUrl: restaurant.imageUrl,
+  openingHours: restaurant.openingHours,
+  distanceMetres: distanceMetres,
+  reviewCount: restaurant.reviewCount,
+  items: restaurant.items,
+);

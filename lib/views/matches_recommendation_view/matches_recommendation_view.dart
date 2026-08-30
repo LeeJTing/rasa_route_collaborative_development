@@ -6,9 +6,8 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../domain_model/matches_recommendation.dart';
+import '../../view_models/dashboard_view_model.dart' show MapSelectionHandoff;
 import '../../view_models/matches_recommendation_view_model.dart';
-import '../common_widgets/app_image.dart';
-import '../common_widgets/app_tag_chip.dart';
 import '../common_widgets/app_top_bar.dart';
 import 'widgets/matched_food_recommendation_group.dart';
 import 'widgets/matches_recommendation_tabs.dart';
@@ -209,82 +208,24 @@ class _MatchesRecommendationViewState extends State<MatchesRecommendationView> {
         (SubmittedLandmarkRecommendation landmark) =>
             SubmittedLandmarkRecommendationCard(
               landmark: landmark,
-              onTap: () => _showLandmarkPreview(context, landmark),
+              onTap: () => _openLandmarkDetails(context, landmark),
             ),
       )
       .toList(growable: true);
 
-  Future<void> _showLandmarkPreview(
+  void _openLandmarkDetails(
     BuildContext context,
     SubmittedLandmarkRecommendation landmark,
-  ) => showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: AppColors.background,
-    shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
-    builder: (BuildContext context) => SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Center(
-              child: Container(
-                width: AppSpacing.xxl,
-                height: AppSpacing.xs,
-                decoration: BoxDecoration(
-                  color: AppColors.outline,
-                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SizedBox(
-              height: AppSizes.foodHeroImage,
-              child: AppImage(
-                source: landmark.imageUrl,
-                borderRadius: AppRadius.cardRadius,
-                semanticLabel: landmark.name,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text(landmark.name, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              '${landmark.category} • ${landmark.distanceLabel}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            if (landmark.price != null) ...<Widget>[
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Listed price: RM ${landmark.price!.toStringAsFixed(2)}',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: AppColors.accentRust),
-              ),
-            ],
-            const SizedBox(height: AppSpacing.md),
-            Wrap(
-              spacing: AppSpacing.xs,
-              runSpacing: AppSpacing.xs,
-              children: landmark.foodNames
-                  .map(
-                    (String name) =>
-                        AppTagChip(label: name, style: AppTagStyle.match),
-                  )
-                  .toList(growable: false),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
+  ) {
+    if (landmark.id <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Landmark details are unavailable.')),
+      );
+      return;
+    }
+    MapSelectionHandoff().pendingLandmarkId = landmark.id;
+    Navigator.pushNamed(context, AppRoutes.landmarkPlaceDetail);
+  }
 }
 
 class _SortToolbar extends StatelessWidget {
