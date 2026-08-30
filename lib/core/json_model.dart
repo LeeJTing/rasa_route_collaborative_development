@@ -75,11 +75,7 @@ abstract final class JsonReader {
       return value.map((Object? e) => e.toString()).toList(growable: false);
     }
     if (value is String && value.isNotEmpty) {
-      return value
-          .split(RegExp(r'[,;]'))
-          .map((String e) => e.trim())
-          .where((String e) => e.isNotEmpty)
-          .toList(growable: false);
+      return value.split(',').map((String e) => e.trim()).toList();
     }
     return const <String>[];
   }

@@ -394,7 +394,7 @@ class FoodKnowledgeRepository {
       mainTaste: mainTaste,
       pronunciationText: food.pronunciationText ?? '',
       audioGuideUrl: food.audioGuideUrl,
-      synonyms: JsonReader.asStringList(food.synonyms),
+      synonyms: _splitValues(food.synonyms ?? ''),
       imageUrls: _resolveImageUrls(
         images
             .map((LocalFoodImageDataModel image) => image.imageName)

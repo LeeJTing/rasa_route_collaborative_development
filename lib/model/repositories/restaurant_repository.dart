@@ -280,7 +280,7 @@ class RestaurantRepository {
     final bool canUseCatalogueImage = catalogueImageMatchesItem(
       restaurantItemName: data.restaurantItemName,
       localFoodName: localFood?.foodName,
-      localFoodSynonyms: JsonReader.asStringList(localFood?.synonyms),
+      localFoodSynonyms: _splitSynonyms(localFood?.synonyms),
     );
     final String? imageName =
         data.foodImgUrl ??
@@ -330,4 +330,10 @@ class RestaurantRepository {
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
       .replaceAll(RegExp(r'\b(?:kuey|kuay|koay)\b'), 'kway')
       .trim();
+
+  List<String> _splitSynonyms(String? value) => (value ?? '')
+      .split(RegExp(r'[,;]'))
+      .map((String synonym) => synonym.trim())
+      .where((String synonym) => synonym.isNotEmpty)
+      .toList(growable: false);
 }
