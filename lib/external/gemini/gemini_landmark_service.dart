@@ -181,6 +181,41 @@ class GeminiLandmarkService {
   is washed out, or so colour-cast the ingredients cannot be told apart.
   ''';
 
+  /// Shared prompt block defining the app's catalogue dish types. Added so
+  /// recognition follows the SAME categories the catalogue actually stores:
+  /// a genuinely Malaysian snack or packaged item (e.g. Tam Tam biscuits)
+  /// must not be offered as an addable landmark even though it is a real
+  /// Malaysian product.
+  static const String _catalogueFoodTypeRules = '''
+  CATALOGUE DISH TYPE - classify the detected item into EXACTLY ONE of the
+  five dish types the app's local-food catalogue accepts:
+
+  - "Food" - a MAIN DISH / meal served on a plate/bowl/wrapper: rice dishes
+    (nasi lemak, nasi kandar, nasi campur), noodles (char kway teow, laksa,
+    mee goreng), roti (roti canai, murtabak, roti john), etc. Something a
+    person orders to eat as a meal.
+  - "Beverage" - a REAL DRINK served in a cup/glass: teh tarik, kopi, fresh
+    juice, cendol-as-drink. NOT a canned ("tin") or bottled drink, and NOT a
+    packaged drink.
+  - "Fruit" - fresh whole or cut fruit (a plate of cut mango, a young
+    coconut).
+  - "Dessert" - a sweet dish (ais kacang, cendol-as-dessert, bubur cha cha).
+  - "Kuih" - traditional Malay cakes/sweets/rice-based snacks served fresh
+    (kuih lapis, seri muka, talam, onde-onde, apam balik).
+
+  Use "none" when the item is NOT any of the above - for example:
+    - packaged snacks (biscuits like Tam Tam, chips/crisps, crackers,
+      cookies, chocolates, sweets in packaging)
+    - canned or bottled drinks (soft drinks in a "tin", bottled water,
+      packaged juice)
+    - packaged/instant foods with no freshly-served dish
+    - any non-food item.
+
+  A "none" item may still be genuinely Malaysian, but it is a Malaysian
+  product, NOT an addable dish: it must never be offered as a landmark.
+  Set "foodType" to exactly one of: Food|Beverage|Fruit|Dessert|Kuih|none.
+  ''';
+
   /// Quick, name-only call - phase 1 of the two-phase recognition flow.
   /// Cheaper than [analyzeFoodImage]: only `dish` and the status fields are
   /// meaningful on the response. Used to check the catalogue first; the full
@@ -289,6 +324,8 @@ $_localFoodRules
 
 $_imageQualityRules
 
+$_catalogueFoodTypeRules
+
   Worked examples - match this reasoning style and calibration:
 
   Example A - a plate of coconut rice with sambal, anchovies, peanuts, egg:
@@ -322,6 +359,7 @@ $_imageQualityRules
     "localFoodConfidence": 0.0-1.0,
     "imageQuality": "good|acceptable|poor",
     "imageQualityIssues": ["string"],
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "confidence": 0.0-1.0
@@ -343,6 +381,7 @@ $_imageQualityRules
       cookingStyle: '',
       mealType: '',
       foodCategory: '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       localFoodConfidence: ((json['localFoodConfidence'] as num?) ?? 1)
           .toDouble(),
@@ -452,6 +491,8 @@ $_localFoodRules
 
 $_imageQualityRules
 
+$_catalogueFoodTypeRules
+
   This is the IN-DEPTH analysis - your judgement here overrides any quicker
   first-pass guess, so take the full procedure above seriously rather than
   agreeing with an obvious first impression.
@@ -472,6 +513,7 @@ $_imageQualityRules
     "cookingStyle": "string",
     "mealType": "string",
     "foodCategory": "string",
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "localFoodReasoning": "string",
     "isMalaysianLocalFood": boolean,
     "localFoodConfidence": 0.0-1.0,
@@ -505,6 +547,7 @@ $_imageQualityRules
       cookingStyle: (json['cookingStyle'] as String?) ?? '',
       mealType: (json['mealType'] as String?) ?? '',
       foodCategory: (json['foodCategory'] as String?) ?? '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       localFoodConfidence: ((json['localFoodConfidence'] as num?) ?? 1)
           .toDouble(),
@@ -622,6 +665,8 @@ $_imageQualityRules
     - a suggested selling price range in MYR (suggestedPriceMin and
       suggestedPriceMax)
 
+$_catalogueFoodTypeRules
+
   Return ONLY raw JSON, no markdown fences, no candidate list:
   {
     "observedFood": "string",
@@ -635,6 +680,7 @@ $_imageQualityRules
     "cookingStyle": "string",
     "mealType": "string",
     "foodCategory": "string",
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "isMalaysianLocalFood": boolean,
     "culturalBackground": "string",
     "tasteTags": ["string"],
@@ -664,6 +710,7 @@ $_imageQualityRules
       cookingStyle: (json['cookingStyle'] as String?) ?? '',
       mealType: (json['mealType'] as String?) ?? '',
       foodCategory: (json['foodCategory'] as String?) ?? '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       culturalBackground: (json['culturalBackground'] as String?) ?? '',
       tasteTags:

@@ -38,6 +38,7 @@ class RecognitionResultCard extends StatelessWidget {
     this.onViewDetails,
     this.onAddLandmark,
     this.isLocalFood = true,
+    this.fitsCatalogueCategory = true,
     this.isLowConfidence = false,
     this.onEnterName,
     this.isProcessing = false,
@@ -62,6 +63,12 @@ class RecognitionResultCard extends StatelessWidget {
   /// to a "Not Local" warning and the caller must not pass [onAddLandmark] -
   /// the details are still shown and "View Details" still works.
   final bool isLocalFood;
+
+  /// Whether the food fits a catalogue dish type (Food/Beverage/Fruit/
+  /// Dessert/Kuih). When false it is a Malaysian product at most (snack,
+  /// package, canned drink) - the header shows a "Malaysian Product" warning
+  /// and the caller must not pass [onAddLandmark].
+  final bool fitsCatalogueCategory;
 
   /// Whether the recognition was shaky enough that the tourist should be
   /// asked to verify it - the card shows a "low confidence" cue when true.
@@ -123,17 +130,21 @@ class RecognitionResultCard extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     Icon(
-                      isLocalFood ? Icons.check_circle : Icons.info_outline,
-                      color: isLocalFood
+                      isLocalFood && fitsCatalogueCategory
+                          ? Icons.check_circle
+                          : Icons.info_outline,
+                      color: isLocalFood && fitsCatalogueCategory
                           ? AppColors.success
                           : AppColors.warning,
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     Flexible(
                       child: Text(
-                        isLocalFood
+                        isLocalFood && fitsCatalogueCategory
                             ? 'Local Food Recognised'
-                            : 'Food Detected (Not Local)',
+                            : !isLocalFood
+                            ? 'Food Detected (Not Local)'
+                            : 'Malaysian Product Detected',
                         textAlign: TextAlign.center,
                         style: AppTextStyles.titleMedium,
                       ),

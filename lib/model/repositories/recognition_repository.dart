@@ -54,6 +54,13 @@ typedef FoodAnalysis = ({
   /// is false - the UI says "this photo looks more like X".
   String observedFood,
 
+  /// The raw catalogue dish-type classification from Gemini ("Food" |
+  /// "Beverage" | "Fruit" | "Dessert" | "Kuih" | "none" | ""). Carried raw
+  /// so `FoodRecognitionLogic` can gate addability - a "none" item (snack,
+  /// package, canned drink) is a Malaysian product at most, never an addable
+  /// dish.
+  String foodType,
+
   /// Dietary restrictions that apply to this dish, using the canonical
   /// `dietary_restriction.restriction_name` strings. Written to the
   /// `food_dietary_restriction` association table when the food is added to
@@ -108,6 +115,7 @@ class RecognitionRepository {
       nameMatchesPhoto: response.nameMatchesPhoto,
       matchConfidence: response.matchConfidence,
       observedFood: response.observedFood,
+      foodType: response.foodType,
       dietaryRestrictions: response.dietaryRestrictions,
     );
   }
@@ -141,6 +149,7 @@ class RecognitionRepository {
       observedFood: response.observedFood.isNotEmpty
           ? response.observedFood
           : response.dish,
+      foodType: response.foodType,
       dietaryRestrictions: response.dietaryRestrictions,
     );
   }
@@ -233,13 +242,32 @@ class RecognitionRepository {
         category: response.foodCategory,
         cookingStyle: response.cookingStyle,
         mealType: response.mealType,
-        foodType: 'Food', // Gemini doesn't classify food_type yet.
+        foodType: _normaliseFoodType(response.foodType),
         tastes: response.tasteTags,
         mainTaste: response.mainTaste,
         synonyms: response.variant.isEmpty
             ? const <String>[]
             : <String>[response.variant],
       );
+
+  /// Gemini's dish-type classification -> a valid catalogue `food_type`
+  /// value (proper case). Unknown / "none" / blank falls back to "Food" so a
+  /// validly-addable dish always carries a canonical type on `LocalFood`;
+  /// the raw classification is still carried on `FoodAnalysis.foodType` for
+  /// the addability gate.
+  static String _normaliseFoodType(String raw) {
+    final String t = raw.trim().toLowerCase();
+    for (final String value in const <String>[
+      'Food',
+      'Beverage',
+      'Fruit',
+      'Dessert',
+      'Kuih',
+    ]) {
+      if (value.toLowerCase() == t) return value;
+    }
+    return 'Food';
+  }
 
   /// Restaurant signboard photo - extracts the name (UC500, A7/A19).
   Future<SignboardAnalysisResponse> analyzeSignboard(List<int> imageBytes) =>
