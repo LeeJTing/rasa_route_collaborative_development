@@ -1,9 +1,10 @@
-import '../../domain_model/restaurant.dart';
-import '../../domain_model/origin_verification.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/origin_verification.dart';
 import '../../domain_model/region.dart';
+import '../../domain_model/restaurant.dart';
+import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/swipe_session.dart';
 import 'auth_repository.dart';
 import 'camera_repository.dart';
@@ -33,10 +34,15 @@ class DiscoveryRepositoryFacade {
   DiscoveryRepositoryFacade();
 
   final RestaurantRepository restaurant = RestaurantRepository();
+  final DietaryRestrictionRepository dietaryRestriction =
+      DietaryRestrictionRepository();
   final RecognitionRepository recognition = RecognitionRepository();
+  final AuthRepository auth = AuthRepository();
+  final FoodKnowledgeRepository food = FoodKnowledgeRepository();
+  final SwipeRepository swipe = SwipeRepository();
 
   /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
-  final MapRepository map;
+  final MapRepository map = MapRepository();
 
   /// REQ102_6 / REQ102_7 - GPS permission and fixes.
   final LocationRepository location = LocationRepository();
@@ -52,6 +58,19 @@ class DiscoveryRepositoryFacade {
 
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 
+  Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) =>
+      restaurant.getRestaurantsByIds(restaurantIds);
+
+  Future<List<RestaurantItem>> getRestaurantItemsByRestaurantIds(
+    List<int> restaurantIds,
+  ) => restaurant.getRestaurantItemsByRestaurantIds(restaurantIds);
+
+  Future<List<DietaryRestriction>> getCurrentDietaryRestrictions() =>
+      dietaryRestriction.restrictionsForCurrentTourist();
+
+  Future<Map<int, List<int>>> getRestrictionIdsByFood() =>
+      dietaryRestriction.restrictionIdsByFood();
+
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
       restaurant.getRestaurantById(restaurantId);
 
@@ -64,8 +83,14 @@ class DiscoveryRepositoryFacade {
     String touristId,
   ) => dietaryRestriction.restrictionsForTourist(touristId);
 
-  Future<Map<int, Set<int>>> dietaryRestrictionIdsByFood() =>
-      dietaryRestriction.restrictionIdsByFood();
+  Future<Map<int, Set<int>>> dietaryRestrictionIdsByFood() async {
+    final Map<int, List<int>> ids = await dietaryRestriction
+        .restrictionIdsByFood();
+    return ids.map(
+      (int foodId, List<int> restrictionIds) =>
+          MapEntry<int, Set<int>>(foodId, restrictionIds.toSet()),
+    );
+  }
 
   Future<List<Region>> malaysiaRegions() => map.malaysiaRegions();
 

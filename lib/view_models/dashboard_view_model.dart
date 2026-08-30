@@ -512,8 +512,9 @@ class DashboardViewModel extends BaseViewModel {
   /// REQ102_10 - the Discovery Layer Bar appears with the detailed map view.
   bool get showSwipePanel => isDetailedView;
 
-  /// REQ102_11 - Quick Mode needs the detailed view *and* a fix in Malaysia.
-  bool get showQuickModeButton => isDetailedView && _locationInMalaysia;
+  /// REQ102_11 / A9 - the tourist starts Quick Mode from the detailed map.
+  /// Permission, a fresh fix and the Malaysia boundary are checked on tap.
+  bool get showQuickModeButton => isDetailedView;
 
   // The map widget needs the same limits the ViewModel clamps against. It
   // reads them from here, so no widget imports a facade or a logic class.
@@ -604,6 +605,8 @@ class DashboardViewModel extends BaseViewModel {
     if (_locating) return;
 
     _locating = true;
+    _locationPermissionGranted = false;
+    _locationInMalaysia = false;
     safeNotifyListeners();
     try {
       // Both awaits are bounded here as well as in the device layer. The
@@ -844,45 +847,45 @@ class DashboardViewModel extends BaseViewModel {
   /// Details page for a tourist-submitted landmark. The landmark screen has
   /// no route arguments, so the pin's `landmark_id` rides the
   /// [MapSelectionHandoff] instead.
-void openSelectedPin() {
-  final MapPin? pin = _selectedPin;
-  if (pin == null) return;
+  void openSelectedPin() {
+    final MapPin? pin = _selectedPin;
+    if (pin == null) return;
 
-  if (pin.kind == MapPinKind.landmark) {
-    final int? landmarkId = int.tryParse(pin.referenceId);
+    if (pin.kind == MapPinKind.landmark) {
+      final int? landmarkId = int.tryParse(pin.referenceId);
 
-    if (landmarkId == null || landmarkId <= 0) {
-      _notice = 'This landmark does not have a valid details reference.';
+      if (landmarkId == null || landmarkId <= 0) {
+        _notice = 'This landmark does not have a valid details reference.';
+        safeNotifyListeners();
+        return;
+      }
+
+      MapSelectionHandoff().pendingLandmarkId = landmarkId;
+      AppNavigator.push(AppRoutes.landmarkPlaceDetail);
+      return;
+    }
+
+    final int? restaurantId = int.tryParse(pin.referenceId);
+
+    if (restaurantId == null || restaurantId <= 0) {
+      _notice = 'This restaurant does not have a valid details reference.';
       safeNotifyListeners();
       return;
     }
 
-    MapSelectionHandoff().pendingLandmarkId = landmarkId;
-    AppNavigator.push(AppRoutes.landmarkPlaceDetail);
-    return;
+    AppNavigator.push(AppRoutes.restaurantDetail, arguments: restaurantId);
   }
-
-  final int? restaurantId = int.tryParse(pin.referenceId);
-
-  if (restaurantId == null || restaurantId <= 0) {
-    _notice = 'This restaurant does not have a valid details reference.';
-    safeNotifyListeners();
-    return;
-  }
-
-  AppNavigator.push(
-    AppRoutes.restaurantDetail,
-    arguments: restaurantId,
-  );
-}
 
   // ===========================================================================
   // Quick Mode (A9, REQ102_11)
   // ===========================================================================
 
-  void openQuickMode() {
+  Future<void> openQuickMode() async {
+    // A9 step 2 happens after the icon is selected. Do not rely on an old
+    // background fix: permission or GPS may have changed since it arrived.
+    await locateTourist();
+    if (!_locationPermissionGranted || !_sharedLocation.isKnown) return;
     if (!_locationInMalaysia) {
-      // A9.3 / M3.
       _notice = notInMalaysiaMessage;
       safeNotifyListeners();
       return;
@@ -1258,8 +1261,6 @@ void openSelectedPin() {
   /// pins on screen until the new set arrives, because those pins are still
   /// the right answer; blanking them every camera nudge just made the map
   /// flicker. Either way the camera is untouched.
-  bool _pinsInFlight = false;
-
   Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
     final int revision = ++_pinLoadRevision;
     final int? requestedFoodId = _activePinFoodId;
