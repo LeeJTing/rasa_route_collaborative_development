@@ -139,12 +139,12 @@ class _FoodDetailViewState extends State<FoodDetailView> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          if (vm.nameCollision != null) ...<Widget>[
+          if (vm.collidedFood != null) ...<Widget>[
             FoodSectionCard(
               title: 'Name Collision',
               child: FoodNameCollisionCard(
-                collision: vm.nameCollision!,
-                onTap: () => vm.loadFood(vm.nameCollision!.alternateFood.id),
+                alternateFood: vm.collidedFood!,
+                onTap: () => vm.loadFood(vm.collidedFood!.id),
               ),
             ),
             const SizedBox(height: AppSpacing.lg),

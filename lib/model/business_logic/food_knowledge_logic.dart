@@ -1,7 +1,6 @@
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../domain_model/dietary_restriction.dart';
-import '../../domain_model/food_name_collision.dart';
 import '../../domain_model/local_food.dart';
 import '../repositories/food_repository_facade.dart';
 
@@ -50,13 +49,13 @@ class FoodKnowledgeLogic {
   /// Finds another catalogue entry whose canonical name or synonym overlaps
   /// with the selected food. Collision detection is data-driven; no dish name
   /// or database id is embedded in the app.
-  Future<FoodNameCollision?> detectNameCollision(int foodId) async {
+  Future<LocalFood?> detectNameCollision(int foodId) async {
     final List<LocalFood> catalogue = await repository.getFoods();
     return findNameCollision(catalogue: catalogue, foodId: foodId);
   }
 
   @visibleForTesting
-  FoodNameCollision? findNameCollision({
+  LocalFood? findNameCollision({
     required List<LocalFood> catalogue,
     required int foodId,
   }) {
@@ -79,10 +78,7 @@ class FoodKnowledgeLogic {
             candidateName,
           );
           if (sharedName == null) continue;
-          return FoodNameCollision(
-            sharedName: sharedName,
-            alternateFood: candidate,
-          );
+          return candidate;
         }
       }
     }

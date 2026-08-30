@@ -36,8 +36,7 @@ void main() {
       foodId: 32,
     );
 
-    expect(collision?.sharedName, 'Hokkien Mee');
-    expect(collision?.alternateFood.id, 31);
+    expect(collision?.id, 31);
   });
 
   test('does not collide unrelated noodle names', () {

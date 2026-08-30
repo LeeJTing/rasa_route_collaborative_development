@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
-import '../../../domain_model/food_name_collision.dart';
+import '../../../domain_model/local_food.dart';
 import '../../common_widgets/app_image.dart';
 import '../../common_widgets/app_tag_chip.dart';
 import 'food_notice_banner.dart';
@@ -12,16 +12,16 @@ import 'food_notice_banner.dart';
 class FoodNameCollisionCard extends StatelessWidget {
   const FoodNameCollisionCard({
     super.key,
-    required this.collision,
+    required this.alternateFood,
     required this.onTap,
   });
 
-  final FoodNameCollision collision;
+  final LocalFood alternateFood;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final alternate = collision.alternateFood;
+    final LocalFood alternate = alternateFood;
     final String taste = alternate.mainTaste.isNotEmpty
         ? alternate.mainTaste
         : alternate.tastes.isEmpty
@@ -101,7 +101,7 @@ class FoodNameCollisionCard extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         FoodNoticeBanner(
           message:
-              "Ordering '${collision.sharedName}' may refer to a different "
+              "Ordering '${alternate.name}' may refer to a different "
               'dish in some restaurants. Please double-check with the seller '
               'before placing your order.',
           type: FoodNoticeType.caution,

@@ -1,5 +1,4 @@
 import '../core/base_view_model.dart';
-import '../domain_model/food_name_collision.dart';
 import '../domain_model/local_food.dart';
 import '../model/business_logic/food_logic_facade.dart';
 
@@ -14,7 +13,7 @@ class FoodDetailViewModel extends BaseViewModel {
   bool _isLiked = false;
   List<LocalFood> _similarFoods = const <LocalFood>[];
   List<String> _allergyWarnings = const <String>[];
-  FoodNameCollision? _nameCollision;
+  LocalFood? _collidedFood;
   bool _isFoodInformationExpanded = false;
   bool _isStartingPronunciation = false;
   String? _pronunciationMessage;
@@ -23,7 +22,7 @@ class FoodDetailViewModel extends BaseViewModel {
   bool get isLiked => _isLiked;
   List<LocalFood> get similarFoods => _similarFoods;
   List<String> get allergyWarnings => _allergyWarnings;
-  FoodNameCollision? get nameCollision => _nameCollision;
+  LocalFood? get collidedFood => _collidedFood;
   bool get isFoodInformationExpanded => _isFoodInformationExpanded;
   bool get isStartingPronunciation => _isStartingPronunciation;
   String? get pronunciationMessage => _pronunciationMessage;
@@ -36,7 +35,7 @@ class FoodDetailViewModel extends BaseViewModel {
     _isFoodInformationExpanded = false;
     _food = await foodLogic.getFoodDetails(id);
     _isLiked = await foodLogic.isFoodInFavourites(id);
-    _nameCollision = await foodLogic.detectNameCollision(id);
+    _collidedFood = await foodLogic.detectNameCollision(id);
     _allergyWarnings = await foodLogic.detectAllergies(_food!);
     _similarFoods = await foodLogic.getSimilarFoods(id);
   });
