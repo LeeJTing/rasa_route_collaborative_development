@@ -7,6 +7,7 @@ import 'app/config/env.dart';
 import 'external/supabase/supabase_service.dart';
 import 'model/background_process/location_monitor.dart';
 import 'model/background_process/restaurant_monitor.dart';
+import 'shared_client/local_storage_manager/local_storage_manager.dart';
 
 /// Application entry point.
 ///
@@ -17,6 +18,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Env.load();
+  await LocalStorageManager().initialise();
   await SupabaseService.initialise();
 
   runApp(const RasaRouteApp());

@@ -77,15 +77,11 @@ class DietaryRestrictionRepository {
     return ids;
   }
 
-  Future<List<DietaryRestriction>> restrictionsForCurrentTourist() =>
-      restrictionsForTourist(api.currentUserId);
-
   /// Resolves the auth user id (`tourist.id`) to the domain `tourist_id`
   /// before reading the join table. Those UUIDs are different columns in the
   /// ERD and cannot be used interchangeably.
-  Future<List<DietaryRestriction>> restrictionsForTourist(
-    String authUserId,
-  ) async {
+  Future<List<DietaryRestriction>> restrictionsForCurrentTourist() async {
+    final String authUserId = api.currentUserId;
     if (authUserId.isEmpty) return const <DietaryRestriction>[];
     final Map<String, dynamic>? tourist = await api.selectOne(
       APIManager.tableTourist,
@@ -94,6 +90,14 @@ class DietaryRestrictionRepository {
     );
     final String touristId =
         JsonReader.asStringOrNull(tourist?['tourist_id']) ?? '';
+    return restrictionsForTourist(touristId);
+  }
+
+  /// The restrictions for one domain tourist id. Callers that only have an
+  /// auth user id must use [restrictionsForCurrentTourist] first.
+  Future<List<DietaryRestriction>> restrictionsForTourist(
+    String touristId,
+  ) async {
     if (touristId.isEmpty) return const <DietaryRestriction>[];
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableUserDietaryRestriction,

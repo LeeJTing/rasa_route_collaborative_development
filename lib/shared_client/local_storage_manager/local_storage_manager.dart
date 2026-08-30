@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 /// The single local data source.
 ///
 /// Repositories use this for offline caching and for the handful of values that
@@ -9,8 +11,9 @@ import 'dart:convert';
 /// A singleton: `LocalStorageManager()` always returns the same instance, so
 /// every repository shares one cache without anyone passing it around.
 ///
-/// Currently an in-memory map, so nothing survives a restart. Swap the map for
-/// a real store without changing the public API.
+/// [SharedPreferences] is the durable store. [_memory] remains as a small
+/// process cache and keeps unit tests deterministic when [initialise] has not
+/// been called.
 class LocalStorageManager {
   factory LocalStorageManager() => _instance;
 
@@ -19,9 +22,12 @@ class LocalStorageManager {
   static final LocalStorageManager _instance = LocalStorageManager._();
 
   final Map<String, String> _memory = <String, String>{};
+  SharedPreferences? _preferences;
 
-  /// Called once from `main()` when a real store needs opening.
-  Future<void> initialise() async {}
+  /// Called once from `main()` before repositories read persisted state.
+  Future<void> initialise() async {
+    _preferences ??= await SharedPreferences.getInstance();
+  }
 
   // --- Keys ------------------------------------------------------------------
 
@@ -38,10 +44,12 @@ class LocalStorageManager {
 
   // --- Primitives ------------------------------------------------------------
 
-  String? readString(String key) => _memory[key];
+  String? readString(String key) =>
+      _memory[key] ?? _preferences?.getString(key);
 
   Future<void> writeString(String key, String value) async {
     _memory[key] = value;
+    await _preferences?.setString(key, value);
   }
 
   bool readBool(String key, {bool fallback = false}) {
@@ -65,9 +73,14 @@ class LocalStorageManager {
   Future<void> remove(String key) async {
     _memory.remove(key);
     _memory.remove(_stampKey(key));
+    await _preferences?.remove(key);
+    await _preferences?.remove(_stampKey(key));
   }
 
-  Future<void> clear() async => _memory.clear();
+  Future<void> clear() async {
+    _memory.clear();
+    await _preferences?.clear();
+  }
 
   // --- JSON ------------------------------------------------------------------
 

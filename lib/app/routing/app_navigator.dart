@@ -48,8 +48,11 @@ abstract final class AppNavigator {
   /// route-object check entirely - a value-level cast here is always safe,
   /// since whatever popped this route already knows what type it's handing
   /// back (see e.g. `AppNavigator.pop<T>` call sites).
-  static Future<T?> push<T>(String routeName) async {
-    final dynamic result = await _navigator.pushNamed<dynamic>(routeName);
+  static Future<T?> push<T>(String routeName, {Object? arguments}) async {
+    final dynamic result = await _navigator.pushNamed<dynamic>(
+      routeName,
+      arguments: arguments,
+    );
     return result as T?;
   }
 
