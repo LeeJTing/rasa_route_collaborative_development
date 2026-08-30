@@ -11,6 +11,7 @@ import '../food_recommendation_view/food_recommendation_view.dart';
 import '../common_widgets/app_image.dart';
 import '../food_recommendation_view/widgets/similar_food_card.dart';
 import 'widgets/food_hero_card.dart';
+import 'widgets/food_name_collision_card.dart';
 import 'widgets/food_notice_banner.dart';
 import 'widgets/food_overview_card.dart';
 import 'widgets/food_section_card.dart';
@@ -138,14 +139,12 @@ class _FoodDetailViewState extends State<FoodDetailView> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          if (vm.collidedFood != null) ...<Widget>[
+          if (vm.nameCollision != null) ...<Widget>[
             FoodSectionCard(
-              title: 'Collision Food',
-              child: FoodNoticeBanner(
-                message:
-                '${food.name} can also refer to ${vm.collidedFood!.name}. Tap to compare the dishes.',
-                type: FoodNoticeType.caution,
-                onTap: () => vm.loadFood(vm.collidedFood!.id),
+              title: 'Name Collision',
+              child: FoodNameCollisionCard(
+                collision: vm.nameCollision!,
+                onTap: () => vm.loadFood(vm.nameCollision!.alternateFood.id),
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -170,10 +169,10 @@ class _FoodDetailViewState extends State<FoodDetailView> {
   }
 
   Future<void> _showEnlargedImage(
-      BuildContext context,
-      LocalFood food,
-      int initialIndex,
-      ) => showDialog<void>(
+    BuildContext context,
+    LocalFood food,
+    int initialIndex,
+  ) => showDialog<void>(
     context: context,
     barrierColor: AppColors.scrim,
     builder: (BuildContext dialogContext) => Dialog(
@@ -193,7 +192,7 @@ class _FoodDetailViewState extends State<FoodDetailView> {
                   source: food.imageUrls.isEmpty ? null : food.imageUrls[index],
                   fit: BoxFit.contain,
                   semanticLabel:
-                  '${food.name} image ${index + 1} of ${food.imageUrls.length}',
+                      '${food.name} image ${index + 1} of ${food.imageUrls.length}',
                 ),
               ),
             ),

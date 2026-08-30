@@ -24,5 +24,32 @@ void main() {
         isFalse,
       );
     });
+
+    test('accepts common Char Kway Teow spelling variants', () {
+      expect(
+        repository.catalogueImageMatchesItem(
+          restaurantItemName: 'Signature Penang Char Kuey Teow',
+          localFoodName: 'Char Kway Teow',
+        ),
+        isTrue,
+      );
+      expect(
+        repository.catalogueImageMatchesItem(
+          restaurantItemName: 'Char Koay Teow Udang',
+          localFoodName: 'Char Kway Teow',
+        ),
+        isTrue,
+      );
+    });
+
+    test('keeps generic Kuey Teow dishes on the neutral fallback', () {
+      expect(
+        repository.catalogueImageMatchesItem(
+          restaurantItemName: 'Kuey Teow Soup',
+          localFoodName: 'Char Kway Teow',
+        ),
+        isFalse,
+      );
+    });
   });
 }

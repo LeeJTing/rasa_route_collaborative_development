@@ -68,6 +68,7 @@ class RestaurantRepository {
       local_food(
         local_food_id,
         food_name,
+        synonyms,
         description,
         local_food_image(local_food_image_id, img_name, local_food_id)
       )
@@ -279,6 +280,7 @@ class RestaurantRepository {
     final bool canUseCatalogueImage = catalogueImageMatchesItem(
       restaurantItemName: data.restaurantItemName,
       localFoodName: localFood?.foodName,
+      localFoodSynonyms: JsonReader.asStringList(localFood?.synonyms),
     );
     final String? imageName =
         data.foodImgUrl ??
@@ -312,17 +314,20 @@ class RestaurantRepository {
   bool catalogueImageMatchesItem({
     required String restaurantItemName,
     required String? localFoodName,
+    List<String> localFoodSynonyms = const <String>[],
   }) {
     final String item = _normaliseFoodName(restaurantItemName);
-    final String linkedFood = _normaliseFoodName(localFoodName ?? '');
-    return item.isNotEmpty &&
-        linkedFood.isNotEmpty &&
-        item.contains(linkedFood);
+    if (item.isEmpty) return false;
+    return <String>[localFoodName ?? '', ...localFoodSynonyms]
+        .map(_normaliseFoodName)
+        .where((String name) => name.isNotEmpty)
+        .any(item.contains);
   }
 
   String _normaliseFoodName(String value) => value
       .toLowerCase()
       .replaceAll('chilli', 'chili')
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .replaceAll(RegExp(r'\b(?:kuey|kuay|koay)\b'), 'kway')
       .trim();
 }

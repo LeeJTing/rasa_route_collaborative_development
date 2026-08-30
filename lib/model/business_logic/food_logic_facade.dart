@@ -1,4 +1,5 @@
 import '../../domain_model/food_comparison.dart';
+import '../../domain_model/food_name_collision.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
@@ -42,11 +43,8 @@ class FoodLogicFacade {
   Future<bool> isFoodInFavourites(int foodId) async =>
       (await getFoodDetails(foodId)).isFavourite;
 
-  Future<LocalFood?> detectNameCollision(int foodId) async {
-    final LocalFood selected = await getFoodDetails(foodId);
-    if (selected.name != 'Prawn Noodle') return null;
-    return knowledge.getLocalFoodById(5);
-  }
+  Future<FoodNameCollision?> detectNameCollision(int foodId) =>
+      knowledge.detectNameCollision(foodId);
 
   Future<List<String>> detectAllergies(LocalFood food) async {
     final String ingredients = food.ingredients.toLowerCase();
