@@ -86,7 +86,11 @@ class MatchesRecommendationViewModel extends BaseViewModel {
                         initialVisibleCount,
                   )
                   .toList(growable: false);
-          return group.copyWith(restaurants: restaurants);
+          return MatchedFoodRecommendations(
+            food: group.food,
+            restaurants: restaurants,
+            submittedLandmarks: group.submittedLandmarks,
+          );
         }
         final List<SubmittedLandmarkRecommendation> landmarks =
             _sortedLandmarks(group.submittedLandmarks)
@@ -98,7 +102,11 @@ class MatchesRecommendationViewModel extends BaseViewModel {
                   _visibleLandmarkCount[group.food.id] ?? initialVisibleCount,
                 )
                 .toList(growable: false);
-        return group.copyWith(submittedLandmarks: landmarks);
+        return MatchedFoodRecommendations(
+          food: group.food,
+          restaurants: group.restaurants,
+          submittedLandmarks: landmarks,
+        );
       })
       .toList(growable: false);
 

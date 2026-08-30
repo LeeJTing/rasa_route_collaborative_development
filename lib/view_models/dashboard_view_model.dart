@@ -1153,7 +1153,7 @@ class DashboardViewModel extends BaseViewModel {
   /// What a filter change or a food search triggers: the previous answer is
   /// stale, so the pins go before the new query runs.
   Future<void> _reloadActiveView() =>
-      isHeatmapView ? _loadHeatmap() : _loadPins(clearFirst: true);
+      isHeatmapView ? _loadHeatmap() : _loadPins();
 
   Future<void> _refreshSwipeModeRegion() async {
     final Region? region = await discoveryLogic.regionAt(
@@ -1262,12 +1262,12 @@ class DashboardViewModel extends BaseViewModel {
   /// the right answer; blanking them every camera nudge just made the map
   /// flicker. Either way the camera is untouched.
   Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
+  /// Keeps the current pins visible while the next result loads. The revision
+  /// check prevents a slower request for an older Swipe card from replacing
+  /// the locations belonging to the food currently in the Target Frame.
+  Future<void> _loadPins() => runGuarded(() async {
     final int revision = ++_pinLoadRevision;
     final int? requestedFoodId = _activePinFoodId;
-    if (clearFirst && _pins.isNotEmpty) {
-      _pins = const <MapPin>[];
-      safeNotifyListeners();
-    }
 
     _lastPinLatitude = _centreLatitude;
     _lastPinLongitude = _centreLongitude;

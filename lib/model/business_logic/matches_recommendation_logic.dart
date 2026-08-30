@@ -156,7 +156,8 @@ class MatchesRecommendationLogic {
             items: matchedItems,
           );
       recommendations.add(
-        restaurant.copyWith(
+        _withRecommendationDetails(
+          restaurant,
           category: _visibleCategory(restaurant.category),
           distanceMetres: _distanceMetres(
             request.origin.latitude,
@@ -170,6 +171,28 @@ class MatchesRecommendationLogic {
     }
     return recommendations;
   }
+
+  Restaurant _withRecommendationDetails(
+    Restaurant restaurant, {
+    required String category,
+    required double distanceMetres,
+    required List<RestaurantItem> items,
+  }) => Restaurant(
+    id: restaurant.id,
+    name: restaurant.name,
+    category: category,
+    address: restaurant.address,
+    rating: restaurant.rating,
+    latitude: restaurant.latitude,
+    longitude: restaurant.longitude,
+    phone: restaurant.phone,
+    website: restaurant.website,
+    imageUrl: restaurant.imageUrl,
+    openingHours: restaurant.openingHours,
+    distanceMetres: distanceMetres,
+    reviewCount: restaurant.reviewCount,
+    items: items,
+  );
 
   List<SubmittedLandmarkRecommendation> _landmarksFor(
     List<FoodOccurrence> foodOccurrences,
