@@ -5,6 +5,7 @@ import 'package:rasa_route_collaborative_development/app/routing/app_routes.dart
 import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/discovery_logic_facade.dart';
+import 'package:rasa_route_collaborative_development/view_models/dashboard_view_model.dart';
 import 'package:rasa_route_collaborative_development/view_models/matches_recommendation_view_model.dart';
 import 'package:rasa_route_collaborative_development/views/matches_recommendation_view/matches_recommendation_view.dart';
 
@@ -82,31 +83,44 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('fits a narrow phone and opens the Matches landmark preview', (
+  testWidgets('fits a narrow phone and opens full landmark details', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    MapSelectionHandoff().pendingLandmarkId = null;
+    addTearDown(() => MapSelectionHandoff().pendingLandmarkId = null);
 
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
         home: _TestMatchesRecommendationView(FakeDiscoveryLogicFacade()),
+        routes: <String, WidgetBuilder>{
+          AppRoutes.landmarkPlaceDetail: (BuildContext context) => Scaffold(
+            body: Text(
+              'Landmark ${MapSelectionHandoff().takeLandmarkId()}',
+            ),
+          ),
+        },
+        home: MatchesRecommendationView(
+          viewModel: MatchesRecommendationViewModel(
+            discoveryLogic: FakeDiscoveryLogicFacade(),
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Submitted Landmarks'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('View Landmark Preview'));
+    await tester.ensureVisible(find.text('View Landmark Details'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('View Landmark Preview'));
+    await tester.tap(find.text('View Landmark Details'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Listed price: RM 12.00'), findsOneWidget);
-    expect(find.text('Close'), findsOneWidget);
+    expect(find.text('Landmark 901'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

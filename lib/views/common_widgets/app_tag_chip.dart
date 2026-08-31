@@ -3,7 +3,12 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 
-enum AppTagStyle { meal, category, taste, neutral, match }
+// ===========================================================================
+// Tourist profile (ChinShunYon) - added `dietary` for dietary-restriction
+// chips on the Profile / edit screens.
+// ===========================================================================
+enum AppTagStyle { meal, category, taste, neutral, match, dietary }
+// End of Tourist profile (ChinShunYon) -------------------------------------
 
 /// Compact colour-coded metadata pill shared by food and restaurant screens.
 class AppTagChip extends StatelessWidget {
@@ -34,6 +39,13 @@ class AppTagChip extends StatelessWidget {
         AppColors.tagTasteBorder,
         AppColors.tagTasteText,
       ),
+      // Tourist profile (ChinShunYon): dietary-restriction chips.
+      AppTagStyle.dietary => (
+        AppColors.tagDietaryBackground,
+        AppColors.tagDietaryBorder,
+        AppColors.tagDietaryText,
+      ),
+      // End of Tourist profile (ChinShunYon).
       AppTagStyle.neutral => (
         AppColors.tagNeutralBackground,
         AppColors.tagNeutralBorder,

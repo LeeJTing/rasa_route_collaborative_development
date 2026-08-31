@@ -199,6 +199,13 @@ class AddLandmarkViewModel extends BaseViewModel
   // --- FORM STATE ---
   String _restaurantName = '';
 
+  /// Bumped by [setExtractedRestaurantName] whenever a signboard capture
+  /// overwrites [_restaurantName]. `AddLandmarkView` compares this to the
+  /// version it last applied to its text field to tell a fresh signboard
+  /// result (which must overwrite the tourist's typed name) apart from the
+  /// tourist's own typing (which must not fight the field).
+  int _extractedRestaurantNameVersion = 0;
+
   /// Every weekday always has at least one row here. A Closed/Unknown day
   /// has exactly one row (times null); an Open day can have more than one
   /// - matching the real `OpeningHours` table directly, where each row is
@@ -249,6 +256,10 @@ class AddLandmarkViewModel extends BaseViewModel
   bool get isStallDisabled => _isStallDisabled;
 
   String get restaurantName => _restaurantName;
+
+  /// See [_extractedRestaurantNameVersion].
+  int get extractedRestaurantNameVersion => _extractedRestaurantNameVersion;
+
   Map<Weekday, List<OpeningHour>> get operatingHours =>
       Map<Weekday, List<OpeningHour>>.unmodifiable(_operatingHours);
 
@@ -461,10 +472,16 @@ class AddLandmarkViewModel extends BaseViewModel
     safeNotifyListeners();
   }
 
-  /// Set extracted restaurant name (from signboard capture only)
+  /// Set extracted restaurant name (from signboard capture only).
+  /// Overwrites whatever the tourist typed - the signboard is authoritative,
+  /// and they can edit it afterwards. Bumps [_extractedRestaurantNameVersion]
+  /// so `AddLandmarkView` can force its text field to show this name even
+  /// while the field is still focused (the focus-guarded sync alone would
+  /// skip it, leaving the tourist's typed name on screen).
   void setExtractedRestaurantName(String? name) {
-    if (name != null && name.isNotEmpty) {
-      _restaurantName = name;
+    if (name != null && name.trim().isNotEmpty) {
+      _restaurantName = name.trim();
+      _extractedRestaurantNameVersion++;
       safeNotifyListeners();
     }
   }
@@ -820,13 +837,13 @@ class AddLandmarkViewModel extends BaseViewModel
     safeNotifyListeners();
 
     try {
-      // Tourist auth isn't implemented in-app yet, so `currentTouristId()`
-      // returns null - fall back to the test tourist (Elwin) created in
-      // Supabase so the submit flow can be tested end-to-end. Replace with
-      // the real id once sign-in exists.
-      final String touristId =
-          await landmarkLogic.currentTouristId() ??
-          '22222222-2222-4222-8222-222222222222';
+      // The signed-in tourist - null when nobody is signed in (the entry
+      // gate routes to sign-in first, so a signed-in tourist is expected
+      // here).
+      final String? touristId = await landmarkLogic.currentTouristId();
+      if (touristId == null || touristId.isEmpty) {
+        throw StateError('Sign in to submit a landmark.');
+      }
 
       // Upload the landmark's own signboard/stall photo FIRST - it is stored
       // on the `submitted_landmark` row (`image_url` / `image_id` /

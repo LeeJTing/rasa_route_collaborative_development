@@ -37,11 +37,6 @@ class SubmittedLandmarkRecommendation {
   final List<String> foodNames;
   final String? imageUrl;
   final double? price;
-
-  String get distanceLabel {
-    if (distanceMetres < 1000) return '${distanceMetres.round()} m';
-    return '${(distanceMetres / 1000).toStringAsFixed(1)} km';
-  }
 }
 
 /// One liked local food and the real places in the active state serving it.
@@ -55,15 +50,6 @@ class MatchedFoodRecommendations {
   final LocalFood food;
   final List<Restaurant> restaurants;
   final List<SubmittedLandmarkRecommendation> submittedLandmarks;
-
-  MatchedFoodRecommendations copyWith({
-    List<Restaurant>? restaurants,
-    List<SubmittedLandmarkRecommendation>? submittedLandmarks,
-  }) => MatchedFoodRecommendations(
-    food: food,
-    restaurants: restaurants ?? this.restaurants,
-    submittedLandmarks: submittedLandmarks ?? this.submittedLandmarks,
-  );
 }
 
 /// State-scoped Matches result assembled from a persisted Swipe Mode session.

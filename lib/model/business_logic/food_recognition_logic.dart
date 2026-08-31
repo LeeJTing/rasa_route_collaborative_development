@@ -50,6 +50,29 @@ class FoodRecognitionLogic {
   /// far too low to create a permanent, shared, curated row.
   static const double _catalogueInsertConfidence = 0.8;
 
+  /// The catalogue's `food_type` values - the ONLY dish types a landmark may
+  /// carry. Anything else (snacks, packaged goods, canned/bottled drinks,
+  /// confectionery) is a Malaysian product at most, never an addable dish.
+  static const Set<String> _catalogueFoodTypes = <String>{
+    'Food',
+    'Beverage',
+    'Fruit',
+    'Dessert',
+    'Kuih',
+  };
+
+  /// Whether a recognised item fits one of the app's catalogue dish types.
+  /// Returns `true` when Gemini returned no classification (blank/unknown -
+  /// don't block a valid dish on a missing field), and `false` only for a
+  /// PRESENT non-catalogue type ("none", "Snack", "Package", ...) - the
+  /// "Malaysian product but can't be added" case.
+  static bool fitsCatalogueCategory(String? foodType) {
+    if (foodType == null) return true;
+    final String t = foodType.trim().toLowerCase();
+    if (t.isEmpty) return true;
+    return _catalogueFoodTypes.any((String c) => c.toLowerCase() == t);
+  }
+
   /// Whether [confidence] (0..1) is shaky enough that the result should be
   /// flagged for the tourist to verify rather than presented as certain.
   ///
@@ -171,6 +194,7 @@ class FoodRecognitionLogic {
       final LocalFood food = await _preferCuratedOverGemini(analysis.food);
       return FoodRecognitionResult(
         isLocalFood: analysis.isLocal,
+        fitsCatalogueCategory: fitsCatalogueCategory(analysis.foodType),
         candidates: <LocalFood>[food],
         priceMin: analysis.priceMin,
         priceMax: analysis.priceMax,
@@ -209,6 +233,9 @@ class FoodRecognitionLogic {
     String imageQuality = quick.imageQuality;
     List<String> imageQualityIssues = quick.imageQualityIssues;
     List<String> dietaryRestrictions = const <String>[];
+    // The catalogue dish-type classification - refreshed to the full
+    // analysis when one runs (it is the authoritative call).
+    String foodType = quick.foodType;
     if (candidates.length > 1) {
       result = candidates.take(3).toList(growable: false);
     } else {
@@ -237,11 +264,13 @@ class FoodRecognitionLogic {
         imageQuality = analysis.imageQuality;
         imageQualityIssues = analysis.imageQualityIssues;
         dietaryRestrictions = analysis.dietaryRestrictions;
+        foodType = analysis.foodType;
       }
     }
 
     return FoodRecognitionResult(
       isLocalFood: true,
+      fitsCatalogueCategory: fitsCatalogueCategory(foodType),
       candidates: result,
       priceMin: priceMin,
       priceMax: priceMax,
@@ -276,6 +305,7 @@ class FoodRecognitionLogic {
       bool nameMatchesPhoto,
       double matchConfidence,
       bool isLocalFood,
+      bool fitsCatalogueCategory,
       String observedFood,
       List<String> dietaryRestrictions,
     })
@@ -291,6 +321,7 @@ class FoodRecognitionLogic {
     double priceMax = analysis.priceMax;
     bool isLocalFood = analysis.isLocal;
     List<String> dietaryRestrictions = analysis.dietaryRestrictions;
+    bool fits = fitsCatalogueCategory(analysis.foodType);
     // The catalogue lookup is a details optimisation, never a substitute for
     // checking the photo - it fills in the (more reliable) curated details
     // for the typed dish whenever one exists, whether or not the photo
@@ -303,10 +334,11 @@ class FoodRecognitionLogic {
       food = match;
       priceMin = 0;
       priceMax = 0;
-      // A curated row IS Malaysian local food by definition - the observed
-      // photo's localness is irrelevant once the tourist commits to a
-      // curated dish.
+      // A curated row IS Malaysian local food and a valid catalogue dish
+      // type by definition - the observed photo's localness/category is
+      // irrelevant once the tourist commits to a curated dish.
       isLocalFood = true;
+      fits = true;
     } else if (!analysis.nameMatchesPhoto) {
       // Gemini could not verify the typed name AND there is no curated row
       // for it. Its response describes the dish it actually SAW (the
@@ -327,6 +359,7 @@ class FoodRecognitionLogic {
       nameMatchesPhoto: analysis.nameMatchesPhoto,
       matchConfidence: analysis.matchConfidence,
       isLocalFood: isLocalFood,
+      fitsCatalogueCategory: fits,
       observedFood: analysis.observedFood,
       dietaryRestrictions: dietaryRestrictions,
     );
@@ -341,6 +374,7 @@ class FoodRecognitionLogic {
       LocalFood food,
       double priceMin,
       double priceMax,
+      bool fitsCatalogueCategory,
       List<String> dietaryRestrictions,
     })
   >
@@ -352,6 +386,7 @@ class FoodRecognitionLogic {
         food: match,
         priceMin: 0.0,
         priceMax: 0.0,
+        fitsCatalogueCategory: true,
         dietaryRestrictions: const <String>[],
       );
     }
@@ -363,6 +398,7 @@ class FoodRecognitionLogic {
       food: analysis.food,
       priceMin: analysis.priceMin,
       priceMax: analysis.priceMax,
+      fitsCatalogueCategory: fitsCatalogueCategory(analysis.foodType),
       dietaryRestrictions: analysis.dietaryRestrictions,
     );
   }

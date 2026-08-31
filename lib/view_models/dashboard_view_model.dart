@@ -1155,7 +1155,7 @@ class DashboardViewModel extends BaseViewModel {
   /// What a filter change or a food search triggers: the previous answer is
   /// stale, so the pins go before the new query runs.
   Future<void> _reloadActiveView() =>
-      isHeatmapView ? _loadHeatmap() : _loadPins(clearFirst: true);
+      isHeatmapView ? _loadHeatmap() : _loadPins();
 
   Future<void> _refreshSwipeModeRegion() async {
     final Region? region = await discoveryLogic.regionAt(
@@ -1254,18 +1254,18 @@ class DashboardViewModel extends BaseViewModel {
     );
   }, silent: _distribution.regions.isNotEmpty);
 
-  /// [clearFirst] wipes the pins before the query rather than swapping them
-  /// when it returns.
+  /// Loads pins for the current map viewport.
   ///
-  /// Only a filter change or a food search does that - there the old pins are
-  /// answering a question the tourist has already moved on from, so leaving
-  /// them up reads as the map ignoring you. Panning and zooming keep their
-  /// pins on screen until the new set arrives, because those pins are still
-  /// the right answer; blanking them every camera nudge just made the map
-  /// flicker. Either way the camera is untouched.
+  /// [clearFirst] removes stale pins immediately when the filter or selected
+  /// food changes. During ordinary panning and zooming, the existing pins stay
+  /// visible until their replacements arrive to avoid map flicker.
+  ///
+  /// The revision check prevents a slower request for an older Swipe card from
+  /// replacing the locations for the food currently in the Target Frame.
   Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
     final int revision = ++_pinLoadRevision;
     final int? requestedFoodId = _activePinFoodId;
+
     if (clearFirst && _pins.isNotEmpty) {
       _pins = const <MapPin>[];
       safeNotifyListeners();

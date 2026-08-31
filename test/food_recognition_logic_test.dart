@@ -145,6 +145,7 @@ FoodAnalysisResponse _quickResponse({
   String foodImageStatus = 'complete',
   int foodCount = 1,
   List<FoodCandidate> candidates = const <FoodCandidate>[],
+  String foodType = '',
 }) => FoodAnalysisResponse(
   dish: dish,
   variant: '',
@@ -153,6 +154,7 @@ FoodAnalysisResponse _quickResponse({
   cookingStyle: '',
   mealType: '',
   foodCategory: 'Malay',
+  foodType: foodType,
   isMalaysianLocalFood: isLocal,
   culturalBackground: '',
   foodStatus: foodStatus,
@@ -241,6 +243,7 @@ void main() {
           nameMatchesPhoto: true,
           matchConfidence: 1.0,
           observedFood: '',
+          foodType: 'Food',
           dietaryRestrictions: const <String>[],
         );
 
@@ -253,6 +256,39 @@ void main() {
         expect(result.candidates.single.name, 'Roti Canai');
       },
     );
+
+    test('a Malaysian snack (e.g. Tam Tam) is not-addable even when it matches '
+        'the catalogue', () async {
+      final tamtam = _food('Tam Tam');
+      knowledge.catalogue = <LocalFood>[tamtam];
+      // Quick call names it confidently AND flags it as a non-catalogue
+      // dish type (packaged snack).
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'Tam Tam', confidence: 0.95, foodType: 'none');
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      // Malaysian (so isLocalFood stays true) but a snack/package - it
+      // must NOT be addable.
+      expect(result.isLocalFood, isTrue);
+      expect(result.fitsCatalogueCategory, isFalse);
+      expect(result.candidates.single.name, 'Tam Tam');
+    });
+
+    test('a beverage classified as "Beverage" stays addable', () async {
+      final tehTarik = _food('Teh Tarik');
+      knowledge.catalogue = <LocalFood>[tehTarik];
+      recognition.onIdentify = (_) async => _quickResponse(
+        dish: 'Teh Tarik',
+        confidence: 0.95,
+        foodType: 'Beverage',
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      expect(result.isLocalFood, isTrue);
+      expect(result.fitsCatalogueCategory, isTrue);
+    });
 
     test('quick says not-local but the full analysis says local is still addable '
         '(Ramly burger case)', () async {
@@ -273,6 +309,7 @@ void main() {
         nameMatchesPhoto: true,
         matchConfidence: 1.0,
         observedFood: '',
+        foodType: 'Food',
         dietaryRestrictions: const <String>[],
       );
 
@@ -306,6 +343,7 @@ void main() {
           nameMatchesPhoto: true,
           matchConfidence: 1.0,
           observedFood: '',
+          foodType: 'Food',
           dietaryRestrictions: const <String>[],
         );
       };
@@ -344,6 +382,7 @@ void main() {
         nameMatchesPhoto: true,
         matchConfidence: 1.0,
         observedFood: '',
+        foodType: 'Food',
         dietaryRestrictions: const <String>[],
       );
 
@@ -459,6 +498,7 @@ void main() {
             nameMatchesPhoto: true,
             matchConfidence: 1.0,
             observedFood: '',
+            foodType: 'Food',
             dietaryRestrictions: const <String>[],
           );
         };
@@ -495,6 +535,7 @@ void main() {
             nameMatchesPhoto: true,
             matchConfidence: 1.0,
             observedFood: '',
+            foodType: 'Food',
             dietaryRestrictions: const <String>[],
           );
         };
@@ -526,6 +567,7 @@ void main() {
           nameMatchesPhoto: true,
           matchConfidence: 1.0,
           observedFood: '',
+          foodType: 'Food',
           dietaryRestrictions: const <String>[],
         );
 
@@ -593,6 +635,7 @@ void main() {
           nameMatchesPhoto: true,
           matchConfidence: 0.9,
           observedFood: '',
+          foodType: 'Food',
           dietaryRestrictions: const <String>[],
         );
       };
@@ -627,6 +670,7 @@ void main() {
           nameMatchesPhoto: true,
           matchConfidence: 1.0,
           observedFood: '',
+          foodType: 'Food',
           dietaryRestrictions: const <String>[],
         );
 
@@ -656,6 +700,7 @@ void main() {
           nameMatchesPhoto: false,
           matchConfidence: 0.9,
           observedFood: 'Pepperoni Pizza',
+          foodType: 'Food',
           dietaryRestrictions: const <String>[],
         );
 
@@ -688,6 +733,7 @@ void main() {
         nameMatchesPhoto: false,
         matchConfidence: 0.95,
         observedFood: 'Ramly Burger',
+        foodType: 'Food',
         dietaryRestrictions: const <String>['No Pork'],
       );
 
@@ -721,6 +767,7 @@ void main() {
         nameMatchesPhoto: true, // "char kuey teow" == "char kway teow"
         matchConfidence: 0.85,
         observedFood: '',
+        foodType: 'Food',
         dietaryRestrictions: const <String>[],
       );
 
@@ -748,6 +795,7 @@ void main() {
         nameMatchesPhoto: false,
         matchConfidence: 0.9,
         observedFood: 'Pepperoni Pizza',
+        foodType: 'Food',
         dietaryRestrictions: const <String>[],
       );
 
@@ -798,6 +846,7 @@ void main() {
             nameMatchesPhoto: true,
             matchConfidence: 1.0,
             observedFood: '',
+            foodType: 'Food',
             dietaryRestrictions: const <String>[],
           );
         };
@@ -806,6 +855,7 @@ void main() {
           LocalFood food,
           double priceMin,
           double priceMax,
+          bool fitsCatalogueCategory,
           List<String> dietaryRestrictions,
         })
         result = await logic.enrichCandidate(<int>[1], 'Murtabak');
@@ -962,6 +1012,49 @@ void main() {
       });
     },
   );
+
+  group('FoodRecognitionLogic.fitsCatalogueCategory', () {
+    test('accepts every catalogue dish type', () {
+      for (final String type in const <String>[
+        'Food',
+        'Beverage',
+        'Fruit',
+        'Dessert',
+        'Kuih',
+      ]) {
+        expect(
+          FoodRecognitionLogic.fitsCatalogueCategory(type),
+          isTrue,
+          reason: type,
+        );
+      }
+      // Case-insensitive and trimmed.
+      expect(FoodRecognitionLogic.fitsCatalogueCategory(' beverage '), isTrue);
+    });
+
+    test('rejects a non-catalogue type (snack/package/canned drink)', () {
+      for (final String type in const <String>[
+        'none',
+        'Snack',
+        'Package',
+        'Canned Drink',
+        'Biscuit',
+        'Other',
+      ]) {
+        expect(
+          FoodRecognitionLogic.fitsCatalogueCategory(type),
+          isFalse,
+          reason: type,
+        );
+      }
+    });
+
+    test('unknown classification is not a blocker (fail-open)', () {
+      expect(FoodRecognitionLogic.fitsCatalogueCategory(null), isTrue);
+      expect(FoodRecognitionLogic.fitsCatalogueCategory(''), isTrue);
+      expect(FoodRecognitionLogic.fitsCatalogueCategory('   '), isTrue);
+    });
+  });
 }
 
 class _TestFoodRecognitionLogic extends FoodRecognitionLogic {

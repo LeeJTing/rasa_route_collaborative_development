@@ -208,42 +208,28 @@ class GeminiService {
     return generateText(prompt);
   }
 
-  /// The Gemini system instructions for UC406 food pairing - a condensed,
-  /// single-source version of the UC406 prompt spec. Only food data is sent
-  /// (SELECTED FOOD + CANDIDATES); dietary conflicts are already removed
-  /// client-side, so the model picks the best pairings and flags only
-  /// incomplete-allergen warnings.
+  /// The Gemini instructions for UC406 food pairing. Candidates carry a short
+  /// attribute tail (category, cooking style, meal type, main taste) so the
+  /// model can judge pairings, and the prompt forbids an empty result because
+  /// the calling repository only sends a non-empty, dietary-safe candidate
+  /// list - a pairing must always be returned when candidates exist.
   static const String _pairingInstructions = '''
-You are a Malaysian local-food pairing assistant. From CANDIDATES, recommend the foods that pair best with SELECTED FOOD.
+You are a Malaysian local-food pairing assistant. Recommend the best foods from CANDIDATES to go with SELECTED FOOD.
 
-STRICT RULES
-1. Use ONLY the supplied data. Never invent or guess a food, food ID, ingredient, allergen, dietary label, flavour, texture, cooking style, cultural fact, or meal suitability. Never modify a food ID.
-2. Recommend only foods listed in CANDIDATES. Never recommend SELECTED FOOD. Do not repeat a candidate. Return fewer when there are not enough eligible candidates, and never more than maximumResults or 5.
-3. Every candidate has already been screened against the tourist's dietary restrictions, so do not exclude or re-evaluate conflicts. However, if a candidate's allergen, ingredient or preparation information is incomplete or uncertain, set dietaryStatus to "warning" and state exactly what to verify with the seller. Never claim an uncertain food is safe.
-4. Pairing: prefer foods that complement SELECTED FOOD (e.g. rich with light/refreshing, spicy with cooling/mildly sweet, savoury with a beverage or dessert, soft with crispy, a main with a side/kuih/drink). Do not credit an attribute that is missing from the input. Similarity alone is not a high score.
-5. matchPercentage: a whole integer 0-100 expressing recommendation strength, not probability or a safety score. Calibrate: 90-100 exceptional (strong evidence, clear complementarity, no concern); 80-89 very good; 70-79 good; 60-69 reasonable; below 60 weak (use only when very few options). Candidates with uncertain dietary information get at most 79.
-6. Rank by matchPercentage from highest to lowest. The first rank is 1 and ranks are consecutive. On a tie, keep CANDIDATES order.
-
-REASON: one sentence under 35 words. State how the candidate pairs with SELECTED FOOD, naming a concrete factor (taste, texture, cooking style, meal type, or balancing effect). Describe complementarity, not similarity. No generic claims such as "great match". Do not repeat the warning.
-
-WARNING (only when dietaryStatus is "warning"): under 25 words. Name the missing, uncertain, or cross-contamination information and what to confirm with the seller. Do not claim the food is safe.
-
-OUTPUT: one valid JSON object only - standard JSON, straight double quotes, no markdown, no code fences, no commentary, no trailing commas, no extra fields.
+RULES
+1. Recommend only ids listed in CANDIDATES. Never recommend the SELECTED FOOD. Do not repeat a candidate. Up to 5.
+2. Pair using your knowledge of these Malaysian dishes: spicy with something cooling or mildly sweet, savoury with a drink or dessert, rich with something light/refreshing, soft with crispy, a main with a suitable side, kuih or beverage. Use the category, cooking style, meal type and main taste shown after each id to judge the pairing.
+3. matchPercentage: whole number 0-100 (90+ exceptional, 80s very good, 70s good, 60s reasonable, below 60 weak). Rank highest first; ranks start at 1.
+4. reason: one short sentence saying how the food pairs with the SELECTED FOOD.
+5. Candidates are already dietary-safe for the tourist, so set dietaryStatus "compatible" and warning null.
+6. CANDIDATES is never empty, so you MUST always return at least one recommendation. If nothing pairs well, still recommend the best available candidate with a lower matchPercentage (50-60) and an honest reason. Never return an empty recommendations array.
+7. Return ONLY JSON, no markdown, no extra text:
 {
   "recommendations": [
-    {
-      "foodId": <int from CANDIDATES>,
-      "rank": 1,
-      "matchPercentage": 85,
-      "reason": "Concise explanation supported by the supplied data.",
-      "dietaryStatus": "compatible",
-      "warning": null
-    }
+    {"foodId": <int from CANDIDATES>, "rank": 1, "matchPercentage": 85, "reason": "...", "dietaryStatus": "compatible", "warning": null}
   ],
   "message": null
 }
-When no candidate is suitable, return exactly:
-{"recommendations": [], "message": "No suitable food pairings were found for your dietary requirements."}
 ''';
 
   static String _buildDataSection({
@@ -264,11 +250,17 @@ When no candidate is suitable, return exactly:
   }
 
   static String _describeFood(LocalFood food) {
-    return '- id ${food.id}: ${food.name} | category: ${_value(food.category)}';
+    final List<String> attributes = <String>[
+      if (food.category.isNotEmpty) food.category,
+      if (food.cookingStyle.isNotEmpty) food.cookingStyle,
+      if (food.mealType.isNotEmpty) food.mealType,
+      if (food.mainTaste.isNotEmpty) food.mainTaste,
+    ];
+    final String detail = attributes.isEmpty
+        ? ''
+        : ' (${attributes.join(', ')})';
+    return '- id ${food.id}: ${food.name}$detail';
   }
-
-  static String _value(String value) =>
-      value.trim().isEmpty ? 'not provided' : value.trim();
 }
 
 /// A Gemini model that is temporarily unavailable (429/5xx) - the signal

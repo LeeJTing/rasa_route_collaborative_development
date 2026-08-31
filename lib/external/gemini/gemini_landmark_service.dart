@@ -181,6 +181,41 @@ class GeminiLandmarkService {
   is washed out, or so colour-cast the ingredients cannot be told apart.
   ''';
 
+  /// Shared prompt block defining the app's catalogue dish types. Added so
+  /// recognition follows the SAME categories the catalogue actually stores:
+  /// a genuinely Malaysian snack or packaged item (e.g. Tam Tam biscuits)
+  /// must not be offered as an addable landmark even though it is a real
+  /// Malaysian product.
+  static const String _catalogueFoodTypeRules = '''
+  CATALOGUE DISH TYPE - classify the detected item into EXACTLY ONE of the
+  five dish types the app's local-food catalogue accepts:
+
+  - "Food" - a MAIN DISH / meal served on a plate/bowl/wrapper: rice dishes
+    (nasi lemak, nasi kandar, nasi campur), noodles (char kway teow, laksa,
+    mee goreng), roti (roti canai, murtabak, roti john), etc. Something a
+    person orders to eat as a meal.
+  - "Beverage" - a REAL DRINK served in a cup/glass: teh tarik, kopi, fresh
+    juice, cendol-as-drink. NOT a canned ("tin") or bottled drink, and NOT a
+    packaged drink.
+  - "Fruit" - fresh whole or cut fruit (a plate of cut mango, a young
+    coconut).
+  - "Dessert" - a sweet dish (ais kacang, cendol-as-dessert, bubur cha cha).
+  - "Kuih" - traditional Malay cakes/sweets/rice-based snacks served fresh
+    (kuih lapis, seri muka, talam, onde-onde, apam balik).
+
+  Use "none" when the item is NOT any of the above - for example:
+    - packaged snacks (biscuits like Tam Tam, chips/crisps, crackers,
+      cookies, chocolates, sweets in packaging)
+    - canned or bottled drinks (soft drinks in a "tin", bottled water,
+      packaged juice)
+    - packaged/instant foods with no freshly-served dish
+    - any non-food item.
+
+  A "none" item may still be genuinely Malaysian, but it is a Malaysian
+  product, NOT an addable dish: it must never be offered as a landmark.
+  Set "foodType" to exactly one of: Food|Beverage|Fruit|Dessert|Kuih|none.
+  ''';
+
   /// Quick, name-only call - phase 1 of the two-phase recognition flow.
   /// Cheaper than [analyzeFoodImage]: only `dish` and the status fields are
   /// meaningful on the response. Used to check the catalogue first; the full
@@ -289,6 +324,8 @@ $_localFoodRules
 
 $_imageQualityRules
 
+$_catalogueFoodTypeRules
+
   Worked examples - match this reasoning style and calibration:
 
   Example A - a plate of coconut rice with sambal, anchovies, peanuts, egg:
@@ -322,6 +359,7 @@ $_imageQualityRules
     "localFoodConfidence": 0.0-1.0,
     "imageQuality": "good|acceptable|poor",
     "imageQualityIssues": ["string"],
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "confidence": 0.0-1.0
@@ -343,6 +381,7 @@ $_imageQualityRules
       cookingStyle: '',
       mealType: '',
       foodCategory: '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       localFoodConfidence: ((json['localFoodConfidence'] as num?) ?? 1)
           .toDouble(),
@@ -452,6 +491,8 @@ $_localFoodRules
 
 $_imageQualityRules
 
+$_catalogueFoodTypeRules
+
   This is the IN-DEPTH analysis - your judgement here overrides any quicker
   first-pass guess, so take the full procedure above seriously rather than
   agreeing with an obvious first impression.
@@ -472,6 +513,7 @@ $_imageQualityRules
     "cookingStyle": "string",
     "mealType": "string",
     "foodCategory": "string",
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "localFoodReasoning": "string",
     "isMalaysianLocalFood": boolean,
     "localFoodConfidence": 0.0-1.0,
@@ -505,6 +547,7 @@ $_imageQualityRules
       cookingStyle: (json['cookingStyle'] as String?) ?? '',
       mealType: (json['mealType'] as String?) ?? '',
       foodCategory: (json['foodCategory'] as String?) ?? '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       localFoodConfidence: ((json['localFoodConfidence'] as num?) ?? 1)
           .toDouble(),
@@ -622,6 +665,8 @@ $_imageQualityRules
     - a suggested selling price range in MYR (suggestedPriceMin and
       suggestedPriceMax)
 
+$_catalogueFoodTypeRules
+
   Return ONLY raw JSON, no markdown fences, no candidate list:
   {
     "observedFood": "string",
@@ -635,6 +680,7 @@ $_imageQualityRules
     "cookingStyle": "string",
     "mealType": "string",
     "foodCategory": "string",
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "isMalaysianLocalFood": boolean,
     "culturalBackground": "string",
     "tasteTags": ["string"],
@@ -664,6 +710,7 @@ $_imageQualityRules
       cookingStyle: (json['cookingStyle'] as String?) ?? '',
       mealType: (json['mealType'] as String?) ?? '',
       foodCategory: (json['foodCategory'] as String?) ?? '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       culturalBackground: (json['culturalBackground'] as String?) ?? '',
       tasteTags:
@@ -688,7 +735,10 @@ $_imageQualityRules
   }
 
   /// Analyze signboard image to extract restaurant name (REQ106_31, REQ106_37)
-  /// Returns: extracted text + frame status
+  /// Returns: extracted text + frame status. Multilingual-aware - Malaysian
+  /// signs mix Malay/English (Latin), Chinese, Tamil and Jawi; the prompt
+  /// romanises non-Latin names into [SignboardAnalysisResponse.textDetected]
+  /// and keeps the exact displayed text in [SignboardAnalysisResponse.nameOriginalScript].
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<SignboardAnalysisResponse> analyzeSignboardImage({
     required List<int> imageBytes,
@@ -710,6 +760,11 @@ $_imageQualityRules
     const String prompt = '''
   Analyze this restaurant/stall signboard photo.
 
+  Malaysian signboards commonly mix scripts: Malay and English (Latin),
+  Simplified/Traditional Chinese, Tamil, and Jawi (Malay written in Arabic
+  script). Read text in ALL of these scripts - never refuse or report
+  "unreadable" just because the name is not in Latin letters.
+
   The "frame" means the four edges of the image itself. A signboard is ONLY
   "fully in frame" when its ENTIRE outline - all four corners and edges -
   sits fully inside the image with clear margin and is not cut off anywhere.
@@ -726,7 +781,27 @@ $_imageQualityRules
   Steps:
   1. Locate the signboard and check its position against the four edges.
   2. Is this a valid restaurant/stall signboard? (yes/no)
-  3. Extract ALL visible text (restaurant name, slogan, etc.).
+  3. Identify the RESTAURANT NAME - usually the largest, most prominent
+     text on the signboard. Return ONLY the name. NEVER include:
+       - lot numbers or addresses ("Lot 12", "Lot No. 12", "No. 12",
+         "Jalan Ampang", "Jln Tun Razak", postcodes like "50450")
+       - phone numbers ("Tel: 012-345 6789", "HP 0123456789",
+         "+60 12-345 6789")
+       - slogans, "Open"/"Buka" signs, or operating hours.
+     When words like "Restoran", "Restaurant", "Kedai", "Kopitiam",
+     "茶餐室" are part of the name, KEEP them - do not strip or drop them.
+     If a lot number or phone number appears on the signboard, leave it
+     out of "textDetected" entirely.
+  4. Transcribe the name faithfully from the signboard.
+
+  For non-Latin names (Chinese/Tamil/Jawi):
+  - "textDetected" = the romanised (Latin) form using the most common
+    Malaysian spelling (pinyin for Chinese, romanised Tamil/Jawi). If
+    unsure, transcribe phonetically so it is still usable in the app.
+  - "nameOriginalScript" = the exact characters exactly as they appear on
+    the signboard.
+  For Latin-script names both fields carry the same text and
+  "languageScript" is "latin".
 
   IMPORTANT: the name being readable does NOT mean the signboard is fully in
   frame. Judge completeness ONLY by whether any part of the signboard is
@@ -735,7 +810,9 @@ $_imageQualityRules
   Return ONLY raw JSON, no markdown fences, no extra text:
   {
     "signboardStatus": "detected|not_detected|unclear",
-    "textDetected": "Extracted text or null",
+    "textDetected": "restaurant name only - no lot number, address, or phone number, or null",
+    "nameOriginalScript": "exact displayed name or null if Latin",
+    "languageScript": "latin|chinese|tamil|jawi|mixed",
     "signboardImageStatus": "complete|partially_captured|obstructed",
     "confidence": 0.0-1.0
   }
@@ -751,6 +828,9 @@ $_imageQualityRules
     return SignboardAnalysisResponse(
       signboardStatus: (json['signboardStatus'] as String?) ?? 'unclear',
       textDetected: json['textDetected'] as String?,
+      nameOriginalScript: json['nameOriginalScript'] as String?,
+      languageScript:
+          (json['languageScript'] as String?)?.trim().toLowerCase() ?? 'latin',
       signboardImageStatus:
           (json['signboardImageStatus'] as String?) ?? 'unclear',
       confidence: ((json['confidence'] as num?) ?? 0).toDouble(),

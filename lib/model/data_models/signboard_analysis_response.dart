@@ -8,6 +8,8 @@ class SignboardAnalysisResponse implements JsonModel {
   const SignboardAnalysisResponse({
     required this.signboardStatus,
     this.textDetected,
+    this.nameOriginalScript,
+    this.languageScript = 'latin',
     required this.signboardImageStatus,
     this.confidence = 1.0,
   });
@@ -16,10 +18,20 @@ class SignboardAnalysisResponse implements JsonModel {
   /// If "not_detected" or "unclear" → Error A7 (can't extract name)
   final String signboardStatus;
 
-  /// Extracted text from signboard (restaurant name)
-  /// Null if signboardStatus != "detected" or no text found
-  /// Used for auto-filling Restaurant Name field
+  /// The restaurant name, romanised to Latin script when the signboard is
+  /// non-Latin (see [nameOriginalScript] for the exact text as displayed).
+  /// Null if signboardStatus != "detected" or no text found. Used for
+  /// auto-filling the Restaurant Name field.
   final String? textDetected;
+
+  /// For non-Latin signboards (Chinese / Tamil / Jawi) the name exactly as
+  /// it appears on the signboard, e.g. 海天楼 or அரவிந்த். Null (or equal to
+  /// [textDetected]) when the signboard is Latin-script.
+  final String? nameOriginalScript;
+
+  /// Script of the detected name: "latin" | "chinese" | "tamil" | "jawi" |
+  /// "mixed". Defaults to "latin" when the field is absent.
+  final String languageScript;
 
   /// Frame completeness: "complete" | "partially_captured" | "obstructed"
   /// If not "complete" → Error A19 (signboard not fully in frame)
@@ -32,6 +44,8 @@ class SignboardAnalysisResponse implements JsonModel {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'signboardStatus': signboardStatus,
     'textDetected': textDetected,
+    'nameOriginalScript': nameOriginalScript,
+    'languageScript': languageScript,
     'signboardImageStatus': signboardImageStatus,
     'confidence': confidence,
   };
@@ -39,11 +53,15 @@ class SignboardAnalysisResponse implements JsonModel {
   SignboardAnalysisResponse copyWith({
     String? signboardStatus,
     String? textDetected,
+    String? nameOriginalScript,
+    String? languageScript,
     String? signboardImageStatus,
     double? confidence,
   }) => SignboardAnalysisResponse(
     signboardStatus: signboardStatus ?? this.signboardStatus,
     textDetected: textDetected ?? this.textDetected,
+    nameOriginalScript: nameOriginalScript ?? this.nameOriginalScript,
+    languageScript: languageScript ?? this.languageScript,
     signboardImageStatus: signboardImageStatus ?? this.signboardImageStatus,
     confidence: confidence ?? this.confidence,
   );

@@ -128,6 +128,19 @@ abstract final class AppColors {
   static const Color tagNeutralBorder = Color(0xFFE0E0E0);
   static const Color tagNeutralText = Color(0xFF424242);
 
+  // ===========================================================================
+  // Tourist profile (ChinShunYon) - dietary-restriction chips
+  // ===========================================================================
+
+  /// [Figma] Dietary-restriction chip, Matches the mock-up's chip colours.
+  static const Color tagDietaryBackground = Color(0xFFEBF8FF);
+  static const Color tagDietaryBorder = Color(0xFFBEE3F8);
+  static const Color tagDietaryText = Color(0xFF3182CE);
+
+  // ===========================================================================
+  // End of Tourist profile (ChinShunYon)
+  // ===========================================================================
+
   // ---------------------------------------------------------------------------
   // Banners (Quick Mode notice, allergy warning, name-collision caution)
   // ---------------------------------------------------------------------------

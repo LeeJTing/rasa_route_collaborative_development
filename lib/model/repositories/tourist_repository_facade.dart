@@ -1,3 +1,8 @@
+import '../../domain_model/auth_session.dart';
+import '../../domain_model/dietary_restriction.dart';
+import '../../domain_model/food_preference.dart';
+import '../../domain_model/tourist.dart';
+
 import 'auth_repository.dart';
 import 'interaction_repository.dart';
 import 'location_repository.dart';
@@ -16,4 +21,85 @@ class TouristRepositoryFacade {
   final TouristProfileRepository profile = TouristProfileRepository();
   final InteractionRepository interaction = InteractionRepository();
   final LocationRepository location = LocationRepository();
+
+  // ==========================================================================
+  // Authentication - flat API
+  // ==========================================================================
+
+  Future<void> sendEmailOtp(String email) => auth.sendEmailOtp(email);
+
+  Future<AuthSession?> verifyEmailOtp({
+    required String email,
+    required String token,
+  }) => auth.verifyEmailOtp(email: email, token: token);
+
+  String get pendingAuthEmail => auth.pendingEmail;
+
+  Future<bool> signInWithGoogle({required String redirectTo}) =>
+      auth.signInWithGoogle(redirectTo: redirectTo);
+
+  Future<AuthSession?> getCurrentSession() => auth.getCurrentSession();
+
+  Future<void> signOut() => auth.signOut();
+
+  String get currentUserId => auth.currentUserId;
+
+  Future<String?> currentTouristId() => auth.currentTouristId();
+
+  /// Returns the [Tourist] row for [session]'s auth user, auto-creating it on
+  /// first sign-in - the "register" half of the login/register UX.
+  Future<Tourist?> getOrCreateTourist(AuthSession session) =>
+      auth.getOrCreateTourist(session);
+
+  // ==========================================================================
+  // Profile - flat API
+  // ==========================================================================
+
+  /// The full profile for [touristId] (identity + preferences + restrictions).
+  Future<Tourist?> getTouristProfile({
+    required String touristId,
+    String authUserId = '',
+    String email = '',
+    String displayName = '',
+  }) => profile.getTourist(
+    touristId: touristId,
+    authUserId: authUserId,
+    email: email,
+    displayName: displayName,
+  );
+
+  /// Every food preference [touristId] has picked (junction rows).
+  Future<List<FoodPreference>> getFoodPreferences(String touristId) =>
+      profile.getFoodPreferences(touristId);
+
+  /// Every selectable food preference from `food_preference` (tastes and
+  /// categories mixed - group by [FoodPreference.kind]).
+  Future<List<FoodPreference>> foodPreferenceOptions() =>
+      profile.foodPreferenceOptions();
+
+  /// Replaces [touristId]'s preference selection (junction rows).
+  Future<void> saveFoodPreferences(String touristId, List<int> preferenceIds) =>
+      profile.saveFoodPreferences(touristId, preferenceIds);
+
+  /// Every restriction [touristId] holds.
+  Future<List<DietaryRestriction>> getDietaryRestrictions(String touristId) =>
+      profile.getDietaryRestrictions(touristId);
+
+  /// Every restriction a tourist can pick.
+  Future<List<DietaryRestriction>> dietaryRestrictionOptions() =>
+      profile.dietaryRestrictionOptions();
+
+  /// Replaces [touristId]'s restriction selection (junction rows).
+  Future<void> saveDietaryRestrictions(
+    String touristId,
+    List<int> restrictionIds,
+  ) => profile.saveDietaryRestrictions(touristId, restrictionIds);
+
+  /// The local-food ids [touristId] has saved.
+  Future<Set<int>> favouriteFoodIds(String touristId) =>
+      profile.favouriteFoodIds(touristId);
+
+  /// Removes one saved dish from [touristId]'s favourites.
+  Future<void> removeFavourite(String touristId, int localFoodId) =>
+      profile.removeFavourite(touristId, localFoodId);
 }
