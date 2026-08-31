@@ -205,27 +205,28 @@ class GeminiService {
     return generateText(prompt);
   }
 
-  /// The Gemini instructions for UC406 food pairing - concise, so we do not
-  /// need to send a long, attribute-heavy candidate list. Only ids and names
-  /// are sent; Gemini pairs from its own knowledge of these Malaysian dishes.
+  /// The Gemini instructions for UC406 food pairing. Candidates carry a short
+  /// attribute tail (category, cooking style, meal type, main taste) so the
+  /// model can judge pairings, and the prompt forbids an empty result because
+  /// the calling repository only sends a non-empty, dietary-safe candidate
+  /// list - a pairing must always be returned when candidates exist.
   static const String _pairingInstructions = '''
 You are a Malaysian local-food pairing assistant. Recommend the best foods from CANDIDATES to go with SELECTED FOOD.
 
 RULES
 1. Recommend only ids listed in CANDIDATES. Never recommend the SELECTED FOOD. Do not repeat a candidate. Up to 5.
-2. Pair using your knowledge of these Malaysian dishes: spicy with something cooling or mildly sweet, savoury with a drink or dessert, rich with something light/refreshing, soft with crispy, a main with a suitable side, kuih or beverage.
+2. Pair using your knowledge of these Malaysian dishes: spicy with something cooling or mildly sweet, savoury with a drink or dessert, rich with something light/refreshing, soft with crispy, a main with a suitable side, kuih or beverage. Use the category, cooking style, meal type and main taste shown after each id to judge the pairing.
 3. matchPercentage: whole number 0-100 (90+ exceptional, 80s very good, 70s good, 60s reasonable, below 60 weak). Rank highest first; ranks start at 1.
 4. reason: one short sentence saying how the food pairs with the SELECTED FOOD.
 5. Candidates are already dietary-safe for the tourist, so set dietaryStatus "compatible" and warning null.
-6. Return ONLY JSON, no markdown, no extra text:
+6. CANDIDATES is never empty, so you MUST always return at least one recommendation. If nothing pairs well, still recommend the best available candidate with a lower matchPercentage (50-60) and an honest reason. Never return an empty recommendations array.
+7. Return ONLY JSON, no markdown, no extra text:
 {
   "recommendations": [
     {"foodId": <int from CANDIDATES>, "rank": 1, "matchPercentage": 85, "reason": "...", "dietaryStatus": "compatible", "warning": null}
   ],
   "message": null
 }
-If nothing pairs well, return exactly:
-{"recommendations": [], "message": "No suitable food pairings were found for your dietary requirements."}
 ''';
 
   static String _buildDataSection({
@@ -246,7 +247,16 @@ If nothing pairs well, return exactly:
   }
 
   static String _describeFood(LocalFood food) {
-    return '- id ${food.id}: ${food.name}';
+    final List<String> attributes = <String>[
+      if (food.category.isNotEmpty) food.category,
+      if (food.cookingStyle.isNotEmpty) food.cookingStyle,
+      if (food.mealType.isNotEmpty) food.mealType,
+      if (food.mainTaste.isNotEmpty) food.mainTaste,
+    ];
+    final String detail = attributes.isEmpty
+        ? ''
+        : ' (${attributes.join(', ')})';
+    return '- id ${food.id}: ${food.name}$detail';
   }
 }
 
