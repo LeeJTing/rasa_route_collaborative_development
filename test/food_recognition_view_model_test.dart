@@ -25,15 +25,23 @@ class _FakeFoodRecognitionLogic extends FoodRecognitionLogic {
       bool nameMatchesPhoto,
       double matchConfidence,
       bool isLocalFood,
+      bool fitsCatalogueCategory,
       String observedFood,
+      List<String> dietaryRestrictions,
     })
   >
   Function(List<int> bytes, String name)?
   onResolveByName;
-  Future<({LocalFood food, double priceMin, double priceMax})> Function(
-    List<int> bytes,
-    String name,
-  )?
+  Future<
+    ({
+      LocalFood food,
+      double priceMin,
+      double priceMax,
+      bool fitsCatalogueCategory,
+      List<String> dietaryRestrictions,
+    })
+  >
+  Function(List<int> bytes, String name)?
   onEnrichCandidate;
 
   @override
@@ -49,17 +57,26 @@ class _FakeFoodRecognitionLogic extends FoodRecognitionLogic {
       bool nameMatchesPhoto,
       double matchConfidence,
       bool isLocalFood,
+      bool fitsCatalogueCategory,
       String observedFood,
+      List<String> dietaryRestrictions,
     })
   >
   resolveByName(List<int> imageBytes, String name) =>
       onResolveByName!(imageBytes, name);
 
   @override
-  Future<({LocalFood food, double priceMin, double priceMax})> enrichCandidate(
-    List<int> imageBytes,
-    String name,
-  ) => onEnrichCandidate!(imageBytes, name);
+  Future<
+    ({
+      LocalFood food,
+      double priceMin,
+      double priceMax,
+      bool fitsCatalogueCategory,
+      List<String> dietaryRestrictions,
+    })
+  >
+  enrichCandidate(List<int> imageBytes, String name) =>
+      onEnrichCandidate!(imageBytes, name);
 }
 
 LocalFood _food(String name) => LocalFood(
@@ -84,6 +101,9 @@ XFile _image() => XFile.fromData(
 FoodRecognitionViewModel _buildViewModel(_FakeFoodRecognitionLogic logic) =>
     FoodRecognitionViewModel(
       landmarkLogic: LandmarkLogicFacade(foodRecognition: logic),
+      // No artificial 10s loading floor in unit tests - the floor is a UI
+      // behaviour and would slow every test by 10s otherwise.
+      minimumLoadingDuration: Duration.zero,
     );
 
 void main() {
@@ -154,8 +174,13 @@ void main() {
         // The picked candidate is resolved to its full record (catalogue
         // match, else Gemini name+image analysis) with its price range - so
         // "View Details" is never left name-only.
-        logic.onEnrichCandidate = (List<int> bytes, String name) async =>
-            (food: _food('Roti Canai'), priceMin: 2.0, priceMax: 8.0);
+        logic.onEnrichCandidate = (List<int> bytes, String name) async => (
+          food: _food('Roti Canai'),
+          priceMin: 2.0,
+          priceMax: 8.0,
+          fitsCatalogueCategory: true,
+          dietaryRestrictions: const <String>[],
+        );
         final FoodRecognitionViewModel vm = _buildViewModel(logic);
         await vm.captureAndRecognize(_image());
         expect(vm.hasMultipleResults, isTrue); // picker showing
@@ -187,7 +212,9 @@ void main() {
         nameMatchesPhoto: true,
         matchConfidence: 1.0,
         isLocalFood: true,
+        fitsCatalogueCategory: true,
         observedFood: '',
+        dietaryRestrictions: const <String>[],
       );
       final FoodRecognitionViewModel vm = _buildViewModel(logic);
       await vm.captureAndRecognize(_image()); // populates _capturedImage
@@ -212,7 +239,9 @@ void main() {
         nameMatchesPhoto: true,
         matchConfidence: 1.0,
         isLocalFood: true,
+        fitsCatalogueCategory: true,
         observedFood: '',
+        dietaryRestrictions: const <String>[],
       );
       final FoodRecognitionViewModel vm = _buildViewModel(logic);
       await vm.captureAndRecognize(_image());
@@ -224,78 +253,120 @@ void main() {
       expect(vm.recognizedFood?.name, 'Murtabak');
     });
 
+    test('keeps the detected food and warns when the typed name does not match '
+        'the photo', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Roti Canai')],
+      );
+      // Photo was detected as 'Roti Canai' but the tourist types
+      // 'Nasi Lemak': Gemini can't confirm it, so the detected food must
+      // stay and a mismatch warning must show instead of renaming.
+      logic.onResolveByName = (List<int> bytes, String name) async => (
+        food: _food(name),
+        priceMin: 0.0,
+        priceMax: 0.0,
+        nameMatchesPhoto: false,
+        matchConfidence: 0.9,
+        isLocalFood: false,
+        fitsCatalogueCategory: true,
+        observedFood: 'Roti Canai',
+        dietaryRestrictions: const <String>[],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.captureAndRecognize(_image()); // populates _capturedImage
+
+      await vm.enterFoodName('Nasi Lemak');
+
+      // The displayed name did NOT change to what was typed.
+      expect(vm.recognizedFood?.name, 'Roti Canai');
+      expect(vm.nameMismatch, isTrue);
+      expect(vm.observedFoodName, 'Roti Canai');
+      expect(vm.typedName, 'Nasi Lemak');
+      // The detected food's own verdict stays.
+      expect(vm.isLocalFood, isTrue);
+
+      // Dismiss keeps the detected food and drops the typed name.
+      vm.dismissNameMismatch();
+      expect(vm.recognizedFood?.name, 'Roti Canai');
+      expect(vm.nameMismatch, isFalse);
+      expect(vm.typedName, isNull);
+    });
+
+    test('a mismatched typed name can never be applied - keeping the detected '
+        'food is the only action', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Roti Canai')],
+      );
+      logic.onResolveByName = (List<int> bytes, String name) async => (
+        food: _food(name),
+        priceMin: 0.0,
+        priceMax: 0.0,
+        nameMatchesPhoto: false,
+        matchConfidence: 0.9,
+        isLocalFood: false,
+        fitsCatalogueCategory: true,
+        observedFood: 'Roti Canai',
+        dietaryRestrictions: const <String>[],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.captureAndRecognize(_image());
+      await vm.enterFoodName('Nasi Lemak');
+
+      // The mismatch is surfaced - the typed name is only held for the
+      // warning ("this photo doesn't look like Nasi Lemak") ...
+      expect(vm.nameMismatch, isTrue);
+      expect(vm.observedFoodName, 'Roti Canai');
+      expect(vm.typedName, 'Nasi Lemak');
+      // ... and the detected food can never be replaced by the typed name.
+      expect(vm.recognizedFood?.name, 'Roti Canai');
+      expect(vm.isLocalFood, isTrue);
+
+      // The only action is keeping the detected food.
+      vm.dismissNameMismatch();
+      expect(vm.recognizedFood?.name, 'Roti Canai');
+      expect(vm.nameMismatch, isFalse);
+      expect(vm.typedName, isNull);
+    });
+
     test(
-      'keeps the detected food and warns when the typed name does not match '
-      'the photo',
+      'a re-submitted name that resolves to a snack is kept but not addable',
       () async {
         final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
         logic.onRecognize = (_) async => FoodRecognitionResult(
           isLocalFood: true,
           candidates: <LocalFood>[_food('Roti Canai')],
         );
-        // Photo was detected as 'Roti Canai' but the tourist types
-        // 'Nasi Lemak': Gemini can't confirm it, so the detected food must
-        // stay and a mismatch warning must show instead of renaming.
+        // The tourist changes the name to a snack (Tam Tam) and Gemini confirms
+        // the photo shows it - the category gate must be re-evaluated for the
+        // NEW name, not left stale from the previous recognition.
         logic.onResolveByName = (List<int> bytes, String name) async => (
-          food: _food(name),
+          food: _food('Tam Tam'),
           priceMin: 0.0,
           priceMax: 0.0,
-          nameMatchesPhoto: false,
-          matchConfidence: 0.9,
-          isLocalFood: false,
-          observedFood: 'Roti Canai',
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          isLocalFood: true,
+          fitsCatalogueCategory: false,
+          observedFood: '',
+          dietaryRestrictions: const <String>[],
         );
         final FoodRecognitionViewModel vm = _buildViewModel(logic);
         await vm.captureAndRecognize(_image()); // populates _capturedImage
 
-        await vm.enterFoodName('Nasi Lemak');
+        await vm.enterFoodName('Tam Tam');
 
-        // The displayed name did NOT change to what was typed.
-        expect(vm.recognizedFood?.name, 'Roti Canai');
-        expect(vm.nameMismatch, isTrue);
-        expect(vm.observedFoodName, 'Roti Canai');
-        expect(vm.typedName, 'Nasi Lemak');
-        // The detected food's own verdict stays.
+        // The typed snack becomes the recognised food ...
+        expect(vm.recognizedFood?.name, 'Tam Tam');
+        // ... but it is Malaysian-yet-not-addable.
         expect(vm.isLocalFood, isTrue);
-
-        // Dismiss keeps the detected food and drops the typed name.
-        vm.dismissNameMismatch();
-        expect(vm.recognizedFood?.name, 'Roti Canai');
-        expect(vm.nameMismatch, isFalse);
-        expect(vm.typedName, isNull);
-      },
-    );
-
-    test(
-      'acceptTypedName applies the typed name only on explicit confirmation',
-      () async {
-        final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
-        logic.onRecognize = (_) async => FoodRecognitionResult(
-          isLocalFood: true,
-          candidates: <LocalFood>[_food('Roti Canai')],
-        );
-        logic.onResolveByName = (List<int> bytes, String name) async => (
-          food: _food(name),
-          priceMin: 0.0,
-          priceMax: 0.0,
-          nameMatchesPhoto: false,
-          matchConfidence: 0.9,
-          isLocalFood: false,
-          observedFood: 'Roti Canai',
-        );
-        final FoodRecognitionViewModel vm = _buildViewModel(logic);
-        await vm.captureAndRecognize(_image());
-        await vm.enterFoodName('Nasi Lemak');
-        expect(vm.nameMismatch, isTrue);
-        expect(vm.recognizedFood?.name, 'Roti Canai');
-
-        vm.acceptTypedName();
-
-        // Now - and only now - the typed name's Gemini-returned details apply.
-        expect(vm.recognizedFood?.name, 'Nasi Lemak');
-        expect(vm.nameMismatch, isFalse);
-        expect(vm.typedName, isNull);
-        expect(vm.isLocalFood, isFalse);
+        expect(vm.fitsCatalogueCategory, isFalse);
+        // And "Add New Landmark" is blocked.
+        vm.proceedToAddLandmark();
+        expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
       },
     );
   });
@@ -330,6 +401,23 @@ void main() {
       // Without the guard this would call AppNavigator.pop (and throw, since
       // no navigator is built) - completing normally proves the guard holds.
       expect(vm.confirmFoodAndReturn, returnsNormally);
+    });
+
+    test('proceedToAddLandmark is a no-op for a Malaysian snack', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        fitsCatalogueCategory: false,
+        candidates: <LocalFood>[_food('Tam Tam')],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.captureAndRecognize(_image());
+
+      vm.proceedToAddLandmark();
+
+      // The hand-off is never populated - the snack is a Malaysian product,
+      // not an addable landmark.
+      expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
     });
   });
 
@@ -372,6 +460,20 @@ void main() {
       expect(vm.proceedToAddLandmark, returnsNormally);
       expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
     });
+
+    test(
+      'blocks add-landmark for a Malaysian snack (fitsCatalogueCategory=false)',
+      () {
+        final LandmarkDetailViewModel vm = LandmarkDetailViewModel();
+        vm.setRecognizedFood(_food('Tam Tam'));
+        vm.setIsLocalFood(true);
+        vm.setFitsCatalogueCategory(false);
+
+        expect(vm.fitsCatalogueCategory, isFalse);
+        expect(vm.proceedToAddLandmark, returnsNormally);
+        expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
+      },
+    );
 
     testWidgets('passes a local food onward to the hand-off', (tester) async {
       await tester.pumpWidget(

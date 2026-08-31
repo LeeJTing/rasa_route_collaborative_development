@@ -15,6 +15,8 @@ class FoodDetailViewModel extends BaseViewModel {
   List<String> _allergyWarnings = const <String>[];
   LocalFood? _collidedFood;
   bool _isFoodInformationExpanded = false;
+  bool _isStartingPronunciation = false;
+  String? _pronunciationMessage;
 
   LocalFood? get food => _food;
   bool get isLiked => _isLiked;
@@ -22,6 +24,8 @@ class FoodDetailViewModel extends BaseViewModel {
   List<String> get allergyWarnings => _allergyWarnings;
   LocalFood? get collidedFood => _collidedFood;
   bool get isFoodInformationExpanded => _isFoodInformationExpanded;
+  bool get isStartingPronunciation => _isStartingPronunciation;
+  String? get pronunciationMessage => _pronunciationMessage;
 
   @override
   Future<void> onInit() => loadFood(foodId);
@@ -45,5 +49,33 @@ class FoodDetailViewModel extends BaseViewModel {
   void toggleFoodInformation() {
     _isFoodInformationExpanded = !_isFoodInformationExpanded;
     safeNotifyListeners();
+  }
+
+  Future<void> playPronunciation() async {
+    final LocalFood? currentFood = _food;
+    if (currentFood == null || _isStartingPronunciation) return;
+    _isStartingPronunciation = true;
+    _pronunciationMessage = null;
+    safeNotifyListeners();
+    try {
+      final PronunciationPlaybackResult result = await foodLogic
+          .playPronunciation(currentFood);
+      _pronunciationMessage = switch (result) {
+        PronunciationPlaybackResult.curatedAudio => null,
+        PronunciationPlaybackResult.deviceVoice =>
+          'Using your device voice for this pronunciation.',
+        PronunciationPlaybackResult.unavailable =>
+          'Pronunciation audio is unavailable on this device.',
+      };
+    } finally {
+      _isStartingPronunciation = false;
+      safeNotifyListeners();
+    }
+  }
+
+  String? takePronunciationMessage() {
+    final String? message = _pronunciationMessage;
+    _pronunciationMessage = null;
+    return message;
   }
 }

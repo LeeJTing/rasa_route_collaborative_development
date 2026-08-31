@@ -60,11 +60,20 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
     // Whether the food was judged to be Malaysian local food - when not, the
     // "Add New Landmark" action below is hidden (details still shown).
     _viewModel.setIsLocalFood(LandmarkDraftHandoff().takeIsLocalFood());
+    _viewModel.setFitsCatalogueCategory(
+      LandmarkDraftHandoff().takeFitsCatalogueCategory(),
+    );
     // Gemini's suggested price range for the food, carried onto the
     // submitted LandmarkItem.
     _viewModel.setPriceRange(
       priceMin: LandmarkDraftHandoff().takePriceMin(),
       priceMax: LandmarkDraftHandoff().takePriceMax(),
+    );
+    // Dietary restrictions for the recognised food, carried onto the
+    // `food_dietary_restriction` association table if it becomes a new
+    // catalogue row.
+    _viewModel.setDietaryRestrictions(
+      LandmarkDraftHandoff().takeDietaryRestrictions(),
     );
 
     _viewModel.onInit();
@@ -98,7 +107,10 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                   return ListView(
                     padding: AppSpacing.screenPadding,
                     children: <Widget>[
-                      _SuccessBanner(isLocalFood: viewModel.isLocalFood),
+                      _SuccessBanner(
+                        isLocalFood: viewModel.isLocalFood,
+                        fitsCatalogueCategory: viewModel.fitsCatalogueCategory,
+                      ),
                       const SizedBox(height: AppSpacing.lg),
                       // The same "Recognised Food" card as `AddLandmarkView`'s,
                       // just always expanded (no collapse arrow) and without the
@@ -109,7 +121,8 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                         collapsible: false,
                       ),
                       const SizedBox(height: AppSpacing.lg),
-                      if (viewModel.isLocalFood) ...<Widget>[
+                      if (viewModel.isLocalFood &&
+                          viewModel.fitsCatalogueCategory) ...<Widget>[
                         Text(
                           viewModel.returnToFormAsAdditionalFood
                               ? 'Add this food to the landmark?'
@@ -129,13 +142,23 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                             ),
                           ),
                         ),
-                      ] else ...<Widget>[
+                      ] else if (!viewModel.isLocalFood) ...<Widget>[
                         // Not Malaysian local food - showing the info is the
                         // whole point of this screen, but it must never be
                         // offered as a landmark.
                         const Text(
                           "This doesn't appear to be Malaysian local food, "
                           'so it cannot be added as a landmark.',
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.bodyMedium,
+                        ),
+                      ] else ...<Widget>[
+                        // Malaysian, but not a catalogue dish type (snack,
+                        // package, canned drink) - a Malaysian product that
+                        // must never be offered as a landmark.
+                        const Text(
+                          'This is a Malaysian product but it is a snack or '
+                          'packaged item, so it cannot be added.',
                           textAlign: TextAlign.center,
                           style: AppTextStyles.bodyMedium,
                         ),
@@ -152,20 +175,29 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
 }
 
 class _SuccessBanner extends StatelessWidget {
-  const _SuccessBanner({required this.isLocalFood});
+  const _SuccessBanner({
+    required this.isLocalFood,
+    required this.fitsCatalogueCategory,
+  });
 
   /// Whether the shown food is Malaysian local food - changes the banner
   /// from a green "recognised" success into a caution-coloured "not local"
   /// note.
   final bool isLocalFood;
 
+  /// Whether the shown food fits a catalogue dish type - when false the
+  /// banner becomes a "Malaysian product, not addable" caution.
+  final bool fitsCatalogueCategory;
+
+  bool get _isAddable => isLocalFood && fitsCatalogueCategory;
+
   @override
   Widget build(BuildContext context) {
-    final Color accent = isLocalFood ? AppColors.success : AppColors.warning;
+    final Color accent = _isAddable ? AppColors.success : AppColors.warning;
     return Container(
       padding: AppSpacing.cardPadding,
       decoration: BoxDecoration(
-        color: isLocalFood
+        color: _isAddable
             ? AppColors.successContainer
             : AppColors.bannerCautionBackground,
         borderRadius: AppRadius.cardRadius,
@@ -174,7 +206,7 @@ class _SuccessBanner extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Icon(
-            isLocalFood ? Icons.check_circle : Icons.info_outline,
+            _isAddable ? Icons.check_circle : Icons.info_outline,
             color: accent,
           ),
           const SizedBox(width: AppSpacing.sm),
@@ -183,9 +215,11 @@ class _SuccessBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  isLocalFood
+                  _isAddable
                       ? 'Local Food Recognised successfully!'
-                      : 'Food Detected - Not Malaysian Local Food',
+                      : !isLocalFood
+                      ? 'Food Detected - Not Malaysian Local Food'
+                      : 'Malaysian Product Detected',
                   style: AppTextStyles.titleSmall.copyWith(
                     fontWeight: FontWeight.w700,
                     color: accent,
@@ -193,9 +227,11 @@ class _SuccessBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  isLocalFood
+                  _isAddable
                       ? 'Please review the information below.'
-                      : 'You can view the details, but it cannot be added as a landmark.',
+                      : !isLocalFood
+                      ? 'You can view the details, but it cannot be added as a landmark.'
+                      : 'It is a snack or packaged item, so it cannot be added as a landmark.',
                   style: AppTextStyles.bodySmall,
                 ),
               ],

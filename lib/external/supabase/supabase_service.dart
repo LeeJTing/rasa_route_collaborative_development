@@ -27,6 +27,15 @@ class SupabaseService {
     await Supabase.initialize(
       url: Env.supabaseUrl,
       publishableKey: Env.supabasePublishableKey,
+      // Google OAuth returns through the `com.rasaroute.app://login-callback`
+      // deep link; PKCE is the flow that pairs with a custom-scheme redirect
+      // on mobile (and the default here - this makes it explicit). Remember
+      // to whitelist that redirect URL in the Supabase project's auth
+      // settings, or the OAuth redirect is rejected before the app is
+      // reopened.
+      authOptions: const FlutterAuthClientOptions(
+        authFlowType: AuthFlowType.pkce,
+      ),
     );
     _isReady = true;
   }
@@ -82,19 +91,31 @@ class SupabaseService {
     String table, {
     String columns = '*',
     Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, List<Object?>>? inFilter,
     String? orderBy,
     bool ascending = true,
     int? limit,
+    int? rangeStart,
+    int? rangeEnd,
   }) async {
     dynamic query = _client.from(table).select(columns);
     for (final MapEntry<String, Object?> filter in eq.entries) {
       query = query.eq(filter.key, filter.value as Object);
+    }
+    final Map<String, List<Object?>> inValues =
+        inFilter ?? const <String, List<Object?>>{};
+    for (final MapEntry<String, List<Object?>> filter in inValues.entries) {
+      if (filter.value.isEmpty) continue;
+      query = query.inFilter(filter.key, filter.value);
     }
     if (orderBy != null) {
       query = query.order(orderBy, ascending: ascending);
     }
     if (limit != null) {
       query = query.limit(limit);
+    }
+    if (rangeStart != null && rangeEnd != null) {
+      query = query.range(rangeStart, rangeEnd);
     }
     final List<dynamic> rows = await query as List<dynamic>;
     return rows.cast<Map<String, dynamic>>();
@@ -154,4 +175,98 @@ class SupabaseService {
     }
     await query;
   }
+
+// ---------------------------------------------------------------------------
+// Authentication
+// ---------------------------------------------------------------------------
+
+  /// Returns the current authentication session as a plain map.
+  ///
+  /// Supabase SDK objects remain inside the external layer.
+  Future<Map<String, dynamic>?> getCurrentAuthSession() async {
+    if (!_isReady) return null;
+
+    final Session? session = Supabase.instance.client.auth.currentSession;
+    final User? user = Supabase.instance.client.auth.currentUser;
+
+    if (session == null || user == null) return null;
+
+    return _authSessionToMap(
+      session: session,
+      user: user,
+    );
+  }
+
+  /// Sends an email OTP for passwordless sign-in.
+  ///
+  /// Depending on the Supabase project's auth configuration, a new user may
+  /// be created automatically when the email does not already exist.
+  Future<void> sendEmailOtp({
+    required String email,
+  }) async {
+    await _client.auth.signInWithOtp(
+      email: email,
+    );
+  }
+
+  /// Verifies an email OTP and returns the resulting session as a plain map.
+  ///
+  /// Supabase SDK objects do not leave this external layer.
+  Future<Map<String, dynamic>?> verifyEmailOtp({
+    required String email,
+    required String token,
+  }) async {
+    final AuthResponse response = await _client.auth.verifyOTP(
+      email: email,
+      token: token,
+      type: OtpType.email,
+    );
+
+    final Session? session = response.session;
+    final User? user = response.user;
+
+    if (session == null || user == null) return null;
+
+    return _authSessionToMap(
+      session: session,
+      user: user,
+    );
+  }
+
+  /// Starts Google OAuth sign-in.
+  ///
+  /// Returns true when Supabase successfully launches the OAuth flow.
+  Future<bool> signInWithGoogle({
+    required String redirectTo,
+  }) async {
+    return _client.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: redirectTo,
+    );
+  }
+
+  /// Signs out the current Supabase user.
+  Future<void> signOut() async {
+    await _client.auth.signOut();
+  }
+
+  Map<String, dynamic> _authSessionToMap({
+    required Session session,
+    required User user,
+  }) {
+    return <String, dynamic>{
+      'access_token': session.accessToken,
+      'refresh_token': session.refreshToken,
+      'user_id': user.id,
+      'email': user.email,
+      'expires_at': session.expiresAt == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(
+        session.expiresAt! * 1000,
+        isUtc: true,
+      ).toIso8601String(),
+    };
+  }
+//End of Authentication -------------------------------------------------------
+
 }

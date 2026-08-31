@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart' hide ServiceStatus;
 
@@ -20,6 +22,12 @@ class DeviceCapabilityManager {
   DeviceCapabilityManager._();
 
   static final DeviceCapabilityManager _instance = DeviceCapabilityManager._();
+
+  AudioPlayer? _audioPlayer;
+  FlutterTts? _textToSpeech;
+
+  AudioPlayer get _pronunciationPlayer => _audioPlayer ??= AudioPlayer();
+  FlutterTts get _pronunciationTts => _textToSpeech ??= FlutterTts();
 
   // --- location --------------------------------------------------------------
 
@@ -142,6 +150,60 @@ class DeviceCapabilityManager {
 
   /// Opens the gallery. Returns null if the tourist cancels.
   Future<CapturedImage?> pickPhoto() async => null;
+
+  // --- pronunciation --------------------------------------------------------
+
+  /// Plays the curated recording when available, then falls back to the
+  /// device's Malay text-to-speech voice if the URL is missing or fails.
+  Future<DevicePronunciationPlaybackResult> playPronunciation({
+    required String foodName,
+    String? audioUrl,
+    String? fallbackText,
+  }) async {
+    try {
+      await _audioPlayer?.stop();
+    } catch (_) {
+      // A stale player must not prevent a new pronunciation attempt.
+    }
+    try {
+      await _textToSpeech?.stop();
+    } catch (_) {
+      // TTS is optional and is only needed when curated audio cannot play.
+    }
+
+    final String? remoteUrl = audioUrl?.trim();
+    if (remoteUrl != null && remoteUrl.isNotEmpty) {
+      try {
+        await _pronunciationPlayer.play(UrlSource(remoteUrl));
+        return DevicePronunciationPlaybackResult.curatedAudio;
+      } catch (_) {
+        // A missing object, timeout, or unsupported stream should not make the
+        // pronunciation control unusable. Continue with the device voice.
+      }
+    }
+
+    try {
+      await _pronunciationTts.setLanguage('ms-MY');
+      await _pronunciationTts.setSpeechRate(0.42);
+      await _pronunciationTts.setPitch(1.0);
+      await _pronunciationTts.setVolume(1.0);
+      final String spokenText = fallbackText?.trim().isNotEmpty == true
+          ? fallbackText!.trim()
+          : foodName;
+      final Object? result = await _pronunciationTts.speak(spokenText);
+      if (result == 1) return DevicePronunciationPlaybackResult.deviceVoice;
+    } catch (_) {
+      // Converted to a stable result below so callers do not handle plugin
+      // exceptions from different platforms.
+    }
+    return DevicePronunciationPlaybackResult.unavailable;
+  }
+}
+
+enum DevicePronunciationPlaybackResult {
+  curatedAudio,
+  deviceVoice,
+  unavailable,
 }
 
 /// A photo taken or picked by the tourist.

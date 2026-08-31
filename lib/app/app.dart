@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../views/add_landmark_view/add_landmark_view.dart';
 import '../views/dashboard_view/dashboard_view.dart';
+import '../views/edit_dietary_restriction_view/edit_dietary_restriction_view.dart';
+import '../views/edit_food_preference_view/edit_food_preference_view.dart';
 import '../views/favourite_collection_view/favourite_collection_view.dart';
 import '../views/food_comparison_view/food_comparison_view.dart';
 import '../views/food_detail_view/food_detail_view.dart';
@@ -9,9 +11,12 @@ import '../views/food_recognition_view/food_recognition_view.dart';
 import '../views/food_recommendation_view/food_recommendation_view.dart';
 import '../views/landmark_detail_view/landmark_detail_view.dart';
 import '../views/landmark_history_view/landmark_history_view.dart';
+import '../views/landmark_place_detail_view/landmark_item_detail_view.dart';
+import '../views/landmark_place_detail_view/landmark_place_detail_view.dart';
 import '../views/local_food_list_view/local_food_list_view.dart';
 import '../views/login_register_view/login_register_view.dart';
 import '../views/main_shell_view/main_shell_view.dart';
+import '../views/matches_recommendation_view/matches_recommendation_view.dart';
 import '../views/opt_view/otp_view.dart';
 import '../views/profile_set_up_view/profile_set_up_view.dart';
 import '../views/profile_view/profile_view.dart';
@@ -48,8 +53,10 @@ class RasaRouteApp extends StatelessWidget {
       theme: AppTheme.light,
 
       navigatorKey: AppNavigator.navigatorKey,
-      // initialRoute: AppRoutes.loginRegister,
-      initialRoute: AppRoutes.mainShell,
+      // The login screen doubles as the entry gate: on startup it checks for a
+      // session and routes to the shell when one exists (see
+      // LoginRegisterViewModel.onInit).
+      initialRoute: AppRoutes.loginRegister,
 
       // The route table. Names come from AppRoutes so no call site types a
       // string literal. Adding a screen is two edits: a constant there, an
@@ -73,6 +80,13 @@ class RasaRouteApp extends StatelessWidget {
         AppRoutes.favouriteCollection: (BuildContext context) =>
             const FavouriteCollectionView(),
 
+        // Tourist profile (ChinShunYon)
+        AppRoutes.editFoodPreference: (BuildContext context) =>
+            const EditFoodPreferenceView(),
+        AppRoutes.editDietaryRestriction: (BuildContext context) =>
+            const EditDietaryRestrictionView(),
+        // End of Tourist profile (ChinShunYon)
+
         AppRoutes.foodDetail: (BuildContext context) => const FoodDetailView(),
         AppRoutes.foodComparison: (BuildContext context) =>
             const FoodComparisonView(),
@@ -81,6 +95,8 @@ class RasaRouteApp extends StatelessWidget {
 
         AppRoutes.restaurantRecommendation: (BuildContext context) =>
             const RestaurantRecommendationView(),
+        AppRoutes.matchesRecommendation: (BuildContext context) =>
+            const MatchesRecommendationView(),
         AppRoutes.restaurantDetail: (BuildContext context) =>
             const RestaurantDetailView(),
         AppRoutes.restaurantItemList: (BuildContext context) =>
@@ -94,6 +110,10 @@ class RasaRouteApp extends StatelessWidget {
             const RestaurantSignboardView(),
         AppRoutes.landmarkDetail: (BuildContext context) =>
             const LandmarkDetailView(),
+        AppRoutes.landmarkPlaceDetail: (BuildContext context) =>
+            const LandmarkPlaceDetailView(),
+        AppRoutes.landmarkItemDetail: (BuildContext context) =>
+            const LandmarkItemDetailView(),
       },
     );
   }

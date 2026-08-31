@@ -24,6 +24,11 @@ class LandmarkSubmissionLogic {
   /// raw `SignboardAnalysisResponse` directly in the ViewModel - a domain
   /// invariant about what counts as a valid capture, not a form-UX check,
   /// so it belongs here, not there).
+  ///
+  /// For non-Latin signboards (Chinese/Tamil/Jawi) the returned name is the
+  /// exact signboard text with the romanised translation in parentheses,
+  /// e.g. "海天楼 (Hai Tian Lou)" - see [displaySignboardName]. The tourist
+  /// can edit the field afterwards.
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<String> analyzeSignboard(List<int> imageBytes) async {
     final response = await repository.recognition.analyzeSignboard(imageBytes);
@@ -35,7 +40,108 @@ class LandmarkSubmissionLogic {
     if (response.textDetected == null || response.textDetected!.isEmpty) {
       throw Exception('Unable to extract restaurant name from signboard.');
     }
-    return response.textDetected!;
+    final String romanised = sanitiseSignboardName(response.textDetected!);
+    if (romanised.isEmpty) {
+      // The only "text" was noise (e.g. a lone phone number) - nothing to
+      // auto-fill, same A7 outcome as finding no text at all.
+      throw Exception('Unable to extract restaurant name from signboard.');
+    }
+    return displaySignboardName(
+      romanised: romanised,
+      originalScript: response.nameOriginalScript,
+      languageScript: response.languageScript,
+    );
+  }
+
+  /// Strips non-name noise Gemini sometimes appends to a signboard name:
+  /// lot numbers, addresses, phone numbers and postcodes (Malaysian signs
+  /// carry "Lot 12, Jalan ...", "Tel: 012-345 6789" under the name). This is
+  /// a deterministic safety net UNDER the signboard prompt - the prompt asks
+  /// for the name alone, but the model occasionally includes a stray lot or
+  /// phone number; that must never land in the Restaurant Name field.
+  /// Returns the cleaned name, which may be empty if the raw text was only
+  /// noise (callers should treat that as "no text extracted").
+  static String sanitiseSignboardName(String raw) {
+    // Treat each line of a multi-line signboard as its own segment, then
+    // also split on commas/semicolons, so "Restoran ABC\nLot 12" becomes
+    // two independent parts and the noise can be dropped without touching
+    // the name.
+    final String flat = raw.trim().replaceAll(RegExp(r'[\r\n]+'), ', ');
+    final Iterable<String> segments = flat
+        .split(RegExp(r'\s*[,;]\s*'))
+        .map((String s) => s.trim())
+        .where((String s) => s.isNotEmpty);
+
+    String result = segments
+        .where((String segment) => !_isSignboardNoise(segment))
+        .join(', ');
+
+    // A phone number glued to the name without a separator
+    // ("Restoran ABC Tel: 012-345 6789") - strip it inline.
+    result = result.replaceAll(
+      RegExp(
+        r'\s*(?:tel|phone|hp|whatsapp|contact|fax)\s*[:.\-]?\s*'
+        r'\+?\d{1,3}(?:[ -]?\d{2,4}){2,}',
+        caseSensitive: false,
+      ),
+      ' ',
+    );
+
+    result = result.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return result.replaceAll(RegExp(r'^[,.;:\- ]+|[,\s.;:\-]+$'), '').trim();
+  }
+
+  /// Builds the Restaurant Name value shown for a signboard capture:
+  /// - Latin-script signs (or when the original-script name is missing or
+  ///   identical to the romanised form) return just the romanised name;
+  /// - non-Latin signs return the exact signboard text with the romanised
+  ///   translation in parentheses, e.g. "海天楼 (Hai Tian Lou)", so the
+  ///   signboard text is kept alongside the translated form.
+  static String displaySignboardName({
+    required String romanised,
+    String? originalScript,
+    String languageScript = 'latin',
+  }) {
+    final String? original = originalScript == null
+        ? null
+        : sanitiseSignboardName(originalScript);
+    final bool showBoth =
+        original != null &&
+        original.isNotEmpty &&
+        original != romanised &&
+        languageScript != 'latin';
+    return showBoth ? '$original ($romanised)' : romanised;
+  }
+
+  /// True when [segment] is signboard noise (address/phone/postcode/lot),
+  /// not part of the restaurant name. Conservative - a segment is only
+  /// treated as noise when it clearly matches one of those patterns.
+  static bool _isSignboardNoise(String segment) {
+    final String s = segment.trim().toLowerCase();
+    if (s.isEmpty) return true;
+
+    // A phone number, optionally preceded by "Tel:" / "HP:" / "Fax:" etc.
+    final String maybePhone = s.replaceFirst(
+      RegExp(r'^(?:tel|phone|hp|whatsapp|contact|fax)\s*[:.\-]?\s*'),
+      '',
+    );
+    if (RegExp(r'^\+?\d[\d\s().-]{6,}$').hasMatch(maybePhone)) return true;
+
+    // Lot / unit / block references: "lot 12", "lot no. 12", "unit 3a".
+    if (RegExp(r'^(?:lot|unit|blok|block)\b').hasMatch(s)) return true;
+
+    // A standalone "No. 12" (address unit number, not a name like
+    // "No. 1 Noodle Bar" - that has more words so won't match this).
+    if (RegExp(r'^no\.?\s*\d+$').hasMatch(s)) return true;
+
+    // A Malaysian postcode, with or without a following town name.
+    if (RegExp(r'^\d{5}\b').hasMatch(s)) return true;
+
+    // Address lines / town names.
+    return RegExp(
+      r'^(?:jalan|jln\.?|lorong|lebuh|persiaran|taman|kuala lumpur|'
+      r'petaling jaya|subang jaya|shah alam|klang|selangor|ampang)\b',
+    ).hasMatch(s);
   }
 
   /// Stall photo (A17). Verifies the whole stall is in frame - does NOT
@@ -64,6 +170,19 @@ class LandmarkSubmissionLogic {
   /// The signed-in tourist's id, for `LandmarkItem.touristId`. Null if
   /// nobody is signed in / the session can't be resolved yet.
   Future<String?> currentTouristId() => repository.auth.currentTouristId();
+
+  /// One submitted landmark (with its dishes and opening hours) for the
+  /// detail screen - flat passthrough to the repository. Null when the id
+  /// matches nothing.
+  Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) =>
+      repository.landmark.getSubmittedLandmarkById(landmarkId);
+
+  /// Every submitted landmark [touristId] has contributed dishes to, newest
+  /// first - flat passthrough to the repository (see the repository doc for
+  /// why the contributor lives on `landmark_item`, not `submitted_landmark`).
+  Future<List<SubmittedLandmark>> getSubmittedLandmarksByTourist(
+    String touristId,
+  ) => repository.landmark.getSubmittedLandmarksByTourist(touristId);
 
   /// Uploads a captured photo - a food's photo, or the landmark's
   /// signboard/stall photo - to Supabase Storage and returns what the row
@@ -233,6 +352,10 @@ class LandmarkSubmissionLogic {
       id: 0,
       landmarkId: 0, // Assigned once the landmark itself is saved.
       touristId: touristId,
+      // The curated catalogue row this dish resolves to - `entry.food.id`
+      // when it is already in `local_food` (id != 0), else 0 (a brand-new
+      // food gets its id backfilled after the Option-C catalogue insert).
+      localFoodId: entry.food.id,
       dish: entry.food.name,
       // LocalFood has no dedicated `variant` field (see FoodRecognitionLogic
       // - it is carried as a synonym instead).
@@ -280,7 +403,11 @@ class LandmarkSubmissionLogic {
   ///    under it (A13.1), then add just the new item(s) and keep its
   ///    existing opening hours (A13.2) rather than overwriting them;
   ///  - otherwise: save the new landmark as a brand new submission.
-  Future<void> submitLandmark({
+  ///
+  /// @return the assigned `landmark_id`, or `0` when no new landmark was
+  ///         created (a matching restaurant already exists). The submit flow
+  ///         uses it to backfill brand-new foods' ids onto the items (Option C).
+  Future<int> submitLandmark({
     required String restaurantName,
     required double? latitude,
     required double? longitude,
@@ -296,7 +423,7 @@ class LandmarkSubmissionLogic {
     if (existing != null) {
       // TODO: A13/A13.1/A13.2/A20 handling once SubmittedLandmarkRepository
       // exposes "add item to existing landmark" and "reactivate" methods.
-      return;
+      return 0;
     }
 
     // Build the landmark + its items here, from the raw, already-validated
@@ -323,6 +450,28 @@ class LandmarkSubmissionLogic {
           .expand((List<OpeningHour> rows) => rows)
           .toList(growable: false),
     );
-    await repository.landmark.save(landmark);
+    final int landmarkId = await repository.landmark.save(landmark);
+    return landmarkId;
+  }
+
+  /// Option C backfill: after genuinely-new foods are written to `local_food`,
+  /// point the just-saved `landmark_item` rows at them (their `local_food_id`
+  /// was 0 at insert time because the rows did not exist yet). Best-effort - a
+  /// failed link must not fail the submission that already succeeded.
+  Future<void> linkNewFoodsToLandmark(
+    int landmarkId,
+    Map<String, int> foodIds,
+  ) async {
+    for (final MapEntry<String, int> entry in foodIds.entries) {
+      try {
+        await repository.landmark.linkItemToFood(
+          landmarkId,
+          entry.key,
+          entry.value,
+        );
+      } catch (_) {
+        // Ignored - the landmark and its items are already saved.
+      }
+    }
   }
 }

@@ -13,6 +13,7 @@ class FoodAnalysisResponse implements JsonModel {
     required this.cookingStyle,
     required this.mealType,
     required this.foodCategory,
+    this.foodType = '',
     required this.isMalaysianLocalFood,
     required this.culturalBackground,
     required this.foodStatus,
@@ -23,6 +24,8 @@ class FoodAnalysisResponse implements JsonModel {
     this.imageQuality = 'good',
     this.imageQualityIssues = const <String>[],
     this.tasteTags = const <String>[],
+    this.mainTaste = '',
+    this.dietaryRestrictions = const <String>[],
     this.foodCount = 1,
     this.candidates = const <FoodCandidate>[],
     this.priceMin = 0,
@@ -30,6 +33,7 @@ class FoodAnalysisResponse implements JsonModel {
     this.nameMatchesPhoto = true,
     this.matchConfidence = 0,
     this.observedFood = '',
+    this.ingredients = '',
   });
 
   /// Dish name (e.g., "Nasi Lemak")
@@ -40,6 +44,10 @@ class FoodAnalysisResponse implements JsonModel {
 
   /// Dish description
   final String description;
+
+  /// Main ingredients, comma-separated (e.g. "rice, coconut milk, sambal,
+  /// peanuts, anchovies, egg"). Empty when Gemini didn't supply them.
+  final String ingredients;
 
   /// Origin/region (e.g., "Melaka & Negeri Sembilan")
   final String origin;
@@ -52,6 +60,13 @@ class FoodAnalysisResponse implements JsonModel {
 
   /// Food category (e.g., "Malay", "Chinese", "Indian", "Nyonya", "Sabah", "Sarawak")
   final String foodCategory;
+
+  /// The app's catalogue dish type: "Food" | "Beverage" | "Fruit" | "Dessert"
+  /// | "Kuih" - or "none" (or empty) when the item is NOT an addable dish
+  /// type (a snack, packaged item, canned/bottled drink, confectionery...).
+  /// Drives the "Malaysian product but can't be added" gate in
+  /// `FoodRecognitionLogic` (see `FoodRecognitionResult.fitsCatalogueCategory`).
+  final String foodType;
 
   /// Is this a Malaysian local food? (REQ106_10)
   final bool isMalaysianLocalFood;
@@ -114,6 +129,17 @@ class FoodAnalysisResponse implements JsonModel {
   /// full analysis call, not the quick name-only one - left empty there.
   final List<String> tasteTags;
 
+  /// The single primary taste from [tasteTags] - it marks `is_main` on the
+  /// `local_food_preference` link when a new food is written to the
+  /// catalogue (mirrors the scraper's `main_taste`). Empty when unknown.
+  final String mainTaste;
+
+  /// Dietary restrictions that apply to this dish, using the canonical
+  /// `dietary_restriction.restriction_name` strings (e.g. "No Pork",
+  /// "No Beef", "Vegetarian"). Only populated by the full analysis calls;
+  /// empty when none apply.
+  final List<String> dietaryRestrictions;
+
   /// How many SEPARATE, distinct food items/dishes are clearly visible in the
   /// image. A single dish/plate/portion counts as one. > 1 means the tourist
   /// should re-capture with only one food in frame. Only populated by the
@@ -138,10 +164,12 @@ class FoodAnalysisResponse implements JsonModel {
     'dish': dish,
     'variant': variant,
     'description': description,
+    'ingredients': ingredients,
     'origin': origin,
     'cookingStyle': cookingStyle,
     'mealType': mealType,
     'foodCategory': foodCategory,
+    'foodType': foodType,
     'isMalaysianLocalFood': isMalaysianLocalFood,
     'culturalBackground': culturalBackground,
     'foodStatus': foodStatus,
@@ -155,6 +183,8 @@ class FoodAnalysisResponse implements JsonModel {
     'imageQuality': imageQuality,
     'imageQualityIssues': imageQualityIssues,
     'tasteTags': tasteTags,
+    'mainTaste': mainTaste,
+    'dietaryRestrictions': dietaryRestrictions,
     'foodCount': foodCount,
     'candidates': candidates.map((FoodCandidate c) => c.toJson()).toList(),
     'priceMin': priceMin,
@@ -165,10 +195,12 @@ class FoodAnalysisResponse implements JsonModel {
     String? dish,
     String? variant,
     String? description,
+    String? ingredients,
     String? origin,
     String? cookingStyle,
     String? mealType,
     String? foodCategory,
+    String? foodType,
     bool? isMalaysianLocalFood,
     String? culturalBackground,
     String? foodStatus,
@@ -182,6 +214,8 @@ class FoodAnalysisResponse implements JsonModel {
     String? imageQuality,
     List<String>? imageQualityIssues,
     List<String>? tasteTags,
+    String? mainTaste,
+    List<String>? dietaryRestrictions,
     int? foodCount,
     List<FoodCandidate>? candidates,
     double? priceMin,
@@ -190,10 +224,12 @@ class FoodAnalysisResponse implements JsonModel {
     dish: dish ?? this.dish,
     variant: variant ?? this.variant,
     description: description ?? this.description,
+    ingredients: ingredients ?? this.ingredients,
     origin: origin ?? this.origin,
     cookingStyle: cookingStyle ?? this.cookingStyle,
     mealType: mealType ?? this.mealType,
     foodCategory: foodCategory ?? this.foodCategory,
+    foodType: foodType ?? this.foodType,
     isMalaysianLocalFood: isMalaysianLocalFood ?? this.isMalaysianLocalFood,
     culturalBackground: culturalBackground ?? this.culturalBackground,
     foodStatus: foodStatus ?? this.foodStatus,
@@ -207,6 +243,8 @@ class FoodAnalysisResponse implements JsonModel {
     imageQuality: imageQuality ?? this.imageQuality,
     imageQualityIssues: imageQualityIssues ?? this.imageQualityIssues,
     tasteTags: tasteTags ?? this.tasteTags,
+    mainTaste: mainTaste ?? this.mainTaste,
+    dietaryRestrictions: dietaryRestrictions ?? this.dietaryRestrictions,
     foodCount: foodCount ?? this.foodCount,
     candidates: candidates ?? this.candidates,
     priceMin: priceMin ?? this.priceMin,

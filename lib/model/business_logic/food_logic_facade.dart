@@ -2,6 +2,7 @@ import '../../domain_model/food_comparison.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
+import '../../shared_client/device_capability_manager/device_capability_manager.dart';
 import 'food_comparison_logic.dart';
 import 'food_knowledge_logic.dart';
 import 'food_recommendation_logic.dart';
@@ -19,6 +20,7 @@ class FoodLogicFacade {
   final FoodKnowledgeLogic knowledge = FoodKnowledgeLogic();
   final FoodComparisonLogic comparison = FoodComparisonLogic();
   final FoodRecommendationLogic recommendation = FoodRecommendationLogic();
+  final DeviceCapabilityManager deviceCapabilities = DeviceCapabilityManager();
 
   // =========================================================================
   // Forwarded Logic
@@ -107,16 +109,33 @@ class FoodLogicFacade {
     // Dietary-safety ids from the DB relations (`user_dietary_restriction` and
     // `food_dietary_restriction`); conflicting foods are excluded before the
     // prompt, so only the food data reaches Gemini.
-    final List<int> touristRestrictionIds =
-        await knowledge.touristDietaryRestrictionIds();
-    final Map<int, List<int>> foodRestrictionIds =
-        await knowledge.foodDietaryRestrictionIds();
+    final List<int> touristRestrictionIds = await knowledge
+        .touristDietaryRestrictionIds();
+    final Map<int, List<int>> foodRestrictionIds = await knowledge
+        .foodDietaryRestrictionIds();
     return recommendation.pairingsFor(
       selected,
       catalogue,
       touristDietaryRestrictionIds: touristRestrictionIds,
       foodDietaryRestrictionIds: foodRestrictionIds,
     );
+  }
+
+  Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) async {
+    final DevicePronunciationPlaybackResult result = await deviceCapabilities
+        .playPronunciation(
+          foodName: food.name,
+          audioUrl: food.audioGuideUrl,
+          fallbackText: food.pronunciationText,
+        );
+    return switch (result) {
+      DevicePronunciationPlaybackResult.curatedAudio =>
+        PronunciationPlaybackResult.curatedAudio,
+      DevicePronunciationPlaybackResult.deviceVoice =>
+        PronunciationPlaybackResult.deviceVoice,
+      DevicePronunciationPlaybackResult.unavailable =>
+        PronunciationPlaybackResult.unavailable,
+    };
   }
 
   // --- Food comparison ------------------------------------------------------
@@ -130,3 +149,6 @@ class FoodLogicFacade {
   LocalFood? bestValueFood(FoodComparison result) =>
       comparison.bestValueFood(result);
 }
+
+/// Stable business-layer result exposed to presentation code.
+enum PronunciationPlaybackResult { curatedAudio, deviceVoice, unavailable }

@@ -8,6 +8,16 @@ import '../data_models/local_food_data_model.dart';
 import '../data_models/local_food_image_data_model.dart';
 import '../data_models/local_food_preference_data_model.dart';
 
+// ====== Auth/Profile (ChinShunYon): favourite tourist_id fix ======
+// `favourite_food.tourist_id` must be `tourist.tourist_id` (see RLS policy 6
+// in rls_policies_auth_profile.txt). The original food-module code used
+// `api.currentUserId` (the Supabase AUTH user id), which is a different
+// value - so RLS rejected every favourite write and the profile module's
+// favourites never saw the rows. The fix resolves the real `tourist_id` via
+// `APIManager.resolveCurrentTouristId` - the shared single remote source - so
+// no repository ever reaches into another module's repository.
+// ====== End of Auth/Profile (ChinShunYon) ======
+
 /// Supabase-backed access to the local-food catalogue and favourites.
 ///
 /// Catalogue data is never replaced with sample dishes. An unavailable or
@@ -190,24 +200,101 @@ class FoodKnowledgeRepository {
     return saved;
   }
 
+  /// Writes the `local_food_preference` links for a freshly-inserted dish -
+  /// its tastes (with the main taste marked `is_main`) and its category.
+  /// [tasteIds] must already be normalised against `food_preference`
+  /// (`FoodRecognitionLogic` does that via `preferenceIdLookup`). Duplicates
+  /// are skipped (the composite PK would 409), and one bad link must not fail
+  /// the whole insert flow.
+  Future<void> linkFoodPreferences(
+    int localFoodId, {
+    required List<int> tasteIds,
+    int mainTasteId = 0,
+    int? categoryId,
+  }) async {
+    final Set<int> seen = <int>{};
+    for (final int tasteId in tasteIds) {
+      if (tasteId <= 0 || !seen.add(tasteId)) continue;
+      try {
+        await api
+            .insertRow(APIManager.tableLocalFoodPreference, <String, dynamic>{
+              'local_food_id': localFoodId,
+              'food_preference_id': tasteId,
+              'is_main': tasteId == mainTasteId,
+            });
+      } catch (_) {
+        // Ignored - see doc above.
+      }
+    }
+    if (categoryId != null && categoryId > 0 && seen.add(categoryId)) {
+      try {
+        await api
+            .insertRow(APIManager.tableLocalFoodPreference, <String, dynamic>{
+              'local_food_id': localFoodId,
+              'food_preference_id': categoryId,
+              'is_main': false,
+            });
+      } catch (_) {
+        // Ignored - see doc above.
+      }
+    }
+  }
+
+  /// Writes the `food_dietary_restriction` links for a freshly-inserted dish.
+  /// [restrictionIds] are `dietary_restriction` ids - the link table's PK
+  /// column `food_dietary_restriction_id` IS the restriction id. Duplicates
+  /// skipped; one bad link must not fail the whole insert flow.
+  Future<void> linkFoodDietaryRestrictions(
+    int localFoodId,
+    List<int> restrictionIds,
+  ) async {
+    final Set<int> seen = <int>{};
+    for (final int restrictionId in restrictionIds) {
+      if (restrictionId <= 0 || !seen.add(restrictionId)) continue;
+      try {
+        await api.insertRow(
+          APIManager.tableFoodDietaryRestriction,
+          <String, dynamic>{
+            'food_dietary_restriction_id': restrictionId,
+            'local_food_id': localFoodId,
+          },
+        );
+      } catch (_) {
+        // Ignored - see doc above.
+      }
+    }
+  }
+
   Future<void> toggleFavourite(int localFoodId) async {
-    if (api.currentUserId.isEmpty) {
+    // ====== Auth/Profile (ChinShunYon): FIX - resolve the real tourist_id ======
+    // The original code gated on `api.currentUserId` (the auth user id) and
+    // wrote that same id into `favourite_food.tourist_id`. RLS policy 6 keys
+    // on `tourist.tourist_id`, so those writes were silently rejected and the
+    // profile module could never see the rows. Resolve the real id first.
+    final String touristId = await api.resolveCurrentTouristId();
+    // ====== End of Auth/Profile (ChinShunYon) ======
+    if (touristId.isEmpty) {
       throw Exception('Sign in to save local food to your favourites.');
     }
 
     try {
-      final bool isFavourite = await _isFavourite(localFoodId);
+      final bool isFavourite = await _isFavourite(localFoodId, touristId);
       if (isFavourite) {
         await api.deleteRows(
           APIManager.tableFavouriteFood,
           eq: <String, Object?>{
-            'tourist_id': api.currentUserId,
+            // 'tourist_id': api.currentUserId, // ORIGINAL (food module) -
+            //   the auth user id, not tourist.tourist_id; RLS policy 6
+            //   rejected it. Kept for record.
+            'tourist_id': touristId, // FIX (ChinShunYon): real tourist_id
             'local_food_id': localFoodId,
           },
         );
       } else {
         await api.insertRow(APIManager.tableFavouriteFood, <String, dynamic>{
-          'tourist_id': api.currentUserId,
+          // 'tourist_id': api.currentUserId, // ORIGINAL (food module) -
+          //   same wrong id as above. Kept for record.
+          'tourist_id': touristId, // FIX (ChinShunYon): real tourist_id
           'local_food_id': localFoodId,
         });
       }
@@ -224,9 +311,12 @@ class FoodKnowledgeRepository {
   Future<Set<int>> favouriteFoodIds() => _getFavouriteFoodIdsSafely();
 
   Future<Set<int>> _getFavouriteFoodIdsSafely() async {
-    if (api.currentUserId.isEmpty) return <int>{};
+    // FIX (ChinShunYon): gate on the resolved tourist_id, not the auth user
+    // id - see APIManager.resolveCurrentTouristId.
+    final String touristId = await api.resolveCurrentTouristId();
+    if (touristId.isEmpty) return <int>{};
     try {
-      return await _getFavouriteFoodIds();
+      return await _getFavouriteFoodIds(touristId);
     } catch (_) {
       // Favourites should not prevent the public catalogue from loading.
       return <int>{};
@@ -246,11 +336,15 @@ class FoodKnowledgeRepository {
     return null;
   }
 
-  Future<Set<int>> _getFavouriteFoodIds() async {
+  Future<Set<int>> _getFavouriteFoodIds(String touristId) async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableFavouriteFood,
       columns: 'local_food_id',
-      eq: <String, Object?>{'tourist_id': api.currentUserId},
+      eq: <String, Object?>{
+        // 'tourist_id': api.currentUserId, // ORIGINAL (food module) - the
+        //   auth user id, not tourist.tourist_id. Kept for record.
+        'tourist_id': touristId, // FIX (ChinShunYon): real tourist_id
+      },
     );
     return rows
         .map((Map<String, dynamic> row) => row['local_food_id'])
@@ -259,17 +353,27 @@ class FoodKnowledgeRepository {
         .toSet();
   }
 
+  /// Reads favourites for an explicitly resolved tourist. Swipe Mode uses the
+  /// temporary development tourist until the authentication module is live.
+  Future<Set<int>> favouriteFoodIdsForTourist(String touristId) async {
+    if (touristId.isEmpty) return <int>{};
+    return _getFavouriteFoodIds(touristId);
+  }
+
   Future<bool> _isFavouriteSafely(int localFoodId) async {
-    if (api.currentUserId.isEmpty) return false;
+    // FIX (ChinShunYon): gate on the resolved tourist_id, not the auth user
+    // id - see APIManager.resolveCurrentTouristId.
+    final String touristId = await api.resolveCurrentTouristId();
+    if (touristId.isEmpty) return false;
     try {
-      return await _isFavourite(localFoodId);
+      return await _isFavourite(localFoodId, touristId);
     } catch (_) {
       return false;
     }
   }
 
-  Future<bool> _isFavourite(int localFoodId) async =>
-      (await _getFavouriteFoodIds()).contains(localFoodId);
+  Future<bool> _isFavourite(int localFoodId, String touristId) async =>
+      (await _getFavouriteFoodIds(touristId)).contains(localFoodId);
 
   /// Converts one nested Supabase response into the screen-facing domain
   /// object. Each table is parsed by its own data model before composition.

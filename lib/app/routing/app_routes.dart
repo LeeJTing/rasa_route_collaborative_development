@@ -36,6 +36,16 @@ abstract final class AppRoutes {
   static const String profile = '/profile';
   static const String favouriteCollection = '/favourite-collection';
 
+  // --- Tourist profile (ChinShunYon) -----------------------------------------
+
+  /// Edit the tourist's taste / culture preferences.
+  static const String editFoodPreference = '/edit-food-preference';
+
+  /// Edit the tourist's dietary restrictions.
+  static const String editDietaryRestriction = '/edit-dietary-restriction';
+
+  // --- End of Tourist profile (ChinShunYon) ----------------------------------
+
   // --- Food ------------------------------------------------------------------
 
   static const String foodDetail = '/food-detail';
@@ -45,6 +55,7 @@ abstract final class AppRoutes {
   // --- Restaurant ------------------------------------------------------------
 
   static const String restaurantRecommendation = '/restaurant-recommendation';
+  static const String matchesRecommendation = '/matches-recommendation';
   static const String restaurantDetail = '/restaurant-detail';
   static const String restaurantItemList = '/restaurant-item-list';
 
@@ -54,6 +65,18 @@ abstract final class AppRoutes {
   static const String addLandmark = '/add-landmark';
   static const String restaurantSignboard = '/restaurant-signboard';
   static const String landmarkDetail = '/landmark-detail';
+
+  /// Full details of a tourist-submitted landmark, opened from the map's
+  /// "View Landmark" button. Distinct from [landmarkDetail], which is the
+  /// recognized-food detail screen in the capture flow.
+  static const String landmarkPlaceDetail = '/landmark-place-detail';
+
+  /// One dish attached to a tourist-submitted landmark, opened by tapping a
+  /// dish card on [landmarkPlaceDetail]. Distinct from [foodDetail] (the
+  /// catalogue's `LocalFood` detail screen, fetched by id) - this reads
+  /// straight off the `LandmarkItem` already in hand via
+  /// `LandmarkItemHandoff`, no network fetch.
+  static const String landmarkItemDetail = '/landmark-item-detail';
 
   /// Every registered name - used by tests to assert the route table is
   /// complete.
@@ -67,15 +90,20 @@ abstract final class AppRoutes {
     localFoodList,
     profile,
     favouriteCollection,
+    editFoodPreference,
+    editDietaryRestriction,
     foodDetail,
     foodComparison,
     foodRecommendation,
     restaurantRecommendation,
+    matchesRecommendation,
     restaurantDetail,
     restaurantItemList,
     landmarkHistory,
     addLandmark,
     restaurantSignboard,
     landmarkDetail,
+    landmarkPlaceDetail,
+    landmarkItemDetail,
   ];
 }

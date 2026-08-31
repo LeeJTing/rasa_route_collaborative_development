@@ -23,6 +23,7 @@ class Restaurant {
     required this.openingHours,
     this.distanceMetres,
     this.reviewCount,
+    this.status,
     this.items = const <RestaurantItem>[],
   });
 
@@ -39,5 +40,48 @@ class Restaurant {
   final List<OpeningHour> openingHours;
   final double? distanceMetres;
   final int? reviewCount;
+  final String? status;
   final List<RestaurantItem> items;
+
+  String get distanceLabel {
+    final double? metres = distanceMetres;
+    if (metres == null) return '';
+    if (metres < 1000) return '${metres.round()} m';
+    final double kilometres = metres / 1000;
+    return '${kilometres.toStringAsFixed(kilometres >= 10 ? 0 : 1)} km';
+  }
+
+  Restaurant copyWith({
+    int? id,
+    String? name,
+    String? category,
+    String? address,
+    double? rating,
+    double? latitude,
+    double? longitude,
+    String? phone,
+    String? website,
+    String? imageUrl,
+    List<OpeningHour>? openingHours,
+    double? distanceMetres,
+    int? reviewCount,
+    String? status,
+    List<RestaurantItem>? items,
+  }) => Restaurant(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    category: category ?? this.category,
+    address: address ?? this.address,
+    rating: rating ?? this.rating,
+    latitude: latitude ?? this.latitude,
+    longitude: longitude ?? this.longitude,
+    phone: phone ?? this.phone,
+    website: website ?? this.website,
+    imageUrl: imageUrl ?? this.imageUrl,
+    openingHours: openingHours ?? this.openingHours,
+    distanceMetres: distanceMetres ?? this.distanceMetres,
+    reviewCount: reviewCount ?? this.reviewCount,
+    status: status ?? this.status,
+    items: items ?? this.items,
+  );
 }

@@ -41,10 +41,21 @@ class LandmarkDetailViewModel extends BaseViewModel {
   /// `LandmarkDraftHandoff.pendingIsLocalFood`.
   bool _isLocalFood = true;
 
+  /// Whether the recognised food fits one of the app's catalogue dish types
+  /// (Food/Beverage/Fruit/Dessert/Kuih). When false it is a Malaysian product
+  /// at most (snack/package/canned drink) and must not be added as a landmark
+  /// - see `LandmarkDraftHandoff.pendingFitsCatalogueCategory`.
+  bool _fitsCatalogueCategory = true;
+
   /// Gemini's suggested MYR price range for the recognised food, carried
   /// onto the submitted `LandmarkItem`. `0` means unknown.
   double _priceMin = 0;
   double _priceMax = 0;
+
+  /// Dietary restrictions (canonical names) for the recognised food, carried
+  /// to the `food_dietary_restriction` association table when it becomes a
+  /// new catalogue row.
+  List<String> _dietaryRestrictions = const <String>[];
 
   /// Whether the confirm button should return this food to the *existing*
   /// `AddLandmarkView` (additional-food flow) instead of pushing a fresh
@@ -56,17 +67,27 @@ class LandmarkDetailViewModel extends BaseViewModel {
   LocalFood? get recognizedFood => _recognizedFood;
   XFile? get capturedImage => _capturedImage;
   bool get isLocalFood => _isLocalFood;
+  bool get fitsCatalogueCategory => _fitsCatalogueCategory;
   bool get returnToFormAsAdditionalFood => _returnToFormAsAdditionalFood;
   double get priceMin => _priceMin;
   double get priceMax => _priceMax;
+  List<String> get dietaryRestrictions => _dietaryRestrictions;
 
   void setIsLocalFood(bool value) {
     _isLocalFood = value;
   }
 
+  void setFitsCatalogueCategory(bool value) {
+    _fitsCatalogueCategory = value;
+  }
+
   void setPriceRange({required double priceMin, required double priceMax}) {
     _priceMin = priceMin;
     _priceMax = priceMax;
+  }
+
+  void setDietaryRestrictions(List<String> dietaryRestrictions) {
+    _dietaryRestrictions = dietaryRestrictions;
   }
 
   void setReturnToFormAsAdditionalFood(bool value) {
@@ -96,9 +117,11 @@ class LandmarkDetailViewModel extends BaseViewModel {
   void proceedToAddLandmark() {
     final LocalFood? food = _recognizedFood;
     if (food == null) return;
-    // A non-local food is never allowed to become a landmark - the UI hides
-    // the button, this guard is the second line of defence.
-    if (!_isLocalFood) return;
+    // A non-local food - or a Malaysian product that isn't a catalogue dish
+    // type (snack/package/canned drink) - is never allowed to become a
+    // landmark - the UI hides the button, this guard is the second line of
+    // defence.
+    if (!_isLocalFood || !_fitsCatalogueCategory) return;
     if (_returnToFormAsAdditionalFood) {
       final XFile? image = _capturedImage;
       if (image == null) return;
@@ -120,6 +143,7 @@ class LandmarkDetailViewModel extends BaseViewModel {
       isLocalFood: _isLocalFood,
       priceMin: _priceMin,
       priceMax: _priceMax,
+      dietaryRestrictions: _dietaryRestrictions,
     );
   }
 }

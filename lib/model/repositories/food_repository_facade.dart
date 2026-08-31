@@ -20,7 +20,7 @@ import 'swipe_repository.dart';
 /// re-exposes them as a single flat API. No business rules live here.
 class FoodRepositoryFacade {
   FoodRepositoryFacade({@visibleForTesting FoodKnowledgeRepository? knowledge})
-      : knowledge = knowledge ?? FoodKnowledgeRepository();
+    : knowledge = knowledge ?? FoodKnowledgeRepository();
 
   final APIManager api = APIManager();
 
@@ -33,7 +33,7 @@ class FoodRepositoryFacade {
   /// data read by recognition/recommendation features.
   final FoodPreferenceRepository foodPreference = FoodPreferenceRepository();
   final DietaryRestrictionRepository dietaryRestriction =
-  DietaryRestrictionRepository();
+      DietaryRestrictionRepository();
 
   // =========================================================================
   // Flat API - a logic class calls these, never `facade.knowledge.xxx`.
@@ -51,6 +51,31 @@ class FoodRepositoryFacade {
   /// saved row (with its assigned id) or null when a duplicate exists.
   Future<LocalFood?> insertFood(LocalFood food) => knowledge.insertFood(food);
 
+  /// Taste/category name -> id lookups (lowercased) for normalising a
+  /// recognized food's tags against `food_preference` before writing links.
+  Future<({Map<String, int> tastes, Map<String, int> categories})>
+  preferenceIdLookup() => foodPreference.preferenceIdLookup();
+
+  /// Writes the `local_food_preference` links for a freshly-inserted dish
+  /// (tastes with the main taste marked, plus its category).
+  Future<void> linkFoodPreferences(
+    int localFoodId, {
+    required List<int> tasteIds,
+    int mainTasteId = 0,
+    int? categoryId,
+  }) => knowledge.linkFoodPreferences(
+    localFoodId,
+    tasteIds: tasteIds,
+    mainTasteId: mainTasteId,
+    categoryId: categoryId,
+  );
+
+  /// Writes the `food_dietary_restriction` links for a freshly-inserted dish.
+  Future<void> linkFoodDietaryRestrictions(
+    int localFoodId,
+    List<int> restrictionIds,
+  ) => knowledge.linkFoodDietaryRestrictions(localFoodId, restrictionIds);
+
   Future<void> toggleFavourite(int localFoodId) =>
       knowledge.toggleFavourite(localFoodId);
 
@@ -67,9 +92,9 @@ class FoodRepositoryFacade {
       dietaryRestriction.restrictions();
 
   /// The signed-in tourist's dietary restrictions (`user_dietary_restriction`),
-  /// keyed by `tourist_id` = the current auth user.
+  /// resolving the auth user id to the domain `tourist_id` first.
   Future<List<DietaryRestriction>> touristDietaryRestrictions() =>
-      dietaryRestriction.restrictionsForTourist(api.currentUserId);
+      dietaryRestriction.restrictionsForCurrentTourist();
 
   /// The restrictions attached to one dish (`food_dietary_restriction`).
   Future<List<DietaryRestriction>> foodDietaryRestrictions(int foodId) =>
@@ -81,12 +106,12 @@ class FoodRepositoryFacade {
       dietaryRestriction.restrictionIdsByFood();
 
   Future<List<FoodPairing>> getPairings(
-      LocalFood food,
-      List<LocalFood> catalogue, {
-        List<int> touristDietaryRestrictionIds = const <int>[],
-        Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
-        int maximumResults = 5,
-      }) => recommendation.getPairings(
+    LocalFood food,
+    List<LocalFood> catalogue, {
+    List<int> touristDietaryRestrictionIds = const <int>[],
+    Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
+    int maximumResults = 5,
+  }) => recommendation.getPairings(
     food,
     catalogue,
     touristDietaryRestrictionIds: touristDietaryRestrictionIds,
@@ -96,7 +121,7 @@ class FoodRepositoryFacade {
 
   /// "If you liked X, try Y" - computed from shared attributes, no AI call.
   Future<List<FoodSimilarity>> getSimilar(
-      LocalFood food,
-      List<LocalFood> catalogue,
-      ) => recommendation.getSimilar(food, catalogue);
+    LocalFood food,
+    List<LocalFood> catalogue,
+  ) => recommendation.getSimilar(food, catalogue);
 }

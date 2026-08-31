@@ -181,6 +181,41 @@ class GeminiLandmarkService {
   is washed out, or so colour-cast the ingredients cannot be told apart.
   ''';
 
+  /// Shared prompt block defining the app's catalogue dish types. Added so
+  /// recognition follows the SAME categories the catalogue actually stores:
+  /// a genuinely Malaysian snack or packaged item (e.g. Tam Tam biscuits)
+  /// must not be offered as an addable landmark even though it is a real
+  /// Malaysian product.
+  static const String _catalogueFoodTypeRules = '''
+  CATALOGUE DISH TYPE - classify the detected item into EXACTLY ONE of the
+  five dish types the app's local-food catalogue accepts:
+
+  - "Food" - a MAIN DISH / meal served on a plate/bowl/wrapper: rice dishes
+    (nasi lemak, nasi kandar, nasi campur), noodles (char kway teow, laksa,
+    mee goreng), roti (roti canai, murtabak, roti john), etc. Something a
+    person orders to eat as a meal.
+  - "Beverage" - a REAL DRINK served in a cup/glass: teh tarik, kopi, fresh
+    juice, cendol-as-drink. NOT a canned ("tin") or bottled drink, and NOT a
+    packaged drink.
+  - "Fruit" - fresh whole or cut fruit (a plate of cut mango, a young
+    coconut).
+  - "Dessert" - a sweet dish (ais kacang, cendol-as-dessert, bubur cha cha).
+  - "Kuih" - traditional Malay cakes/sweets/rice-based snacks served fresh
+    (kuih lapis, seri muka, talam, onde-onde, apam balik).
+
+  Use "none" when the item is NOT any of the above - for example:
+    - packaged snacks (biscuits like Tam Tam, chips/crisps, crackers,
+      cookies, chocolates, sweets in packaging)
+    - canned or bottled drinks (soft drinks in a "tin", bottled water,
+      packaged juice)
+    - packaged/instant foods with no freshly-served dish
+    - any non-food item.
+
+  A "none" item may still be genuinely Malaysian, but it is a Malaysian
+  product, NOT an addable dish: it must never be offered as a landmark.
+  Set "foodType" to exactly one of: Food|Beverage|Fruit|Dessert|Kuih|none.
+  ''';
+
   /// Quick, name-only call - phase 1 of the two-phase recognition flow.
   /// Cheaper than [analyzeFoodImage]: only `dish` and the status fields are
   /// meaningful on the response. Used to check the catalogue first; the full
@@ -289,6 +324,8 @@ $_localFoodRules
 
 $_imageQualityRules
 
+$_catalogueFoodTypeRules
+
   Worked examples - match this reasoning style and calibration:
 
   Example A - a plate of coconut rice with sambal, anchovies, peanuts, egg:
@@ -322,6 +359,7 @@ $_imageQualityRules
     "localFoodConfidence": 0.0-1.0,
     "imageQuality": "good|acceptable|poor",
     "imageQualityIssues": ["string"],
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "confidence": 0.0-1.0
@@ -343,6 +381,7 @@ $_imageQualityRules
       cookingStyle: '',
       mealType: '',
       foodCategory: '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       localFoodConfidence: ((json['localFoodConfidence'] as num?) ?? 1)
           .toDouble(),
@@ -381,6 +420,7 @@ $_imageQualityRules
       variant: 'Nasi Lemak Biasa',
       description:
           'Coconut rice with sambal, peanuts, anchovies and boiled egg.',
+      ingredients: 'Coconut rice, sambal, peanuts, anchovies, boiled egg',
       origin: 'Melaka & Negeri Sembilan',
       cookingStyle: 'Simmering',
       mealType: 'Breakfast',
@@ -388,6 +428,8 @@ $_imageQualityRules
       isMalaysianLocalFood: true,
       culturalBackground: 'Traditional breakfast dish of the Malay Peninsula.',
       tasteTags: <String>['Spicy', 'Sweet', 'Rich'],
+      mainTaste: 'Spicy',
+      dietaryRestrictions: <String>[],
       foodStatus: 'detected',
       foodImageStatus: 'complete',
       confidence: 0.95,
@@ -407,12 +449,21 @@ $_imageQualityRules
   1. Identify the dish name
   2. Identify the dish variant
   3. Provide a brief description
+  3b. List the main ingredients, comma-separated (e.g. "rice, coconut milk,
+      sambal, peanuts, anchovies, egg")
   4. Identify the origin/region
   5. Identify the cooking style
   6. Identify the meal type (Breakfast/Lunch/Dinner/Snack)
   7. Categorize: Malay|Chinese|Indian|Nyonya|Sabah|Sarawak|Other
   8. Cultural background
-  9. Taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3
+  9. Taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3,
+     plus "mainTaste": the single most important taste of the dish.
+
+  9b. Dietary restrictions that apply to this dish - zero or more of the
+      canonical `dietary_restriction` names (No Pork, No Beef, No Chicken,
+      No Seafood, Vegetarian, Vegan, Halal, No Egg, No Dairy, No Gluten,
+      No Nuts, No Shellfish, No Mayonnaise, No Mustard, ...). Use exactly
+      these strings; use [] when none apply.
 
   10. Frame status: Is the ENTIRE food visible within the frame?
       - "complete" if fully visible
@@ -440,6 +491,8 @@ $_localFoodRules
 
 $_imageQualityRules
 
+$_catalogueFoodTypeRules
+
   This is the IN-DEPTH analysis - your judgement here overrides any quicker
   first-pass guess, so take the full procedure above seriously rather than
   agreeing with an obvious first impression.
@@ -455,10 +508,12 @@ $_imageQualityRules
     "dish": "string",
     "variant": "string",
     "description": "string",
+    "ingredients": "string",
     "origin": "string",
     "cookingStyle": "string",
     "mealType": "string",
     "foodCategory": "string",
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "localFoodReasoning": "string",
     "isMalaysianLocalFood": boolean,
     "localFoodConfidence": 0.0-1.0,
@@ -466,6 +521,8 @@ $_imageQualityRules
     "imageQualityIssues": ["string"],
     "culturalBackground": "string",
     "tasteTags": ["string"],
+    "mainTaste": "string",
+    "dietaryRestrictions": ["string"],
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "suggestedPriceMin": 0.0,
@@ -485,10 +542,12 @@ $_imageQualityRules
       dish: (json['dish'] as String?) ?? '',
       variant: (json['variant'] as String?) ?? '',
       description: (json['description'] as String?) ?? '',
+      ingredients: (json['ingredients'] as String?) ?? '',
       origin: (json['origin'] as String?) ?? '',
       cookingStyle: (json['cookingStyle'] as String?) ?? '',
       mealType: (json['mealType'] as String?) ?? '',
       foodCategory: (json['foodCategory'] as String?) ?? '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       localFoodConfidence: ((json['localFoodConfidence'] as num?) ?? 1)
           .toDouble(),
@@ -502,6 +561,12 @@ $_imageQualityRules
       culturalBackground: (json['culturalBackground'] as String?) ?? '',
       tasteTags:
           (json['tasteTags'] as List<dynamic>?)?.whereType<String>().toList() ??
+          const <String>[],
+      mainTaste: (json['mainTaste'] as String?) ?? '',
+      dietaryRestrictions:
+          (json['dietaryRestrictions'] as List<dynamic>?)
+              ?.whereType<String>()
+              .toList() ??
           const <String>[],
       foodStatus: (json['foodStatus'] as String?) ?? 'unclear',
       foodImageStatus: (json['foodImageStatus'] as String?) ?? 'unclear',
@@ -532,6 +597,7 @@ $_imageQualityRules
       dish: name,
       variant: '',
       description: 'Details for $name.',
+      ingredients: '',
       origin: '',
       cookingStyle: '',
       mealType: '',
@@ -539,6 +605,8 @@ $_imageQualityRules
       isMalaysianLocalFood: true,
       culturalBackground: '',
       tasteTags: const <String>[],
+      mainTaste: '',
+      dietaryRestrictions: const <String>[],
       foodStatus: 'detected',
       foodImageStatus: 'complete',
       confidence: 0.9,
@@ -582,14 +650,22 @@ $_imageQualityRules
   is better served by being told than by being agreed with.
 
   When "nameMatchesPhoto" is true, provide the details for "$name":
-    - variant, a brief description, origin/region, cooking style
+    - variant, a brief description, main ingredients (comma-separated),
+      origin/region, cooking style
     - meal type (Breakfast/Lunch/Dinner/Snack)
     - food category (Malay|Chinese|Indian|Nyonya|Sabah|Sarawak|Other)
     - isMalaysianLocalFood (true/false)
     - cultural background
-    - taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3
+    - taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3,
+      plus the single most important one as "mainTaste"
+    - dietary restrictions - zero or more of the canonical names (No Pork,
+      No Beef, No Chicken, No Seafood, Vegetarian, Vegan, Halal, No Egg,
+      No Dairy, No Gluten, No Nuts, No Shellfish, No Mayonnaise, No Mustard,
+      ...); use [] when none apply
     - a suggested selling price range in MYR (suggestedPriceMin and
       suggestedPriceMax)
+
+$_catalogueFoodTypeRules
 
   Return ONLY raw JSON, no markdown fences, no candidate list:
   {
@@ -599,13 +675,17 @@ $_imageQualityRules
     "dish": "string",
     "variant": "string",
     "description": "string",
+    "ingredients": "string",
     "origin": "string",
     "cookingStyle": "string",
     "mealType": "string",
     "foodCategory": "string",
+    "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
     "isMalaysianLocalFood": boolean,
     "culturalBackground": "string",
     "tasteTags": ["string"],
+    "mainTaste": "string",
+    "dietaryRestrictions": ["string"],
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "suggestedPriceMin": 0.0,
@@ -625,14 +705,22 @@ $_imageQualityRules
       dish: (json['dish'] as String?) ?? name,
       variant: (json['variant'] as String?) ?? '',
       description: (json['description'] as String?) ?? '',
+      ingredients: (json['ingredients'] as String?) ?? '',
       origin: (json['origin'] as String?) ?? '',
       cookingStyle: (json['cookingStyle'] as String?) ?? '',
       mealType: (json['mealType'] as String?) ?? '',
       foodCategory: (json['foodCategory'] as String?) ?? '',
+      foodType: (json['foodType'] as String?) ?? '',
       isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
       culturalBackground: (json['culturalBackground'] as String?) ?? '',
       tasteTags:
           (json['tasteTags'] as List<dynamic>?)?.whereType<String>().toList() ??
+          const <String>[],
+      mainTaste: (json['mainTaste'] as String?) ?? '',
+      dietaryRestrictions:
+          (json['dietaryRestrictions'] as List<dynamic>?)
+              ?.whereType<String>()
+              .toList() ??
           const <String>[],
       foodStatus: (json['foodStatus'] as String?) ?? 'unclear',
       foodImageStatus: (json['foodImageStatus'] as String?) ?? 'unclear',
@@ -647,7 +735,10 @@ $_imageQualityRules
   }
 
   /// Analyze signboard image to extract restaurant name (REQ106_31, REQ106_37)
-  /// Returns: extracted text + frame status
+  /// Returns: extracted text + frame status. Multilingual-aware - Malaysian
+  /// signs mix Malay/English (Latin), Chinese, Tamil and Jawi; the prompt
+  /// romanises non-Latin names into [SignboardAnalysisResponse.textDetected]
+  /// and keeps the exact displayed text in [SignboardAnalysisResponse.nameOriginalScript].
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<SignboardAnalysisResponse> analyzeSignboardImage({
     required List<int> imageBytes,
@@ -669,6 +760,11 @@ $_imageQualityRules
     const String prompt = '''
   Analyze this restaurant/stall signboard photo.
 
+  Malaysian signboards commonly mix scripts: Malay and English (Latin),
+  Simplified/Traditional Chinese, Tamil, and Jawi (Malay written in Arabic
+  script). Read text in ALL of these scripts - never refuse or report
+  "unreadable" just because the name is not in Latin letters.
+
   The "frame" means the four edges of the image itself. A signboard is ONLY
   "fully in frame" when its ENTIRE outline - all four corners and edges -
   sits fully inside the image with clear margin and is not cut off anywhere.
@@ -685,7 +781,27 @@ $_imageQualityRules
   Steps:
   1. Locate the signboard and check its position against the four edges.
   2. Is this a valid restaurant/stall signboard? (yes/no)
-  3. Extract ALL visible text (restaurant name, slogan, etc.).
+  3. Identify the RESTAURANT NAME - usually the largest, most prominent
+     text on the signboard. Return ONLY the name. NEVER include:
+       - lot numbers or addresses ("Lot 12", "Lot No. 12", "No. 12",
+         "Jalan Ampang", "Jln Tun Razak", postcodes like "50450")
+       - phone numbers ("Tel: 012-345 6789", "HP 0123456789",
+         "+60 12-345 6789")
+       - slogans, "Open"/"Buka" signs, or operating hours.
+     When words like "Restoran", "Restaurant", "Kedai", "Kopitiam",
+     "茶餐室" are part of the name, KEEP them - do not strip or drop them.
+     If a lot number or phone number appears on the signboard, leave it
+     out of "textDetected" entirely.
+  4. Transcribe the name faithfully from the signboard.
+
+  For non-Latin names (Chinese/Tamil/Jawi):
+  - "textDetected" = the romanised (Latin) form using the most common
+    Malaysian spelling (pinyin for Chinese, romanised Tamil/Jawi). If
+    unsure, transcribe phonetically so it is still usable in the app.
+  - "nameOriginalScript" = the exact characters exactly as they appear on
+    the signboard.
+  For Latin-script names both fields carry the same text and
+  "languageScript" is "latin".
 
   IMPORTANT: the name being readable does NOT mean the signboard is fully in
   frame. Judge completeness ONLY by whether any part of the signboard is
@@ -694,7 +810,9 @@ $_imageQualityRules
   Return ONLY raw JSON, no markdown fences, no extra text:
   {
     "signboardStatus": "detected|not_detected|unclear",
-    "textDetected": "Extracted text or null",
+    "textDetected": "restaurant name only - no lot number, address, or phone number, or null",
+    "nameOriginalScript": "exact displayed name or null if Latin",
+    "languageScript": "latin|chinese|tamil|jawi|mixed",
     "signboardImageStatus": "complete|partially_captured|obstructed",
     "confidence": 0.0-1.0
   }
@@ -710,6 +828,9 @@ $_imageQualityRules
     return SignboardAnalysisResponse(
       signboardStatus: (json['signboardStatus'] as String?) ?? 'unclear',
       textDetected: json['textDetected'] as String?,
+      nameOriginalScript: json['nameOriginalScript'] as String?,
+      languageScript:
+          (json['languageScript'] as String?)?.trim().toLowerCase() ?? 'latin',
       signboardImageStatus:
           (json['signboardImageStatus'] as String?) ?? 'unclear',
       confidence: ((json['confidence'] as num?) ?? 0).toDouble(),
@@ -764,5 +885,120 @@ $_imageQualityRules
       stallImageStatus: (json['stallImageStatus'] as String?) ?? 'unclear',
       confidence: ((json['confidence'] as num?) ?? 0).toDouble(),
     );
+  }
+
+  // ===========================================================================
+  // 3-step origin verification - the Option C gate (see
+  // `FoodRecognitionLogic.registerNewDishes`). Text-only (dish name, no
+  // image): asks THREE separately-framed questions so a single ingrained
+  // model belief cannot just repeat itself. Port of
+  // tools/validate_dish_origin.py.
+  // ===========================================================================
+
+  /// Dishes already confirmed wrong in this catalogue (port of the Python
+  /// tool's KNOWN_MISATTRIBUTIONS). Append every newly-caught misattribution
+  /// here - check 3 only gets more precise over time.
+  static const List<String> knownMisattributions = <String>['Soto Ayam'];
+
+  /// Check 1 - direct origin. No mention of Malaysia anywhere, so there is
+  /// nothing for the model to anchor to or agree with. Asks for the historical
+  /// origin AND the a/b/c/d case, so an adopted dish (roti canai) or a shared
+  /// regional one (rendang) is not rejected just because its origin is not
+  /// Malaysia.
+  Future<Map<String, dynamic>> verifyOriginDirect(String dish) async {
+    if (!useLiveGemini) {
+      return <String, dynamic>{
+        'case': 'a',
+        'origin_country': 'Malaysia',
+        'origin_ethnicity': 'Malay',
+        'confidence': 0.9,
+      };
+    }
+    final String prompt =
+        'Classify the dish "$dish" against this scheme, using culinary '
+        'history, not where it is eaten today:\n'
+        '(a) MALAYSIAN ORIGIN - the dish originated in Malaysia.\n'
+        '(b) ADOPTED / NATURALIZED - originated elsewhere but adopted and '
+        'naturalized as everyday Malaysian local food (e.g. roti canai, '
+        'chee cheong fun).\n'
+        '(c) FOREIGN - popular in Malaysia but foreign with no distinct '
+        'Malaysian identity (e.g. sushi, pizza, a Western fast-food '
+        'burger).\n'
+        '(d) SHARED REGIONAL - shared across Malaysia/Indonesia/etc. and '
+        'genuinely part of Malaysian everyday food culture (e.g. rendang, '
+        'laksa).\n\n'
+        'What country/ethnic cuisine did it historically originate from, '
+        'and which case fits best?\n\n'
+        'Return strictly this JSON object, nothing else, no markdown fences: '
+        '{"case": "a|b|c|d", "origin_country": "<country>", '
+        '"origin_ethnicity": "<e.g. Malay, Javanese, Peranakan, Thai>", '
+        '"confidence": <0.0-1.0>}';
+    final String raw = await _gemini.generateText(
+      prompt,
+      apiKey: Env.geminiApiKeyLandmark,
+      model: Env.geminiModelLandmark,
+    );
+    return _decodeJsonObject(raw);
+  }
+
+  /// Check 2 - devil's advocate. Surfaces the Malaysia-vs-elsewhere dispute
+  /// and asks the model to adjudicate it, case-aware: a dish can be
+  /// Malaysian local food even when it did not originate in Malaysia.
+  Future<Map<String, dynamic>> verifyOriginAdjudicate(String dish) async {
+    if (!useLiveGemini) {
+      return <String, dynamic>{
+        'case': 'a',
+        'actual_origin_country': 'Malaysia',
+      };
+    }
+    final String prompt =
+        'Some sources describe "$dish" as Malaysian, others as originating '
+        'elsewhere (Indonesia, Singapore, Thailand, Brunei, India, China, '
+        '...). Some dishes are adopted/naturalized in Malaysia (roti canai, '
+        'chee cheong fun) or shared regional (rendang, laksa) and are '
+        'genuinely Malaysian local food even though they did not originate '
+        'there.\n\n'
+        'Adjudicate which case fits best:\n'
+        '(a) MALAYSIAN ORIGIN\n'
+        '(b) ADOPTED / NATURALIZED in Malaysia (everyday local food, foreign '
+        'origin)\n'
+        '(c) FOREIGN with no distinct Malaysian identity\n'
+        '(d) SHARED REGIONAL, genuinely part of Malaysian everyday food '
+        'culture\n\n'
+        'Return strictly this JSON object, nothing else, no markdown fences: '
+        '{"case": "a|b|c|d", "actual_origin_country": "<country>", '
+        '"distinguishing_notes": "<max 2 sentences>"}';
+    final String raw = await _gemini.generateText(
+      prompt,
+      apiKey: Env.geminiApiKeyLandmark,
+      model: Env.geminiModelLandmark,
+    );
+    return _decodeJsonObject(raw);
+  }
+
+  /// Check 3 - known pattern. Audits against the specific recurring failure
+  /// already caught, rather than a generic origin question.
+  Future<Map<String, dynamic>> verifyOriginKnownPattern(String dish) async {
+    if (!useLiveGemini) {
+      return <String, dynamic>{'is_commonly_misattributed': false};
+    }
+    final String examples = knownMisattributions.join(', ');
+    final String prompt =
+        'You are auditing a Malaysian local-food database for a specific, '
+        'recurring error: dishes that are genuinely eaten across Malaysia '
+        'get mislabeled as "Malay/Malaysian in origin" even though they '
+        'actually originated elsewhere. Confirmed examples of this exact '
+        'mistake caught in this database so far: $examples.\n\n'
+        'Is "$dish" the same kind of mistake?\n\n'
+        'Return strictly this JSON object, nothing else, no markdown fences: '
+        '{"is_commonly_misattributed": <true/false>, '
+        '"correct_origin_if_misattributed": "<country or null>", '
+        '"reasoning": "<max 2 sentences>"}';
+    final String raw = await _gemini.generateText(
+      prompt,
+      apiKey: Env.geminiApiKeyLandmark,
+      model: Env.geminiModelLandmark,
+    );
+    return _decodeJsonObject(raw);
   }
 }

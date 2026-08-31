@@ -1,4 +1,5 @@
 import '../../domain_model/local_food.dart';
+import '../../domain_model/origin_verification.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../data_models/food_analysis_response.dart';
 import '../data_models/signboard_analysis_response.dart';
@@ -52,6 +53,20 @@ typedef FoodAnalysis = ({
   /// What the photo actually shows, in Gemini's words, when [nameMatchesPhoto]
   /// is false - the UI says "this photo looks more like X".
   String observedFood,
+
+  /// The raw catalogue dish-type classification from Gemini ("Food" |
+  /// "Beverage" | "Fruit" | "Dessert" | "Kuih" | "none" | ""). Carried raw
+  /// so `FoodRecognitionLogic` can gate addability - a "none" item (snack,
+  /// package, canned drink) is a Malaysian product at most, never an addable
+  /// dish.
+  String foodType,
+
+  /// Dietary restrictions that apply to this dish, using the canonical
+  /// `dietary_restriction.restriction_name` strings. Written to the
+  /// `food_dietary_restriction` association table when the food is added to
+  /// the catalogue - carried here (NOT on `LocalFood`) because dietary is an
+  /// association, not a `local_food` column.
+  List<String> dietaryRestrictions,
 });
 
 /// Food recognition from a photo, via Gemini. Also used for restaurant
@@ -100,6 +115,8 @@ class RecognitionRepository {
       nameMatchesPhoto: response.nameMatchesPhoto,
       matchConfidence: response.matchConfidence,
       observedFood: response.observedFood,
+      foodType: response.foodType,
+      dietaryRestrictions: response.dietaryRestrictions,
     );
   }
 
@@ -108,8 +125,10 @@ class RecognitionRepository {
   /// Sends the name AND the image to Gemini so it verifies the photo against
   /// that name and returns the details for exactly that one dish (see
   /// `GeminiLandmarkService.analyzeFoodWithName`). The resulting `LocalFood`
-  /// is always named exactly [name] - what the tourist typed - never a
-  /// candidate list.
+  /// is named from `response.dish` - never the typed name forced onto it: on
+  /// a match Gemini sets `dish` to the typed dish, on a mismatch it sets it
+  /// to the dish it actually saw, so a food's name and its details always
+  /// describe the same dish.
   Future<FoodAnalysis> analyzeFoodByName(
     List<int> imageBytes,
     String name,
@@ -117,7 +136,7 @@ class RecognitionRepository {
     final FoodAnalysisResponse response = await api.geminiLandmark
         .analyzeFoodWithName(imageBytes: imageBytes, name: name);
     return (
-      food: _toLocalFood(response, name: name),
+      food: _toLocalFood(response),
       priceMin: response.priceMin,
       priceMax: response.priceMax,
       isLocal: response.isMalaysianLocalFood,
@@ -130,7 +149,83 @@ class RecognitionRepository {
       observedFood: response.observedFood.isNotEmpty
           ? response.observedFood
           : response.dish,
+      foodType: response.foodType,
+      dietaryRestrictions: response.dietaryRestrictions,
     );
+  }
+
+  /// 3-step origin verification for a dish name - the Option C gate before a
+  /// genuinely-new food is written to `local_food` (see
+  /// `FoodRecognitionLogic.registerNewDishes`). Three separately-framed
+  /// Gemini questions each classify the dish into the a/b/c/d scheme
+  /// (`OriginDishCase`); a check votes "Malaysian" for (a) origin, (b)
+  /// adopted/naturalized or (d) shared regional. With no human-review queue,
+  /// the split is resolved by rule: AT LEAST 2 of 3 must agree, otherwise the
+  /// dish is rejected. Fail-closed: a check that errors counts as a "no"
+  /// vote, so an unverifiable dish is never admitted on a broken call.
+  Future<OriginVerification> verifyDishOrigin(String dishName) async {
+    final Map<String, dynamic> direct = await _safeCheck(
+      () => api.geminiLandmark.verifyOriginDirect(dishName),
+    );
+    final Map<String, dynamic> adjudicate = await _safeCheck(
+      () => api.geminiLandmark.verifyOriginAdjudicate(dishName),
+    );
+    final Map<String, dynamic> knownPattern = await _safeCheck(
+      () => api.geminiLandmark.verifyOriginKnownPattern(dishName),
+    );
+
+    final OriginDirectCheck c1 = (
+      dishCase: OriginDishCase.fromLabel(direct['case']),
+      originCountry: (direct['origin_country'] as String?)?.trim() ?? '',
+      originEthnicity: (direct['origin_ethnicity'] as String?)?.trim() ?? '',
+      confidence: ((direct['confidence'] as num?) ?? 0).toDouble(),
+    );
+    final OriginAdjudicateCheck c2 = (
+      dishCase: OriginDishCase.fromLabel(adjudicate['case']),
+      actualOriginCountry:
+          (adjudicate['actual_origin_country'] as String?)?.trim() ?? '',
+      distinguishingNotes:
+          (adjudicate['distinguishing_notes'] as String?)?.trim() ?? '',
+    );
+    final OriginKnownPatternCheck c3 = (
+      // Fail closed: a missing/broken check reads as "commonly misattributed"
+      // (i.e. NOT a vote for Malaysian).
+      isCommonlyMisattributed:
+          (knownPattern['is_commonly_misattributed'] as bool?) ?? true,
+      correctOriginIfMisattributed:
+          (knownPattern['correct_origin_if_misattributed'] as String?)?.trim(),
+      reasoning: (knownPattern['reasoning'] as String?)?.trim() ?? '',
+    );
+
+    // A check votes "Malaysian local food" when it classifies the dish as
+    // (a) Malaysian origin, (b) adopted/naturalized or (d) shared regional.
+    // At least 2 of 3 must agree - a single weak vote is not enough to create
+    // a curated catalogue row.
+    int votes = 0;
+    if (c1.dishCase.isMalaysianLocalFood) votes++;
+    if (c2.dishCase.isMalaysianLocalFood) votes++;
+    if (!c3.isCommonlyMisattributed) votes++;
+
+    return OriginVerification(
+      dishName: dishName,
+      verdict: votes >= 2 ? OriginVerdict.accept : OriginVerdict.reject,
+      votesMalaysian: votes,
+      directOrigin: c1,
+      adjudicate: c2,
+      knownPattern: c3,
+    );
+  }
+
+  /// Runs one verification check, returning an empty map on any failure so a
+  /// broken call never throws out of [verifyDishOrigin].
+  Future<Map<String, dynamic>> _safeCheck(
+    Future<Map<String, dynamic>> Function() check,
+  ) async {
+    try {
+      return await check();
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
   }
 
   /// `FoodAnalysisResponse` (data model) -> `LocalFood` (domain model) - the
@@ -141,17 +236,38 @@ class RecognitionRepository {
         id: 0, // Not yet saved - a repository assigns this once persisted.
         name: name ?? response.dish,
         description: response.description,
+        ingredients: response.ingredients,
         origin: response.origin,
         culturalBackground: response.culturalBackground,
-        ingredients: '', // Not returned by Gemini yet
         category: response.foodCategory,
         cookingStyle: response.cookingStyle,
         mealType: response.mealType,
-        foodType: 'Food', // Gemini doesn't classify food_type yet.
+        foodType: _normaliseFoodType(response.foodType),
+        tastes: response.tasteTags,
+        mainTaste: response.mainTaste,
         synonyms: response.variant.isEmpty
             ? const <String>[]
             : <String>[response.variant],
       );
+
+  /// Gemini's dish-type classification -> a valid catalogue `food_type`
+  /// value (proper case). Unknown / "none" / blank falls back to "Food" so a
+  /// validly-addable dish always carries a canonical type on `LocalFood`;
+  /// the raw classification is still carried on `FoodAnalysis.foodType` for
+  /// the addability gate.
+  static String _normaliseFoodType(String raw) {
+    final String t = raw.trim().toLowerCase();
+    for (final String value in const <String>[
+      'Food',
+      'Beverage',
+      'Fruit',
+      'Dessert',
+      'Kuih',
+    ]) {
+      if (value.toLowerCase() == t) return value;
+    }
+    return 'Food';
+  }
 
   /// Restaurant signboard photo - extracts the name (UC500, A7/A19).
   Future<SignboardAnalysisResponse> analyzeSignboard(List<int> imageBytes) =>

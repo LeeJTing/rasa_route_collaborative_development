@@ -38,6 +38,7 @@ class RecognitionResultCard extends StatelessWidget {
     this.onViewDetails,
     this.onAddLandmark,
     this.isLocalFood = true,
+    this.fitsCatalogueCategory = true,
     this.isLowConfidence = false,
     this.onEnterName,
     this.isProcessing = false,
@@ -47,7 +48,6 @@ class RecognitionResultCard extends StatelessWidget {
     this.observedFoodName,
     this.typedName,
     this.onDismissNameMismatch,
-    this.onAcceptTypedName,
   });
 
   final LocalFood food;
@@ -64,6 +64,12 @@ class RecognitionResultCard extends StatelessWidget {
   /// the details are still shown and "View Details" still works.
   final bool isLocalFood;
 
+  /// Whether the food fits a catalogue dish type (Food/Beverage/Fruit/
+  /// Dessert/Kuih). When false it is a Malaysian product at most (snack,
+  /// package, canned drink) - the header shows a "Malaysian Product" warning
+  /// and the caller must not pass [onAddLandmark].
+  final bool fitsCatalogueCategory;
+
   /// Whether the recognition was shaky enough that the tourist should be
   /// asked to verify it - the card shows a "low confidence" cue when true.
   /// An already-decided boolean, not a raw score: the threshold is a domain
@@ -73,8 +79,9 @@ class RecognitionResultCard extends StatelessWidget {
   final bool isLowConfidence;
 
   /// Whether a manually-typed name was verified against the photo and found
-  /// NOT to match it (warn-and-allow) - the card warns "this photo doesn't
-  /// look like X, it looks like Y" so a mismatch is never silently accepted.
+  /// NOT to match it - the card warns "this photo doesn't look like X, it
+  /// looks like Y" and the typed name can NOT be added (only the detected
+  /// food can be kept).
   final bool nameMismatch;
 
   /// What the photo actually shows, in Gemini's words, when [nameMismatch].
@@ -84,12 +91,9 @@ class RecognitionResultCard extends StatelessWidget {
   /// warning ("This looks more like X than `<typedName>`.").
   final String? typedName;
 
-  /// "Keep the detected food" - dismisses the mismatch warning.
+  /// "Keep the detected food" - the only action on a mismatch warning; the
+  /// typed name (which Gemini could not confirm) is never applied.
   final VoidCallback? onDismissNameMismatch;
-
-  /// "Add as `<typedName>` anyway" - the tourist explicitly accepts the typed
-  /// name even though Gemini could not confirm it (warn-and-allow commit).
-  final VoidCallback? onAcceptTypedName;
 
   /// Manual fallback when Gemini got the dish wrong - called with the food
   /// name the tourist typed (see `FoodRecognitionViewModel.enterFoodName`).
@@ -126,17 +130,21 @@ class RecognitionResultCard extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     Icon(
-                      isLocalFood ? Icons.check_circle : Icons.info_outline,
-                      color: isLocalFood
+                      isLocalFood && fitsCatalogueCategory
+                          ? Icons.check_circle
+                          : Icons.info_outline,
+                      color: isLocalFood && fitsCatalogueCategory
                           ? AppColors.success
                           : AppColors.warning,
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     Flexible(
                       child: Text(
-                        isLocalFood
+                        isLocalFood && fitsCatalogueCategory
                             ? 'Local Food Recognised'
-                            : 'Food Detected (Not Local)',
+                            : !isLocalFood
+                            ? 'Food Detected (Not Local)'
+                            : 'Malaysian Product Detected',
                         textAlign: TextAlign.center,
                         style: AppTextStyles.titleMedium,
                       ),
@@ -189,10 +197,11 @@ class RecognitionResultCard extends StatelessWidget {
                             const SizedBox(width: AppSpacing.xs),
                             Expanded(
                               child: Text(
-                                "This looks more like "
-                                "'${observedFoodName ?? food.name}' than "
-                                "'${typedName ?? food.name}'. Add it as "
-                                "'${typedName ?? food.name}' anyway?",
+                                "This photo doesn't look like "
+                                "'${typedName ?? food.name}' - it looks more "
+                                "like '${observedFoodName ?? food.name}', so "
+                                "it can't be added as "
+                                "'${typedName ?? food.name}'.",
                                 style: AppTextStyles.bodySmall.copyWith(
                                   color: AppColors.warning,
                                 ),
@@ -200,24 +209,16 @@ class RecognitionResultCard extends StatelessWidget {
                             ),
                           ],
                         ),
-                        if (onAcceptTypedName != null ||
-                            onDismissNameMismatch != null)
+                        if (onDismissNameMismatch != null)
                           Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: <Widget>[
-                              if (onAcceptTypedName != null &&
-                                  typedName != null)
-                                TextButton(
-                                  onPressed: onAcceptTypedName,
-                                  child: Text("Add as '$typedName'"),
+                              TextButton(
+                                onPressed: onDismissNameMismatch,
+                                child: Text(
+                                  "Keep '${observedFoodName ?? food.name}'",
                                 ),
-                              if (onDismissNameMismatch != null)
-                                TextButton(
-                                  onPressed: onDismissNameMismatch,
-                                  child: Text(
-                                    "Keep '${observedFoodName ?? food.name}'",
-                                  ),
-                                ),
+                              ),
                             ],
                           ),
                       ],
