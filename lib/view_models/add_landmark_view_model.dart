@@ -837,13 +837,13 @@ class AddLandmarkViewModel extends BaseViewModel
     safeNotifyListeners();
 
     try {
-      // Tourist auth isn't implemented in-app yet, so `currentTouristId()`
-      // returns null - fall back to the test tourist (Elwin) created in
-      // Supabase so the submit flow can be tested end-to-end. Replace with
-      // the real id once sign-in exists.
-      final String touristId =
-          await landmarkLogic.currentTouristId() ??
-          '22222222-2222-4222-8222-222222222222';
+      // The signed-in tourist - null when nobody is signed in (the entry
+      // gate routes to sign-in first, so a signed-in tourist is expected
+      // here).
+      final String? touristId = await landmarkLogic.currentTouristId();
+      if (touristId == null || touristId.isEmpty) {
+        throw StateError('Sign in to submit a landmark.');
+      }
 
       // Upload the landmark's own signboard/stall photo FIRST - it is stored
       // on the `submitted_landmark` row (`image_url` / `image_id` /
