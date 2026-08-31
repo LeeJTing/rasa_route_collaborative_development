@@ -2,6 +2,7 @@ import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/pronunciation_playback_result.dart';
 import '../repositories/food_repository_facade.dart';
 
 /// The food catalogue: browse, search, detail, pairings and similarity.
@@ -45,6 +46,9 @@ class FoodKnowledgeLogic {
 
   Future<bool> isFoodInFavourites(int foodId) async =>
       (await getFoodDetails(foodId)).isFavourite;
+
+  Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) =>
+      repository.playPronunciation(food);
 
   /// Finds another catalogue entry whose canonical name or synonym overlaps
   /// with the selected food. Collision detection is data-driven; no dish name

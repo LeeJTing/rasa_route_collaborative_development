@@ -13,9 +13,16 @@ import 'widgets/restaurant_information_section.dart';
 import 'widgets/restaurant_menu_preview.dart';
 
 class RestaurantDetailView extends StatefulWidget {
-  const RestaurantDetailView({super.key, @visibleForTesting this.viewModel});
+  const RestaurantDetailView({super.key});
 
-  final RestaurantDetailViewModel? viewModel;
+  @protected
+  RestaurantDetailViewModel createViewModel() => RestaurantDetailViewModel();
+
+  @protected
+  int? selectedRestaurantId(BuildContext context) {
+    final Object? argument = ModalRoute.of(context)?.settings.arguments;
+    return argument is int ? argument : null;
+  }
 
   @override
   State<RestaurantDetailView> createState() => _RestaurantDetailViewState();
@@ -28,7 +35,7 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
   @override
   void initState() {
     super.initState();
-    _viewModel = widget.viewModel ?? RestaurantDetailViewModel();
+    _viewModel = widget.createViewModel();
   }
 
   @override
@@ -36,16 +43,8 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
     super.didChangeDependencies();
     if (_didLoadArguments) return;
     _didLoadArguments = true;
-    final Object? argument = ModalRoute.of(context)?.settings.arguments;
-    if (argument is int) {
-      _viewModel.loadRestaurant(argument);
-    } else if (widget.viewModel == null) {
-      _viewModel.rejectMissingRestaurantId();
-    } else {
-      // Injected ViewModels are used by isolated widget tests where there is
-      // no named route. Production navigation must always provide the ID.
-      _viewModel.loadRestaurant(1);
-    }
+    _viewModel.selectRestaurant(widget.selectedRestaurantId(context));
+    _viewModel.onInit();
   }
 
   @override

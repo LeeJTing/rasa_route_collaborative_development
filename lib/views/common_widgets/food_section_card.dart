@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../app/theme/app_colors.dart';
-import '../../../app/theme/app_dimensions.dart';
+import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_dimensions.dart';
 
-/// Shared Food Detail surface used by every information section.
 class FoodSectionCard extends StatelessWidget {
   const FoodSectionCard({
     super.key,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/app/theme/app_theme.dart';
+import 'package:rasa_route_collaborative_development/model/business_logic/discovery_logic_facade.dart';
 import 'package:rasa_route_collaborative_development/view_models/restaurant_detail_view_model.dart';
 import 'package:rasa_route_collaborative_development/views/restaurant_detail_view/restaurant_detail_view.dart';
 
@@ -15,11 +16,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: RestaurantDetailView(
-          viewModel: RestaurantDetailViewModel(
-            discoveryLogic: FakeDiscoveryLogicFacade(),
-          ),
-        ),
+        home: _TestRestaurantDetailView(FakeDiscoveryLogicFacade()),
       ),
     );
     await tester.pumpAndSettle();
@@ -52,4 +49,26 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+}
+
+class _TestRestaurantDetailViewModel extends RestaurantDetailViewModel {
+  _TestRestaurantDetailViewModel(this.logic);
+
+  final DiscoveryLogicFacade logic;
+
+  @override
+  DiscoveryLogicFacade createDiscoveryLogic() => logic;
+}
+
+class _TestRestaurantDetailView extends RestaurantDetailView {
+  const _TestRestaurantDetailView(this.logic);
+
+  final DiscoveryLogicFacade logic;
+
+  @override
+  RestaurantDetailViewModel createViewModel() =>
+      _TestRestaurantDetailViewModel(logic);
+
+  @override
+  int? selectedRestaurantId(BuildContext context) => 1;
 }

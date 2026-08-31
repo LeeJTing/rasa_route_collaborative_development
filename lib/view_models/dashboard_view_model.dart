@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../app/routing/app_navigator.dart';
 import '../app/routing/app_routes.dart';
@@ -50,10 +50,12 @@ class MapSelectionHandoff {
 /// Regional Exploration Module, following UC300.
 
 class DashboardViewModel extends BaseViewModel {
-  DashboardViewModel({@visibleForTesting DiscoveryLogicFacade? discoveryLogic})
-    : discoveryLogic = discoveryLogic ?? DiscoveryLogicFacade() {
+  DashboardViewModel() {
     _live.add(this);
   }
+
+  @protected
+  DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
 
   // ===========================================================================
   // Where the tourist is - pushed in, never polled
@@ -146,7 +148,7 @@ class DashboardViewModel extends BaseViewModel {
     }
   }
 
-  final DiscoveryLogicFacade discoveryLogic;
+  late final DiscoveryLogicFacade discoveryLogic = createDiscoveryLogic();
 
   // ===========================================================================
   // Map view + camera

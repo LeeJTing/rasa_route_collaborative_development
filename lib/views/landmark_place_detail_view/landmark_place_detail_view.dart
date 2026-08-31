@@ -267,7 +267,7 @@ class _Photo extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         const Icon(Icons.location_on, size: 40, color: AppColors.textSecondary),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpacing.xs),
         Text(label, style: AppTextStyles.bodySmall),
       ],
     ),
@@ -332,7 +332,7 @@ class _MetaLine extends StatelessWidget {
                         size: AppSizes.iconSmall,
                         color: AppColors.primary,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       Text(
                         location,
                         style: AppTextStyles.bodyMedium.copyWith(
@@ -340,7 +340,7 @@ class _MetaLine extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       const Icon(
                         Icons.copy_outlined,
                         size: AppSizes.inlineNoticeIconSize,
@@ -366,7 +366,7 @@ class _MetaLine extends StatelessWidget {
                         size: AppSizes.inlineNoticeIconSize,
                         color: AppColors.primary,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       Text(
                         'Open Google Maps',
                         style: AppTextStyles.bodySmall.copyWith(
@@ -389,7 +389,7 @@ class _MetaLine extends StatelessWidget {
                 size: 14,
                 color: AppColors.warning,
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: AppSpacing.xs),
               Text(reports, style: AppTextStyles.bodySmall),
             ],
           ),

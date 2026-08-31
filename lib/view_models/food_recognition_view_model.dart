@@ -1,5 +1,5 @@
 import 'package:image_picker/image_picker.dart';
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../app/routing/app_navigator.dart';
 import '../app/routing/app_routes.dart';
@@ -273,12 +273,12 @@ typedef AdditionalFoodCaptureResult = ({
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
 class FoodRecognitionViewModel extends BaseViewModel {
-  FoodRecognitionViewModel({
-    @visibleForTesting LandmarkLogicFacade? landmarkLogic,
-    @visibleForTesting this.minimumLoadingDuration = const Duration(seconds: 3),
-  }) : landmarkLogic = landmarkLogic ?? LandmarkLogicFacade();
+  FoodRecognitionViewModel();
 
-  final LandmarkLogicFacade landmarkLogic;
+  @protected
+  LandmarkLogicFacade createLandmarkLogic() => LandmarkLogicFacade();
+
+  late final LandmarkLogicFacade landmarkLogic = createLandmarkLogic();
 
   /// How long the "Analysing image..." loading state must stay up at minimum
   /// after a capture / manual name entry / picker enrichment starts. Gemini
@@ -286,8 +286,8 @@ class FoodRecognitionViewModel extends BaseViewModel {
   /// recognised-food card (and the "View Details" data carried with it) is
   /// never shown while the result is still settling. `Duration.zero` in
   /// tests, so they don't each wait out the floor.
-  @visibleForTesting
-  final Duration minimumLoadingDuration;
+  @protected
+  Duration get minimumLoadingDuration => const Duration(seconds: 3);
 
   // --- MODE ---
   FoodRecognitionPurpose _purpose = FoodRecognitionPurpose.food;

@@ -1,6 +1,5 @@
 import '../core/base_view_model.dart';
 import '../model/business_logic/food_logic_facade.dart';
-import '../model/business_logic/tourist_information_logic_facade.dart';
 
 /// ViewModel for `FavouriteCollectionView`.
 ///
@@ -17,6 +16,4 @@ class FavouriteCollectionViewModel extends BaseViewModel {
   FavouriteCollectionViewModel();
 
   final FoodLogicFacade foodLogic = FoodLogicFacade();
-  final TouristInformationLogicFacade touristLogic =
-      TouristInformationLogicFacade();
 }

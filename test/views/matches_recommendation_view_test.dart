@@ -4,6 +4,7 @@ import 'package:rasa_route_collaborative_development/app/theme/app_theme.dart';
 import 'package:rasa_route_collaborative_development/app/routing/app_routes.dart';
 import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
+import 'package:rasa_route_collaborative_development/model/business_logic/discovery_logic_facade.dart';
 import 'package:rasa_route_collaborative_development/view_models/matches_recommendation_view_model.dart';
 import 'package:rasa_route_collaborative_development/views/matches_recommendation_view/matches_recommendation_view.dart';
 
@@ -18,11 +19,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: MatchesRecommendationView(
-          viewModel: MatchesRecommendationViewModel(
-            discoveryLogic: FakeDiscoveryLogicFacade(),
-          ),
-        ),
+        home: _TestMatchesRecommendationView(FakeDiscoveryLogicFacade()),
       ),
     );
     await tester.pumpAndSettle();
@@ -96,11 +93,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: MatchesRecommendationView(
-          viewModel: MatchesRecommendationViewModel(
-            discoveryLogic: FakeDiscoveryLogicFacade(),
-          ),
-        ),
+        home: _TestMatchesRecommendationView(FakeDiscoveryLogicFacade()),
       ),
     );
     await tester.pumpAndSettle();
@@ -132,11 +125,7 @@ void main() {
           }
           return null;
         },
-        home: MatchesRecommendationView(
-          viewModel: MatchesRecommendationViewModel(
-            discoveryLogic: FakeDiscoveryLogicFacade(),
-          ),
-        ),
+        home: _TestMatchesRecommendationView(FakeDiscoveryLogicFacade()),
       ),
     );
     await tester.pumpAndSettle();
@@ -174,12 +163,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: MatchesRecommendationView(
-          viewModel: MatchesRecommendationViewModel(
-            discoveryLogic: FakeDiscoveryLogicFacade(
+        home: _TestMatchesRecommendationView(
+          FakeDiscoveryLogicFacade(
               matchesResult: emptyRecommendations,
             ),
-          ),
         ),
       ),
     );
@@ -188,4 +175,24 @@ void main() {
     expect(find.textContaining('No matching restaurants'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+}
+
+class _TestMatchesRecommendationViewModel
+    extends MatchesRecommendationViewModel {
+  _TestMatchesRecommendationViewModel(this.logic);
+
+  final DiscoveryLogicFacade logic;
+
+  @override
+  DiscoveryLogicFacade createDiscoveryLogic() => logic;
+}
+
+class _TestMatchesRecommendationView extends MatchesRecommendationView {
+  const _TestMatchesRecommendationView(this.logic);
+
+  final DiscoveryLogicFacade logic;
+
+  @override
+  MatchesRecommendationViewModel createViewModel() =>
+      _TestMatchesRecommendationViewModel(logic);
 }

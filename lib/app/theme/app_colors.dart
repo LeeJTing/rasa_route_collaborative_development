@@ -79,6 +79,9 @@ abstract final class AppColors {
 
   static const Color transparent = Color(0x00000000);
 
+  /// Solid backdrop behind the live camera preview and capture controls.
+  static const Color cameraBackground = Color(0xFF000000);
+
   /// [Derived] Scrim behind modal bottom sheets and image overlays.
   static const Color scrim = Color(0x66000000);
 

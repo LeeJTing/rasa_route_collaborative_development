@@ -2,7 +2,9 @@ import 'dart:developer' as developer;
 
 import '../../core/json_model.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/pronunciation_playback_result.dart';
 import '../../shared_client/api_manager/api_manager.dart';
+import '../../shared_client/device_capability_manager/device_capability_manager.dart';
 import '../data_models/food_preference_data_model.dart';
 import '../data_models/local_food_data_model.dart';
 import '../data_models/local_food_image_data_model.dart';
@@ -17,6 +19,24 @@ class FoodKnowledgeRepository {
   FoodKnowledgeRepository();
 
   final APIManager api = APIManager();
+  final DeviceCapabilityManager deviceCapabilities = DeviceCapabilityManager();
+
+  Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) async {
+    final DevicePronunciationPlaybackResult result = await deviceCapabilities
+        .playPronunciation(
+          foodName: food.name,
+          audioUrl: food.audioGuideUrl,
+          fallbackText: food.pronunciationText,
+        );
+    return switch (result) {
+      DevicePronunciationPlaybackResult.curatedAudio =>
+        PronunciationPlaybackResult.curatedAudio,
+      DevicePronunciationPlaybackResult.deviceVoice =>
+        PronunciationPlaybackResult.deviceVoice,
+      DevicePronunciationPlaybackResult.unavailable =>
+        PronunciationPlaybackResult.unavailable,
+    };
+  }
 
   // ---------------------------------------------------------------------------
   // Catalogue cache

@@ -171,9 +171,9 @@ void main() {
     setUp(() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
-      logic = FoodRecognitionLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
-        foodRepository: _FakeFoodRepositoryFacade(knowledge),
+      logic = _TestFoodRecognitionLogic(
+        _FakeDiscoveryRepositoryFacade(recognition),
+        _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -567,9 +567,9 @@ void main() {
     setUp(() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
-      logic = FoodRecognitionLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
-        foodRepository: _FakeFoodRepositoryFacade(knowledge),
+      logic = _TestFoodRecognitionLogic(
+        _FakeDiscoveryRepositoryFacade(recognition),
+        _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -772,9 +772,9 @@ void main() {
     setUp(() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
-      logic = FoodRecognitionLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
-        foodRepository: _FakeFoodRepositoryFacade(knowledge),
+      logic = _TestFoodRecognitionLogic(
+        _FakeDiscoveryRepositoryFacade(recognition),
+        _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -854,9 +854,9 @@ void main() {
       setUp(() {
         recognition = _FakeRecognitionRepository();
         knowledge = _FakeFoodKnowledgeRepository();
-        logic = FoodRecognitionLogic(
-          discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
-          foodRepository: _FakeFoodRepositoryFacade(knowledge),
+        logic = _TestFoodRecognitionLogic(
+          _FakeDiscoveryRepositoryFacade(recognition),
+          _FakeFoodRepositoryFacade(knowledge),
         );
       });
 
@@ -962,4 +962,17 @@ void main() {
       });
     },
   );
+}
+
+class _TestFoodRecognitionLogic extends FoodRecognitionLogic {
+  _TestFoodRecognitionLogic(this.discovery, this.food);
+
+  final DiscoveryRepositoryFacade discovery;
+  final FoodRepositoryFacade food;
+
+  @override
+  DiscoveryRepositoryFacade createDiscoveryRepository() => discovery;
+
+  @override
+  FoodRepositoryFacade createFoodRepository() => food;
 }

@@ -56,7 +56,7 @@ class HeatmapLegend extends StatelessWidget {
           children: <Widget>[
             for (final Color step in AppColors.heatmapScale)
               Padding(
-                padding: const EdgeInsets.only(right: 3),
+                padding: const EdgeInsets.only(right: AppSpacing.xs),
                 child: Container(
                   width: AppSizes.legendSwatch,
                   height: AppSizes.legendSwatch,
@@ -81,7 +81,7 @@ class HeatmapLegend extends StatelessWidget {
           maximumRestaurantCount == 0
               ? 'No restaurants mapped yet'
               : 'Best-served state: $maximumRestaurantCount restaurants',
-          style: AppTextStyles.labelSmall.copyWith(fontSize: 9),
+          style: AppTextStyles.mapMicroLabel,
         ),
       ],
     );

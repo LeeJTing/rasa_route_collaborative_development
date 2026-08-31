@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
@@ -13,11 +13,12 @@ import '../repositories/discovery_repository_facade.dart';
 
 /// Builds Matches from one state's persisted Swipe Mode likes and real places.
 class MatchesRecommendationLogic {
-  MatchesRecommendationLogic({
-    @visibleForTesting DiscoveryRepositoryFacade? repository,
-  }) : _repository = repository ?? DiscoveryRepositoryFacade();
+  MatchesRecommendationLogic();
 
-  final DiscoveryRepositoryFacade _repository;
+  @protected
+  DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
+
+  late final DiscoveryRepositoryFacade _repository = createRepository();
 
   Future<MatchesRecommendationResult> recommendations(
     MatchesRecommendationRequest request,

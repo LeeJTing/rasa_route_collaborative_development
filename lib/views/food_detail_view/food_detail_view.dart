@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../domain_model/local_food.dart';
 import '../../view_models/food_detail_view_model.dart';
-import '../common_widgets/app_top_bar.dart';
-import '../food_recommendation_view/food_recommendation_view.dart';
 import '../common_widgets/app_image.dart';
-import '../food_recommendation_view/widgets/similar_food_card.dart';
+import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/food_pairing_card.dart';
+import '../common_widgets/food_section_card.dart';
+import '../common_widgets/similar_food_card.dart';
 import 'widgets/food_hero_card.dart';
 import 'widgets/food_name_collision_card.dart';
 import 'widgets/food_notice_banner.dart';
 import 'widgets/food_overview_card.dart';
-import 'widgets/food_section_card.dart';
 
 class FoodDetailView extends StatefulWidget {
   const FoodDetailView({super.key});
@@ -39,7 +40,8 @@ class _FoodDetailViewState extends State<FoodDetailView> {
     if (_initialised) return;
     _initialised = true;
     final Object? argument = ModalRoute.of(context)?.settings.arguments;
-    _viewModel.loadFood(argument is int ? argument : 0);
+    _viewModel.foodId = argument is int ? argument : 0;
+    _viewModel.onInit();
   }
 
   @override
@@ -152,7 +154,7 @@ class _FoodDetailViewState extends State<FoodDetailView> {
           FoodSectionCard(
             title: 'Pairing Recommendations',
             subtitle: 'Flavours that complement this dish',
-            child: FoodRecommendationView(foodId: vm.foodId),
+            child: _pairingRecommendations(context, vm),
           ),
           const SizedBox(height: AppSpacing.lg),
           FoodSectionCard(
@@ -165,6 +167,48 @@ class _FoodDetailViewState extends State<FoodDetailView> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _pairingRecommendations(
+    BuildContext context,
+    FoodDetailViewModel viewModel,
+  ) {
+    if (viewModel.loadingPairings) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (viewModel.pairingError != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(viewModel.pairingError!),
+          TextButton.icon(
+            onPressed: viewModel.loadPairings,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry pairing recommendations'),
+          ),
+        ],
+      );
+    }
+    if (viewModel.pairings.isEmpty) {
+      return const Text(
+        'No suitable food pairings were found for your dietary requirements.',
+      );
+    }
+    return Column(
+      children: viewModel.pairings
+          .map(
+            (pairing) => FoodPairingCard(
+              pairing: pairing,
+              pairedFood: viewModel.pairedFood(pairing.pairedLocalFoodId),
+              onTap: () => Navigator.pushNamed(
+                context,
+                AppRoutes.foodDetail,
+                arguments: pairing.pairedLocalFoodId,
+              ),
+            ),
+          )
+          .toList(growable: false),
     );
   }
 

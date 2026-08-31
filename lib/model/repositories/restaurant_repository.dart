@@ -201,7 +201,9 @@ class RestaurantRepository {
           rangeStart += _cataloguePageSize;
         }
       }
-      return List<RestaurantItem>.unmodifiable(items);
+      return List<RestaurantItem>.unmodifiable(
+        _deduplicateRestaurantItems(items),
+      );
     } catch (error, stackTrace) {
       developer.log(
         'Restaurant item eligibility query failed.',
@@ -254,7 +256,7 @@ class RestaurantRepository {
       imageUrl: data.restaurantImageUrl,
       openingHours: openingHours,
       status: data.status,
-      items: items,
+      items: _deduplicateRestaurantItems(items),
     );
   }
 
@@ -414,4 +416,35 @@ class RestaurantRepository {
       .map((String synonym) => synonym.trim())
       .where((String synonym) => synonym.isNotEmpty)
       .toList(growable: false);
+
+  /// Imported menu datasets can contain the same dish more than once under
+  /// different row ids. A restaurant menu is unique by its visible dish name
+  /// and price; when duplicates exist, retain the row with the richer photo
+  /// and ingredient data.
+  @visibleForTesting
+  List<RestaurantItem> deduplicateRestaurantItems(List<RestaurantItem> items) =>
+      _deduplicateRestaurantItems(items);
+
+  List<RestaurantItem> _deduplicateRestaurantItems(List<RestaurantItem> items) {
+    final Map<String, RestaurantItem> byMenuEntry = <String, RestaurantItem>{};
+    for (final RestaurantItem item in items) {
+      final String key = <String>[
+        item.restaurantId.toString(),
+        _normaliseFoodName(item.foodName),
+        item.price?.toStringAsFixed(2) ?? 'no-price',
+      ].join('|');
+      final RestaurantItem? existing = byMenuEntry[key];
+      if (existing == null || _itemQuality(item) > _itemQuality(existing)) {
+        byMenuEntry[key] = item;
+      }
+    }
+    return List<RestaurantItem>.unmodifiable(byMenuEntry.values);
+  }
+
+  int _itemQuality(RestaurantItem item) {
+    int quality = 0;
+    if (item.imageUrl?.trim().isNotEmpty == true) quality += 2;
+    if (item.ingredients?.trim().isNotEmpty == true) quality += 1;
+    return quality;
+  }
 }
