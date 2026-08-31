@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../core/json_model.dart';
+import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../shared_client/api_manager/api_manager.dart';
@@ -10,7 +11,7 @@ import '../data_models/restaurant_data_model.dart';
 import '../data_models/restaurant_item_data_model.dart';
 import '../data_models/local_food_data_model.dart';
 import '../data_models/local_food_image_data_model.dart';
-import 'restaurant_opening_hours_parser.dart';
+import '../data_models/opening_hours_data_model.dart';
 
 /// Supabase-backed restaurant catalogue used by Quick Mode.
 ///
@@ -20,8 +21,6 @@ import 'restaurant_opening_hours_parser.dart';
 /// linked local-food catalogue image is used.
 class RestaurantRepository {
   final APIManager api = APIManager();
-  final RestaurantOpeningHoursParser openingHoursParser =
-      const RestaurantOpeningHoursParser();
 
   static const int _cataloguePageSize = 1000;
   static const int _restaurantIdBatchSize = 200;
@@ -36,10 +35,18 @@ class RestaurantRepository {
     latitude,
     phone,
     website,
-    opening_hours,
     restaurant_image_id,
     restaurant_image_url,
-    status
+    status,
+    restaurant_opening_hours:opening_hours!opening_hours_restaurant_id_fkey(
+      opening_hours_id,
+      day,
+      status,
+      opening_time,
+      closing_time,
+      landmark_id,
+      restaurant_id
+    )
   ''';
 
   static const String _itemSummaryColumns = '''
@@ -220,6 +227,12 @@ class RestaurantRepository {
 
   Restaurant _toDomain(Map<String, dynamic> row) {
     final RestaurantDataModel data = RestaurantDataModel.fromJson(row);
+    final List<OpeningHour> openingHours = openingHoursFromRows(
+      JsonReader.asModelList<Map<String, dynamic>>(
+        row['restaurant_opening_hours'],
+        (Map<String, dynamic> json) => json,
+      ),
+    );
     final Object? rawItems = row['restaurant_item'];
     final List<RestaurantItem> items = rawItems is List
         ? rawItems
@@ -239,10 +252,75 @@ class RestaurantRepository {
       phone: data.phone ?? '',
       website: data.website ?? '',
       imageUrl: data.restaurantImageUrl,
-      openingHours: openingHoursParser.parse(data.openingHours),
+      openingHours: openingHours,
       status: data.status,
       items: items,
     );
+  }
+
+  /// Converts ERD `opening_hours` rows at the repository boundary.
+  @visibleForTesting
+  List<OpeningHour> openingHoursFromRows(List<Map<String, dynamic>> rows) {
+    final List<OpeningHour> hours = <OpeningHour>[];
+    for (final Map<String, dynamic> row in rows) {
+      final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
+      final Weekday? day = _weekday(data.day);
+      final DayStatus? status = _dayStatus(data.status);
+      if (day == null || status == null) continue;
+      int? opensAt = _minutesOfDay(data.openingTime);
+      int? closesAt = _minutesOfDay(data.closingTime);
+      if (status == DayStatus.open && opensAt == null && closesAt == null) {
+        opensAt = 0;
+        closesAt = 1440;
+      } else if (status == DayStatus.open &&
+          opensAt == 0 &&
+          data.closingTime?.startsWith('23:59') == true) {
+        closesAt = 1440;
+      }
+      hours.add(
+        OpeningHour(
+          id: data.openingHoursId,
+          day: day,
+          status: status,
+          opensAt: status == DayStatus.open ? opensAt : null,
+          closesAt: status == DayStatus.open ? closesAt : null,
+        ),
+      );
+    }
+    hours.sort((OpeningHour a, OpeningHour b) {
+      final int dayOrder = a.day.index.compareTo(b.day.index);
+      if (dayOrder != 0) return dayOrder;
+      return (a.opensAt ?? -1).compareTo(b.opensAt ?? -1);
+    });
+    return List<OpeningHour>.unmodifiable(hours);
+  }
+
+  Weekday? _weekday(String value) {
+    final String name = value.trim().toLowerCase();
+    for (final Weekday day in Weekday.values) {
+      if (day.name == name) return day;
+    }
+    return null;
+  }
+
+  DayStatus? _dayStatus(String value) {
+    final String name = value.trim().toLowerCase();
+    for (final DayStatus status in DayStatus.values) {
+      if (status.name == name) return status;
+    }
+    return null;
+  }
+
+  int? _minutesOfDay(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final List<String> parts = value.split(':');
+    if (parts.length < 2) return null;
+    final int? hour = int.tryParse(parts[0]);
+    final int? minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null || hour > 23 || minute > 59) {
+      return null;
+    }
+    return hour * 60 + minute;
   }
 
   RestaurantItem _itemDataToDomain(RestaurantItemDataModel data) =>
