@@ -48,6 +48,7 @@ class LandmarkLogicFacade {
       bool nameMatchesPhoto,
       double matchConfidence,
       bool isLocalFood,
+      bool fitsCatalogueCategory,
       String observedFood,
       List<String> dietaryRestrictions,
     })
@@ -60,6 +61,7 @@ class LandmarkLogicFacade {
       LocalFood food,
       double priceMin,
       double priceMax,
+      bool fitsCatalogueCategory,
       List<String> dietaryRestrictions,
     })
   >

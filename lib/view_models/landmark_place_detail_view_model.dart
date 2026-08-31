@@ -2,6 +2,18 @@ import '../core/base_view_model.dart';
 import '../domain_model/submitted_landmark.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
 
+/// Why a tourist is reporting a submitted-landmark pin. Mirrors the
+/// catalogue's `RestaurantReportReason` (the report feature was first built
+/// for normal restaurant detail, and is now also offered on submitted
+/// landmark pins) - reasons phrased for a tourist-submitted restaurant.
+enum LandmarkReportReason {
+  noLongerExists,
+  incorrectName,
+  incorrectLocation,
+  incorrectOperatingHours,
+  incorrectInformation,
+}
+
 /// ViewModel for `LandmarkPlaceDetailView` - the full-detail page for a
 /// tourist-submitted landmark, opened from the dashboard map's "View
 /// Landmark" button (A11-4).
@@ -20,8 +32,13 @@ class LandmarkPlaceDetailViewModel extends BaseViewModel {
 
   int _landmarkId = 0;
   SubmittedLandmark? _landmark;
+  bool _reportSubmitted = false;
 
   SubmittedLandmark? get landmark => _landmark;
+
+  /// True between a successful [submitReport] and [consumeReportSubmitted] -
+  /// lets the View show its confirmation after the sheet pops.
+  bool get reportSubmitted => _reportSubmitted;
 
   /// Set from `MapSelectionHandoff` in the View's `initState`, before
   /// `onInit()` - see that class's doc.
@@ -49,6 +66,24 @@ class LandmarkPlaceDetailViewModel extends BaseViewModel {
     }
     _landmark = landmark;
   });
+
+  /// Records a report against this landmark pin. UI-only stub for now, the
+  /// same as `RestaurantDetailViewModel.submitReport` - a later repository
+  /// iteration will submit the reason through an authenticated RPC and
+  /// enforce the unique-user threshold that freezes a landmark after enough
+  /// reports. The button is only reachable in the ready state (a landmark is
+  /// loaded), so there is no `_landmark == null` guard here - that would also
+  /// block unit-testing the state transition without a loaded landmark.
+  Future<void> submitReport(LandmarkReportReason reason) async {
+    _reportSubmitted = true;
+    safeNotifyListeners();
+  }
+
+  void consumeReportSubmitted() {
+    if (!_reportSubmitted) return;
+    _reportSubmitted = false;
+    safeNotifyListeners();
+  }
 }
 
 /// Hands a tapped `LandmarkItem` from `LandmarkPlaceDetailView`'s dish list
