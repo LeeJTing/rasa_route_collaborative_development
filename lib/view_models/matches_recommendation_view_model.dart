@@ -1,16 +1,15 @@
 import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../core/base_view_model.dart';
+import '../domain_model/matches_recommendation_tab.dart';
 import '../domain_model/matches_recommendation.dart';
 import '../domain_model/restaurant.dart';
 import '../domain_model/restaurant_item.dart';
 import '../domain_model/swipe_session.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
 import 'current_location_facade.dart';
-
-enum MatchesRecommendationTab { restaurants, submittedLandmarks }
 
 enum MatchesRestaurantSort { distance, price, preference, rating }
 
@@ -24,15 +23,16 @@ enum MatchesSortDirection { ascending, descending }
 /// presentation concerns: selected tab, sorting, radius expansion and how many
 /// entries are visible inside each liked-food group.
 class MatchesRecommendationViewModel extends BaseViewModel {
-  MatchesRecommendationViewModel({
-    @visibleForTesting DiscoveryLogicFacade? discoveryLogic,
-  }) : discoveryLogic = discoveryLogic ?? DiscoveryLogicFacade();
+  MatchesRecommendationViewModel();
+
+  @protected
+  DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
 
   static const int initialVisibleCount = 2;
   static const int additionalVisibleCount = 2;
   static const double initialRadiusKm = 1;
 
-  final DiscoveryLogicFacade discoveryLogic;
+  late final DiscoveryLogicFacade discoveryLogic = createDiscoveryLogic();
   final CurrentLocationFacade locationFacade = CurrentLocationFacade();
 
   MatchesRecommendationRequest? _request;
@@ -240,10 +240,12 @@ class MatchesRecommendationViewModel extends BaseViewModel {
     final MatchedFoodRecommendations? group = _group(foodId);
     final double current = radiusFor(foodId);
     if (group == null) return current;
-    final List<double> outside = group.restaurants
-        .map((Restaurant value) => value.distanceMetres ?? double.infinity)
-        .where((double value) => value.isFinite && value > current * 1000)
-        .toList(growable: false)..sort();
+    final List<double> outside =
+        group.restaurants
+            .map((Restaurant value) => value.distanceMetres ?? double.infinity)
+            .where((double value) => value.isFinite && value > current * 1000)
+            .toList(growable: false)
+          ..sort();
     return outside.isEmpty
         ? current
         : math.max(current, (outside.first / 1000).ceilToDouble());
@@ -253,10 +255,14 @@ class MatchesRecommendationViewModel extends BaseViewModel {
     final MatchedFoodRecommendations? group = _group(foodId);
     final double current = radiusFor(foodId);
     if (group == null) return current;
-    final List<double> outside = group.submittedLandmarks
-        .map((SubmittedLandmarkRecommendation value) => value.distanceMetres)
-        .where((double value) => value > current * 1000)
-        .toList(growable: false)..sort();
+    final List<double> outside =
+        group.submittedLandmarks
+            .map(
+              (SubmittedLandmarkRecommendation value) => value.distanceMetres,
+            )
+            .where((double value) => value > current * 1000)
+            .toList(growable: false)
+          ..sort();
     return outside.isEmpty
         ? current
         : math.max(current, (outside.first / 1000).ceilToDouble());

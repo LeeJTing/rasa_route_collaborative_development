@@ -3,7 +3,6 @@ import 'package:meta/meta.dart' show visibleForTesting;
 import '../core/base_view_model.dart';
 import '../domain_model/local_food.dart';
 import '../model/business_logic/food_logic_facade.dart';
-import '../model/business_logic/tourist_information_logic_facade.dart';
 
 /// ViewModel for `FavouriteCollectionView`.
 ///
@@ -50,20 +49,5 @@ class FavouriteCollectionViewModel extends BaseViewModel {
         .toList(growable: false);
   });
 
-  /// Removes [food] from the collection (the swipe-to-delete action).
-  ///
-  /// Optimistic: the card disappears immediately, then the junction row is
-  /// deleted; if that fails the list reloads so the truth comes back.
-  Future<void> removeFavourite(LocalFood food) async {
-    _favourites = _favourites
-        .where((LocalFood f) => f.id != food.id)
-        .toList(growable: false);
-    safeNotifyListeners();
-    await runGuarded(() async {
-      await touristLogic.removeFavourite(food.id);
-    });
-    if (hasError) {
-      await load();
-    }
-  }
+  final FoodLogicFacade foodLogic = FoodLogicFacade();
 }

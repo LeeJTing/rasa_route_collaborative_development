@@ -17,7 +17,7 @@ void main() {
 
     setUp(() {
       repository = _MatchesRepository();
-      logic = MatchesRecommendationLogic(repository: repository);
+      logic = _TestMatchesRecommendationLogic(repository);
     });
 
     test(
@@ -58,8 +58,8 @@ void main() {
 
     test('keeps a real occurrence when the catalogue page omits it', () async {
       final MatchesRecommendationLogic fallbackLogic =
-          MatchesRecommendationLogic(
-            repository: _MissingCatalogueRestaurantRepository(),
+          _TestMatchesRecommendationLogic(
+            _MissingCatalogueRestaurantRepository(),
           );
 
       final MatchesRecommendationResult result = await fallbackLogic
@@ -74,6 +74,15 @@ void main() {
       expect(result.groups.single.restaurants.single.name, 'Actual Restaurant');
     });
   });
+}
+
+class _TestMatchesRecommendationLogic extends MatchesRecommendationLogic {
+  _TestMatchesRecommendationLogic(this.repository);
+
+  final DiscoveryRepositoryFacade repository;
+
+  @override
+  DiscoveryRepositoryFacade createRepository() => repository;
 }
 
 class _MissingCatalogueRestaurantRepository extends _MatchesRepository {

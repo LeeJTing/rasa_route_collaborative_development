@@ -1,6 +1,9 @@
+import 'package:meta/meta.dart' show visibleForTesting;
+
 import '../../domain_model/dietary_restriction.dart';
-import '../repositories/food_repository_facade.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/pronunciation_playback_result.dart';
+import '../repositories/food_repository_facade.dart';
 
 /// The food catalogue: browse, search, detail, pairings and similarity.
 ///
@@ -44,30 +47,75 @@ class FoodKnowledgeLogic {
   Future<bool> isFoodInFavourites(int foodId) async =>
       (await getFoodDetails(foodId)).isFavourite;
 
+  Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) =>
+      repository.playPronunciation(food);
+
   /// Finds another catalogue entry whose canonical name or synonym overlaps
   /// with the selected food. Collision detection is data-driven; no dish name
   /// or database id is embedded in the app.
   Future<LocalFood?> detectNameCollision(int foodId) async {
     final List<LocalFood> catalogue = await repository.getFoods();
+    return findNameCollision(catalogue: catalogue, foodId: foodId);
+  }
+
+  @visibleForTesting
+  LocalFood? findNameCollision({
+    required List<LocalFood> catalogue,
+    required int foodId,
+  }) {
     final LocalFood selected = catalogue.firstWhere(
       (LocalFood food) => food.id == foodId,
       orElse: () => throw Exception('Local food not found.'),
     );
-    final Set<String> selectedNames = <String>{
-      selected.name.toLowerCase(),
-      ...selected.synonyms.map((String value) => value.toLowerCase()),
-    };
+    final Map<String, String> selectedNames = _namesByNormalisedValue(selected);
     for (final LocalFood candidate in catalogue) {
       if (candidate.id == selected.id) continue;
-      final Set<String> candidateNames = <String>{
-        candidate.name.toLowerCase(),
-        ...candidate.synonyms.map((String value) => value.toLowerCase()),
-      };
-      if (selectedNames.intersection(candidateNames).isNotEmpty) {
-        return candidate;
+      final Map<String, String> candidateNames = _namesByNormalisedValue(
+        candidate,
+      );
+      for (final MapEntry<String, String> selectedName
+          in selectedNames.entries) {
+        for (final MapEntry<String, String> candidateName
+            in candidateNames.entries) {
+          final String? sharedName = _sharedCollisionName(
+            selectedName,
+            candidateName,
+          );
+          if (sharedName == null) continue;
+          return candidate;
+        }
       }
     }
     return null;
+  }
+
+  String? _sharedCollisionName(
+    MapEntry<String, String> selected,
+    MapEntry<String, String> candidate,
+  ) {
+    if (selected.key == candidate.key) return selected.value;
+    final MapEntry<String, String> shorter =
+        selected.key.length <= candidate.key.length ? selected : candidate;
+    final MapEntry<String, String> longer = identical(shorter, selected)
+        ? candidate
+        : selected;
+    if (shorter.key.split(' ').length < 2) return null;
+    return ' ${longer.key} '.contains(' ${shorter.key} ')
+        ? shorter.value
+        : null;
+  }
+
+  Map<String, String> _namesByNormalisedValue(LocalFood food) {
+    final Map<String, String> names = <String, String>{};
+    for (final String value in <String>[food.name, ...food.synonyms]) {
+      final String display = value.trim();
+      final String normalised = display
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+          .trim();
+      if (normalised.isNotEmpty) names.putIfAbsent(normalised, () => display);
+    }
+    return names;
   }
 
   List<String> detectAllergies(LocalFood food) {
@@ -86,8 +134,8 @@ class FoodKnowledgeLogic {
 
   Future<List<int>> touristDietaryRestrictionIds() async {
     try {
-      final List<DietaryRestriction> restrictions =
-      await repository.touristDietaryRestrictions();
+      final List<DietaryRestriction> restrictions = await repository
+          .touristDietaryRestrictions();
       return restrictions
           .map((DietaryRestriction r) => r.id)
           .toList(growable: false);

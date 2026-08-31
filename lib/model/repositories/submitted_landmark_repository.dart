@@ -21,8 +21,7 @@ import '../data_models/submitted_landmark_data_model.dart';
 ///     identity column, so the DB assigns it.
 ///   * `opening_hours` - one row per day/range. `opening_hours_id` has no
 ///     identity default - supplied the same way as `landmark_id`. The table
-///     has NO `status` column: an Open day writes its times; a Closed/Unknown
-///     day writes one row with null times (that's the whole representation).
+///     stores the ERD `status` plus nullable times for Closed/Unknown days.
 ///
 /// These writes require RLS insert/update policies - until they are applied,
 /// every write is denied (see ARCHITECTURE_ANALYSIS.md, Known Gaps).
@@ -149,7 +148,7 @@ class SubmittedLandmarkRepository {
         api.selectAll(
           APIManager.tableOpeningHours,
           columns:
-              'opening_hours_id, day, opening_time, closing_time, '
+              'opening_hours_id, day, status, opening_time, closing_time, '
               'landmark_id, restaurant_id',
           eq: <String, Object?>{'landmark_id': landmarkId},
         ),
@@ -236,23 +235,26 @@ class SubmittedLandmarkRepository {
     );
   }
 
-  /// `opening_hours` row -> `OpeningHour`. Null times mean the day is
-  /// recorded as closed - the same convention `MapRepository` uses for map
-  /// pins. Returns null when the day text doesn't parse.
+  /// `opening_hours` row -> `OpeningHour`. Returns null when its enum text
+  /// does not match the ERD values.
   OpeningHour? _toOpeningHour(Map<String, dynamic> row) {
     final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
     final Weekday? day = _weekday(data.day);
-    if (day == null) return null;
+    final DayStatus? status = _dayStatus(data.status);
+    if (day == null || status == null) return null;
     final int? opensAt = _minutesOfDay(data.openingTime);
-    final int? closesAt = _minutesOfDay(data.closingTime);
+    int? closesAt = _minutesOfDay(data.closingTime);
+    if (status == DayStatus.open &&
+        opensAt == 0 &&
+        data.closingTime?.startsWith('23:59') == true) {
+      closesAt = 1440;
+    }
     return OpeningHour(
       id: data.openingHoursId,
       day: day,
-      status: opensAt == null || closesAt == null
-          ? DayStatus.closed
-          : DayStatus.open,
-      opensAt: opensAt,
-      closesAt: closesAt,
+      status: status,
+      opensAt: status == DayStatus.open ? opensAt : null,
+      closesAt: status == DayStatus.open ? closesAt : null,
     );
   }
 
@@ -260,6 +262,14 @@ class SubmittedLandmarkRepository {
     final String name = value.trim().toLowerCase();
     for (final Weekday day in Weekday.values) {
       if (day.name == name) return day;
+    }
+    return null;
+  }
+
+  static DayStatus? _dayStatus(String value) {
+    final String name = value.trim().toLowerCase();
+    for (final DayStatus status in DayStatus.values) {
+      if (status.name == name) return status;
     }
     return null;
   }
@@ -400,6 +410,7 @@ class SubmittedLandmarkRepository {
       await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
         'opening_hours_id': nextId++,
         'day': _dayName(hour.day),
+        'status': hour.status.name,
         'opening_time': isOpen && hour.opensAt != null
             ? _formatTime(hour.opensAt!)
             : null,

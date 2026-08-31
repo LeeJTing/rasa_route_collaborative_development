@@ -5,6 +5,7 @@ import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
+import '../../domain_model/matches_recommendation_tab.dart';
 import '../../domain_model/matches_recommendation.dart';
 import '../../view_models/dashboard_view_model.dart' show MapSelectionHandoff;
 import '../../view_models/matches_recommendation_view_model.dart';
@@ -15,12 +16,11 @@ import 'widgets/matches_restaurant_card.dart';
 import 'widgets/submitted_landmark_recommendation_card.dart';
 
 class MatchesRecommendationView extends StatefulWidget {
-  const MatchesRecommendationView({
-    super.key,
-    @visibleForTesting this.viewModel,
-  });
+  const MatchesRecommendationView({super.key});
 
-  final MatchesRecommendationViewModel? viewModel;
+  @protected
+  MatchesRecommendationViewModel createViewModel() =>
+      MatchesRecommendationViewModel();
 
   @override
   State<MatchesRecommendationView> createState() =>
@@ -34,7 +34,7 @@ class _MatchesRecommendationViewState extends State<MatchesRecommendationView> {
   @override
   void initState() {
     super.initState();
-    _viewModel = widget.viewModel ?? MatchesRecommendationViewModel();
+    _viewModel = widget.createViewModel();
   }
 
   @override

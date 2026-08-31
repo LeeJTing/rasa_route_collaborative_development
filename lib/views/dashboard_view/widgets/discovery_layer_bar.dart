@@ -583,10 +583,9 @@ class _MatchesPill extends StatelessWidget {
             const SizedBox(width: AppSpacing.xs),
             Text(
               'Matches $count',
-              style: AppTextStyles.labelSmall.copyWith(
+              style: AppTextStyles.compactBadgeLabel.copyWith(
                 color: AppColors.textPrimary,
                 fontWeight: FontWeight.w600,
-                fontSize: 10,
               ),
             ),
           ],

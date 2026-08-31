@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../view_models/food_recommendation_view_model.dart';
-import 'widgets/recommendation_card.dart';
+import '../common_widgets/food_pairing_card.dart';
 
 class FoodRecommendationView extends StatefulWidget {
   const FoodRecommendationView({super.key, this.foodId});
@@ -36,7 +37,8 @@ class _FoodRecommendationViewState extends State<FoodRecommendationView> {
     super.didChangeDependencies();
     if (_initialised) return;
     _initialised = true;
-    _viewModel.load(_foodId);
+    _viewModel.foodId = _foodId;
+    _viewModel.onInit();
   }
 
   @override
@@ -60,8 +62,8 @@ class _FoodRecommendationViewState extends State<FoodRecommendationView> {
       child: Consumer<FoodRecommendationViewModel>(
         builder:
             (BuildContext context, FoodRecommendationViewModel vm, Widget? _) {
-          return _content(context, vm);
-        },
+              return _content(context, vm);
+            },
       ),
     );
   }
@@ -122,11 +124,16 @@ class _FoodRecommendationViewState extends State<FoodRecommendationView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: vm.pairings
           .map(
-            (pairing) => RecommendationCard(
-          pairing: pairing,
-          pairedFood: vm.pairedFood(pairing.pairedLocalFoodId),
-        ),
-      )
+            (pairing) => FoodPairingCard(
+              pairing: pairing,
+              pairedFood: vm.pairedFood(pairing.pairedLocalFoodId),
+              onTap: () => Navigator.pushNamed(
+                context,
+                AppRoutes.foodDetail,
+                arguments: pairing.pairedLocalFoodId,
+              ),
+            ),
+          )
           .toList(growable: false),
     );
   }

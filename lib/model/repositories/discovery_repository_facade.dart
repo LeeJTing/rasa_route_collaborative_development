@@ -76,6 +76,9 @@ class DiscoveryRepositoryFacade {
 
   Future<List<LocalFood>> getLocalFoods() => food.getFoods();
 
+  Future<List<LocalFood>> searchLocalFoods(String query) =>
+      food.searchFoods(query);
+
   Future<Set<int>> favouriteFoodIdsForTourist(String touristId) =>
       food.favouriteFoodIdsForTourist(touristId);
 

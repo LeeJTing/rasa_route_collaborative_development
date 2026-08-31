@@ -554,14 +554,14 @@ class _CameraViewfinder extends StatelessWidget {
   Widget build(BuildContext context) {
     if (frozenImage != null) {
       return ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: _FrozenImage(image: frozenImage!),
       );
     }
 
     if (error != null) {
       return ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: Center(
           child: Padding(
             padding: AppSpacing.screenPadding,
@@ -580,7 +580,7 @@ class _CameraViewfinder extends StatelessWidget {
     final CameraController? camera = controller;
     if (isInitializing || camera == null || !camera.value.isInitialized) {
       return const ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: Center(
           child: CircularProgressIndicator(color: AppColors.primary),
         ),
@@ -588,7 +588,7 @@ class _CameraViewfinder extends StatelessWidget {
     }
 
     return ColoredBox(
-      color: Colors.black,
+      color: AppColors.cameraBackground,
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
@@ -696,7 +696,7 @@ class _CaptureControlBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: Colors.black,
+      color: AppColors.cameraBackground,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
         child: Center(child: _CaptureButton(onTap: onCapture)),

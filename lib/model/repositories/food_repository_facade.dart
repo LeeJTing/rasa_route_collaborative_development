@@ -1,10 +1,8 @@
-import 'package:meta/meta.dart' show visibleForTesting;
-
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_pairing.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
-import '../../shared_client/api_manager/api_manager.dart';
+import '../../domain_model/pronunciation_playback_result.dart';
 import 'dietary_restriction_repository.dart';
 import 'food_knowledge_repository.dart';
 import 'food_preference_repository.dart';
@@ -19,12 +17,9 @@ import 'swipe_repository.dart';
 /// separate repositories. It groups the repositories for one subject area and
 /// re-exposes them as a single flat API. No business rules live here.
 class FoodRepositoryFacade {
-  FoodRepositoryFacade({@visibleForTesting FoodKnowledgeRepository? knowledge})
-    : knowledge = knowledge ?? FoodKnowledgeRepository();
+  FoodRepositoryFacade();
 
-  final APIManager api = APIManager();
-
-  final FoodKnowledgeRepository knowledge;
+  final FoodKnowledgeRepository knowledge = FoodKnowledgeRepository();
   final RecommendationRepository recommendation = RecommendationRepository();
   final SwipeRepository swipe = SwipeRepository();
 
@@ -45,6 +40,9 @@ class FoodRepositoryFacade {
       knowledge.searchFoods(query);
 
   Future<LocalFood?> getFoodById(int foodId) => knowledge.getFoodById(foodId);
+
+  Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) =>
+      knowledge.playPronunciation(food);
 
   /// Adds a genuinely-new, tourist-confirmed Malaysian local food to the
   /// catalogue (Option C - catalogue growth from submissions). Returns the

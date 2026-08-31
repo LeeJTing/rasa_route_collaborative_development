@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/opening_hour.dart';
@@ -14,14 +14,15 @@ import '../repositories/discovery_repository_facade.dart';
 /// A business-logic class knows exactly one thing below it: a repository
 /// facade. It never sees a repository, a shared client or Flutter.
 class RestaurantDiscoveryLogic {
-  RestaurantDiscoveryLogic({
-    @visibleForTesting DiscoveryRepositoryFacade? discoveryRepository,
-    @visibleForTesting DateTime Function()? now,
-  }) : repository = discoveryRepository ?? DiscoveryRepositoryFacade(),
-       _now = now ?? DateTime.now;
+  RestaurantDiscoveryLogic();
 
-  final DiscoveryRepositoryFacade repository;
-  final DateTime Function() _now;
+  @protected
+  DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
+
+  @protected
+  DateTime currentTime() => DateTime.now();
+
+  late final DiscoveryRepositoryFacade repository = createRepository();
 
   Future<Restaurant?> findById(int restaurantId) =>
       repository.getRestaurantById(restaurantId);
@@ -176,7 +177,9 @@ class RestaurantDiscoveryLogic {
   }
 
   List<Restaurant> _availableSummaries(List<Restaurant> restaurants) {
-    final DateTime malaysiaNow = _now().toUtc().add(const Duration(hours: 8));
+    final DateTime malaysiaNow = currentTime().toUtc().add(
+      const Duration(hours: 8),
+    );
     return restaurants
         .where(
           (Restaurant restaurant) =>

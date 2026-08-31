@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../core/json_model.dart';
+import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../shared_client/api_manager/api_manager.dart';
@@ -10,7 +11,7 @@ import '../data_models/restaurant_data_model.dart';
 import '../data_models/restaurant_item_data_model.dart';
 import '../data_models/local_food_data_model.dart';
 import '../data_models/local_food_image_data_model.dart';
-import 'restaurant_opening_hours_parser.dart';
+import '../data_models/opening_hours_data_model.dart';
 
 /// Supabase-backed restaurant catalogue used by Quick Mode.
 ///
@@ -20,8 +21,6 @@ import 'restaurant_opening_hours_parser.dart';
 /// linked local-food catalogue image is used.
 class RestaurantRepository {
   final APIManager api = APIManager();
-  final RestaurantOpeningHoursParser openingHoursParser =
-      const RestaurantOpeningHoursParser();
 
   static const int _cataloguePageSize = 1000;
   static const int _restaurantIdBatchSize = 200;
@@ -36,10 +35,18 @@ class RestaurantRepository {
     latitude,
     phone,
     website,
-    opening_hours,
     restaurant_image_id,
     restaurant_image_url,
-    status
+    status,
+    restaurant_opening_hours:opening_hours!opening_hours_restaurant_id_fkey(
+      opening_hours_id,
+      day,
+      status,
+      opening_time,
+      closing_time,
+      landmark_id,
+      restaurant_id
+    )
   ''';
 
   static const String _itemSummaryColumns = '''
@@ -68,6 +75,7 @@ class RestaurantRepository {
       local_food(
         local_food_id,
         food_name,
+        synonyms,
         description,
         local_food_image(local_food_image_id, img_name, local_food_id)
       )
@@ -193,7 +201,9 @@ class RestaurantRepository {
           rangeStart += _cataloguePageSize;
         }
       }
-      return List<RestaurantItem>.unmodifiable(items);
+      return List<RestaurantItem>.unmodifiable(
+        _deduplicateRestaurantItems(items),
+      );
     } catch (error, stackTrace) {
       developer.log(
         'Restaurant item eligibility query failed.',
@@ -219,6 +229,12 @@ class RestaurantRepository {
 
   Restaurant _toDomain(Map<String, dynamic> row) {
     final RestaurantDataModel data = RestaurantDataModel.fromJson(row);
+    final List<OpeningHour> openingHours = openingHoursFromRows(
+      JsonReader.asModelList<Map<String, dynamic>>(
+        row['restaurant_opening_hours'],
+        (Map<String, dynamic> json) => json,
+      ),
+    );
     final Object? rawItems = row['restaurant_item'];
     final List<RestaurantItem> items = rawItems is List
         ? rawItems
@@ -238,10 +254,75 @@ class RestaurantRepository {
       phone: data.phone ?? '',
       website: data.website ?? '',
       imageUrl: data.restaurantImageUrl,
-      openingHours: openingHoursParser.parse(data.openingHours),
+      openingHours: openingHours,
       status: data.status,
-      items: items,
+      items: _deduplicateRestaurantItems(items),
     );
+  }
+
+  /// Converts ERD `opening_hours` rows at the repository boundary.
+  @visibleForTesting
+  List<OpeningHour> openingHoursFromRows(List<Map<String, dynamic>> rows) {
+    final List<OpeningHour> hours = <OpeningHour>[];
+    for (final Map<String, dynamic> row in rows) {
+      final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
+      final Weekday? day = _weekday(data.day);
+      final DayStatus? status = _dayStatus(data.status);
+      if (day == null || status == null) continue;
+      int? opensAt = _minutesOfDay(data.openingTime);
+      int? closesAt = _minutesOfDay(data.closingTime);
+      if (status == DayStatus.open && opensAt == null && closesAt == null) {
+        opensAt = 0;
+        closesAt = 1440;
+      } else if (status == DayStatus.open &&
+          opensAt == 0 &&
+          data.closingTime?.startsWith('23:59') == true) {
+        closesAt = 1440;
+      }
+      hours.add(
+        OpeningHour(
+          id: data.openingHoursId,
+          day: day,
+          status: status,
+          opensAt: status == DayStatus.open ? opensAt : null,
+          closesAt: status == DayStatus.open ? closesAt : null,
+        ),
+      );
+    }
+    hours.sort((OpeningHour a, OpeningHour b) {
+      final int dayOrder = a.day.index.compareTo(b.day.index);
+      if (dayOrder != 0) return dayOrder;
+      return (a.opensAt ?? -1).compareTo(b.opensAt ?? -1);
+    });
+    return List<OpeningHour>.unmodifiable(hours);
+  }
+
+  Weekday? _weekday(String value) {
+    final String name = value.trim().toLowerCase();
+    for (final Weekday day in Weekday.values) {
+      if (day.name == name) return day;
+    }
+    return null;
+  }
+
+  DayStatus? _dayStatus(String value) {
+    final String name = value.trim().toLowerCase();
+    for (final DayStatus status in DayStatus.values) {
+      if (status.name == name) return status;
+    }
+    return null;
+  }
+
+  int? _minutesOfDay(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final List<String> parts = value.split(':');
+    if (parts.length < 2) return null;
+    final int? hour = int.tryParse(parts[0]);
+    final int? minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null || hour > 23 || minute > 59) {
+      return null;
+    }
+    return hour * 60 + minute;
   }
 
   RestaurantItem _itemDataToDomain(RestaurantItemDataModel data) =>
@@ -279,6 +360,7 @@ class RestaurantRepository {
     final bool canUseCatalogueImage = catalogueImageMatchesItem(
       restaurantItemName: data.restaurantItemName,
       localFoodName: localFood?.foodName,
+      localFoodSynonyms: _splitSynonyms(localFood?.synonyms),
     );
     final String? imageName =
         data.foodImgUrl ??
@@ -312,17 +394,57 @@ class RestaurantRepository {
   bool catalogueImageMatchesItem({
     required String restaurantItemName,
     required String? localFoodName,
+    List<String> localFoodSynonyms = const <String>[],
   }) {
     final String item = _normaliseFoodName(restaurantItemName);
-    final String linkedFood = _normaliseFoodName(localFoodName ?? '');
-    return item.isNotEmpty &&
-        linkedFood.isNotEmpty &&
-        item.contains(linkedFood);
+    if (item.isEmpty) return false;
+    return <String>[localFoodName ?? '', ...localFoodSynonyms]
+        .map(_normaliseFoodName)
+        .where((String name) => name.isNotEmpty)
+        .any(item.contains);
   }
 
   String _normaliseFoodName(String value) => value
       .toLowerCase()
       .replaceAll('chilli', 'chili')
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .replaceAll(RegExp(r'\b(?:kuey|kuay|koay)\b'), 'kway')
       .trim();
+
+  List<String> _splitSynonyms(String? value) => (value ?? '')
+      .split(RegExp(r'[,;]'))
+      .map((String synonym) => synonym.trim())
+      .where((String synonym) => synonym.isNotEmpty)
+      .toList(growable: false);
+
+  /// Imported menu datasets can contain the same dish more than once under
+  /// different row ids. A restaurant menu is unique by its visible dish name
+  /// and price; when duplicates exist, retain the row with the richer photo
+  /// and ingredient data.
+  @visibleForTesting
+  List<RestaurantItem> deduplicateRestaurantItems(List<RestaurantItem> items) =>
+      _deduplicateRestaurantItems(items);
+
+  List<RestaurantItem> _deduplicateRestaurantItems(List<RestaurantItem> items) {
+    final Map<String, RestaurantItem> byMenuEntry = <String, RestaurantItem>{};
+    for (final RestaurantItem item in items) {
+      final String key = <String>[
+        item.restaurantId.toString(),
+        _normaliseFoodName(item.foodName),
+        item.price?.toStringAsFixed(2) ?? 'no-price',
+      ].join('|');
+      final RestaurantItem? existing = byMenuEntry[key];
+      if (existing == null || _itemQuality(item) > _itemQuality(existing)) {
+        byMenuEntry[key] = item;
+      }
+    }
+    return List<RestaurantItem>.unmodifiable(byMenuEntry.values);
+  }
+
+  int _itemQuality(RestaurantItem item) {
+    int quality = 0;
+    if (item.imageUrl?.trim().isNotEmpty == true) quality += 2;
+    if (item.ingredients?.trim().isNotEmpty == true) quality += 1;
+    return quality;
+  }
 }
