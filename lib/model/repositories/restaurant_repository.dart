@@ -357,16 +357,12 @@ class RestaurantRepository {
             (LocalFoodImageDataModel a, LocalFoodImageDataModel b) =>
                 a.localFoodImageId.compareTo(b.localFoodImageId),
           );
-    final bool canUseCatalogueImage = catalogueImageMatchesItem(
-      restaurantItemName: data.restaurantItemName,
-      localFoodName: localFood?.foodName,
-      localFoodSynonyms: _splitSynonyms(localFood?.synonyms),
+    final String? imageName = preferredRestaurantItemImageName(
+      restaurantImageName: data.foodImgUrl,
+      linkedFoodImageNames: localFoodImages
+          .map((LocalFoodImageDataModel image) => image.imageName)
+          .toList(growable: false),
     );
-    final String? imageName =
-        data.foodImgUrl ??
-        (canUseCatalogueImage && localFoodImages.isNotEmpty
-            ? localFoodImages.first.imageName
-            : null);
     return RestaurantItem(
       id: data.restaurantItemId,
       restaurantId: data.restaurantId,
@@ -385,37 +381,32 @@ class RestaurantRepository {
     );
   }
 
-  /// A catalogue image is a generic food reference, not proof that the
-  /// restaurant serves the pictured plate. Imported restaurant items can also
-  /// carry an incorrect local_food_id. Only reuse the catalogue image when the
-  /// linked food name is visibly part of the restaurant's item name; otherwise
-  /// the View shows its neutral food-image fallback.
+  /// Resolves an item's image according to the ERD relationship.
+  ///
+  /// A restaurant-specific photo wins. Otherwise the first image belonging to
+  /// the `local_food_id` foreign-key target is used. Missing data remains null
+  /// so the View can render its neutral fallback.
   @visibleForTesting
-  bool catalogueImageMatchesItem({
-    required String restaurantItemName,
-    required String? localFoodName,
-    List<String> localFoodSynonyms = const <String>[],
+  String? preferredRestaurantItemImageName({
+    required String? restaurantImageName,
+    required List<String> linkedFoodImageNames,
   }) {
-    final String item = _normaliseFoodName(restaurantItemName);
-    if (item.isEmpty) return false;
-    return <String>[localFoodName ?? '', ...localFoodSynonyms]
-        .map(_normaliseFoodName)
-        .where((String name) => name.isNotEmpty)
-        .any(item.contains);
+    final String? restaurantImage = _nonEmpty(restaurantImageName);
+    if (restaurantImage != null) return restaurantImage;
+    for (final String linkedImage in linkedFoodImageNames) {
+      final String? value = _nonEmpty(linkedImage);
+      if (value != null) return value;
+    }
+    return null;
   }
 
-  String _normaliseFoodName(String value) => value
-      .toLowerCase()
-      .replaceAll('chilli', 'chili')
-      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-      .replaceAll(RegExp(r'\b(?:kuey|kuay|koay)\b'), 'kway')
-      .trim();
+  String? _nonEmpty(String? value) {
+    final String? trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
 
-  List<String> _splitSynonyms(String? value) => (value ?? '')
-      .split(RegExp(r'[,;]'))
-      .map((String synonym) => synonym.trim())
-      .where((String synonym) => synonym.isNotEmpty)
-      .toList(growable: false);
+  String _normaliseMenuEntryName(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
 
   /// Imported menu datasets can contain the same dish more than once under
   /// different row ids. A restaurant menu is unique by its visible dish name
@@ -430,7 +421,7 @@ class RestaurantRepository {
     for (final RestaurantItem item in items) {
       final String key = <String>[
         item.restaurantId.toString(),
-        _normaliseFoodName(item.foodName),
+        _normaliseMenuEntryName(item.foodName),
         item.price?.toStringAsFixed(2) ?? 'no-price',
       ].join('|');
       final RestaurantItem? existing = byMenuEntry[key];

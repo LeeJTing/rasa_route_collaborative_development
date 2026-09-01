@@ -267,7 +267,6 @@ class RestaurantDiscoveryLogic {
                 .where(
                   (RestaurantItem item) => !_conflictsWithRestrictions(
                     item,
-                    restrictions: restrictions,
                     activeRestrictionIds: activeRestrictionIds,
                     restrictionIdsByFood: restrictionIdsByFood,
                   ),
@@ -287,111 +286,11 @@ class RestaurantDiscoveryLogic {
 
   bool _conflictsWithRestrictions(
     RestaurantItem item, {
-    required List<DietaryRestriction> restrictions,
     required Set<int> activeRestrictionIds,
     required Map<int, List<int>> restrictionIdsByFood,
-  }) {
-    final List<int> linked =
-        restrictionIdsByFood[item.localFoodId] ?? const <int>[];
-    if (linked.any(activeRestrictionIds.contains)) return true;
-
-    final String itemText = _normaliseWords(
-      '${item.foodName} ${item.ingredients ?? ''}',
-    );
-    for (final DietaryRestriction restriction in restrictions) {
-      final String normalizedName = restriction.name.trim().toLowerCase();
-      final List<String> keywords =
-          _restrictionKeywords[normalizedName] ??
-          normalizedName
-              .replaceFirst(RegExp(r'^no\s+'), '')
-              .split('/')
-              .map((String value) => value.trim())
-              .where((String value) => value.isNotEmpty)
-              .toList(growable: false);
-      if (keywords.any(
-        (String keyword) =>
-            itemText.contains(' ${_normaliseWords(keyword).trim()} '),
-      )) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  String _normaliseWords(String value) =>
-      ' ${value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim()} ';
-
-  static const Map<String, List<String>> _restrictionKeywords =
-      <String, List<String>>{
-        'no pork': <String>['pork', 'bacon', 'ham', 'lard', 'char siu'],
-        'no beef': <String>['beef'],
-        'no chicken': <String>['chicken'],
-        'no mutton': <String>['mutton', 'lamb'],
-        'no duck': <String>['duck'],
-        'no organ meat': <String>[
-          'liver',
-          'intestine',
-          'tripe',
-          'kidney',
-          'offal',
-        ],
-        'no fish': <String>[
-          'fish',
-          'anchovy',
-          'ikan',
-          'tuna',
-          'salmon',
-          'sardine',
-          'mackerel',
-        ],
-        'no shellfish': <String>[
-          'shellfish',
-          'prawn',
-          'shrimp',
-          'crab',
-          'lobster',
-          'clam',
-          'oyster',
-          'mussel',
-        ],
-        'no shrimp/prawn': <String>['shrimp', 'prawn'],
-        'no squid/octopus': <String>['squid', 'octopus', 'sotong'],
-        'no egg': <String>['egg', 'mayonnaise', 'mayo'],
-        'no dairy': <String>[
-          'milk',
-          'dairy',
-          'cheese',
-          'butter',
-          'cream',
-          'yoghurt',
-          'yogurt',
-          'ghee',
-        ],
-        'no peanuts': <String>['peanut'],
-        'no tree nuts': <String>[
-          'almond',
-          'cashew',
-          'walnut',
-          'hazelnut',
-          'pistachio',
-          'macadamia',
-          'pecan',
-        ],
-        'no sesame': <String>['sesame'],
-        'no soy': <String>['soy', 'soya', 'tofu', 'tempeh'],
-        'no wheat': <String>['wheat', 'flour'],
-        'no gluten': <String>['gluten', 'wheat', 'flour'],
-        'no coconut': <String>['coconut', 'santan'],
-        'no corn': <String>['corn', 'maize'],
-        'no mushrooms': <String>['mushroom'],
-        'no tomato': <String>['tomato'],
-        'no garlic': <String>['garlic'],
-        'no onion': <String>['onion', 'shallot'],
-        'no ginger': <String>['ginger'],
-        'no coriander/cilantro': <String>['coriander', 'cilantro'],
-        'no mayonnaise': <String>['mayonnaise', 'mayo'],
-        'no mustard': <String>['mustard'],
-      };
+  }) => (restrictionIdsByFood[item.localFoodId] ?? const <int>[]).any(
+    activeRestrictionIds.contains,
+  );
 
   double _distanceMetres(double lat1, double lon1, double lat2, double lon2) {
     const double earthRadius = 6371000;

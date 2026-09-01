@@ -38,6 +38,14 @@ class FoodKnowledgeLogic {
   /// used to prioritise similar foods.
   Future<Set<int>> favouriteFoodIds() => repository.favouriteFoodIds();
 
+  /// Removes a saved dish without the add-on-missing behaviour of toggle.
+  Future<void> removeFavouriteFood(int localFoodId) async {
+    final Set<int> savedIds = await repository.favouriteFoodIds();
+    if (savedIds.contains(localFoodId)) {
+      await repository.toggleFavourite(localFoodId);
+    }
+  }
+
   Future<LocalFood> getFoodDetails(int foodId) async {
     final LocalFood? food = await repository.getFoodById(foodId);
     if (food == null) throw Exception('Local food not found.');
@@ -118,18 +126,18 @@ class FoodKnowledgeLogic {
     return names;
   }
 
-  List<String> detectAllergies(LocalFood food) {
-    final String ingredients = food.ingredients.toLowerCase();
-    final List<String> warnings = <String>[];
-    if (ingredients.contains('prawn') ||
-        ingredients.contains('seafood') ||
-        ingredients.contains('shellfish')) {
-      warnings.add('People with seafood allergy should avoid this dish.');
-    }
-    if (ingredients.contains('peanut') || ingredients.contains('nut')) {
-      warnings.add('People with nut allergies should avoid this dish.');
-    }
-    return warnings;
+  Future<List<String>> dietaryWarnings(int foodId) async {
+    final List<DietaryRestriction> restrictions = await repository
+        .foodDietaryRestrictions(foodId);
+    return restrictions
+        .map((DietaryRestriction restriction) {
+          final String label = restriction.name.replaceFirst(
+            RegExp(r'^No\s+', caseSensitive: false),
+            '',
+          );
+          return 'Contains or may include: $label.';
+        })
+        .toList(growable: false);
   }
 
   Future<List<int>> touristDietaryRestrictionIds() async {

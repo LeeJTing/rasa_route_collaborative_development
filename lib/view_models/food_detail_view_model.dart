@@ -48,7 +48,7 @@ class FoodDetailViewModel extends BaseViewModel {
       _food = await foodLogic.getFoodDetails(id);
       _isLiked = await foodLogic.isFoodInFavourites(id);
       _collidedFood = await foodLogic.detectNameCollision(id);
-      _allergyWarnings = foodLogic.detectAllergies(_food!);
+      _allergyWarnings = await foodLogic.dietaryWarnings(id);
       _similarFoods = await foodLogic.getSimilarFoods(id);
       _catalogue = await foodLogic.getLocalFoods();
     });
