@@ -10,12 +10,14 @@ class FoodHeroCard extends StatefulWidget {
     super.key,
     required this.food,
     required this.isLiked,
+    required this.isUpdatingFavourite,
     required this.onLike,
     required this.onImageTap,
   });
 
   final LocalFood food;
   final bool isLiked;
+  final bool isUpdatingFavourite;
   final VoidCallback onLike;
   final ValueChanged<int> onImageTap;
 
@@ -97,7 +99,7 @@ class _FoodHeroCardState extends State<FoodHeroCard> {
               tooltip: widget.isLiked
                   ? 'Remove from favourites'
                   : 'Add to favourites',
-              onPressed: widget.onLike,
+              onPressed: widget.isUpdatingFavourite ? null : widget.onLike,
               icon: Icon(
                 widget.isLiked ? Icons.favorite : Icons.favorite_border,
                 color: widget.isLiked

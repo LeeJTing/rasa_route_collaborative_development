@@ -100,7 +100,8 @@ class _FoodDetailViewState extends State<FoodDetailView> {
             child: FoodHeroCard(
               food: food,
               isLiked: vm.isLiked,
-              onLike: vm.toggleLike,
+              isUpdatingFavourite: vm.isUpdatingFavourite,
+              onLike: () => _toggleFavourite(context, vm),
               onImageTap: (int initialIndex) =>
                   _showEnlargedImage(context, food, initialIndex),
             ),
@@ -210,6 +211,17 @@ class _FoodDetailViewState extends State<FoodDetailView> {
           )
           .toList(growable: false),
     );
+  }
+
+  Future<void> _toggleFavourite(
+    BuildContext context,
+    FoodDetailViewModel viewModel,
+  ) async {
+    final String? message = await viewModel.toggleLike();
+    if (!context.mounted || message == null) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _showEnlargedImage(

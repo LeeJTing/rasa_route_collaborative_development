@@ -28,7 +28,7 @@ class FoodLogicFacade {
   Future<List<LocalFood>> getLocalFoods() => knowledge.getLocalFoods();
 
   /// Toggle favourite status for a dish.
-  Future<void> toggleFavouriteFood(int foodId) =>
+  Future<bool> toggleFavouriteFood(int foodId) =>
       knowledge.toggleFavouriteFood(foodId);
 
   Future<Set<int>> favouriteFoodIds() => knowledge.favouriteFoodIds();

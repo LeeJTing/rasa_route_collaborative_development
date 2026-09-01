@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart' show protected;
+
 import '../core/base_view_model.dart';
 import '../domain_model/food_pairing.dart';
 import '../domain_model/local_food.dart';
@@ -8,7 +10,10 @@ import '../model/business_logic/food_logic_facade.dart';
 class FoodDetailViewModel extends BaseViewModel {
   FoodDetailViewModel({this.foodId = 1});
 
-  final FoodLogicFacade foodLogic = FoodLogicFacade();
+  @protected
+  FoodLogicFacade createFoodLogic() => FoodLogicFacade();
+
+  late final FoodLogicFacade foodLogic = createFoodLogic();
 
   int foodId;
   LocalFood? _food;
@@ -22,6 +27,7 @@ class FoodDetailViewModel extends BaseViewModel {
   LocalFood? _collidedFood;
   bool _isFoodInformationExpanded = false;
   bool _isStartingPronunciation = false;
+  bool _isUpdatingFavourite = false;
   String? _pronunciationMessage;
 
   LocalFood? get food => _food;
@@ -34,6 +40,7 @@ class FoodDetailViewModel extends BaseViewModel {
   LocalFood? get collidedFood => _collidedFood;
   bool get isFoodInformationExpanded => _isFoodInformationExpanded;
   bool get isStartingPronunciation => _isStartingPronunciation;
+  bool get isUpdatingFavourite => _isUpdatingFavourite;
   String? get pronunciationMessage => _pronunciationMessage;
 
   @override
@@ -78,11 +85,24 @@ class FoodDetailViewModel extends BaseViewModel {
     return null;
   }
 
-  Future<void> toggleLike() => runGuarded(() async {
-    await foodLogic.toggleFavouriteFood(foodId);
-    _isLiked = !_isLiked;
-    _food = _food?.copyWith(isFavourite: _isLiked);
-  }, silent: true);
+  Future<String?> toggleLike() async {
+    if (_isUpdatingFavourite) return null;
+    _isUpdatingFavourite = true;
+    safeNotifyListeners();
+    try {
+      _isLiked = await foodLogic.toggleFavouriteFood(foodId);
+      _food = _food?.copyWith(isFavourite: _isLiked);
+      return null;
+    } catch (error) {
+      final String message = error.toString();
+      return message.startsWith('Exception: ')
+          ? message.substring('Exception: '.length)
+          : message;
+    } finally {
+      _isUpdatingFavourite = false;
+      safeNotifyListeners();
+    }
+  }
 
   void toggleFoodInformation() {
     _isFoodInformationExpanded = !_isFoodInformationExpanded;

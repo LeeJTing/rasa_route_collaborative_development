@@ -31,7 +31,7 @@ class FoodKnowledgeLogic {
       repository.getFoodById(foodId);
 
   /// Toggle favourite status (add if missing, remove if present).
-  Future<void> toggleFavouriteFood(int localFoodId) =>
+  Future<bool> toggleFavouriteFood(int localFoodId) =>
       repository.toggleFavourite(localFoodId);
 
   /// The signed-in tourist's favourited food ids (empty when signed out),
