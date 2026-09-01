@@ -74,7 +74,7 @@ class FoodRepositoryFacade {
     List<int> restrictionIds,
   ) => knowledge.linkFoodDietaryRestrictions(localFoodId, restrictionIds);
 
-  Future<void> toggleFavourite(int localFoodId) =>
+  Future<bool> toggleFavourite(int localFoodId) =>
       knowledge.toggleFavourite(localFoodId);
 
   /// The signed-in tourist's favourited food ids (`favourite_food`), or an

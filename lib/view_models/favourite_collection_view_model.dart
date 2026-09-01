@@ -1,4 +1,4 @@
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../core/base_view_model.dart';
 import '../domain_model/local_food.dart';
@@ -8,11 +8,8 @@ import '../model/business_logic/food_logic_facade.dart';
 ///
 /// The dishes the tourist saved, with swipe-to-remove.
 ///
-/// The `favourite_food` junction is keyed by `tourist.tourist_id`, so the
-/// "which dishes did THIS tourist save" question belongs to the profile module
-/// (`touristLogic.favouriteFoodIds` / `removeFavourite`). The catalogue
-/// itself (a `LocalFood` list) belongs to the food module
-/// (`foodLogic.getLocalFoods`) - this ViewModel joins the two.
+/// The food facade provides both the catalogue and the signed-in tourist's
+/// saved food ids, keeping this ViewModel on one architecture path.
 ///
 /// Rules this class follows (see `lib/core/base_view_model.dart`):
 ///   * no `package:flutter/material.dart` import and no `BuildContext`;
@@ -22,14 +19,12 @@ import '../model/business_logic/food_logic_facade.dart';
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
 class FavouriteCollectionViewModel extends BaseViewModel {
-  FavouriteCollectionViewModel({
-    @visibleForTesting FoodLogicFacade? foodLogic,
-    @visibleForTesting TouristInformationLogicFacade? touristLogic,
-  }) : foodLogic = foodLogic ?? FoodLogicFacade(),
-       touristLogic = touristLogic ?? TouristInformationLogicFacade();
+  FavouriteCollectionViewModel();
 
-  final FoodLogicFacade foodLogic;
-  final TouristInformationLogicFacade touristLogic;
+  @protected
+  FoodLogicFacade createFoodLogic() => FoodLogicFacade();
+
+  late final FoodLogicFacade foodLogic = createFoodLogic();
 
   List<LocalFood> _favourites = const <LocalFood>[];
 
@@ -43,11 +38,19 @@ class FavouriteCollectionViewModel extends BaseViewModel {
   /// (`favourite_food`, profile module) against the catalogue (food module).
   Future<void> load() => runGuarded(() async {
     final List<LocalFood> all = await foodLogic.getLocalFoods();
-    final Set<int> savedIds = await touristLogic.favouriteFoodIds();
+    final Set<int> savedIds = await foodLogic.favouriteFoodIds();
     _favourites = all
         .where((LocalFood food) => savedIds.contains(food.id))
         .toList(growable: false);
   });
 
-  final FoodLogicFacade foodLogic = FoodLogicFacade();
+  /// Removes [food] optimistically and restores the database truth on failure.
+  Future<void> removeFavourite(LocalFood food) async {
+    _favourites = _favourites
+        .where((LocalFood favourite) => favourite.id != food.id)
+        .toList(growable: false);
+    safeNotifyListeners();
+    await runGuarded(() => foodLogic.removeFavouriteFood(food.id));
+    if (hasError) await load();
+  }
 }

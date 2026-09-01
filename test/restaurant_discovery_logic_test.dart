@@ -165,6 +165,7 @@ void main() {
               ],
               restrictionIdsByFood: const <int, List<int>>{
                 100: <int>[9],
+                102: <int>[9],
               },
               menuItemsByRestaurant: <int, List<RestaurantItem>>{
                 1: const <RestaurantItem>[
@@ -215,6 +216,39 @@ void main() {
         );
       },
     );
+
+    test('does not infer dietary restrictions from ingredient text', () async {
+      final Restaurant restaurant = _restaurant(1, distanceKm: 0.2);
+      final _FakeDiscoveryRepositoryFacade repository =
+          _FakeDiscoveryRepositoryFacade(
+            <Restaurant>[restaurant],
+            restrictions: const <DietaryRestriction>[
+              DietaryRestriction(id: 9, name: 'No Shrimp/Prawn'),
+            ],
+            menuItemsByRestaurant: const <int, List<RestaurantItem>>{
+              1: <RestaurantItem>[
+                RestaurantItem(
+                  id: 10,
+                  restaurantId: 1,
+                  localFoodId: 100,
+                  foodName: 'Seafood Noodles',
+                  ingredients: 'Fresh shrimp and stock',
+                  currency: 'RM',
+                  foodCategory: 'Noodle',
+                ),
+              ],
+            },
+          );
+      final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+        repository,
+      );
+
+      final List<Restaurant> results = await logic
+          .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+
+      expect(results, hasLength(1));
+      expect(results.single.items, hasLength(1));
+    });
   });
 }
 

@@ -3,53 +3,42 @@ import 'package:rasa_route_collaborative_development/domain_model/restaurant_ite
 import 'package:rasa_route_collaborative_development/model/repositories/restaurant_repository.dart';
 
 void main() {
-  group('restaurant item catalogue-image fallback', () {
+  group('restaurant item image policy', () {
     final RestaurantRepository repository = RestaurantRepository();
 
-    test('allows a linked image when the food name matches', () {
+    test('prefers the restaurant-specific image', () {
       expect(
-        repository.catalogueImageMatchesItem(
-          restaurantItemName: 'Signature Chilli Pan Mee (Dry)',
-          localFoodName: 'Chili Pan Mee',
+        repository.preferredRestaurantItemImageName(
+          restaurantImageName: 'restaurant-item.jpg',
+          linkedFoodImageNames: <String>['catalogue.jpg'],
         ),
-        isTrue,
+        'restaurant-item.jpg',
       );
     });
 
-    test('rejects an unrelated linked food image', () {
-      expect(
-        repository.catalogueImageMatchesItem(
-          restaurantItemName: 'Chilli Pan Mee (Dry)',
-          localFoodName: 'Curry Laksa',
-        ),
-        isFalse,
-      );
-    });
+    test(
+      'uses the image from the linked local food when item image is absent',
+      () {
+        expect(
+          repository.preferredRestaurantItemImageName(
+            restaurantImageName: null,
+            linkedFoodImageNames: <String>[
+              '040_yong_tau_foo_1.jpg',
+              '040_yong_tau_foo_2.jpg',
+            ],
+          ),
+          '040_yong_tau_foo_1.jpg',
+        );
+      },
+    );
 
-    test('accepts common Char Kway Teow spelling variants', () {
+    test('returns null only when neither relationship provides an image', () {
       expect(
-        repository.catalogueImageMatchesItem(
-          restaurantItemName: 'Signature Penang Char Kuey Teow',
-          localFoodName: 'Char Kway Teow',
+        repository.preferredRestaurantItemImageName(
+          restaurantImageName: ' ',
+          linkedFoodImageNames: const <String>[],
         ),
-        isTrue,
-      );
-      expect(
-        repository.catalogueImageMatchesItem(
-          restaurantItemName: 'Char Koay Teow Udang',
-          localFoodName: 'Char Kway Teow',
-        ),
-        isTrue,
-      );
-    });
-
-    test('keeps generic Kuey Teow dishes on the neutral fallback', () {
-      expect(
-        repository.catalogueImageMatchesItem(
-          restaurantItemName: 'Kuey Teow Soup',
-          localFoodName: 'Char Kway Teow',
-        ),
-        isFalse,
+        isNull,
       );
     });
 

@@ -182,11 +182,11 @@ class LocalFoodListViewModel extends BaseViewModel {
 
   Future<String?> toggleFavourite(int id) async {
     try {
-      await foodLogic.toggleFavouriteFood(id);
+      final bool isFavourite = await foodLogic.toggleFavouriteFood(id);
       _foods = _foods
           .map(
             (LocalFood food) =>
-                food.id == id ? _withFavourite(food, !food.isFavourite) : food,
+                food.id == id ? _withFavourite(food, isFavourite) : food,
           )
           .toList(growable: false);
       safeNotifyListeners();

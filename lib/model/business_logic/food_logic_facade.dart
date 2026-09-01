@@ -28,8 +28,13 @@ class FoodLogicFacade {
   Future<List<LocalFood>> getLocalFoods() => knowledge.getLocalFoods();
 
   /// Toggle favourite status for a dish.
-  Future<void> toggleFavouriteFood(int foodId) =>
+  Future<bool> toggleFavouriteFood(int foodId) =>
       knowledge.toggleFavouriteFood(foodId);
+
+  Future<Set<int>> favouriteFoodIds() => knowledge.favouriteFoodIds();
+
+  Future<void> removeFavouriteFood(int foodId) =>
+      knowledge.removeFavouriteFood(foodId);
 
   Future<LocalFood> getFoodDetails(int foodId) =>
       knowledge.getFoodDetails(foodId);
@@ -40,8 +45,8 @@ class FoodLogicFacade {
   Future<LocalFood?> detectNameCollision(int foodId) =>
       knowledge.detectNameCollision(foodId);
 
-  List<String> detectAllergies(LocalFood food) =>
-      knowledge.detectAllergies(food);
+  Future<List<String>> dietaryWarnings(int foodId) =>
+      knowledge.dietaryWarnings(foodId);
 
   Future<List<LocalFood>> getSimilarFoods(int foodId) =>
       recommendation.getSimilarFoods(foodId);

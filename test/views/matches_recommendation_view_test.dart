@@ -99,16 +99,9 @@ void main() {
         home: _TestMatchesRecommendationView(FakeDiscoveryLogicFacade()),
         routes: <String, WidgetBuilder>{
           AppRoutes.landmarkPlaceDetail: (BuildContext context) => Scaffold(
-            body: Text(
-              'Landmark ${MapSelectionHandoff().takeLandmarkId()}',
-            ),
+            body: Text('Landmark ${MapSelectionHandoff().takeLandmarkId()}'),
           ),
         },
-        home: MatchesRecommendationView(
-          viewModel: MatchesRecommendationViewModel(
-            discoveryLogic: FakeDiscoveryLogicFacade(),
-          ),
-        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -178,9 +171,7 @@ void main() {
       MaterialApp(
         theme: AppTheme.light,
         home: _TestMatchesRecommendationView(
-          FakeDiscoveryLogicFacade(
-              matchesResult: emptyRecommendations,
-            ),
+          FakeDiscoveryLogicFacade(matchesResult: emptyRecommendations),
         ),
       ),
     );
