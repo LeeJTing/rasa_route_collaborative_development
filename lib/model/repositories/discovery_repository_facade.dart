@@ -13,6 +13,7 @@ import 'food_knowledge_repository.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
 import 'recognition_repository.dart';
+import 'report_repository.dart';
 import 'restaurant_repository.dart';
 import 'swipe_repository.dart';
 
@@ -40,6 +41,9 @@ class DiscoveryRepositoryFacade {
   final AuthRepository auth = AuthRepository();
   final FoodKnowledgeRepository food = FoodKnowledgeRepository();
   final SwipeRepository swipe = SwipeRepository();
+
+  /// Shared tourist report table (kind + place_id + reason).
+  final ReportRepository report = ReportRepository();
 
   /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
   final MapRepository map = MapRepository();

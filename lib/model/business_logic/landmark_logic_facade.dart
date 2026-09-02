@@ -1,6 +1,7 @@
 import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/food_recognition_result.dart';
+import '../../domain_model/landmark_report_reason.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/submitted_landmark.dart';
@@ -129,7 +130,7 @@ class LandmarkLogicFacade {
   bool isOnLand(double latitude, double longitude) =>
       submission.isOnLand(latitude, longitude);
 
-  Future<void> submitLandmark({
+  Future<LandmarkSubmitResult> submitLandmark({
     required String restaurantName,
     required double? latitude,
     required double? longitude,
@@ -147,7 +148,7 @@ class LandmarkLogicFacade {
     // is written.
     await foodRecognition.verifyNewFoodsOrThrow(foods);
 
-    final int landmarkId = await submission.submitLandmark(
+    final LandmarkSubmitResult result = await submission.submitLandmark(
       restaurantName: restaurantName,
       latitude: latitude,
       longitude: longitude,
@@ -159,21 +160,81 @@ class LandmarkLogicFacade {
       foods: foods,
       operatingHours: operatingHours,
     );
-    // Option C - best-effort catalogue growth. The landmark write is the one
-    // the tourist confirmed; a catalogue insert that fails (e.g. the RLS
-    // migration not applied yet) must not fail the submission that already
-    // succeeded. alreadyVerified: the 3-step gate already ran above.
+    // Option C - best-effort catalogue growth. The landmark write (or the
+    // merge) is the thing the tourist confirmed; a catalogue insert that
+    // fails (e.g. the RLS migration not applied yet) must not fail the
+    // submission that already succeeded. alreadyVerified: the 3-step gate
+    // already ran above. New dishes are registered in EVERY outcome - a
+    // merged dish still needs a `local_food` row so it can be attached (both
+    // merge targets require a `local_food_id`).
     try {
       final Map<String, int> newFoodIds = await foodRecognition
           .registerNewDishes(foods, alreadyVerified: true);
-      if (landmarkId != 0 && newFoodIds.isNotEmpty) {
-        // The new rows' ids were 0 at item-insert time - point the just-saved
-        // items at them now, so the map resolves the pins like restaurant
-        // pins do.
-        await submission.linkNewFoodsToLandmark(landmarkId, newFoodIds);
+      switch (result.outcome) {
+        case LandmarkSubmitOutcome.created:
+          if (result.landmarkId != null && newFoodIds.isNotEmpty) {
+            // The new rows' ids were 0 at item-insert time - point the
+            // just-saved items at them now, so the map resolves the pins like
+            // restaurant pins do.
+            await submission.linkNewFoodsToLandmark(
+              result.landmarkId!,
+              newFoodIds,
+            );
+          }
+          // A brand-new landmark took every dish - nothing pre-existed.
+          return result.copyWith(
+            addedDishNames: <String>[
+              for (final FoodSubmission entry in foods)
+                if (!entry.isFake) entry.food.name,
+            ],
+          );
+        case LandmarkSubmitOutcome.mergedIntoRestaurant:
+          // A13 - attach the dishes (now with resolved catalogue ids) to the
+          // existing restaurant as `restaurant_item` rows. Dishes already
+          // listed there come back in `existing` for the "item exists" note.
+          final FoodAttachResult attach = await submission.addFoodsToRestaurant(
+            result.restaurantId!,
+            foods,
+            newFoodIds,
+          );
+          return result.copyWith(
+            addedDishNames: attach.added,
+            existingDishNames: attach.existing,
+          );
+        case LandmarkSubmitOutcome.mergedIntoLandmark:
+          // Same place is an existing submitted landmark - attach there.
+          final FoodAttachResult attach = await submission
+              .addFoodsToSubmittedLandmark(
+                landmarkId: result.landmarkId!,
+                touristId: touristId,
+                foods: foods,
+                newFoodIds: newFoodIds,
+              );
+          return result.copyWith(
+            addedDishNames: attach.added,
+            existingDishNames: attach.existing,
+          );
       }
     } catch (_) {
-      // Ignored - the landmark was already saved.
+      // Ignored - the landmark/merge was already saved; report the bare
+      // outcome without the dish-level detail.
+      return result;
     }
   }
+
+  /// Records a tourist's report against a submitted landmark (the report
+  /// sheet on the landmark detail page) - sign-in required, dedupe per
+  /// tourist, count bump, freeze once it passes the threshold; `frozePlace`
+  /// is true when this report froze the landmark. Flat passthrough to the
+  /// submission logic.
+  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
+  submitLandmarkReport({
+    required int landmarkId,
+    required LandmarkReportReason reason,
+    String? touristId,
+  }) => submission.submitLandmarkReport(
+    landmarkId: landmarkId,
+    reason: reason,
+    touristId: touristId,
+  );
 }
