@@ -465,8 +465,12 @@ Future<void> _openInGoogleMaps(
   }
 }
 
-/// The landmark's recorded hours, one line per row. Days with no recorded
-/// times read "Closed" (the wire format has no separate "unknown" row).
+/// The landmark's recorded hours, one line per row, honouring all three
+/// [DayStatus] states (matching the add-landmark form's wording): an Open row
+/// shows its time range, a day recorded as Unknown reads "Hours not known" -
+/// never "Closed" - and only a day the submitter confirmed closed reads
+/// "Closed". The app does not tell a tourist a place is shut when it does not
+/// know (the same rule the map's "Hours unknown" label follows).
 class _OpeningHoursList extends StatelessWidget {
   const _OpeningHoursList({required this.hours});
 
@@ -478,11 +482,12 @@ class _OpeningHoursList extends StatelessWidget {
       for (final OpeningHour hour in hours)
         (
           _dayName(hour.day),
-          hour.status == DayStatus.open &&
-                  hour.opensAt != null &&
-                  hour.closesAt != null
-              ? '${_clock(hour.opensAt!)} - ${_clock(hour.closesAt!)}'
-              : 'Closed',
+          switch (hour.status) {
+            DayStatus.open when hour.opensAt != null && hour.closesAt != null =>
+              '${_clock(hour.opensAt!)} - ${_clock(hour.closesAt!)}',
+            DayStatus.unknown => 'Hours not known',
+            _ => 'Closed',
+          },
         ),
     ];
     return Container(
