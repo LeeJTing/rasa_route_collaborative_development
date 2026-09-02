@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_dimensions.dart';
-import '../../../view_models/landmark_place_detail_view_model.dart';
+import '../../../domain_model/landmark_report_reason.dart';
 
 /// Bottom sheet for reporting an incorrect submitted-landmark pin - the
 /// landmark counterpart of `ReportRestaurantSheet` on the catalogue

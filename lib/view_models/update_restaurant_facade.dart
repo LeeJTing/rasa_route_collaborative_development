@@ -61,6 +61,21 @@ class UpdateRestaurantFacade {
     }
   }
 
+  /// Called when THIS tourist changed the map themselves - e.g. a report they
+  /// just submitted froze the landmark/restaurant they were viewing. Their own
+  /// dashboard re-reads at once (no "update available" banner - it was their
+  /// action, not a background change), so the frozen place's pin disappears.
+  ///
+  /// Same static dashboard entry point family as [publishMapDataChanged], but
+  /// the silent auto-apply variant instead of the ask-first banner.
+  void publishOwnMapDataChanged() {
+    try {
+      DashboardViewModel.onOwnMapDataChanged();
+    } catch (_) {
+      // One broken ViewModel must not stop the caller.
+    }
+  }
+
   /// Called by `RestaurantMonitor`. Fans out to every registered ViewModel.
   void publishNearby(List<Restaurant> restaurants) {
     _latestNearby = restaurants;

@@ -2,6 +2,7 @@ import 'auth_repository.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
 import 'recognition_repository.dart';
+import 'report_repository.dart';
 import 'restaurant_repository.dart';
 import 'submitted_landmark_repository.dart';
 
@@ -30,4 +31,7 @@ class LandmarkRepositoryFacade {
   final RestaurantRepository restaurant = RestaurantRepository();
   final RecognitionRepository recognition = RecognitionRepository();
   final AuthRepository auth = AuthRepository();
+
+  /// Shared tourist report table (kind + place_id + reason).
+  final ReportRepository report = ReportRepository();
 }

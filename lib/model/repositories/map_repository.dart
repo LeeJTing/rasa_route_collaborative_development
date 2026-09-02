@@ -235,7 +235,7 @@ class MapRepository {
               APIManager.tableRestaurant,
               columns:
                   'restaurant_id, restaurant_name, latitude, longitude, '
-                  'category, rating, restaurant_image_url',
+                  'category, rating, restaurant_image_url, status',
             ),
             api.selectAll(
               APIManager.tableRestaurantItem,
@@ -255,7 +255,8 @@ class MapRepository {
 
     final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
       for (final Map<String, dynamic> row in restaurants)
-        if (_asInt(row['restaurant_id']) != 0)
+        if (_asInt(row['restaurant_id']) != 0 &&
+            _asString(row['status']).trim().toLowerCase() == 'available')
           _asInt(row['restaurant_id']): row,
     };
 
@@ -315,12 +316,13 @@ class MapRepository {
       );
     }
 
-    // C26: a landmark that reached the report threshold is excluded from map
-    // pins, search results and recommendations.
+    // A landmark that reached the report threshold is frozen (`status`
+    // 'frozen') and excluded from map pins, search results and
+    // recommendations - only 'available' landmarks are shown.
     final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
       for (final Map<String, dynamic> row in landmarks)
         if (_asInt(row['landmark_id']) != 0 &&
-            _asString(row['status']).toLowerCase() != 'hidden')
+            _asString(row['status']).trim().toLowerCase() == 'available')
           _asInt(row['landmark_id']): row,
     };
 

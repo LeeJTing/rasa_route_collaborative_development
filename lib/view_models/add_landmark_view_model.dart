@@ -225,6 +225,14 @@ class AddLandmarkViewModel extends BaseViewModel
   bool _isSubmitting = false;
   String? _submitError;
 
+  /// True when the last submit MERGED the dishes into an existing place
+  /// (catalogue restaurant or submitted landmark, same name within ~100m)
+  /// instead of creating a new landmark - see `LandmarkSubmitResult`.
+  bool _submitMerged = false;
+  String? _submitTargetName;
+  List<String> _submitAddedDishNames = const <String>[];
+  List<String> _submitExistingDishNames = const <String>[];
+
   // --- GETTERS ---
   TouristLocation get currentLocation => _currentLocation;
   TouristLocation get adjustedLocation => _adjustedLocation;
@@ -255,6 +263,55 @@ class AddLandmarkViewModel extends BaseViewModel
 
   bool get isSubmitting => _isSubmitting;
   String? get submitError => _submitError;
+
+  /// Whether the last successful submit merged into an existing place
+  /// instead of creating a new landmark.
+  bool get submitMerged => _submitMerged;
+
+  /// Confirmation copy for a MERGED submit (A13) - says which dishes were
+  /// added and which already existed on the target, so the tourist sees
+  /// "item exists" honestly. Null when a new landmark was created (the View
+  /// shows the default success message instead). Name lists are capped so an
+  /// open-ended number of dishes can never overflow the snackbar.
+  String? get submitConfirmation {
+    if (!_submitMerged) return null;
+    final String rawTarget =
+        (_submitTargetName == null || _submitTargetName!.isEmpty)
+        ? 'this place'
+        : '"${_truncate(_submitTargetName!)}"';
+    final List<String> added = _previewNames(_submitAddedDishNames);
+    final List<String> existing = _previewNames(_submitExistingDishNames);
+    final String head;
+    if (added.isNotEmpty && existing.isNotEmpty) {
+      head =
+          'Added ${added.join(', ')}. '
+          'Already exists: ${existing.join(', ')}.';
+    } else if (existing.isNotEmpty) {
+      head = '${existing.join(', ')} already exists - nothing new added.';
+    } else if (added.isNotEmpty) {
+      head = 'Added ${added.join(', ')}.';
+    } else {
+      head = 'Dishes added.';
+    }
+    return '$head ($rawTarget)'.replaceAll('  ', ' ');
+  }
+
+  /// Caps a dish-name list for the confirmation message - never more than
+  /// [_previewNameLimit] names, then a "+N more" tail.
+  static const int _previewNameLimit = 3;
+
+  static List<String> _previewNames(List<String> names) {
+    if (names.length <= _previewNameLimit) return names;
+    return <String>[
+      ...names.take(_previewNameLimit),
+      '+${names.length - _previewNameLimit} more',
+    ];
+  }
+
+  /// Truncates long target names so a very long restaurant/landmark name
+  /// cannot blow out the snackbar width.
+  static String _truncate(String value, {int max = 30}) =>
+      value.length <= max ? value : '${value.substring(0, max - 1)}…';
 
   bool get canSubmit =>
       _capturedImage != null &&
@@ -746,6 +803,10 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Supabase (used while verifying the insert flow works).
   /// Errors: A13 (restaurant exists), A16 (price invalid), M6 (no image)
   Future<void> submitLandmark({bool isFake = false}) async {
+    _submitMerged = false;
+    _submitTargetName = null;
+    _submitAddedDishNames = const <String>[];
+    _submitExistingDishNames = const <String>[];
     if (!hasImageCaptured) {
       _submitError = 'Please capture either signboard or stall image';
       safeNotifyListeners();
@@ -833,7 +894,7 @@ class AddLandmarkViewModel extends BaseViewModel
       // their defaults, like reportedCount: 0 and status: available) is
       // LandmarkSubmissionLogic's job now, not this ViewModel's - see that
       // method's doc for why.
-      await landmarkLogic.submitLandmark(
+      final result = await landmarkLogic.submitLandmark(
         restaurantName: _restaurantName,
         latitude: location.isKnown ? location.latitude : null,
         longitude: location.isKnown ? location.longitude : null,
@@ -868,6 +929,10 @@ class AddLandmarkViewModel extends BaseViewModel
         ],
         operatingHours: _operatingHours,
       );
+      _submitMerged = result.merged;
+      _submitTargetName = result.targetName;
+      _submitAddedDishNames = List<String>.of(result.addedDishNames);
+      _submitExistingDishNames = List<String>.of(result.existingDishNames);
 
       _isSubmitting = false;
       safeNotifyListeners();

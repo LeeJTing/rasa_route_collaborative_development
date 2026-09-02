@@ -90,10 +90,20 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
     await viewModel.submitLandmark();
     if (!mounted) return;
     if (viewModel.submitError == null) {
+      // A13 - when the place already exists on the map (same name within
+      // ~100m) the dishes were added to that place instead of creating a new
+      // landmark - `submitConfirmation` says so (and lists any that already
+      // existed); otherwise show the default success message.
+      final String message =
+          viewModel.submitConfirmation ??
+          'Your landmark has been submitted successfully.'; // M8
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Your landmark has been submitted successfully.'),
-        ), // M8
+        SnackBar(
+          // Clamped so a long merged-outcome message can never overflow the
+          // snackbar - the ViewModel already caps the dish list; this caps
+          // total lines as a final guard.
+          content: Text(message, maxLines: 4, overflow: TextOverflow.ellipsis),
+        ),
       );
       AppNavigator.resetTo(AppRoutes.mainShell);
     }

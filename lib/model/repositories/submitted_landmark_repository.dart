@@ -122,6 +122,93 @@ class SubmittedLandmarkRepository {
     );
   }
 
+  /// A tourist just re-confirmed (in person, within ~100m) that this place
+  /// exists, so an older submission of the same place is reactivated AND
+  /// cleaned: `reported_count` -> 0 and `status` -> 'available'. Used by the
+  /// Add-Landmark merge/dedupe flow on any existing submitted landmark that
+  /// matches the new submission's restaurant name + location.
+  Future<void> clearReportsAndReactivate(int landmarkId) async {
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{
+        'reported_count': 0,
+        'status': LandmarkStatus.available.name,
+      },
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// Increments `submitted_landmark.reported_count` by one after a report is
+  /// recorded and returns the new value (read-modify-write - fine at the
+  /// current dev scale; a later authenticated RPC can make it atomic).
+  Future<int> incrementReportCount(int landmarkId) async {
+    final Map<String, dynamic>? row = await api.selectOne(
+      APIManager.tableSubmittedLandmark,
+      columns: 'reported_count',
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+    final int next = ((row?['reported_count'] as num?)?.toInt() ?? 0) + 1;
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{'reported_count': next},
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+    return next;
+  }
+
+  /// Freezes a landmark (`status` -> 'frozen') once its report count passes
+  /// the threshold - the map/search/list filters only show 'available'
+  /// places, so a frozen landmark disappears from discovery until it is
+  /// reactivated (A20 / [reactivate]).
+  Future<void> freeze(int landmarkId) async {
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{'status': 'frozen'},
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// Every submitted landmark whose name equals [name] (trimmed,
+  /// case-insensitive). Lightweight rows (no dishes/opening hours) - the
+  /// submit flow only needs id + coordinates to decide which previously
+  /// submitted landmarks belong to the same place (~100m) and should be
+  /// reactivated/cleared.
+  Future<List<SubmittedLandmark>> findByName(String name) async {
+    final String normalized = name.trim().toLowerCase();
+    if (normalized.isEmpty) return const <SubmittedLandmark>[];
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableSubmittedLandmark,
+      columns:
+          'landmark_id, landmark_name, latitude, longitude, reported_count, '
+          'status',
+    );
+    final List<SubmittedLandmark> matches = <SubmittedLandmark>[];
+    for (final Map<String, dynamic> row in rows) {
+      final String rowName = (row['landmark_name'] as String? ?? '')
+          .trim()
+          .toLowerCase();
+      if (rowName != normalized) continue;
+      matches.add(
+        SubmittedLandmark(
+          id: (row['landmark_id'] as num).toInt(),
+          name: row['landmark_name'] as String? ?? '',
+          latitude: (row['latitude'] as num?)?.toDouble(),
+          longitude: (row['longitude'] as num?)?.toDouble(),
+          category: '',
+          reportedCount: (row['reported_count'] as num?)?.toInt() ?? 0,
+          status:
+              (row['status'] as String? ?? '').toLowerCase() ==
+                  LandmarkStatus.frozen.name
+              ? LandmarkStatus.frozen
+              : LandmarkStatus.available,
+          items: const <LandmarkItem>[],
+          openingHours: const <OpeningHour>[],
+        ),
+      );
+    }
+    return matches;
+  }
+
   /// Reads ONE submitted landmark with everything its detail screen needs:
   /// the `submitted_landmark` row, its `landmark_item` dishes and its
   /// `opening_hours`. Returns null when no such landmark exists. Rows are

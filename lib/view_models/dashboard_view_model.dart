@@ -108,6 +108,48 @@ class DashboardViewModel extends BaseViewModel {
     }
   }
 
+  /// Called by `UpdateRestaurantFacade.publishOwnMapDataChanged` when THIS
+  /// tourist changed the map themselves - e.g. a report they just submitted
+  /// froze the landmark/restaurant they were viewing. Unlike [onMapDataChanged]
+  /// there is no "update available" banner (it was their own action, not a
+  /// background change), so each live dashboard silently drops its map caches
+  /// and re-reads whatever view is showing - the frozen place's pin disappears.
+  static void onOwnMapDataChanged() {
+    for (final DashboardViewModel viewModel in Set<DashboardViewModel>.of(
+      _live,
+    )) {
+      viewModel._refreshAfterOwnChange();
+    }
+  }
+
+  Future<void> _refreshAfterOwnChange() async {
+    discoveryLogic.clearMapCache();
+    safeNotifyListeners();
+    await _reloadActiveView();
+    // The tourist's own change froze the place whose card they had open - it
+    // is no longer 'available', so its pin is gone and the open card must go
+    // with it instead of lingering over the refreshed map.
+    _dismissSelectedPinIfNoLongerPinned();
+  }
+
+  /// Closes the open pin card when the pin it points at is no longer in the
+  /// freshly loaded [pins] - e.g. after this tourist's report froze the place
+  /// and it stopped being 'available'. No-op when nothing is selected or the
+  /// pin is still there (a report below the freeze threshold changes nothing
+  /// on the map).
+  void _dismissSelectedPinIfNoLongerPinned() {
+    final MapPin? selected = _selectedPin;
+    if (selected == null) return;
+    final bool stillPinned = _pins.any(
+      (MapPin pin) =>
+          pin.kind == selected.kind && pin.referenceId == selected.referenceId,
+    );
+    if (!stillPinned) {
+      _selectedPin = null;
+      safeNotifyListeners();
+    }
+  }
+
   /// Whether the map on screen has fallen behind the database.
   bool get mapUpdateAvailable => _mapUpdatePending;
 
