@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../../app/config/env.dart';
 import '../../app/routing/app_navigator.dart';
 import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
@@ -189,18 +188,6 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                               errorMessage: viewModel.locationError,
                               onMove: viewModel.adjustLandmarkLocation,
                             ),
-                            // Presenter tool (hidden in prod): one-tap
-                            // simulated GPS fixes, so a demo can "be" in a
-                            // different place without moving. See
-                            // `AddLandmarkViewModel.simulateLocation`.
-                            if (Env.appEnv != 'prod') ...<Widget>[
-                              const SizedBox(height: AppSpacing.sm),
-                              _DemoLocationRow(
-                                isSimulating: viewModel.isSimulatingLocation,
-                                onSelect: viewModel.simulateLocation,
-                                onUseDevice: viewModel.useDeviceLocation,
-                              ),
-                            ],
                             const SizedBox(height: AppSpacing.lg),
                             _OperatingHoursSection(
                               operatingHours: viewModel.operatingHours,
@@ -1051,81 +1038,6 @@ class _AdditionalFoodsSection extends StatelessWidget {
           onPressed: onAddMore,
           icon: const Icon(Icons.add),
           label: const Text('Add More Food'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Presenter tool (dev builds only): a row of one-tap simulated GPS fixes so
-/// a demo can "be" in a different place without moving, plus a way back to
-/// the real device GPS. Wired to
-/// `AddLandmarkViewModel.simulateLocation` / `.useDeviceLocation`.
-class _DemoLocationRow extends StatelessWidget {
-  const _DemoLocationRow({
-    required this.isSimulating,
-    required this.onSelect,
-    required this.onUseDevice,
-  });
-
-  final bool isSimulating;
-  final void Function(double latitude, double longitude) onSelect;
-  final VoidCallback onUseDevice;
-
-  static const List<({String label, double lat, double lon})> _presets =
-      <({String label, double lat, double lon})>[
-        (label: 'KL', lat: 3.1390, lon: 101.6869),
-        (label: 'Penang', lat: 5.4141, lon: 100.3288),
-        (label: 'Kota Kinabalu', lat: 5.9804, lon: 116.0735),
-        (label: 'Kuching', lat: 1.5535, lon: 110.3593),
-        (label: 'Outside MY', lat: 1.3521, lon: 103.8198),
-        (label: 'At sea', lat: 3.0, lon: 100.2),
-      ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Icon(
-              isSimulating ? Icons.my_location : Icons.place,
-              size: 14,
-              color: isSimulating ? AppColors.primary : AppColors.textSecondary,
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Expanded(
-              child: Text(
-                isSimulating
-                    ? 'Simulated location active'
-                    : 'Demo: simulate a location',
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: isSimulating
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
-                ),
-              ),
-            ),
-            if (isSimulating)
-              TextButton(
-                onPressed: onUseDevice,
-                child: const Text('Use device GPS'),
-              ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Wrap(
-          spacing: AppSpacing.xs,
-          runSpacing: AppSpacing.xs,
-          children: <Widget>[
-            for (final ({String label, double lat, double lon}) preset
-                in _presets)
-              ActionChip(
-                label: Text(preset.label),
-                onPressed: () => onSelect(preset.lat, preset.lon),
-              ),
-          ],
         ),
       ],
     );

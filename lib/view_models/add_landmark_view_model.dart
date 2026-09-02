@@ -153,11 +153,6 @@ class AddLandmarkViewModel extends BaseViewModel
     safeNotifyListeners();
   }
 
-  /// Presenter tool: when set (via [simulateLocation]) this overrides the
-  /// device GPS fix everywhere (map center, 100m range, submitted
-  /// coordinates) so a demo can "be" in a different place. Cleared by
-  /// [useDeviceLocation] to go back to the real device GPS.
-  TouristLocation _simulatedLocation = TouristLocation.unknown;
   String? _locationError;
 
   // --- FOOD STATE (auto-filled from recognition; price entered per food) ---
@@ -231,14 +226,9 @@ class AddLandmarkViewModel extends BaseViewModel
   String? _submitError;
 
   // --- GETTERS ---
-  TouristLocation get currentLocation =>
-      _simulatedLocation.isKnown ? _simulatedLocation : _currentLocation;
+  TouristLocation get currentLocation => _currentLocation;
   TouristLocation get adjustedLocation => _adjustedLocation;
   String? get locationError => _locationError;
-
-  /// True while a presenter-supplied demo location is overriding the device
-  /// GPS fix (see [simulateLocation]).
-  bool get isSimulatingLocation => _simulatedLocation.isKnown;
 
   LocalFood? get recognizedFood => _primaryFood?.food;
   XFile? get recognizedFoodImage => _recognizedFoodImage;
@@ -385,33 +375,6 @@ class AddLandmarkViewModel extends BaseViewModel
       accuracyMeters: currentLocation.accuracyMeters,
       capturedAt: DateTime.now(),
     );
-    safeNotifyListeners();
-  }
-
-  /// Presenter tool - override the detected location with [latitude] /
-  /// [longitude] (dev/demo only). The map center, the 100m range and the
-  /// submitted coordinates all follow [currentLocation], which prefers this
-  /// over the real GPS fix. Resets the adjusted pin so the map recentres on
-  /// the new spot. Call [useDeviceLocation] to go back to the real device
-  /// GPS.
-  void simulateLocation(double latitude, double longitude) {
-    _simulatedLocation = TouristLocation(
-      latitude: latitude,
-      longitude: longitude,
-      accuracyMeters: 10,
-      capturedAt: DateTime.now(),
-    );
-    _adjustedLocation = TouristLocation.unknown;
-    _locationError = null;
-    safeNotifyListeners();
-  }
-
-  /// Presenter tool - stop simulating; read the real device GPS again (the
-  /// next fix from `LocationMonitor` takes over).
-  void useDeviceLocation() {
-    _simulatedLocation = TouristLocation.unknown;
-    _adjustedLocation = TouristLocation.unknown;
-    _locationError = null;
     safeNotifyListeners();
   }
 
