@@ -1,16 +1,9 @@
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../core/base_view_model.dart';
 import '../domain_model/restaurant.dart';
+import '../domain_model/restaurant_report_reason.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
-
-enum RestaurantReportReason {
-  noLongerExists,
-  incorrectOperatingHours,
-  incorrectLocation,
-  listedLocalFoodUnavailable,
-  incorrectInformation,
-}
 
 /// ViewModel for `RestaurantDetailView`.
 ///
@@ -24,11 +17,12 @@ enum RestaurantReportReason {
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
 class RestaurantDetailViewModel extends BaseViewModel {
-  RestaurantDetailViewModel({
-    @visibleForTesting DiscoveryLogicFacade? discoveryLogic,
-  }) : discoveryLogic = discoveryLogic ?? DiscoveryLogicFacade();
+  RestaurantDetailViewModel();
 
-  final DiscoveryLogicFacade discoveryLogic;
+  @protected
+  DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
+
+  late final DiscoveryLogicFacade discoveryLogic = createDiscoveryLogic();
 
   Restaurant? _restaurant;
   int? _restaurantId;
@@ -36,6 +30,18 @@ class RestaurantDetailViewModel extends BaseViewModel {
 
   Restaurant? get restaurant => _restaurant;
   bool get reportSubmitted => _reportSubmitted;
+
+  void selectRestaurant(int? restaurantId) {
+    _restaurantId = restaurantId;
+  }
+
+  @override
+  Future<void> onInit() {
+    final int? restaurantId = _restaurantId;
+    return restaurantId == null
+        ? rejectMissingRestaurantId()
+        : loadRestaurant(restaurantId);
+  }
 
   Future<void> loadRestaurant(int restaurantId) => runGuarded(() async {
     _restaurantId = restaurantId;

@@ -1,4 +1,4 @@
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_recognition_result.dart';
@@ -20,11 +20,14 @@ import 'food_name_matcher.dart';
 /// this class only orchestrates the two-phase *policy* of when to ask for
 /// one.
 class FoodRecognitionLogic {
-  FoodRecognitionLogic({
-    @visibleForTesting DiscoveryRepositoryFacade? discoveryRepository,
-    @visibleForTesting FoodRepositoryFacade? foodRepository,
-  }) : discoveryRepository = discoveryRepository ?? DiscoveryRepositoryFacade(),
-       foodRepository = foodRepository ?? FoodRepositoryFacade();
+  FoodRecognitionLogic();
+
+  @protected
+  DiscoveryRepositoryFacade createDiscoveryRepository() =>
+      DiscoveryRepositoryFacade();
+
+  @protected
+  FoodRepositoryFacade createFoodRepository() => FoodRepositoryFacade();
 
   /// A single quick-call result is only trusted - and allowed to shortcut
   /// straight to a catalogue record - at or above this confidence (0..1).
@@ -106,8 +109,9 @@ class FoodRecognitionLogic {
   Future<bool> requestCameraPermission() =>
       discoveryRepository.camera.requestCameraPermission();
 
-  final DiscoveryRepositoryFacade discoveryRepository;
-  final FoodRepositoryFacade foodRepository;
+  late final DiscoveryRepositoryFacade discoveryRepository =
+      createDiscoveryRepository();
+  late final FoodRepositoryFacade foodRepository = createFoodRepository();
 
   /// The curated `local_food` row best matching a free-text dish name, or
   /// null when none is good enough (then Gemini's own details are used).

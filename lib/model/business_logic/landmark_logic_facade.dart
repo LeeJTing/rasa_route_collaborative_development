@@ -1,4 +1,4 @@
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/food_recognition_result.dart';
 import '../../domain_model/local_food.dart';
@@ -26,11 +26,12 @@ import 'landmark_submission_logic.dart';
 /// `discoveryLogic.foodDistribution(...)`, never
 /// `discoveryLogic.mapExploration.distribution(...)`).
 class LandmarkLogicFacade {
-  LandmarkLogicFacade({
-    @visibleForTesting FoodRecognitionLogic? foodRecognition,
-  }) : foodRecognition = foodRecognition ?? FoodRecognitionLogic();
+  LandmarkLogicFacade();
 
-  final FoodRecognitionLogic foodRecognition;
+  @protected
+  FoodRecognitionLogic createFoodRecognition() => FoodRecognitionLogic();
+
+  late final FoodRecognitionLogic foodRecognition = createFoodRecognition();
   final LandmarkSubmissionLogic submission = LandmarkSubmissionLogic();
 
   // ===========================================================================

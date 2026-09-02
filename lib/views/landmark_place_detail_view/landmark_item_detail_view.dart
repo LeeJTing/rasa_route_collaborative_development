@@ -12,7 +12,7 @@ import '../common_widgets/app_image.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
 import '../common_widgets/landmark_item_formatting.dart';
-import '../food_detail_view/widgets/food_section_card.dart';
+import '../common_widgets/food_section_card.dart';
 
 /// Full details of one dish attached to a tourist-submitted landmark,
 /// reached by tapping a dish card on `LandmarkPlaceDetailView`. Reads
@@ -220,7 +220,7 @@ class _Photo extends StatelessWidget {
           size: 40,
           color: AppColors.textSecondary,
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpacing.xs),
         Text(label, style: AppTextStyles.bodySmall),
       ],
     ),
@@ -258,7 +258,7 @@ class _Pill extends StatelessWidget {
               size: AppSizes.inlineNoticeIconSize,
               color: AppColors.textPrimary,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: AppSpacing.xs),
           ],
           Text(
             text,

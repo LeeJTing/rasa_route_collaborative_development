@@ -52,6 +52,18 @@ abstract final class AppRadius {
   );
 
   static const double xl = 24;
+
+  // ===========================================================================
+  // Auth (ChinShunYon) - Login / OTP screens
+  // ===========================================================================
+
+  /// [Figma] Pill radius for auth fields and buttons - the mock-up uses
+  /// `border-radius: 24px` on every control.
+  static const double authPillRadius = 24;
+
+  // ===========================================================================
+  // End of Auth (ChinShunYon)
+  // ===========================================================================
 }
 
 /// Fixed component sizes taken from the mock-up.
@@ -269,6 +281,10 @@ abstract final class AppSizes {
   /// Hairline divider / border width.
   static const double borderWidth = 1;
 
+  /// Stronger border width (1.5) - auth pill borders and selected-option
+  /// borders that need to read clearly on cream.
+  static const double borderWidthStrong = 1.5;
+
   /// Dish image height in the food-comparison pair card.
   static const double comparisonImageHeight = 140;
 
@@ -286,6 +302,58 @@ abstract final class AppSizes {
 
   /// Fallback when `imageCategory` is unknown - splits the difference.
   static const double landmarkPhotoHeightDefault = 180;
+
+  // ===========================================================================
+  // Auth (ChinShunYon) - Login / OTP screens
+  // ===========================================================================
+
+  /// [Figma] Login avatar: 100px cream circle holding the rice-ball.
+  static const double authAvatarRadius = 50;
+
+  /// [Figma] Rice-ball emoji inside the login avatar.
+  static const double authEmojiSize = 48;
+
+  /// [Figma] OTP badge: 80px cream circle holding the mail icon.
+  static const double authBadgeRadius = 40;
+
+  /// [Figma] Mail icon inside the OTP badge.
+  static const double authBadgeIconSize = 36;
+
+  // ===========================================================================
+  // End of Auth (ChinShunYon)
+  // ===========================================================================
+
+  // ===========================================================================
+  // Tourist profile (ChinShunYon) - edit-screen option cards
+  // ===========================================================================
+
+  /// [Figma] Square icon box inside a preference/restriction option card.
+  static const double profileOptionBox = 72;
+
+  /// [Figma] Placeholder icon inside [profileOptionBox] (images not added).
+  static const double profileOptionIcon = 32;
+
+  /// Long-label max width - matches the 72px option box so the card never
+  /// grows wider than its box. A wider label (e.g. "No Coriander/Cilantro")
+  /// is what pushed a 4-per-row Wrap onto a new line; capping the label to
+  /// the box width keeps every card the same size.
+  static const double profileOptionLabelMaxWidth = 72;
+
+  /// Leading icon inside the Profile screen's list rows and email card.
+  static const double profileListIconSize = 22;
+
+  /// Trailing icon (chevron / edit) inside the Profile screen's rows.
+  static const double profileListTrailingIconSize = 20;
+
+  /// Blur radius of the soft shadow under the edit-screen option cards.
+  static const double cardShadowBlur = 8;
+
+  /// Vertical offset of the edit-screen option-card shadow.
+  static const double cardShadowOffsetY = 2;
+
+  // ===========================================================================
+  // End of Tourist profile (ChinShunYon)
+  // ===========================================================================
 }
 
 /// Camera-frame guide proportions (REQ106_1) - fractions of the viewfinder's
@@ -322,4 +390,37 @@ abstract final class AppLayoutRatios {
   /// Initial and maximum heights for the catalogue filter bottom sheet.
   static const double catalogueFilterSheetInitial = 0.8;
   static const double catalogueFilterSheetMaximum = 0.92;
+
+  // ===========================================================================
+  // Tourist profile (ChinShunYon) - edit-screen option grid
+  // ===========================================================================
+
+  /// [Figma] Fixed height (px) of one cell in the "All Restrictions" grid:
+  /// the 72px option box plus a two-line label (e.g. "No Coriander/Cilantro")
+  /// with room to spare, so long restriction names wrap instead of
+  /// overflowing the cell. A fixed extent (rather than a width-relative
+  /// aspect ratio) keeps two-line labels fitting on narrow phones too.
+  static const double profileOptionGridMainAxisExtent = 140;
+
+  /// Columns in the "Chosen on top" / "All Restrictions" option grids.
+  static const int profileOptionGridCrossAxisCount = 4;
+
+  // ===========================================================================
+  // End of Tourist profile (ChinShunYon)
+  // ===========================================================================
+
+  // ===========================================================================
+  // Auth (ChinShunYon) - Login / OTP form rhythm
+  // ===========================================================================
+
+  /// Top spacer weight on the login and OTP forms (pushes the avatar / badge
+  /// group down from the app-bar area).
+  static const int authTopSpacerFlex = 2;
+
+  /// Bottom spacer weight on the login form (pushes the Google row up).
+  static const int authBottomSpacerFlex = 3;
+
+  // ===========================================================================
+  // End of Auth (ChinShunYon)
+  // ===========================================================================
 }

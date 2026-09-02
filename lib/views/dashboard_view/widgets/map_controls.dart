@@ -142,9 +142,8 @@ class MapQuickModeButton extends StatelessWidget {
                 const Icon(Icons.bolt, size: 22, color: AppColors.onPrimary),
                 Text(
                   'Quick',
-                  style: AppTextStyles.labelSmall.copyWith(
+                  style: AppTextStyles.mapMicroLabel.copyWith(
                     color: AppColors.onPrimary,
-                    fontSize: 9,
                   ),
                 ),
               ],

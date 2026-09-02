@@ -8,7 +8,6 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
-import '../repositories/food_repository_facade.dart';
 import 'dart:math' as math;
 
 /// REQ102 - the Local Food Dashboard.
@@ -21,21 +20,15 @@ import 'dart:math' as math;
 /// Reached from `DiscoveryLogicFacade`, which is the one facade the dashboard
 /// talks to.
 ///
-/// A business-logic class knows exactly one thing below it: a **repository
-/// facade**. This is the second class in the project to hold two - the same
-/// documented exception `FoodRecognitionLogic` uses, and for the same reason.
-/// It needs [DiscoveryRepositoryFacade] for the map, the occurrences and the
-/// GPS fix, and [FoodRepositoryFacade] for the local-food catalogue that both
-/// the C1 denominator and the food keyword search are computed from. The
-/// alternative would be a second copy of the catalogue query inside
-/// `MapRepository`, which is worse.
+/// A business-logic class knows exactly one thing below it: a repository
+/// facade. Map facts and the local-food catalogue are both exposed through
+/// [DiscoveryRepositoryFacade], so this class stays within that boundary.
 ///
 /// It never sees a repository, a shared client or Flutter.
 class MapExplorationLogic {
   MapExplorationLogic();
 
   final DiscoveryRepositoryFacade repository = DiscoveryRepositoryFacade();
-  final FoodRepositoryFacade foodRepository = FoodRepositoryFacade();
 
   // ===========================================================================
   // Dev GPS mock (Android-only presenter tool)
@@ -286,7 +279,7 @@ class MapExplorationLogic {
   }) async {
     final List<Object> gathered = await Future.wait(<Future<Object>>[
       regions(),
-      foodRepository.getFoods(),
+      repository.getLocalFoods(),
       repository.map.foodOccurrences(),
     ]);
     final List<Region> allRegions = gathered[0] as List<Region>;
@@ -392,7 +385,7 @@ class MapExplorationLogic {
     // together they cost one round trip instead of three; cached, they cost
     // nothing at all on a pan.
     final List<Object> gathered = await Future.wait(<Future<Object>>[
-      foodRepository.getFoods(),
+      repository.getLocalFoods(),
       repository.map.foodOccurrences(),
       repository.map.openingHours(),
     ]);
@@ -571,7 +564,7 @@ class MapExplorationLogic {
     final List<Object> gathered = await Future.wait(<Future<Object>>[
       regions(),
       repository.map.places(),
-      foodRepository.searchFoods(keyword),
+      repository.searchLocalFoods(keyword),
       repository.map.foodOccurrences(),
     ]);
     final List<Region> allRegions = gathered[0] as List<Region>;

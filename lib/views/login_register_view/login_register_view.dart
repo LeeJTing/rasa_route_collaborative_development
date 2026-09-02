@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/routing/app_routes.dart';
+import '../../core/view_state.dart';
 import '../../view_models/login_register_view_model.dart';
-import '../common_widgets/app_top_bar.dart';
+import 'widgets/auth_text_field.dart';
 
 /// Sign in screen.
 ///
@@ -26,20 +28,99 @@ class LoginRegisterView extends StatefulWidget {
   State<LoginRegisterView> createState() => _LoginRegisterViewState();
 }
 
-class _LoginRegisterViewState extends State<LoginRegisterView> {
+class _LoginRegisterViewState extends State<LoginRegisterView>
+    with WidgetsBindingObserver {
   late final LoginRegisterViewModel _viewModel;
+  bool _navigatedToShell = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _viewModel = LoginRegisterViewModel();
+    // The login screen doubles as the entry gate - react to the session check.
+    _viewModel.addListener(_onSessionChecked);
     _viewModel.onInit();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _viewModel.removeListener(_onSessionChecked);
     _viewModel.dispose();
     super.dispose();
+  }
+
+  /// Once the entry session check has finished and a session exists, skip the
+  /// form and open the shell (clearing the stack). Guarded so this only fires
+  /// once per screen life.
+  void _onSessionChecked() {
+    if (_navigatedToShell ||
+        _viewModel.checkingSession ||
+        !_viewModel.signedIn) {
+      return;
+    }
+    _navigatedToShell = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        AppRoutes.mainShell,
+        (Route<dynamic> _) => false,
+      );
+    });
+  }
+
+  /// Google OAuth hands off to the system browser; the app is backgrounded
+  /// until the OAuth deep link (`com.rasaroute.app://login-callback`) brings
+  /// it back. On resume, finish the flow - Supabase already completed the
+  /// exchange, so this resolves the session and provisions the tourist row.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _viewModel.googleFlowStarted &&
+        !_viewModel.googleSignInComplete) {
+      _completeGoogleSignIn();
+    }
+  }
+
+  Future<void> _sendOtp(LoginRegisterViewModel viewModel) async {
+    await viewModel.sendEmailOtp();
+    if (!mounted) return;
+    if (viewModel.otpSent) {
+      await Navigator.pushNamed(context, AppRoutes.otp);
+    }
+  }
+
+  Future<void> _signInWithGoogle(LoginRegisterViewModel viewModel) async {
+    await viewModel.signInWithGoogle();
+    if (!mounted || !viewModel.googleFlowStarted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Continue sign-in in your browser.')),
+    );
+  }
+
+  /// Finishes a Google sign-in after the browser returns. On success, clears
+  /// the stack and lands on the shell (same as the OTP path).
+  Future<void> _completeGoogleSignIn() async {
+    await _viewModel.completeGoogleSignIn();
+    if (!mounted) return;
+    if (_viewModel.googleSignInComplete) {
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        AppRoutes.mainShell,
+        (Route<dynamic> _) => false,
+      );
+    } else if (_viewModel.hasError) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _viewModel.errorMessage ??
+                'Google sign-in did not complete. Please try again.',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -47,7 +128,6 @@ class _LoginRegisterViewState extends State<LoginRegisterView> {
     return ChangeNotifierProvider<LoginRegisterViewModel>.value(
       value: _viewModel,
       child: Scaffold(
-        appBar: const AppTopBar(title: 'Sign in'),
         body: SafeArea(
           child: Consumer<LoginRegisterViewModel>(
             builder:
@@ -56,40 +136,162 @@ class _LoginRegisterViewState extends State<LoginRegisterView> {
                   LoginRegisterViewModel viewModel,
                   Widget? _,
                 ) {
+                  // Entry session check in flight - show a splash rather than
+                  // flashing the form to a tourist who is already signed in.
+                  if (viewModel.checkingSession) {
+                    return const _SessionCheckSplash();
+                  }
                   return Padding(
                     padding: AppSpacing.screenPadding,
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Text(
-                            'Welcome to Rasa Route',
-                            style: Theme.of(context).textTheme.headlineSmall,
+                    child: Column(
+                      children: <Widget>[
+                        const Spacer(flex: AppLayoutRatios.authTopSpacerFlex),
+                        CircleAvatar(
+                          radius: AppSizes.authAvatarRadius,
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.secondaryContainer,
+                          child: Text(
+                            '🍙',
+                            style: TextStyle(fontSize: AppSizes.authEmojiSize),
                           ),
-                          const SizedBox(height: AppSpacing.md),
-                          Text(
-                            'Your local-food discovery companion.',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          const SizedBox(height: AppSpacing.xl),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: () => Navigator.pushReplacementNamed(
-                                context,
-                                AppRoutes.mainShell,
+                        ),
+                        const SizedBox(height: AppSpacing.xxl),
+                        Text(
+                          "Log in or sign up to discover Malaysia's local foods.",
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontWeight: FontWeight.w700,
                               ),
-                              child: const Text('Explore the app'),
-                            ),
+                        ),
+                        const Spacer(flex: AppLayoutRatios.authTopSpacerFlex),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Row(
+                            children: <Widget>[
+                              Icon(
+                                Icons.mail_outline,
+                                size: AppSizes.iconSmall,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                              const SizedBox(width: AppSpacing.xs),
+                              Text(
+                                'Email Address',
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        AuthTextField(onChanged: viewModel.setEmail),
+                        if (viewModel.hasError) ...<Widget>[
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            viewModel.errorMessage ??
+                                'Unable to send the code.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
                           ),
                         ],
-                      ),
+                        const SizedBox(height: AppSpacing.xl),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: viewModel.canSendOtp
+                                ? () => _sendOtp(viewModel)
+                                : null,
+                            style: ElevatedButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.authPillRadius,
+                                ),
+                              ),
+                            ),
+                            child: viewModel.state == ViewState.busy
+                                ? const CircularProgressIndicator()
+                                : const Text('Send One-Time Password'),
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        const Row(
+                          children: <Widget>[
+                            Expanded(child: Divider()),
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: AppSpacing.md,
+                              ),
+                              child: Text('OR'),
+                            ),
+                            Expanded(child: Divider()),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: viewModel.isBusy
+                                ? null
+                                : () => _signInWithGoogle(viewModel),
+                            icon: Icon(
+                              Icons.g_mobiledata,
+                              color: AppColors.accentRust,
+                            ),
+                            label: const Text('Continue With Google'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.accentRust,
+                              side: BorderSide(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.primaryContainer,
+                                width: AppSizes.borderWidthStrong,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.authPillRadius,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const Spacer(
+                          flex: AppLayoutRatios.authBottomSpacerFlex,
+                        ),
+                      ],
                     ),
                   );
                 },
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The brief splash shown while the entry session check runs (the same brand
+/// mark as the sign-in screen, so there's no jarring jump).
+class _SessionCheckSplash extends StatelessWidget {
+  const _SessionCheckSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: <Widget>[
+        CircleAvatar(
+          radius: AppSizes.authAvatarRadius,
+          backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+          child: const Text(
+            '🍙',
+            style: TextStyle(fontSize: AppSizes.authEmojiSize),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        const CircularProgressIndicator(),
+      ],
     );
   }
 }

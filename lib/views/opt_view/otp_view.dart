@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/routing/app_routes.dart';
+import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../view_models/otp_view_model.dart';
-import '../common_widgets/app_top_bar.dart';
+import 'widgets/otp_code_field.dart';
 
 /// Verify your email screen.
 ///
@@ -41,18 +43,147 @@ class _OtpViewState extends State<OtpView> {
     super.dispose();
   }
 
+  Future<void> _verify(OtpViewModel viewModel) async {
+    await viewModel.verifyEmailOtp();
+    if (!mounted || !viewModel.verified) return;
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      AppRoutes.mainShell,
+      (Route<dynamic> _) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<OtpViewModel>.value(
       value: _viewModel,
       child: Scaffold(
-        appBar: const AppTopBar(title: 'Verify your email'),
         body: SafeArea(
           child: Consumer<OtpViewModel>(
             builder: (BuildContext context, OtpViewModel viewModel, Widget? _) {
-              return const Padding(
+              return Padding(
                 padding: AppSpacing.screenPadding,
-                child: Center(child: Text('OtpView')),
+                child: Column(
+                  children: <Widget>[
+                    const Spacer(flex: AppLayoutRatios.authTopSpacerFlex),
+                    CircleAvatar(
+                      radius: AppSizes.authBadgeRadius,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.secondaryContainer,
+                      child: Icon(
+                        Icons.email_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                        size: AppSizes.authBadgeIconSize,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+                    Text(
+                      'Verify Your Email',
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+                    Text.rich(
+                      TextSpan(
+                        children: <TextSpan>[
+                          TextSpan(
+                            text:
+                                'Enter the 6-digit verification code sent to ',
+                          ),
+                          // The mock-up bolds the recipient address.
+                          TextSpan(
+                            text: viewModel.email,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const TextSpan(text: '.'),
+                        ],
+                      ),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+                    OtpCodeField(
+                      codeLength: OtpViewModel.otpLength,
+                      onChanged: (String code) {
+                        viewModel.setToken(code);
+                        if (viewModel.canVerify) {
+                          _verify(viewModel);
+                        }
+                      },
+                    ),
+                    if (viewModel.hasError) ...<Widget>[
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        viewModel.errorMessage ?? 'Unable to verify the code.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.md),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: viewModel.canResend
+                          ? TextButton(
+                              onPressed: viewModel.resendEmailOtp,
+                              child: const Text('Resend OTP'),
+                            )
+                          : Text(
+                              'Resend OTP in ${viewModel.resendCooldown}s',
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                  ),
+                            ),
+                    ),
+                    const Spacer(),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Did not receive the email?',
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                    ),
+                    Text(
+                      '1. Please confirm your email address is correct.\n'
+                      '2. Please check if the email was mistakenly marked as spam.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: AppSpacing.xxl),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primary,
+                          backgroundColor: AppColors.surface,
+                          side: BorderSide(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.primaryContainer,
+                            width: AppSizes.borderWidthStrong,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              AppRadius.authPillRadius,
+                            ),
+                          ),
+                        ),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+                  ],
+                ),
               );
             },
           ),

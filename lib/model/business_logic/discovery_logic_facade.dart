@@ -1,4 +1,4 @@
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/exploration_filter.dart';
 import '../../domain_model/exploration_search.dart';
@@ -23,17 +23,20 @@ import 'restaurant_discovery_logic.dart';
 /// facade fans out to as many business-logic classes as the feature needs. No
 /// business rules live here, and it never imports Flutter.
 class DiscoveryLogicFacade {
-  DiscoveryLogicFacade({
-    @visibleForTesting FoodDiscoveryLogic? foodDiscovery,
-    @visibleForTesting MatchesRecommendationLogic? matchesRecommendation,
-  }) : foodDiscovery = foodDiscovery ?? FoodDiscoveryLogic(),
-       matchesRecommendation =
-           matchesRecommendation ?? MatchesRecommendationLogic();
+  DiscoveryLogicFacade();
+
+  @protected
+  FoodDiscoveryLogic createFoodDiscovery() => FoodDiscoveryLogic();
+
+  @protected
+  MatchesRecommendationLogic createMatchesRecommendation() =>
+      MatchesRecommendationLogic();
 
   final RestaurantDiscoveryLogic restaurantDiscovery =
       RestaurantDiscoveryLogic();
-  final FoodDiscoveryLogic foodDiscovery;
-  final MatchesRecommendationLogic matchesRecommendation;
+  late final FoodDiscoveryLogic foodDiscovery = createFoodDiscovery();
+  late final MatchesRecommendationLogic matchesRecommendation =
+      createMatchesRecommendation();
   final MapExplorationLogic mapExploration = MapExplorationLogic();
 
   // ---------------------------------------------------------------------------

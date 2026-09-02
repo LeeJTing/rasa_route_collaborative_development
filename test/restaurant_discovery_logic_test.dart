@@ -19,8 +19,8 @@ void main() {
             _restaurant(index, distanceKm: 2 + (index - 5) * 0.04),
           _restaurant(20, distanceKm: 11),
         ];
-        final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-          discoveryRepository: _FakeDiscoveryRepositoryFacade(restaurants),
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          _FakeDiscoveryRepositoryFacade(restaurants),
         );
 
         final List<Restaurant> results = await logic
@@ -43,8 +43,8 @@ void main() {
           _restaurant(3, distanceKm: 9),
           _restaurant(4, distanceKm: 11),
         ];
-        final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-          discoveryRepository: _FakeDiscoveryRepositoryFacade(restaurants),
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          _FakeDiscoveryRepositoryFacade(restaurants),
         );
 
         final List<Restaurant> results = await logic
@@ -67,8 +67,8 @@ void main() {
         ];
         final _FakeDiscoveryRepositoryFacade repository =
             _FakeDiscoveryRepositoryFacade(summaries);
-        final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-          discoveryRepository: repository,
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          repository,
         );
 
         final List<Restaurant> results = await logic.nearby(
@@ -113,8 +113,8 @@ void main() {
           ],
         ),
       ];
-      final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(restaurants),
+      final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+        _FakeDiscoveryRepositoryFacade(restaurants),
         now: () => DateTime.utc(2026, 8, 31, 2),
       );
 
@@ -137,10 +137,8 @@ void main() {
           OpeningHour(id: 0, day: Weekday.monday, status: DayStatus.unknown),
         ],
       );
-      final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(<Restaurant>[
-          restaurant,
-        ]),
+      final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+        _FakeDiscoveryRepositoryFacade(<Restaurant>[restaurant]),
         now: () => DateTime.utc(2026, 8, 31, 2),
       );
 
@@ -167,6 +165,7 @@ void main() {
               ],
               restrictionIdsByFood: const <int, List<int>>{
                 100: <int>[9],
+                102: <int>[9],
               },
               menuItemsByRestaurant: <int, List<RestaurantItem>>{
                 1: const <RestaurantItem>[
@@ -200,8 +199,8 @@ void main() {
                 ],
               },
             );
-        final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-          discoveryRepository: repository,
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          repository,
         );
 
         final List<Restaurant> results = await logic
@@ -217,6 +216,39 @@ void main() {
         );
       },
     );
+
+    test('does not infer dietary restrictions from ingredient text', () async {
+      final Restaurant restaurant = _restaurant(1, distanceKm: 0.2);
+      final _FakeDiscoveryRepositoryFacade repository =
+          _FakeDiscoveryRepositoryFacade(
+            <Restaurant>[restaurant],
+            restrictions: const <DietaryRestriction>[
+              DietaryRestriction(id: 9, name: 'No Shrimp/Prawn'),
+            ],
+            menuItemsByRestaurant: const <int, List<RestaurantItem>>{
+              1: <RestaurantItem>[
+                RestaurantItem(
+                  id: 10,
+                  restaurantId: 1,
+                  localFoodId: 100,
+                  foodName: 'Seafood Noodles',
+                  ingredients: 'Fresh shrimp and stock',
+                  currency: 'RM',
+                  foodCategory: 'Noodle',
+                ),
+              ],
+            },
+          );
+      final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+        repository,
+      );
+
+      final List<Restaurant> results = await logic
+          .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+
+      expect(results, hasLength(1));
+      expect(results.single.items, hasLength(1));
+    });
   });
 }
 
@@ -224,6 +256,20 @@ const TouristLocation _testLocation = TouristLocation(
   latitude: 3,
   longitude: 101,
 );
+
+class _TestRestaurantDiscoveryLogic extends RestaurantDiscoveryLogic {
+  _TestRestaurantDiscoveryLogic(this.fakeRepository, {DateTime Function()? now})
+    : now = now ?? DateTime.now;
+
+  final DiscoveryRepositoryFacade fakeRepository;
+  final DateTime Function() now;
+
+  @override
+  DiscoveryRepositoryFacade createRepository() => fakeRepository;
+
+  @override
+  DateTime currentTime() => now();
+}
 
 Restaurant _restaurant(
   int id, {
