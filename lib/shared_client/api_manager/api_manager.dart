@@ -42,19 +42,38 @@ class APIManager {
   static const String tableFavouriteFood = 'favourite_food';
   static const String tableRestaurant = 'restaurant';
   static const String tableRestaurantItem = 'restaurant_item';
-  static const String tableTourist = 'tourist';
   static const String tableOpeningHours = 'opening_hours';
   static const String tableSubmittedLandmark = 'submitted_landmark';
   static const String tableLandmarkItem = 'landmark_item';
   static const String tableFoodPreference = 'food_preference';
   static const String tableDietaryRestriction = 'dietary_restriction';
   static const String tableLocalFoodPreference = 'local_food_preference';
+  static const String tableReport = 'report';
 
   /// Searchable geography for the dashboard: cities, towns, areas and notable
   /// locations (REQ102_19). Read-only - seeded by migration.
   static const String tablePlace = 'place';
   static const String tableFoodDietaryRestriction = 'food_dietary_restriction';
   static const String tableUserDietaryRestriction = 'user_dietary_restriction';
+
+  // ===========================================================================
+  // Auth & Tourist (ChinShunYon) - tourist rows
+  // ===========================================================================
+
+  /// One row per signed-in tourist. `tourist.tourist_id` is the app-facing
+  /// id (used as the `tourist_id` FK on `favourite_food`, `landmark_item`,
+  /// etc.); `tourist.id` links the row to `auth.users.id`. See
+  /// `TouristDataModel`.
+  static const String tableTourist = 'tourist';
+
+  /// Links a tourist to the `food_preference` rows they picked
+  /// (`tourist_id` -> `food_preference_id`). Each `food_preference` row is a
+  /// single taste OR a single category (the other field is null).
+  static const String tablePersonalisedPreference = 'personalised_preference';
+
+  // ===========================================================================
+  // End of Auth & Tourist (ChinShunYon)
+  // ===========================================================================
 
   /// Supabase Storage bucket holding local-food dish photos. The
   /// `local_food_image.img_name` column stores the object name in this bucket.
@@ -133,6 +152,35 @@ class APIManager {
   /// The signed-in user's id, or `''` when nobody is signed in.
   String get currentUserId => _supabase.currentUserId;
 
+  // ===========================================================================
+  // Auth & Tourist (ChinShunYon) - tourist id resolution
+  // ===========================================================================
+
+  /// The signed-in tourist's app-facing `tourist_id` (from the `tourist`
+  /// row), or `''` when nobody is signed in or the row does not exist yet.
+  ///
+  /// Every table that stores "whose is this" (`favourite_food`,
+  /// `personalised_preference`, `user_dietary_restriction`, ...) keys on
+  /// `tourist.tourist_id`, NOT on the auth user id (`auth.uid()`) that
+  /// [currentUserId] returns. Exposing the resolution here - the single
+  /// remote source every repository already depends on - lets any module
+  /// fetch the right id without one repository reaching into another
+  /// module's repository.
+  Future<String> resolveCurrentTouristId() async {
+    final String authUserId = currentUserId;
+    if (authUserId.isEmpty) return '';
+    final Map<String, dynamic>? row = await _supabase.selectOne(
+      tableTourist,
+      columns: 'tourist_id',
+      eq: <String, Object?>{'id': authUserId},
+    );
+    return row == null ? '' : (row['tourist_id'] as String? ?? '');
+  }
+
+  // ===========================================================================
+  // End of Auth & Tourist (ChinShunYon)
+  // ===========================================================================
+
   /// Plain-text prompt to Gemini, with the app's configured timeout + retry.
   Future<String> askGemini(String prompt) => _gemini.generateText(prompt);
 
@@ -147,4 +195,32 @@ class APIManager {
     }
     return _supabase.storagePublicUrl(bucket, trimmed);
   }
+
+  // ---------------------------------------------------------------------------
+  // Authentication, forwarded to SupabaseService.
+  // ---------------------------------------------------------------------------
+
+  Future<void> sendEmailOtp({required String email}) {
+    return _supabase.sendEmailOtp(email: email);
+  }
+
+  Future<Map<String, dynamic>?> verifyEmailOtp({
+    required String email,
+    required String token,
+  }) {
+    return _supabase.verifyEmailOtp(email: email, token: token);
+  }
+
+  Future<bool> signInWithGoogle({required String redirectTo}) {
+    return _supabase.signInWithGoogle(redirectTo: redirectTo);
+  }
+
+  Future<Map<String, dynamic>?> getCurrentAuthSession() =>
+      _supabase.getCurrentAuthSession();
+
+  Future<void> signOut() {
+    return _supabase.signOut();
+  }
+
+  //End of Authentication -------------------------------------------------------
 }

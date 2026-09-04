@@ -1,7 +1,11 @@
 import 'dart:math' as math;
 
+import 'package:meta/meta.dart' show visibleForTesting;
+
+import '../../domain_model/landmark_report_reason.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
+import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/landmark_repository_facade.dart';
@@ -24,6 +28,11 @@ class LandmarkSubmissionLogic {
   /// raw `SignboardAnalysisResponse` directly in the ViewModel - a domain
   /// invariant about what counts as a valid capture, not a form-UX check,
   /// so it belongs here, not there).
+  ///
+  /// For non-Latin signboards (Chinese/Tamil/Jawi) the returned name is the
+  /// exact signboard text with the romanised translation in parentheses,
+  /// e.g. "海天楼 (Hai Tian Lou)" - see [displaySignboardName]. The tourist
+  /// can edit the field afterwards.
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<String> analyzeSignboard(List<int> imageBytes) async {
     final response = await repository.recognition.analyzeSignboard(imageBytes);
@@ -35,7 +44,108 @@ class LandmarkSubmissionLogic {
     if (response.textDetected == null || response.textDetected!.isEmpty) {
       throw Exception('Unable to extract restaurant name from signboard.');
     }
-    return response.textDetected!;
+    final String romanised = sanitiseSignboardName(response.textDetected!);
+    if (romanised.isEmpty) {
+      // The only "text" was noise (e.g. a lone phone number) - nothing to
+      // auto-fill, same A7 outcome as finding no text at all.
+      throw Exception('Unable to extract restaurant name from signboard.');
+    }
+    return displaySignboardName(
+      romanised: romanised,
+      originalScript: response.nameOriginalScript,
+      languageScript: response.languageScript,
+    );
+  }
+
+  /// Strips non-name noise Gemini sometimes appends to a signboard name:
+  /// lot numbers, addresses, phone numbers and postcodes (Malaysian signs
+  /// carry "Lot 12, Jalan ...", "Tel: 012-345 6789" under the name). This is
+  /// a deterministic safety net UNDER the signboard prompt - the prompt asks
+  /// for the name alone, but the model occasionally includes a stray lot or
+  /// phone number; that must never land in the Restaurant Name field.
+  /// Returns the cleaned name, which may be empty if the raw text was only
+  /// noise (callers should treat that as "no text extracted").
+  static String sanitiseSignboardName(String raw) {
+    // Treat each line of a multi-line signboard as its own segment, then
+    // also split on commas/semicolons, so "Restoran ABC\nLot 12" becomes
+    // two independent parts and the noise can be dropped without touching
+    // the name.
+    final String flat = raw.trim().replaceAll(RegExp(r'[\r\n]+'), ', ');
+    final Iterable<String> segments = flat
+        .split(RegExp(r'\s*[,;]\s*'))
+        .map((String s) => s.trim())
+        .where((String s) => s.isNotEmpty);
+
+    String result = segments
+        .where((String segment) => !_isSignboardNoise(segment))
+        .join(', ');
+
+    // A phone number glued to the name without a separator
+    // ("Restoran ABC Tel: 012-345 6789") - strip it inline.
+    result = result.replaceAll(
+      RegExp(
+        r'\s*(?:tel|phone|hp|whatsapp|contact|fax)\s*[:.\-]?\s*'
+        r'\+?\d{1,3}(?:[ -]?\d{2,4}){2,}',
+        caseSensitive: false,
+      ),
+      ' ',
+    );
+
+    result = result.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return result.replaceAll(RegExp(r'^[,.;:\- ]+|[,\s.;:\-]+$'), '').trim();
+  }
+
+  /// Builds the Restaurant Name value shown for a signboard capture:
+  /// - Latin-script signs (or when the original-script name is missing or
+  ///   identical to the romanised form) return just the romanised name;
+  /// - non-Latin signs return the exact signboard text with the romanised
+  ///   translation in parentheses, e.g. "海天楼 (Hai Tian Lou)", so the
+  ///   signboard text is kept alongside the translated form.
+  static String displaySignboardName({
+    required String romanised,
+    String? originalScript,
+    String languageScript = 'latin',
+  }) {
+    final String? original = originalScript == null
+        ? null
+        : sanitiseSignboardName(originalScript);
+    final bool showBoth =
+        original != null &&
+        original.isNotEmpty &&
+        original != romanised &&
+        languageScript != 'latin';
+    return showBoth ? '$original ($romanised)' : romanised;
+  }
+
+  /// True when [segment] is signboard noise (address/phone/postcode/lot),
+  /// not part of the restaurant name. Conservative - a segment is only
+  /// treated as noise when it clearly matches one of those patterns.
+  static bool _isSignboardNoise(String segment) {
+    final String s = segment.trim().toLowerCase();
+    if (s.isEmpty) return true;
+
+    // A phone number, optionally preceded by "Tel:" / "HP:" / "Fax:" etc.
+    final String maybePhone = s.replaceFirst(
+      RegExp(r'^(?:tel|phone|hp|whatsapp|contact|fax)\s*[:.\-]?\s*'),
+      '',
+    );
+    if (RegExp(r'^\+?\d[\d\s().-]{6,}$').hasMatch(maybePhone)) return true;
+
+    // Lot / unit / block references: "lot 12", "lot no. 12", "unit 3a".
+    if (RegExp(r'^(?:lot|unit|blok|block)\b').hasMatch(s)) return true;
+
+    // A standalone "No. 12" (address unit number, not a name like
+    // "No. 1 Noodle Bar" - that has more words so won't match this).
+    if (RegExp(r'^no\.?\s*\d+$').hasMatch(s)) return true;
+
+    // A Malaysian postcode, with or without a following town name.
+    if (RegExp(r'^\d{5}\b').hasMatch(s)) return true;
+
+    // Address lines / town names.
+    return RegExp(
+      r'^(?:jalan|jln\.?|lorong|lebuh|persiaran|taman|kuala lumpur|'
+      r'petaling jaya|subang jaya|shah alam|klang|selangor|ampang)\b',
+    ).hasMatch(s);
   }
 
   /// Stall photo (A17). Verifies the whole stall is in frame - does NOT
@@ -183,7 +293,12 @@ class LandmarkSubmissionLogic {
   /// Haversine distance between two coordinates, in metres - a pure
   /// geometric calculation, true regardless of where the coordinates came
   /// from.
-  double _distanceMetres(double lat1, double lon1, double lat2, double lon2) {
+  static double _distanceMetres(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) {
     const double earthRadiusMetres = 6371000;
     final double dLat = _degToRad(lat2 - lat1);
     final double dLon = _degToRad(lon2 - lon1);
@@ -197,7 +312,7 @@ class LandmarkSubmissionLogic {
     return earthRadiusMetres * c;
   }
 
-  double _degToRad(double deg) => deg * (math.pi / 180);
+  static double _degToRad(double deg) => deg * (math.pi / 180);
 
   /// Whether a tourist-adjusted pin at ([adjustedLat], [adjustedLon]) is
   /// still within the allowed correction range of [current] (A9.1) - the
@@ -241,15 +356,23 @@ class LandmarkSubmissionLogic {
   /// so a food that has a photo persists with its `landmark_item.image_url`
   /// / `image_id` set; a food without one (e.g. name-typed, no photo)
   /// persists those as null.
-  LandmarkItem _toLandmarkItem(FoodSubmission entry, String touristId) {
+  LandmarkItem _toLandmarkItem(
+    FoodSubmission entry,
+    String touristId, {
+    int landmarkIdOverride = 0,
+    int? localFoodIdOverride,
+  }) {
     return LandmarkItem(
       id: 0,
-      landmarkId: 0, // Assigned once the landmark itself is saved.
+      landmarkId:
+          landmarkIdOverride, // 0 = assigned once the landmark is saved.
       touristId: touristId,
-      // The curated catalogue row this dish resolves to - `entry.food.id`
-      // when it is already in `local_food` (id != 0), else 0 (a brand-new
-      // food gets its id backfilled after the Option-C catalogue insert).
-      localFoodId: entry.food.id,
+      // The curated catalogue row this dish resolves to - [localFoodIdOverride]
+      // when the caller already knows it (the merge path resolves brand-new
+      // foods' ids first, Option-C style), else `entry.food.id` when it is
+      // already in `local_food` (id != 0), else 0 (a brand-new food gets its
+      // id backfilled after the Option-C catalogue insert).
+      localFoodId: localFoodIdOverride ?? entry.food.id,
       dish: entry.food.name,
       // LocalFood has no dedicated `variant` field (see FoodRecognitionLogic
       // - it is carried as a synonym instead).
@@ -270,18 +393,29 @@ class LandmarkSubmissionLogic {
     );
   }
 
-  /// Saves a new landmark (BF-24..28) - builds the `SubmittedLandmark` and
-  /// `LandmarkItem` domain objects here, from the raw, already-validated
-  /// form data `AddLandmarkViewModel` passes in. This construction (and its
-  /// business defaults - `reportedCount: 0`, `status: available`) used to
-  /// happen in the ViewModel itself; moved here since deciding a landmark's
-  /// initial moderation state is a domain concern, not a form concern.
+  /// Saves a new landmark (BF-24..28), OR merges the dishes into a place that
+  /// already exists on the map (UC500 A13).
   ///
-  /// A new landmark is ALWAYS submitted as [LandmarkStatus.available] with
-  /// `reported_count` 0 - i.e. even if a previous frozen landmark of the
-  /// same name exists, the fresh submission starts available and clean (the
-  /// repository forces these two values on insert too, so the guarantee
-  /// holds regardless of what is passed in).
+  /// MATCH RULE (A13): "the same place" = same name (trimmed, case-insensitive)
+  /// AND within ~100m of the landmark's chosen location. Resolution order:
+  ///   1. a catalogue RESTAURANT within ~100m  -> merge its `restaurant_item`
+  ///      (no landmark row is written; the restaurant keeps its opening hours);
+  ///   2. else an existing submitted LANDMARK within ~100m -> merge its
+  ///      `landmark_item` (no new landmark row; the existing one keeps its
+  ///      opening hours);
+  ///   3. else a brand-new `submitted_landmark` is saved (always `available`,
+  ///      `reported_count` 0).
+  /// In EVERY outcome the place the tourist just re-confirmed is reactivated:
+  /// the matched catalogue restaurant (1) and any same-name submitted
+  /// landmark(s) within ~100m have their `report_count`/`reported_count`
+  /// cleared and `status` set back to 'available' (A20) - including, in case
+  /// (2), the very landmark being merged into.
+  ///
+  /// The dishes themselves are NOT attached here - genuinely-new foods get a
+  /// `local_food` row (Option C) only after this returns, and the caller
+  /// attaches them with the resolved ids (see
+  /// [addFoodsToRestaurant]/[addFoodsToSubmittedLandmark]), so this method's
+  /// result carries no added/existing dish lists yet.
   ///
   /// The landmark's own signboard/stall photo is carried on the submitted
   /// row too: [imageUrl]/[imageId] are its storage URL / object id and
@@ -290,18 +424,7 @@ class LandmarkSubmissionLogic {
   /// photo (via [uploadImage]) before calling this - the same way it uploads
   /// each food's photo - so `submitted_landmark.image_url` / `image_id` /
   /// `image_category` are set, not null.
-  ///
-  /// TODO once `SubmittedLandmarkRepository` has real methods:
-  ///  - if [checkRestaurantExists] found a match: A13 - check whether it is
-  ///    frozen and reactivate it (A20), check the food isn't already listed
-  ///    under it (A13.1), then add just the new item(s) and keep its
-  ///    existing opening hours (A13.2) rather than overwriting them;
-  ///  - otherwise: save the new landmark as a brand new submission.
-  ///
-  /// @return the assigned `landmark_id`, or `0` when no new landmark was
-  ///         created (a matching restaurant already exists). The submit flow
-  ///         uses it to backfill brand-new foods' ids onto the items (Option C).
-  Future<int> submitLandmark({
+  Future<LandmarkSubmitResult> submitLandmark({
     required String restaurantName,
     required double? latitude,
     required double? longitude,
@@ -313,18 +436,48 @@ class LandmarkSubmissionLogic {
     required List<FoodSubmission> foods,
     required Map<Weekday, List<OpeningHour>> operatingHours,
   }) async {
-    final Restaurant? existing = await checkRestaurantExists(restaurantName);
-    if (existing != null) {
-      // TODO: A13/A13.1/A13.2/A20 handling once SubmittedLandmarkRepository
-      // exposes "add item to existing landmark" and "reactivate" methods.
-      return 0;
+    // 1) Same place as a catalogue restaurant (A13) -> merge into it.
+    final Restaurant? existingRestaurant = await _findNearbyRestaurant(
+      restaurantName,
+      latitude,
+      longitude,
+    );
+    if (existingRestaurant != null) {
+      await _reactivateSamePlace(
+        name: restaurantName,
+        latitude: latitude,
+        longitude: longitude,
+        matchedRestaurant: existingRestaurant,
+      );
+      return LandmarkSubmitResult.mergedIntoRestaurant(
+        restaurantId: existingRestaurant.id,
+        targetName: existingRestaurant.name,
+      );
     }
 
-    // Build the landmark + its items here, from the raw, already-validated
-    // form data, and persist them following the real Supabase tables
-    // (`submitted_landmark` + `landmark_item` + `opening_hours`). The foods'
-    // taste tags were already normalised against `food_preference` in the
-    // recognition flow (`FoodRecognitionLogic`) - not repeated here.
+    // 2) Same place as an earlier submitted landmark -> merge into it too
+    // (the user re-submitted in person; don't stack a second pin).
+    final SubmittedLandmark? existingLandmark =
+        await _findNearbySubmittedLandmark(restaurantName, latitude, longitude);
+    if (existingLandmark != null) {
+      await _reactivateSamePlace(
+        name: restaurantName,
+        latitude: latitude,
+        longitude: longitude,
+        matchedRestaurant: null,
+      );
+      return LandmarkSubmitResult.mergedIntoLandmark(
+        landmarkId: existingLandmark.id,
+        targetName: existingLandmark.name,
+      );
+    }
+
+    // 3) Brand-new place - build the landmark + its items here, from the raw,
+    // already-validated form data, and persist them following the real
+    // Supabase tables (`submitted_landmark` + `landmark_item` +
+    // `opening_hours`). The foods' taste tags were already normalised against
+    // `food_preference` in the recognition flow (`FoodRecognitionLogic`) -
+    // not repeated here.
     final SubmittedLandmark landmark = SubmittedLandmark(
       id: 0,
       name: restaurantName,
@@ -345,7 +498,248 @@ class LandmarkSubmissionLogic {
           .toList(growable: false),
     );
     final int landmarkId = await repository.landmark.save(landmark);
-    return landmarkId;
+
+    // The tourist standing here again confirms the place still exists - if an
+    // OLDER submitted landmark of the same place is frozen/reported, clear it
+    // (A20). The fresh row above is already available with reported_count 0.
+    await _reactivateSamePlace(
+      name: restaurantName,
+      latitude: latitude,
+      longitude: longitude,
+      matchedRestaurant: null,
+    );
+    return LandmarkSubmitResult.created(landmarkId: landmarkId);
+  }
+
+  /// The catalogue restaurant that is the SAME place as the submission:
+  /// name equals [name] AND within ~100m of ([latitude], [longitude]). Picks
+  /// the nearest such restaurant; null when there is no location fix or no
+  /// restaurant matches (a same-named restaurant in another town is NOT the
+  /// same place - it must not swallow a submission).
+  Future<Restaurant?> _findNearbyRestaurant(
+    String name,
+    double? latitude,
+    double? longitude,
+  ) async {
+    if (latitude == null || longitude == null) return null;
+    final List<Restaurant> candidates = await repository.restaurant
+        .findByNameList(name);
+    return nearestRestaurantWithinMetres(candidates, latitude, longitude);
+  }
+
+  /// The previously submitted landmark that is the SAME place as the
+  /// submission (used when no catalogue restaurant is near): name equals
+  /// [name] AND within ~100m of ([latitude], [longitude]); nearest wins.
+  /// null when there is no location fix or no landmark matches.
+  Future<SubmittedLandmark?> _findNearbySubmittedLandmark(
+    String name,
+    double? latitude,
+    double? longitude,
+  ) async {
+    if (latitude == null || longitude == null) return null;
+    final List<SubmittedLandmark> candidates = await repository.landmark
+        .findByName(name);
+    return nearestLandmarkWithinMetres(candidates, latitude, longitude);
+  }
+
+  /// Pure "nearest candidate within [maxMetres]" selector - unit-testable
+  /// geometry shared by the merge flow (no repository/network needed).
+  /// Candidates without coordinates are ignored. null when nothing is within
+  /// range (a same-named place in another town must not be matched).
+  @visibleForTesting
+  static Restaurant? nearestRestaurantWithinMetres(
+    List<Restaurant> candidates,
+    double latitude,
+    double longitude, {
+    double maxMetres = 100,
+  }) {
+    Restaurant? nearest;
+    double nearestDistance = double.infinity;
+    for (final Restaurant candidate in candidates) {
+      final double? lat = candidate.latitude;
+      final double? lon = candidate.longitude;
+      if (lat == null || lon == null) continue;
+      final double distance = _distanceMetres(latitude, longitude, lat, lon);
+      if (distance <= maxMetres && distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = candidate;
+      }
+    }
+    return nearest;
+  }
+
+  /// Submitted-landmark twin of [nearestRestaurantWithinMetres].
+  @visibleForTesting
+  static SubmittedLandmark? nearestLandmarkWithinMetres(
+    List<SubmittedLandmark> candidates,
+    double latitude,
+    double longitude, {
+    double maxMetres = 100,
+  }) {
+    SubmittedLandmark? nearest;
+    double nearestDistance = double.infinity;
+    for (final SubmittedLandmark candidate in candidates) {
+      final double? lat = candidate.latitude;
+      final double? lon = candidate.longitude;
+      if (lat == null || lon == null) continue;
+      final double distance = _distanceMetres(latitude, longitude, lat, lon);
+      if (distance <= maxMetres && distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = candidate;
+      }
+    }
+    return nearest;
+  }
+
+  /// Reactivates a place the tourist just re-confirmed exists (A20), in BOTH
+  /// submit outcomes (merge into an existing restaurant, and brand-new
+  /// landmark):
+  ///   * the matched catalogue [restaurant] (when given) has its
+  ///     `report_count` / `status` cleared back to 'available';
+  ///   * every previously submitted landmark with the same name within ~100m
+  ///     of the submission also has `reported_count` / `status` cleared.
+  /// Best-effort - a failed reactivation must never fail the submission.
+  Future<void> _reactivateSamePlace({
+    required String name,
+    required double? latitude,
+    required double? longitude,
+    required Restaurant? matchedRestaurant,
+  }) async {
+    try {
+      if (matchedRestaurant != null) {
+        await repository.restaurant.resetRestaurantModeration(
+          matchedRestaurant.id,
+        );
+      }
+      if (latitude == null || longitude == null) return;
+      final List<SubmittedLandmark> sameName = await repository.landmark
+          .findByName(name);
+      for (final SubmittedLandmark older in sameName) {
+        final double? lat = older.latitude;
+        final double? lon = older.longitude;
+        if (lat == null || lon == null) continue;
+        if (_distanceMetres(latitude, longitude, lat, lon) > 100) continue;
+        await repository.landmark.clearReportsAndReactivate(older.id);
+      }
+    } catch (_) {
+      // Ignored - the submission itself already succeeded.
+    }
+  }
+
+  /// Attaches the submitted dishes to an existing catalogue restaurant as
+  /// `restaurant_item` rows (the A13 restaurant merge, called after
+  /// genuinely-new foods were registered to `local_food` so every item has a
+  /// `local_food_id`). A dish that is already listed under the restaurant
+  /// (same catalogue food or same name) is skipped (A13.1) and reported back
+  /// in [FoodAttachResult.existing] so the UI can say "item exists".
+  /// Best-effort per item - a failed link must not fail the merge; it is
+  /// simply not reported as added.
+  Future<FoodAttachResult> addFoodsToRestaurant(
+    int restaurantId,
+    List<FoodSubmission> foods,
+    Map<String, int> newFoodIds,
+  ) async {
+    final List<String> added = <String>[];
+    final List<String> existing = <String>[];
+    final Set<String> existingNames = <String>{};
+    final Set<int> existingFoodIds = <int>{};
+    try {
+      final List<RestaurantItem> existingItems = await repository.restaurant
+          .getRestaurantItemsByRestaurantIds(<int>[restaurantId]);
+      for (final RestaurantItem item in existingItems) {
+        if (item.localFoodId > 0) existingFoodIds.add(item.localFoodId);
+        existingNames.add(item.foodName.trim().toLowerCase());
+      }
+    } catch (_) {
+      // Ignored - dedupe is best-effort; the insert below still runs.
+    }
+
+    for (final FoodSubmission entry in foods) {
+      if (entry.isFake) continue;
+      final String key = entry.food.name.trim().toLowerCase();
+      final int localFoodId = newFoodIds[entry.food.name] ?? entry.food.id;
+      if (localFoodId <= 0) continue; // Not in the catalogue - nothing to link.
+      if ((localFoodId > 0 && existingFoodIds.contains(localFoodId)) ||
+          existingNames.contains(key)) {
+        if (!existing.contains(entry.food.name)) {
+          existing.add(entry.food.name);
+        }
+        continue;
+      }
+      try {
+        await repository.restaurant.addRestaurantItem(
+          restaurantId: restaurantId,
+          localFoodId: localFoodId,
+          name: entry.food.name,
+          foodImgUrl: entry.imageUrl,
+          foodCategory: entry.food.category,
+          price: entry.price,
+        );
+        added.add(entry.food.name);
+        existingFoodIds.add(localFoodId);
+        existingNames.add(key);
+      } catch (_) {
+        // Ignored - one bad item link must not abort the merge.
+      }
+    }
+    return (added: added, existing: existing);
+  }
+
+  /// Attaches the submitted dishes to an EXISTING submitted landmark as
+  /// `landmark_item` rows (the A13 landmark merge - used when the place is
+  /// already a submitted landmark rather than a catalogue restaurant). Same
+  /// dedupe/reporting as [addFoodsToRestaurant]; the landmark's own opening
+  /// hours are untouched (A13.2).
+  Future<FoodAttachResult> addFoodsToSubmittedLandmark({
+    required int landmarkId,
+    required String touristId,
+    required List<FoodSubmission> foods,
+    required Map<String, int> newFoodIds,
+  }) async {
+    final List<String> added = <String>[];
+    final List<String> existing = <String>[];
+    final Set<String> existingNames = <String>{};
+    final Set<int> existingFoodIds = <int>{};
+    try {
+      final SubmittedLandmark? current = await repository.landmark
+          .getSubmittedLandmarkById(landmarkId);
+      if (current != null) {
+        for (final LandmarkItem item in current.items) {
+          if (item.localFoodId > 0) existingFoodIds.add(item.localFoodId);
+          existingNames.add(item.dish.trim().toLowerCase());
+        }
+      }
+    } catch (_) {
+      // Ignored - dedupe is best-effort; the insert below still runs.
+    }
+
+    final List<LandmarkItem> toAdd = <LandmarkItem>[];
+    for (final FoodSubmission entry in foods) {
+      if (entry.isFake) continue;
+      final String key = entry.food.name.trim().toLowerCase();
+      final int localFoodId = newFoodIds[entry.food.name] ?? entry.food.id;
+      if ((localFoodId > 0 && existingFoodIds.contains(localFoodId)) ||
+          existingNames.contains(key)) {
+        if (!existing.contains(entry.food.name)) {
+          existing.add(entry.food.name);
+        }
+        continue;
+      }
+      toAdd.add(
+        _toLandmarkItem(
+          entry,
+          touristId,
+          landmarkIdOverride: landmarkId,
+          localFoodIdOverride: localFoodId > 0 ? localFoodId : null,
+        ),
+      );
+    }
+    if (toAdd.isEmpty) return (added: added, existing: existing);
+    await repository.landmark.addItems(landmarkId, toAdd);
+    for (final LandmarkItem item in toAdd) {
+      added.add(item.dish);
+    }
+    return (added: added, existing: existing);
   }
 
   /// Option C backfill: after genuinely-new foods are written to `local_food`,
@@ -368,4 +762,154 @@ class LandmarkSubmissionLogic {
       }
     }
   }
+
+  /// Records a tourist's report against a submitted landmark (the shared
+  /// `report` table) and applies the moderation rule: `reported_count` is
+  /// incremented, and once it reaches [_reportFreezeAtReports] the landmark
+  /// is frozen (`status` 'frozen') so the map/list filters stop showing it.
+  /// `frozePlace: true` tells the caller that THIS report was the one that
+  /// froze it - the UI leaves the page and refreshes the map, dropping the
+  /// now-hidden pin.
+  ///
+  /// Reporting is a signed-in feature: when no tourist is resolved (no auth
+  /// session) nothing is written and `requiresSignIn: true` is returned so
+  /// the UI can ask the user to sign in. When signed in, one tourist may
+  /// report a place only once - a duplicate is detected first and
+  /// `alreadyReported: true` is returned without touching the count.
+  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
+  submitLandmarkReport({
+    required int landmarkId,
+    required LandmarkReportReason reason,
+    String? touristId,
+  }) async {
+    final String? resolvedTouristId =
+        touristId ?? await repository.auth.currentTouristId();
+    if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
+      return (requiresSignIn: true, alreadyReported: false, frozePlace: false);
+    }
+    final bool duplicate = await repository.report.alreadyReported(
+      kind: 'landmark',
+      placeId: landmarkId,
+      touristId: resolvedTouristId,
+    );
+    if (duplicate) {
+      return (requiresSignIn: false, alreadyReported: true, frozePlace: false);
+    }
+    await repository.report.insertReport(
+      kind: 'landmark',
+      placeId: landmarkId,
+      reason: reason.name,
+      touristId: resolvedTouristId,
+    );
+    final int count = await repository.landmark.incrementReportCount(
+      landmarkId,
+    );
+    final bool frozePlace = shouldFreezeAfterReport(count);
+    if (frozePlace) {
+      await repository.landmark.freeze(landmarkId);
+      // Frozen places are no longer 'available', so cached map pins must go:
+      // the next read (right after the UI leaves the page) has no pin for it.
+      repository.map.clearCache();
+    }
+    return (
+      requiresSignIn: false,
+      alreadyReported: false,
+      frozePlace: frozePlace,
+    );
+  }
+
+  /// Freeze once the reported count REACHES [_reportFreezeAtReports] (so the
+  /// 5th report freezes). Pure so the boundary is unit-testable without a
+  /// repository seam.
+  @visibleForTesting
+  static bool shouldFreezeAfterReport(int reportedCount) =>
+      reportedCount >= _reportFreezeAtReports;
+
+  /// A landmark is frozen once its report count reaches this many reports.
+  static const int _reportFreezeAtReports = 5;
+}
+
+/// Result of attaching a set of submitted dishes to an existing place -
+/// which dishes were added and which already existed (A13.1) - so the UI can
+/// say "item exists" after a merge.
+typedef FoodAttachResult = ({List<String> added, List<String> existing});
+
+/// Which of the three submit outcomes happened - see
+/// [LandmarkSubmissionLogic.submitLandmark].
+enum LandmarkSubmitOutcome { created, mergedIntoRestaurant, mergedIntoLandmark }
+
+/// Outcome of [LandmarkSubmissionLogic.submitLandmark] - a brand-new
+/// `submitted_landmark` was created, or the dishes were MERGED into an
+/// existing catalogue restaurant / submitted landmark (same name within
+/// ~100m) and no new landmark row was written.
+class LandmarkSubmitResult {
+  const LandmarkSubmitResult.created({required this.landmarkId})
+    : outcome = LandmarkSubmitOutcome.created,
+      restaurantId = null,
+      targetName = null,
+      addedDishNames = const <String>[],
+      existingDishNames = const <String>[];
+
+  const LandmarkSubmitResult.mergedIntoRestaurant({
+    required this.restaurantId,
+    required this.targetName,
+  }) : outcome = LandmarkSubmitOutcome.mergedIntoRestaurant,
+       landmarkId = null,
+       addedDishNames = const <String>[],
+       existingDishNames = const <String>[];
+
+  const LandmarkSubmitResult.mergedIntoLandmark({
+    required this.landmarkId,
+    required this.targetName,
+  }) : outcome = LandmarkSubmitOutcome.mergedIntoLandmark,
+       restaurantId = null,
+       addedDishNames = const <String>[],
+       existingDishNames = const <String>[];
+
+  const LandmarkSubmitResult._({
+    required this.outcome,
+    this.landmarkId,
+    this.restaurantId,
+    this.targetName,
+    required this.addedDishNames,
+    required this.existingDishNames,
+  });
+
+  final LandmarkSubmitOutcome outcome;
+
+  /// The NEW landmark's id when [outcome] is [created]; the EXISTING
+  /// landmark's id when [mergedIntoLandmark]; null when merged into a
+  /// catalogue restaurant.
+  final int? landmarkId;
+
+  /// The catalogue restaurant's id when [outcome] is [mergedIntoRestaurant].
+  final int? restaurantId;
+
+  /// Display name of the place merged into (restaurant or landmark), for the
+  /// confirmation message; null when a new landmark was created.
+  final String? targetName;
+
+  /// Dishes actually attached - filled in by the caller once genuinely-new
+  /// foods were registered, via [copyWith].
+  final List<String> addedDishNames;
+
+  /// Dishes NOT attached because they already exist on the target (A13.1).
+  final List<String> existingDishNames;
+
+  /// Whether the dishes went onto an existing place instead of a new landmark.
+  bool get merged =>
+      outcome == LandmarkSubmitOutcome.mergedIntoRestaurant ||
+      outcome == LandmarkSubmitOutcome.mergedIntoLandmark;
+
+  LandmarkSubmitResult copyWith({
+    List<String>? addedDishNames,
+    List<String>? existingDishNames,
+  }) => LandmarkSubmitResult._(
+    outcome: outcome,
+    landmarkId: landmarkId,
+    restaurantId: restaurantId,
+    targetName: targetName,
+    addedDishNames: addedDishNames ?? this.addedDishNames,
+    existingDishNames: existingDishNames ?? this.existingDishNames,
+  );
 }

@@ -148,8 +148,7 @@ class MapSearchBar extends StatelessWidget {
               const SizedBox(width: AppSpacing.xs),
               Text(
                 filterCount == 0 ? 'Filter' : 'Filter ($filterCount)',
-                style: AppTextStyles.titleSmall.copyWith(
-                  fontSize: 13,
+                style: AppTextStyles.compactControlLabel.copyWith(
                   color: filterPanelOpen
                       ? AppColors.onPrimary
                       : AppColors.textPrimary,

@@ -16,6 +16,7 @@ import '../common_widgets/app_tag_chip.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
 import '../common_widgets/landmark_item_formatting.dart';
+import 'widgets/report_landmark_sheet.dart';
 
 /// Full details of a tourist-submitted landmark (A11-4 "View Landmark"),
 /// reached from the dashboard map's pin sheet. Shows the landmark's photo,
@@ -57,6 +58,51 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
     super.dispose();
   }
 
+  /// Opens the report bottom sheet and, on a successful submit, shows the
+  /// confirmation SnackBar - mirrors the catalogue restaurant detail's
+  /// report flow (see `RestaurantDetailView._showReportSheet`).
+  Future<void> _showReportSheet(
+    SubmittedLandmark landmark,
+    LandmarkPlaceDetailViewModel viewModel,
+  ) async {
+    final bool? submitted = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
+      builder: (BuildContext sheetContext) => ReportLandmarkSheet(
+        landmarkName: landmark.name,
+        onSubmit: viewModel.submitReport,
+      ),
+    );
+    if (!mounted || submitted != true) return;
+    final String message;
+    if (viewModel.requiresSignIn) {
+      message =
+          'Sign in to report this place. Please sign in from the profile page and try again.';
+    } else if (viewModel.reportFailed) {
+      message = 'Sorry, your report could not be sent. Please try again.';
+    } else if (viewModel.alreadyReported) {
+      message =
+          'You have already reported this landmark. Thanks for looking out!';
+    } else if (viewModel.reportSubmitted) {
+      message = 'Report received. Thank you for helping keep the map accurate.';
+    } else {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+    final bool leavePage = viewModel.reportFrozePlace;
+    viewModel.consumeReportSubmitted();
+    // A report that froze the landmark hides it - leave the page (back to the
+    // map) so the now-hidden pin is no longer shown. The ViewModel already
+    // asked every live dashboard to drop its caches and re-read, so the map
+    // underneath is current by the time the tourist lands on it.
+    if (leavePage && mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<LandmarkPlaceDetailViewModel>.value(
@@ -90,7 +136,10 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
                       title: 'No landmark to show',
                     );
                   }
-                  return _LandmarkDetails(landmark: landmark);
+                  return _LandmarkDetails(
+                    landmark: landmark,
+                    onReport: () => _showReportSheet(landmark, viewModel),
+                  );
                 },
           ),
         ),
@@ -102,9 +151,13 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
 /// The ready-state content - the landmark's header (photo, name, category,
 /// location), its opening hours, and its dishes.
 class _LandmarkDetails extends StatelessWidget {
-  const _LandmarkDetails({required this.landmark});
+  const _LandmarkDetails({required this.landmark, required this.onReport});
 
   final SubmittedLandmark landmark;
+
+  /// Opens the report sheet - wired in `_LandmarkPlaceDetailViewState` so it
+  /// can reach the ViewModel's `submitReport` and show the confirmation.
+  final VoidCallback onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -148,6 +201,15 @@ class _LandmarkDetails extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
           ],
+        const SizedBox(height: AppSpacing.lg),
+        // Report affordance - mirrors the catalogue restaurant detail's
+        // "Report Restaurant" button: lets a tourist flag an incorrect
+        // submitted-landmark pin. UI-only for now, like the restaurant one.
+        OutlinedButton.icon(
+          onPressed: onReport,
+          icon: const Icon(Icons.flag_outlined, color: AppColors.error),
+          label: const Text('Report Landmark'),
+        ),
       ],
     );
   }
@@ -267,7 +329,7 @@ class _Photo extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         const Icon(Icons.location_on, size: 40, color: AppColors.textSecondary),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpacing.xs),
         Text(label, style: AppTextStyles.bodySmall),
       ],
     ),
@@ -332,7 +394,7 @@ class _MetaLine extends StatelessWidget {
                         size: AppSizes.iconSmall,
                         color: AppColors.primary,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       Text(
                         location,
                         style: AppTextStyles.bodyMedium.copyWith(
@@ -340,7 +402,7 @@ class _MetaLine extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       const Icon(
                         Icons.copy_outlined,
                         size: AppSizes.inlineNoticeIconSize,
@@ -366,7 +428,7 @@ class _MetaLine extends StatelessWidget {
                         size: AppSizes.inlineNoticeIconSize,
                         color: AppColors.primary,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       Text(
                         'Open Google Maps',
                         style: AppTextStyles.bodySmall.copyWith(
@@ -389,7 +451,7 @@ class _MetaLine extends StatelessWidget {
                 size: 14,
                 color: AppColors.warning,
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: AppSpacing.xs),
               Text(reports, style: AppTextStyles.bodySmall),
             ],
           ),
@@ -402,7 +464,11 @@ class _MetaLine extends StatelessWidget {
 /// (`google.com/maps/search`), which opens the Google Maps app if it's
 /// installed, or falls back to a browser otherwise - the same behaviour on
 /// Android and iOS without needing platform-specific URI schemes.
-Future<void> _openInGoogleMaps(BuildContext context, double lat, double lon) async {
+Future<void> _openInGoogleMaps(
+  BuildContext context,
+  double lat,
+  double lon,
+) async {
   final Uri uri = Uri.parse(
     'https://www.google.com/maps/search/?api=1&query=$lat,$lon',
   );
@@ -417,8 +483,12 @@ Future<void> _openInGoogleMaps(BuildContext context, double lat, double lon) asy
   }
 }
 
-/// The landmark's recorded hours, one line per row. Days with no recorded
-/// times read "Closed" (the wire format has no separate "unknown" row).
+/// The landmark's recorded hours, one line per row, honouring all three
+/// [DayStatus] states (matching the add-landmark form's wording): an Open row
+/// shows its time range, a day recorded as Unknown reads "Hours not known" -
+/// never "Closed" - and only a day the submitter confirmed closed reads
+/// "Closed". The app does not tell a tourist a place is shut when it does not
+/// know (the same rule the map's "Hours unknown" label follows).
 class _OpeningHoursList extends StatelessWidget {
   const _OpeningHoursList({required this.hours});
 
@@ -430,11 +500,12 @@ class _OpeningHoursList extends StatelessWidget {
       for (final OpeningHour hour in hours)
         (
           _dayName(hour.day),
-          hour.status == DayStatus.open &&
-                  hour.opensAt != null &&
-                  hour.closesAt != null
-              ? '${_clock(hour.opensAt!)} - ${_clock(hour.closesAt!)}'
-              : 'Closed',
+          switch (hour.status) {
+            DayStatus.open when hour.opensAt != null && hour.closesAt != null =>
+              '${_clock(hour.opensAt!)} - ${_clock(hour.closesAt!)}',
+            DayStatus.unknown => 'Hours not known',
+            _ => 'Closed',
+          },
         ),
     ];
     return Container(
@@ -553,7 +624,10 @@ class _DishCard extends StatelessWidget {
                       runSpacing: AppSpacing.xs,
                       children: <Widget>[
                         if (item.mealType.isNotEmpty)
-                          AppTagChip(label: item.mealType, style: AppTagStyle.meal),
+                          AppTagChip(
+                            label: item.mealType,
+                            style: AppTagStyle.meal,
+                          ),
                         if (item.foodCategory.isNotEmpty)
                           AppTagChip(
                             label: item.foodCategory,
@@ -574,10 +648,7 @@ class _DishCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.xs),
-              const Icon(
-                Icons.chevron_right,
-                color: AppColors.textSecondary,
-              ),
+              const Icon(Icons.chevron_right, color: AppColors.textSecondary),
             ],
           ),
         ),

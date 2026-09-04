@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../views/add_landmark_view/add_landmark_view.dart';
 import '../views/dashboard_view/dashboard_view.dart';
+import '../views/edit_dietary_restriction_view/edit_dietary_restriction_view.dart';
+import '../views/edit_food_preference_view/edit_food_preference_view.dart';
 import '../views/favourite_collection_view/favourite_collection_view.dart';
 import '../views/food_comparison_view/food_comparison_view.dart';
 import '../views/food_detail_view/food_detail_view.dart';
@@ -51,8 +53,10 @@ class RasaRouteApp extends StatelessWidget {
       theme: AppTheme.light,
 
       navigatorKey: AppNavigator.navigatorKey,
-      // initialRoute: AppRoutes.loginRegister,
-      initialRoute: AppRoutes.mainShell,
+      // The login screen doubles as the entry gate: on startup it checks for a
+      // session and routes to the shell when one exists (see
+      // LoginRegisterViewModel.onInit).
+      initialRoute: AppRoutes.loginRegister,
 
       // The route table. Names come from AppRoutes so no call site types a
       // string literal. Adding a screen is two edits: a constant there, an
@@ -75,6 +79,13 @@ class RasaRouteApp extends StatelessWidget {
         AppRoutes.profile: (BuildContext context) => const ProfileView(),
         AppRoutes.favouriteCollection: (BuildContext context) =>
             const FavouriteCollectionView(),
+
+        // Tourist profile (ChinShunYon)
+        AppRoutes.editFoodPreference: (BuildContext context) =>
+            const EditFoodPreferenceView(),
+        AppRoutes.editDietaryRestriction: (BuildContext context) =>
+            const EditDietaryRestrictionView(),
+        // End of Tourist profile (ChinShunYon)
 
         AppRoutes.foodDetail: (BuildContext context) => const FoodDetailView(),
         AppRoutes.foodComparison: (BuildContext context) =>

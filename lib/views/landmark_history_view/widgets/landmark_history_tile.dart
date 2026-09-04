@@ -142,7 +142,7 @@ class _StatusAndDishes extends StatelessWidget {
           ),
         ),
         if (dishLine.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 2),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             dishLine,
             maxLines: 1,

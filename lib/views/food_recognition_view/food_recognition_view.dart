@@ -365,23 +365,28 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           food: viewModel.recognizedFood!,
           capturedImage: viewModel.capturedImage,
           isLocalFood: viewModel.isLocalFood,
+          fitsCatalogueCategory: viewModel.fitsCatalogueCategory,
           isLowConfidence: viewModel.isLowConfidence,
           nameMismatch: viewModel.nameMismatch,
           observedFoodName: viewModel.observedFoodName,
           typedName: viewModel.typedName,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
           onViewDetails: viewModel.proceedToViewDetails,
-          // Non-local food: details + "View Details" stay, but there is no
-          // "Add New Landmark" - it must never become a landmark.
-          onAddLandmark: viewModel.isLocalFood
+          // Non-addable (not local, or a Malaysian snack/package): details +
+          // "View Details" stay, but there is no "Add New Landmark".
+          onAddLandmark:
+              viewModel.isLocalFood && viewModel.fitsCatalogueCategory
               ? viewModel.proceedToAddLandmark
               : null,
           onEnterName: viewModel.enterFoodName,
           isProcessing: viewModel.isProcessing,
-          promptText: viewModel.isLocalFood
+          promptText: viewModel.isLocalFood && viewModel.fitsCatalogueCategory
               ? 'Would you like to add this as a new landmark?'
-              : "This doesn't appear to be Malaysian local food, so it "
-                    "can't be added as a landmark.",
+              : !viewModel.isLocalFood
+              ? "This doesn't appear to be Malaysian local food, so it "
+                    "can't be added as a landmark."
+              : 'This is a Malaysian product but it is a snack or packaged '
+                    "item, so it can't be added.",
         );
 
       case FoodRecognitionPurpose.additionalFood:
@@ -389,6 +394,7 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           food: viewModel.recognizedFood!,
           capturedImage: viewModel.capturedImage,
           isLocalFood: viewModel.isLocalFood,
+          fitsCatalogueCategory: viewModel.fitsCatalogueCategory,
           isLowConfidence: viewModel.isLowConfidence,
           nameMismatch: viewModel.nameMismatch,
           observedFoodName: viewModel.observedFoodName,
@@ -399,17 +405,21 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           // LandmarkDetailViewModel.returnToFormAsAdditionalFood) rather
           // than pushing a brand-new AddLandmarkView.
           onViewDetails: viewModel.proceedToViewDetails,
-          // Non-local food: never "Add to Landmark" back onto the form.
-          onAddLandmark: viewModel.isLocalFood
+          // Non-addable food: never "Add to Landmark" back onto the form.
+          onAddLandmark:
+              viewModel.isLocalFood && viewModel.fitsCatalogueCategory
               ? viewModel.confirmFoodAndReturn
               : null,
           onEnterName: viewModel.enterFoodName,
           isProcessing: viewModel.isProcessing,
           addLandmarkLabel: 'Add to Landmark',
-          promptText: viewModel.isLocalFood
+          promptText: viewModel.isLocalFood && viewModel.fitsCatalogueCategory
               ? 'Add this food to the landmark?'
-              : "This doesn't appear to be Malaysian local food, so it "
-                    "can't be added.",
+              : !viewModel.isLocalFood
+              ? "This doesn't appear to be Malaysian local food, so it "
+                    "can't be added."
+              : 'This is a Malaysian product but it is a snack or packaged '
+                    "item, so it can't be added.",
         );
 
       case FoodRecognitionPurpose.signboard:
@@ -544,14 +554,14 @@ class _CameraViewfinder extends StatelessWidget {
   Widget build(BuildContext context) {
     if (frozenImage != null) {
       return ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: _FrozenImage(image: frozenImage!),
       );
     }
 
     if (error != null) {
       return ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: Center(
           child: Padding(
             padding: AppSpacing.screenPadding,
@@ -570,7 +580,7 @@ class _CameraViewfinder extends StatelessWidget {
     final CameraController? camera = controller;
     if (isInitializing || camera == null || !camera.value.isInitialized) {
       return const ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: Center(
           child: CircularProgressIndicator(color: AppColors.primary),
         ),
@@ -578,7 +588,7 @@ class _CameraViewfinder extends StatelessWidget {
     }
 
     return ColoredBox(
-      color: Colors.black,
+      color: AppColors.cameraBackground,
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
@@ -686,7 +696,7 @@ class _CaptureControlBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: Colors.black,
+      color: AppColors.cameraBackground,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
         child: Center(child: _CaptureButton(onTap: onCapture)),

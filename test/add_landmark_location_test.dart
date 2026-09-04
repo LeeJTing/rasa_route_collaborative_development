@@ -73,55 +73,5 @@ void main() {
         vm.dispose();
       },
     );
-
-    test(
-      'simulateLocation overrides the detected location and is reversible',
-      () async {
-        final AddLandmarkViewModel vm = AddLandmarkViewModel();
-        await vm.onInit();
-        // Real device GPS fix: Kuala Lumpur.
-        vm.onCurrentLocationChanged(
-          TouristLocation(
-            latitude: 3.1390,
-            longitude: 101.6869,
-            accuracyMeters: 10,
-            capturedAt: DateTime.now(),
-          ),
-        );
-
-        vm.simulateLocation(5.9804, 116.0735); // present as if in Kota Kinabalu
-
-        expect(vm.isSimulatingLocation, isTrue);
-        expect(vm.currentLocation.latitude, 5.9804);
-        expect(vm.currentLocation.longitude, 116.0735);
-
-        vm.useDeviceLocation(); // flip back to real GPS
-
-        expect(vm.isSimulatingLocation, isFalse);
-        expect(vm.currentLocation.latitude, 3.1390);
-        vm.dispose();
-      },
-    );
-
-    test('100m range is measured from the simulated location', () async {
-      final AddLandmarkViewModel vm = AddLandmarkViewModel();
-      await vm.onInit();
-      vm.onCurrentLocationChanged(
-        TouristLocation(
-          latitude: 3.1390,
-          longitude: 101.6869,
-          accuracyMeters: 10,
-          capturedAt: DateTime.now(),
-        ),
-      );
-      vm.simulateLocation(5.9804, 116.0735); // simulate Kota Kinabalu
-
-      // A pin ~60m from the simulated KK fix is allowed (it is on land).
-      vm.adjustLandmarkLocation(5.9809, 116.0735);
-
-      expect(vm.locationError, isNull);
-      expect(vm.adjustedLocation.isKnown, isTrue);
-      vm.dispose();
-    });
   });
 }

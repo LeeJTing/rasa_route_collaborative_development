@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
@@ -16,10 +16,12 @@ import '../repositories/discovery_repository_facade.dart';
 /// models and persists the device-local Swipe session; Supabase rows and local
 /// JSON stay below the repository boundary.
 class FoodDiscoveryLogic {
-  FoodDiscoveryLogic({@visibleForTesting DiscoveryRepositoryFacade? repository})
-    : _repository = repository ?? DiscoveryRepositoryFacade();
+  FoodDiscoveryLogic();
 
-  final DiscoveryRepositoryFacade _repository;
+  @protected
+  DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
+
+  late final DiscoveryRepositoryFacade _repository = createRepository();
 
   /// Builds the real queue for the Malaysian state under the map centre.
   Future<SwipeModePreparation> prepareSwipeMode({

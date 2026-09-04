@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../../app/config/env.dart';
 import '../../app/routing/app_navigator.dart';
 import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
@@ -45,6 +44,11 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
   late final TextEditingController _restaurantNameController;
   final FocusNode _restaurantNameFocusNode = FocusNode();
 
+  /// Last signboard-extraction version applied to `_restaurantNameController`
+  /// (see the force-sync in `build` - a fresh extraction must overwrite the
+  /// tourist's typed name even while the field is focused).
+  int _appliedRestaurantNameVersion = 0;
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +74,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
     _restaurantNameController = TextEditingController(
       text: _viewModel.restaurantName,
     );
+    _appliedRestaurantNameVersion = _viewModel.extractedRestaurantNameVersion;
     _viewModel.onInit();
   }
 
@@ -85,10 +90,20 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
     await viewModel.submitLandmark();
     if (!mounted) return;
     if (viewModel.submitError == null) {
+      // A13 - when the place already exists on the map (same name within
+      // ~100m) the dishes were added to that place instead of creating a new
+      // landmark - `submitConfirmation` says so (and lists any that already
+      // existed); otherwise show the default success message.
+      final String message =
+          viewModel.submitConfirmation ??
+          'Your landmark has been submitted successfully.'; // M8
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Your landmark has been submitted successfully.'),
-        ), // M8
+        SnackBar(
+          // Clamped so a long merged-outcome message can never overflow the
+          // snackbar - the ViewModel already caps the dish list; this caps
+          // total lines as a final guard.
+          content: Text(message, maxLines: 4, overflow: TextOverflow.ellipsis),
+        ),
       );
       AppNavigator.resetTo(AppRoutes.mainShell);
     }
@@ -108,10 +123,18 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                   AddLandmarkViewModel viewModel,
                   Widget? _,
                 ) {
-                  // Sync the restaurant-name field from the ViewModel only while
-                  // it isn't focused, so an auto-fill from signboard capture
-                  // shows up without fighting the tourist's own typing.
-                  if (!_restaurantNameFocusNode.hasFocus &&
+                  // A fresh signboard result must overwrite the tourist's
+                  // typed name even while the field is focused (the field
+                  // regains focus when the capture route pops back). Detect
+                  // it via the ViewModel's extraction version and force-sync;
+                  // otherwise fall back to the focus-guarded sync, so normal
+                  // auto-fill shows up without fighting the tourist's typing.
+                  if (_appliedRestaurantNameVersion !=
+                      viewModel.extractedRestaurantNameVersion) {
+                    _restaurantNameController.text = viewModel.restaurantName;
+                    _appliedRestaurantNameVersion =
+                        viewModel.extractedRestaurantNameVersion;
+                  } else if (!_restaurantNameFocusNode.hasFocus &&
                       _restaurantNameController.text !=
                           viewModel.restaurantName) {
                     _restaurantNameController.text = viewModel.restaurantName;
@@ -175,18 +198,6 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                               errorMessage: viewModel.locationError,
                               onMove: viewModel.adjustLandmarkLocation,
                             ),
-                            // Presenter tool (hidden in prod): one-tap
-                            // simulated GPS fixes, so a demo can "be" in a
-                            // different place without moving. See
-                            // `AddLandmarkViewModel.simulateLocation`.
-                            if (Env.appEnv != 'prod') ...<Widget>[
-                              const SizedBox(height: AppSpacing.sm),
-                              _DemoLocationRow(
-                                isSimulating: viewModel.isSimulatingLocation,
-                                onSelect: viewModel.simulateLocation,
-                                onUseDevice: viewModel.useDeviceLocation,
-                              ),
-                            ],
                             const SizedBox(height: AppSpacing.lg),
                             _OperatingHoursSection(
                               operatingHours: viewModel.operatingHours,
@@ -848,7 +859,7 @@ class _DayRow extends StatelessWidget {
   }
 }
 
-/// Opening/closing time selector - a dropdown list of every half-hour mark
+/// Opening/closing time selector - a dropdown list of every 15-minute mark
 /// from "00:00" through "24:00" inclusive ("24:00" is its own distinct
 /// option, meaning "open until midnight," not the same slot as "00:00").
 /// Replaces the old wheel-style `showTimePicker` dialog - the tourist picks
@@ -860,7 +871,7 @@ class _TimeDropdown extends StatelessWidget {
   final int? minutes;
   final ValueChanged<int> onChanged;
 
-  static const int _stepMinutes = 30;
+  static const int _stepMinutes = 15;
   static const int _maxMinutes = 24 * 60; // 1440 = "24:00"
 
   static String _label(int totalMinutes) {
@@ -871,7 +882,7 @@ class _TimeDropdown extends StatelessWidget {
   }
 
   /// Rounds to the nearest valid dropdown entry - guards against a stored
-  /// value that doesn't land exactly on a half-hour mark (DropdownButton
+  /// value that doesn't land exactly on a 15-minute mark (DropdownButton
   /// throws if its value doesn't match one of its items exactly).
   static int? _snap(int? value) {
     if (value == null) return null;
@@ -1037,81 +1048,6 @@ class _AdditionalFoodsSection extends StatelessWidget {
           onPressed: onAddMore,
           icon: const Icon(Icons.add),
           label: const Text('Add More Food'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Presenter tool (dev builds only): a row of one-tap simulated GPS fixes so
-/// a demo can "be" in a different place without moving, plus a way back to
-/// the real device GPS. Wired to
-/// `AddLandmarkViewModel.simulateLocation` / `.useDeviceLocation`.
-class _DemoLocationRow extends StatelessWidget {
-  const _DemoLocationRow({
-    required this.isSimulating,
-    required this.onSelect,
-    required this.onUseDevice,
-  });
-
-  final bool isSimulating;
-  final void Function(double latitude, double longitude) onSelect;
-  final VoidCallback onUseDevice;
-
-  static const List<({String label, double lat, double lon})> _presets =
-      <({String label, double lat, double lon})>[
-        (label: 'KL', lat: 3.1390, lon: 101.6869),
-        (label: 'Penang', lat: 5.4141, lon: 100.3288),
-        (label: 'Kota Kinabalu', lat: 5.9804, lon: 116.0735),
-        (label: 'Kuching', lat: 1.5535, lon: 110.3593),
-        (label: 'Outside MY', lat: 1.3521, lon: 103.8198),
-        (label: 'At sea', lat: 3.0, lon: 100.2),
-      ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Icon(
-              isSimulating ? Icons.my_location : Icons.place,
-              size: 14,
-              color: isSimulating ? AppColors.primary : AppColors.textSecondary,
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Expanded(
-              child: Text(
-                isSimulating
-                    ? 'Simulated location active'
-                    : 'Demo: simulate a location',
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: isSimulating
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
-                ),
-              ),
-            ),
-            if (isSimulating)
-              TextButton(
-                onPressed: onUseDevice,
-                child: const Text('Use device GPS'),
-              ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Wrap(
-          spacing: AppSpacing.xs,
-          runSpacing: AppSpacing.xs,
-          children: <Widget>[
-            for (final ({String label, double lat, double lon}) preset
-                in _presets)
-              ActionChip(
-                label: Text(preset.label),
-                onPressed: () => onSelect(preset.lat, preset.lon),
-              ),
-          ],
         ),
       ],
     );
