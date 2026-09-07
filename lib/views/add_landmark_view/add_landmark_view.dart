@@ -66,6 +66,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
         priceMax: LandmarkDraftHandoff().takePriceMax(),
         confidence: LandmarkDraftHandoff().takeConfidence(),
         dietaryRestrictions: LandmarkDraftHandoff().takeDietaryRestrictions(),
+        dietaryConflicts: LandmarkDraftHandoff().takeDietaryConflicts(),
       );
     }
     final XFile? foodImage = LandmarkDraftHandoff().takeCapturedImage();
@@ -154,6 +155,8 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                                 image: viewModel.recognizedFoodImage,
                                 price: viewModel.primaryFoodPrice,
                                 priceWarning: viewModel.primaryFoodPriceWarning,
+                                dietaryConflicts:
+                                    viewModel.primaryFoodDietaryConflicts,
                                 onPriceChanged: viewModel.setPrimaryFoodPrice,
                               ),
                             ],
@@ -296,6 +299,7 @@ class _PrimaryFoodSection extends StatelessWidget {
     required this.price,
     required this.onPriceChanged,
     this.priceWarning,
+    this.dietaryConflicts = const <String>[],
   });
 
   final LocalFood food;
@@ -306,12 +310,16 @@ class _PrimaryFoodSection extends StatelessWidget {
   /// Optional soft price guidance (Gemini's suggested range) under the field.
   final String? priceWarning;
 
+  /// Restrictions this dish conflicts with - see `RecognisedFoodCard`.
+  final List<String> dietaryConflicts;
+
   @override
   Widget build(BuildContext context) {
     return RecognisedFoodCard(
       food: food,
       image: image,
       collapsible: true,
+      dietaryConflicts: dietaryConflicts,
       footer: _PriceField(
         label: 'Price (MYR)',
         initialValue: price,

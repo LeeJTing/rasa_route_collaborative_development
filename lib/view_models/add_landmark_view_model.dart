@@ -179,6 +179,11 @@ class AddLandmarkViewModel extends BaseViewModel
   /// `food_dietary_restriction` association table when it becomes a new
   /// catalogue row.
   List<String> _recognizedFoodDietaryRestrictions = const <String>[];
+
+  /// The signed-in tourist's restrictions the recognized primary dish
+  /// conflicts with - shown as a warning on its card (adding is still
+  /// allowed). Carried from `LandmarkDraftHandoff`.
+  List<String> _recognizedFoodDietaryConflicts = const <String>[];
   List<LandmarkFoodEntry> _additionalFoods = <LandmarkFoodEntry>[];
 
   /// Per-entry soft price guidance, keyed by the form-local
@@ -242,6 +247,11 @@ class AddLandmarkViewModel extends BaseViewModel
   XFile? get recognizedFoodImage => _recognizedFoodImage;
   double? get primaryFoodPrice => _primaryFood?.price;
   String? get primaryFoodPriceWarning => _primaryFoodPriceWarning;
+
+  /// The restrictions the recognized primary dish conflicts with - see
+  /// `_recognizedFoodDietaryConflicts`.
+  List<String> get primaryFoodDietaryConflicts =>
+      _recognizedFoodDietaryConflicts;
   String? additionalFoodPriceWarning(int entryId) =>
       _additionalFoodPriceWarnings[entryId];
   List<LandmarkFoodEntry> get additionalFoods =>
@@ -359,9 +369,11 @@ class AddLandmarkViewModel extends BaseViewModel
     double priceMax = 0,
     double confidence = 0,
     List<String> dietaryRestrictions = const <String>[],
+    List<String> dietaryConflicts = const <String>[],
   }) {
     _recognizedFoodConfidence = confidence;
     _recognizedFoodDietaryRestrictions = dietaryRestrictions;
+    _recognizedFoodDietaryConflicts = dietaryConflicts;
     _primaryFood = _primaryFood == null
         ? LandmarkFoodEntry.newEntry(
             food: food,

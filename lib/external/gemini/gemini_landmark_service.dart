@@ -459,11 +459,18 @@ $_catalogueFoodTypeRules
   9. Taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3,
      plus "mainTaste": the single most important taste of the dish.
 
-  9b. Dietary restrictions that apply to this dish - zero or more of the
-      canonical `dietary_restriction` names (No Pork, No Beef, No Chicken,
-      No Seafood, Vegetarian, Vegan, Halal, No Egg, No Dairy, No Gluten,
-      No Nuts, No Shellfish, No Mayonnaise, No Mustard, ...). Use exactly
-      these strings; use [] when none apply.
+  9b. Dietary restrictions that CONFLICT with this dish - zero or more of
+      the canonical `dietary_restriction` names (No Pork, No Beef, No
+      Chicken, No Seafood, Vegetarian, Vegan, Halal, No Egg, No Dairy, No
+      Gluten, No Nuts, No Shellfish, No Mayonnaise, No Mustard, ...). Use
+      exactly these strings; use [] when none apply.
+
+      CRITICAL: list a restriction ONLY when the dish CONTAINS an ingredient
+      that the restriction forbids (e.g. "No Pork" for a pork dish, "No
+      Coconut" when it is cooked with coconut milk). NEVER list a restriction
+      merely because the dish is free of it - a pork-free or gluten-free or
+      egg-free dish is NOT tagged No Pork / No Gluten / No Egg. When in
+      doubt, prefer a shorter list over a longer one.
 
   10. Frame status: Is the ENTIRE food visible within the frame?
       - "complete" if fully visible
@@ -658,10 +665,13 @@ $_catalogueFoodTypeRules
     - cultural background
     - taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3,
       plus the single most important one as "mainTaste"
-    - dietary restrictions - zero or more of the canonical names (No Pork,
-      No Beef, No Chicken, No Seafood, Vegetarian, Vegan, Halal, No Egg,
-      No Dairy, No Gluten, No Nuts, No Shellfish, No Mayonnaise, No Mustard,
-      ...); use [] when none apply
+    - dietary restrictions that CONFLICT with this dish - zero or more of
+      the canonical names (No Pork, No Beef, No Chicken, No Seafood,
+      Vegetarian, Vegan, Halal, No Egg, No Dairy, No Gluten, No Nuts, No
+      Shellfish, No Mayonnaise, No Mustard, ...); use [] when none apply.
+      CRITICAL: list a restriction ONLY when the dish CONTAINS an ingredient
+      that restriction forbids; NEVER list one the dish is free of (a
+      gluten-free dish is not tagged No Gluten)
     - a suggested selling price range in MYR (suggestedPriceMin and
       suggestedPriceMax)
 

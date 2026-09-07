@@ -102,6 +102,83 @@ class FoodRecognitionLogic {
   bool isLowLocalFoodConfidence(double localFoodConfidence) =>
       localFoodConfidence < _lowConfidence;
 
+  /// Restrictions the signed-in tourist holds that conflict with the
+  /// recognised dish's dietary tags - e.g. a tourist who avoids "No Pork"
+  /// against a dish tagged pork. Returns the USER's own restriction names
+  /// (their wording, so the warning reads naturally). Tolerant, case- and
+  /// substring-insensitive match: a Gemini tag like "pork" or "contains
+  /// pork" still flags "No Pork". Pure - no I/O.
+  static List<String> dietaryConflicts({
+    required List<String> userRestrictions,
+    required List<String> foodTags,
+  }) {
+    final Set<String> tags = foodTags
+        .map(_normaliseRestriction)
+        .where((String t) => t.isNotEmpty)
+        .toSet();
+    if (tags.isEmpty) return const <String>[];
+    final List<String> conflicts = <String>[];
+    for (final String restriction in userRestrictions) {
+      final String needle = _normaliseRestriction(restriction);
+      // Ignore empty and one/two-character noise (e.g. a stray "no").
+      if (needle.length < 3) continue;
+      final bool hit = tags.any(
+        (String tag) =>
+            tag == needle ||
+            (tag.length >= 3 && tag.contains(needle)) ||
+            needle.contains(tag),
+      );
+      if (hit) conflicts.add(restriction);
+    }
+    return conflicts;
+  }
+
+  static String _normaliseRestriction(String value) =>
+      value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// The signed-in tourist's dietary restriction names (e.g. "No Pork") - so
+  /// a recognised dish that conflicts can warn on the result card. Empty when
+  /// signed out or the reference query fails (best-effort: a warning must
+  /// never block capture).
+  Future<List<String>> userDietaryRestrictionNames() async {
+    try {
+      final List<DietaryRestriction> restrictions = await foodRepository
+          .touristDietaryRestrictions();
+      return restrictions
+          .map((DietaryRestriction r) => r.name)
+          .toList(growable: false);
+    } catch (_) {
+      return const <String>[];
+    }
+  }
+
+  /// The dietary tags to ATTRIBUTE to [food] for conflict warnings.
+  ///
+  /// A CURATED catalogue row's own `food_dietary_restriction` links are the
+  /// authoritative source - Gemini's fresh tags are ignored (curated wins,
+  /// the same rule as the dish's name/details, and the same links every other
+  /// dietary-filtering feature uses). This is what keeps the warning exact:
+  /// the canonical names never substring-match one another, so only a
+  /// restriction the dish is genuinely linked to can ever be flagged. A
+  /// brand-new dish (id == 0) has no links yet, so Gemini's tags are the only
+  /// source there.
+  Future<List<String>> _dietaryTagsFor(
+    LocalFood food,
+    List<String> geminiTags,
+  ) async {
+    if (food.id == 0) return geminiTags;
+    try {
+      final List<DietaryRestriction> linked = await foodRepository
+          .foodDietaryRestrictions(food.id);
+      return linked
+          .map((DietaryRestriction r) => r.name)
+          .toList(growable: false);
+    } catch (_) {
+      // A read failure must not rob the warning - fall back to Gemini's tags.
+      return geminiTags;
+    }
+  }
+
   /// Whether the OS camera permission is granted, asking for it if not - the
   /// gate before the camera preview opens on `FoodRecognitionView` (REQ106_1).
   /// Routed through the repository so no View ever touches
@@ -192,6 +269,14 @@ class FoodRecognitionLogic {
       // The full analysis decides WHICH dish this is - but if that dish is
       // already curated, the stored row (data + id) wins over Gemini's copy.
       final LocalFood food = await _preferCuratedOverGemini(analysis.food);
+      // A curated dish's own `food_dietary_restriction` links are the
+      // authoritative tags - Gemini's free-text tags are ignored for it (they
+      // often list restrictions the dish is FREE of, which would show the
+      // tourist irrelevant warnings).
+      final List<String> dietaryRestrictions = await _dietaryTagsFor(
+        food,
+        analysis.dietaryRestrictions,
+      );
       return FoodRecognitionResult(
         isLocalFood: analysis.isLocal,
         fitsCatalogueCategory: fitsCatalogueCategory(analysis.foodType),
@@ -202,7 +287,7 @@ class FoodRecognitionLogic {
         localFoodConfidence: analysis.localConfidence,
         imageQuality: analysis.imageQuality,
         imageQualityIssues: analysis.imageQualityIssues,
-        dietaryRestrictions: analysis.dietaryRestrictions,
+        dietaryRestrictions: dietaryRestrictions,
       );
     }
 
@@ -250,6 +335,10 @@ class FoodRecognitionLogic {
           quick.confidence >= _highConfidence &&
           !isPoorImageQuality(quick.imageQuality)) {
         result = <LocalFood>[existing];
+        // The fast path skips the full analysis, so the dish's tags must be
+        // read from the curated row's own `food_dietary_restriction` links -
+        // otherwise a catalogue dish would never warn at all here.
+        dietaryRestrictions = await _dietaryTagsFor(existing, const <String>[]);
       } else {
         final analysis = await discoveryRepository.recognition.analyzeFoodFull(
           imageBytes,
@@ -263,7 +352,12 @@ class FoodRecognitionLogic {
         localFoodConfidence = analysis.localConfidence;
         imageQuality = analysis.imageQuality;
         imageQualityIssues = analysis.imageQualityIssues;
-        dietaryRestrictions = analysis.dietaryRestrictions;
+        // Curated row => its own links are the tags (never Gemini's); a
+        // brand-new dish keeps Gemini's tags.
+        dietaryRestrictions = await _dietaryTagsFor(
+          result.first,
+          analysis.dietaryRestrictions,
+        );
         foodType = analysis.foodType;
       }
     }
@@ -339,6 +433,9 @@ class FoodRecognitionLogic {
       // irrelevant once the tourist commits to a curated dish.
       isLocalFood = true;
       fits = true;
+      // Curated row => its own links are the authoritative tags (Gemini's
+      // are ignored - see [_dietaryTagsFor]).
+      dietaryRestrictions = await _dietaryTagsFor(match, const <String>[]);
     } else if (!analysis.nameMatchesPhoto) {
       // Gemini could not verify the typed name AND there is no curated row
       // for it. Its response describes the dish it actually SAW (the
@@ -387,7 +484,9 @@ class FoodRecognitionLogic {
         priceMin: 0.0,
         priceMax: 0.0,
         fitsCatalogueCategory: true,
-        dietaryRestrictions: const <String>[],
+        // Curated row => its own links are the authoritative tags (Gemini's
+        // are ignored - see [_dietaryTagsFor]).
+        dietaryRestrictions: await _dietaryTagsFor(match, const <String>[]),
       );
     }
     final analysis = await discoveryRepository.recognition.analyzeFoodByName(
