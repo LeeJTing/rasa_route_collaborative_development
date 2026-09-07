@@ -36,6 +36,39 @@ void main() {
       expect(viewModel.signedIn, isFalse);
     });
 
+    test('onInit flags needsProfileSetup for a new tourist', () async {
+      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
+        touristLogic: _FakeTouristInformationLogicFacade(
+          session: const AuthSession(
+            accessToken: 'a',
+            refreshToken: 'r',
+            userId: 'auth-1',
+            email: 'tourist@example.com',
+          ),
+          needsProfileSetupResult: true,
+        ),
+      );
+
+      await viewModel.onInit();
+
+      expect(viewModel.signedIn, isTrue);
+      expect(viewModel.needsProfileSetup, isTrue);
+    });
+
+    test('completeGoogleSignIn picks up needsProfileSetup', () async {
+      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
+        touristLogic: _FakeTouristInformationLogicFacade(
+          googleCompleteResult: _tourist(),
+          needsProfileSetupResult: true,
+        ),
+      );
+
+      await viewModel.completeGoogleSignIn();
+
+      expect(viewModel.googleSignInComplete, isTrue);
+      expect(viewModel.needsProfileSetup, isTrue);
+    });
+
     test('canSendOtp requires a non-empty email', () {
       final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
         touristLogic: _FakeTouristInformationLogicFacade(),
@@ -87,6 +120,8 @@ void main() {
 
       expect(viewModel.otpSent, isFalse);
       expect(viewModel.hasError, isTrue);
+      // No technical prefix ("Bad state: ...") - just the plain message.
+      expect(viewModel.errorMessage, 'send OTP failed');
     });
 
     test('signInWithGoogle records a started flow', () async {
@@ -130,12 +165,36 @@ void main() {
     });
 
     test(
+      'completeGoogleSignIn waits for a late session instead of erroring',
+      () async {
+        // The Supabase SDK finishes the PKCE code exchange a moment after the
+        // app resumes, so the first facade call can legitimately return null.
+        final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
+          touristLogic: _FakeTouristInformationLogicFacade(
+            googleCompleteResult: _tourist(),
+            nullResultsBeforeSuccess: 2,
+          ),
+          googleSessionGracePeriod: const Duration(milliseconds: 300),
+          googleSessionRetryInterval: const Duration(milliseconds: 5),
+        );
+
+        await viewModel.completeGoogleSignIn();
+
+        expect(viewModel.googleSignInComplete, isTrue);
+        expect(viewModel.hasError, isFalse);
+      },
+    );
+
+    test(
       'completeGoogleSignIn reports an error when no session resolved',
       () async {
         final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
           touristLogic: _FakeTouristInformationLogicFacade(
             googleCompleteResult: null,
           ),
+          // No session ever arrives - do not actually wait the real 5s grace
+          // window in a unit test.
+          googleSessionGracePeriod: Duration.zero,
         );
 
         await viewModel.completeGoogleSignIn();
@@ -159,14 +218,24 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
   _FakeTouristInformationLogicFacade({
     this.googleStartResult = true,
     this.googleCompleteResult,
+    this.nullResultsBeforeSuccess = 0,
     this.throwOnSendOtp = false,
     this.session,
+    this.needsProfileSetupResult = false,
   });
 
   final bool googleStartResult;
   final Tourist? googleCompleteResult;
+
+  /// How many initial [completeGoogleSignIn] calls return null before
+  /// [googleCompleteResult] is returned - models the Supabase SDK still
+  /// exchanging the PKCE code when the app resumes.
+  final int nullResultsBeforeSuccess;
   bool throwOnSendOtp;
   final AuthSession? session;
+  final bool needsProfileSetupResult;
+
+  int googleCompleteCalls = 0;
 
   @override
   Future<AuthSession?> getCurrentSession() async => session;
@@ -183,6 +252,11 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
 
   @override
   Future<Tourist?> completeGoogleSignIn() async {
+    googleCompleteCalls++;
+    if (googleCompleteCalls <= nullResultsBeforeSuccess) return null;
     return googleCompleteResult;
   }
+
+  @override
+  Future<bool> needsProfileSetup() async => needsProfileSetupResult;
 }
