@@ -76,6 +76,22 @@ class LandmarkLogicFacade {
   Future<bool> requestCameraPermission() =>
       foodRecognition.requestCameraPermission();
 
+  /// The signed-in tourist's dietary restriction names (e.g. "No Pork"), used
+  /// to warn when a recognised dish conflicts with their profile - see
+  /// `FoodRecognitionLogic.userDietaryRestrictionNames`.
+  Future<List<String>> userDietaryRestrictions() =>
+      foodRecognition.userDietaryRestrictionNames();
+
+  /// Of [userRestrictions], the ones [foodTags] conflict with - pure match,
+  /// no I/O (see `FoodRecognitionLogic.dietaryConflicts`).
+  List<String> dietaryConflicts({
+    required List<String> userRestrictions,
+    required List<String> foodTags,
+  }) => FoodRecognitionLogic.dietaryConflicts(
+    userRestrictions: userRestrictions,
+    foodTags: foodTags,
+  );
+
   // ===========================================================================
   // Landmark submission, re-exposed (from LandmarkSubmissionLogic)
   // ===========================================================================

@@ -44,6 +44,13 @@ class _FakeFoodRecognitionLogic extends FoodRecognitionLogic {
   Function(List<int> bytes, String name)?
   onEnrichCandidate;
 
+  /// Dietary restriction names the signed-in tourist holds - empty by default
+  /// so unrelated tests never see a conflict warning.
+  List<String> userRestrictions = const <String>[];
+
+  @override
+  Future<List<String>> userDietaryRestrictionNames() async => userRestrictions;
+
   @override
   Future<FoodRecognitionResult> recognizeFood(List<int> imageBytes) =>
       onRecognize!(imageBytes);
@@ -116,8 +123,7 @@ class _TestFoodRecognitionViewModel extends FoodRecognitionViewModel {
   final FoodRecognitionLogic logic;
 
   @override
-  LandmarkLogicFacade createLandmarkLogic() =>
-      _TestLandmarkLogicFacade(logic);
+  LandmarkLogicFacade createLandmarkLogic() => _TestLandmarkLogicFacade(logic);
 
   @override
   Duration get minimumLoadingDuration => Duration.zero;
@@ -212,6 +218,44 @@ void main() {
         expect(vm.priceMax, 8.0);
       },
     );
+
+    test('warns when the recognised food conflicts with the tourist\'s '
+        'dietary restrictions but still keeps it addable', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.userRestrictions = <String>['No Pork'];
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Murtabak')],
+        dietaryRestrictions: const <String>['No Pork', 'High Calorie'],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.onInit();
+
+      await vm.captureAndRecognize(_image());
+
+      expect(vm.recognizedFood?.name, 'Murtabak');
+      expect(vm.isLocalFood, isTrue);
+      // Warning present but non-blocking - the food is still addable.
+      expect(vm.hasDietaryConflict, isTrue);
+      expect(vm.dietaryConflicts, <String>['No Pork']);
+    });
+
+    test('does not warn when no user restriction matches the food', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.userRestrictions = <String>['No Beef'];
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Murtabak')],
+        dietaryRestrictions: const <String>['No Pork'],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.onInit();
+
+      await vm.captureAndRecognize(_image());
+
+      expect(vm.hasDietaryConflict, isFalse);
+      expect(vm.dietaryConflicts, isEmpty);
+    });
   });
 
   group('FoodRecognitionViewModel.enterFoodName (manual fallback)', () {

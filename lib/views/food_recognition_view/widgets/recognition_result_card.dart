@@ -48,6 +48,7 @@ class RecognitionResultCard extends StatelessWidget {
     this.observedFoodName,
     this.typedName,
     this.onDismissNameMismatch,
+    this.dietaryConflicts = const <String>[],
   });
 
   final LocalFood food;
@@ -94,6 +95,11 @@ class RecognitionResultCard extends StatelessWidget {
   /// "Keep the detected food" - the only action on a mismatch warning; the
   /// typed name (which Gemini could not confirm) is never applied.
   final VoidCallback? onDismissNameMismatch;
+
+  /// The signed-in tourist's dietary restrictions this recognised food
+  /// conflicts with (e.g. "No Pork"). When non-empty a warning is shown -
+  /// the food can still be added.
+  final List<String> dietaryConflicts;
 
   /// Manual fallback when Gemini got the dish wrong - called with the food
   /// name the tourist typed (see `FoodRecognitionViewModel.enterFoodName`).
@@ -225,6 +231,10 @@ class RecognitionResultCard extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (dietaryConflicts.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: AppSpacing.sm),
+                  _DietaryConflictWarning(conflicts: dietaryConflicts),
+                ],
                 const SizedBox(height: AppSpacing.md),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -286,6 +296,45 @@ class RecognitionResultCard extends StatelessWidget {
               isProcessing: isProcessing,
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Warning box: this recognised food conflicts with the signed-in tourist's
+/// dietary restrictions. Informative only - adding is still allowed.
+class _DietaryConflictWarning extends StatelessWidget {
+  const _DietaryConflictWarning({required this.conflicts});
+
+  final List<String> conflicts;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.bannerCautionBackground,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: AppSizes.inlineNoticeIconSize,
+            color: AppColors.warning,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              'Your profile avoids: ${conflicts.join(', ')}. '
+              "This dish may not suit you - you can still add it.",
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.warning,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );
