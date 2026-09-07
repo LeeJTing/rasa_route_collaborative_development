@@ -31,12 +31,18 @@ class OtpViewModel extends BaseViewModel {
   String _email = '';
   String _token = '';
   bool _verified = false;
+  bool _needsProfileSetup = false;
   int _resendCooldown = 0;
   Timer? _resendTimer;
 
   String get email => _email;
   String get token => _token;
   bool get verified => _verified;
+
+  /// C3 first-run gate: true when the verified tourist has configured no
+  /// profile yet, so the View routes them to set-up before the dashboard.
+  bool get needsProfileSetup => _needsProfileSetup;
+
   bool get canVerify =>
       _email.isNotEmpty && _token.length == otpLength && !isBusy;
 
@@ -72,6 +78,7 @@ class OtpViewModel extends BaseViewModel {
         throw StateError('That verification code is invalid or has expired.');
       }
       _verified = true;
+      _needsProfileSetup = await touristLogic.needsProfileSetup();
     });
   }
 
