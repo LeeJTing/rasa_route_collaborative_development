@@ -56,6 +56,16 @@ class FoodComparisonLogic {
           .toSet();
     }
 
+    Map<int, ({double min, double max})> priceByFoodId =
+        const <int, ({double min, double max})>{};
+    try {
+      priceByFoodId = await repository.foodPriceRanges(
+        foods.map((LocalFood food) => food.id).toSet(),
+      );
+    } catch (_) {
+      priceByFoodId = const <int, ({double min, double max})>{};
+    }
+
     return FoodComparison(
       foodIds: foods.map((LocalFood food) => food.id).toList(growable: false),
       foodNames: foods
@@ -66,6 +76,7 @@ class FoodComparisonLogic {
       activeTouristRestrictions: touristRestrictions
           .map((DietaryRestriction r) => r.name)
           .toList(growable: false),
+      priceByFoodId: priceByFoodId,
       leftDietaryAssessment: _assess(
         foodRestrictionIds: foodRestrictionIds[foods[0].id] ?? const <int>{},
         touristRestrictionIds: touristRestrictionIds,
@@ -80,7 +91,8 @@ class FoodComparisonLogic {
   }
 
   /// The dish that best fits [comparison]'s active restrictions, or `null`
-  /// when there is nothing to match against.
+  /// when there is nothing to match against - including when BOTH dishes
+  /// conflict (no dish is safe to recommend).
   LocalFood? bestDietaryMatch(FoodComparison comparison) {
     final List<LocalFood> foods = comparison.foods;
     if (foods.length < 2) return null;
@@ -88,14 +100,28 @@ class FoodComparisonLogic {
     final bool leftOk = comparison.leftDietaryAssessment.isSuitable;
     final bool rightOk = comparison.rightDietaryAssessment.isSuitable;
     if (leftOk != rightOk) return leftOk ? foods[0] : foods[1];
-    return foods[0];
+    if (leftOk) return foods[0];
+    // Both dishes conflict - do not pretend one is a safe match.
+    return null;
   }
 
-  /// The dish with the best restaurant price value.
-  ///
-  /// Restaurant prices are not modelled yet, so there is no value ranking to
-  /// compute - callers fall back to a "Not enough price data" message.
-  LocalFood? bestValueFood(FoodComparison comparison) => null;
+
+  LocalFood? bestValueFood(FoodComparison comparison) {
+    final List<LocalFood> foods = comparison.foods;
+    if (foods.length < 2) return null;
+    LocalFood? best;
+    double? bestMin;
+    for (final LocalFood food in foods) {
+      final ({double min, double max})? range =
+          comparison.priceByFoodId[food.id];
+      if (range == null) continue;
+      if (bestMin == null || range.min < bestMin) {
+        best = food;
+        bestMin = range.min;
+      }
+    }
+    return best;
+  }
 
   /// Flags a dish "not suitable" only when a restriction attached to it
   /// ([foodRestrictionIds]) is one the tourist also holds

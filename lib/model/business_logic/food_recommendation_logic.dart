@@ -1,5 +1,6 @@
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_pairing.dart';
+import '../../domain_model/food_preference.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
 import '../repositories/food_repository_facade.dart';
@@ -13,12 +14,14 @@ class FoodRecommendationLogic {
     List<LocalFood> catalogue, {
     List<int> touristDietaryRestrictionIds = const <int>[],
     Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
+    List<FoodPreference> touristPreferences = const <FoodPreference>[],
     int maximumResults = 5,
   }) => repository.getPairings(
     food,
     catalogue,
     touristDietaryRestrictionIds: touristDietaryRestrictionIds,
     foodDietaryRestrictionIds: foodDietaryRestrictionIds,
+    touristPreferences: touristPreferences,
     maximumResults: maximumResults,
   );
 
@@ -105,6 +108,9 @@ class FoodRecommendationLogic {
         .touristDietaryRestrictions();
     final Map<int, List<int>> restrictionIds = await repository
         .foodDietaryRestrictionIds();
+
+    final List<FoodPreference> preferences = await repository
+        .touristFoodPreferences();
     return pairingsFor(
       selected,
       catalogue,
@@ -112,6 +118,7 @@ class FoodRecommendationLogic {
           .map((DietaryRestriction restriction) => restriction.id)
           .toList(growable: false),
       foodDietaryRestrictionIds: restrictionIds,
+      touristPreferences: preferences,
     );
   }
 }
