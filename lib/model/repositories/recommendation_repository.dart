@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../domain_model/food_pairing.dart';
+import '../../domain_model/food_preference.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
 import '../../shared_client/api_manager/api_manager.dart';
@@ -17,6 +18,7 @@ class RecommendationRepository {
       List<LocalFood> catalogue, {
         List<int> touristDietaryRestrictionIds = const <int>[],
         Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
+        List<FoodPreference> touristPreferences = const <FoodPreference>[],
         int maximumResults = 5,
       }) async {
     final int maxResults = maximumResults < 1
@@ -26,7 +28,7 @@ class RecommendationRepository {
     // Confirmed dietary conflicts are excluded up front - dietary safety
     // outranks pairing quality and is never left to the model alone.
     final Set<int> touristRestrictionIds = touristDietaryRestrictionIds.toSet();
-    final List<LocalFood> candidates = catalogue
+    final List<LocalFood> filtered = catalogue
         .where((LocalFood c) => c.id != food.id)
         .where(
           (LocalFood c) => !_hasDietaryConflict(
@@ -35,13 +37,18 @@ class RecommendationRepository {
         touristRestrictionIds,
       ),
     )
-        .take(40)
         .toList(growable: false);
+        
+    final List<LocalFood> candidates = filtered.toList(growable: false);
     if (candidates.isEmpty) return const <FoodPairing>[];
 
     final String raw = await api.gemini.generateFoodPairings(
       selected: food,
       candidates: candidates,
+      touristPreferences: <String>[
+        for (final FoodPreference preference in touristPreferences)
+          preference.name,
+      ],
     );
     final List<FoodPairing> parsed = parsePairings(
       raw,
@@ -49,17 +56,8 @@ class RecommendationRepository {
       candidates: candidates,
       maximumResults: maxResults,
     );
-    // Gemini is fallible: it may answer with the empty "no suitable pairings"
-    // response, or return ids outside CANDIDATES that validation drops - even
-    // when eligible candidates remain. Never leave the tourist without a
-    // pairing when at least one candidate exists: fall back to a
-    // deterministic, dietary-safe pick.
-    if (parsed.isNotEmpty) return parsed;
-    return fallbackPairings(
-      food,
-      candidates,
-      maximumResults: maxResults,
-    );
+
+    return parsed;
   }
 
   /// Whether [candidate]'s `food_dietary_restriction` ids intersect the
@@ -73,91 +71,6 @@ class RecommendationRepository {
     final List<int> ids =
         foodDietaryRestrictionIds[candidate.id] ?? const <int>[];
     return ids.any(touristRestrictionIds.contains);
-  }
-
-  /// Deterministic fallback for when Gemini returns no usable pairing but
-  /// eligible [candidates] remain: rank candidates by how many attributes
-  /// they share with [selected] (category, cooking style, meal type) and
-  /// return the top ones. Guarantees at least one pairing whenever at least
-  /// one candidate is supplied, so the "no suitable pairing" message only
-  /// appears when dietary filtering has removed every candidate.
-  @visibleForTesting
-  List<FoodPairing> fallbackPairings(
-    LocalFood selected,
-    List<LocalFood> candidates, {
-    required int maximumResults,
-  }) {
-    if (candidates.isEmpty) return const <FoodPairing>[];
-
-    final List<({LocalFood food, int shared})> scored = candidates
-        .map(
-          (LocalFood c) => (
-            food: c,
-            shared: _sharedAttributeCount(selected, c),
-          ),
-        )
-        .toList(growable: false);
-    scored.sort((a, b) {
-      final int byShared = b.shared.compareTo(a.shared);
-      if (byShared != 0) return byShared;
-      return a.food.id.compareTo(b.food.id);
-    });
-
-    final int take = scored.length < maximumResults
-        ? scored.length
-        : maximumResults;
-    final List<FoodPairing> pairings = <FoodPairing>[];
-    for (int index = 0; index < take; index++) {
-      final LocalFood candidate = scored[index].food;
-      pairings.add(
-        FoodPairing(
-          localFoodId: selected.id,
-          pairedLocalFoodId: candidate.id,
-          pairedFoodName: candidate.name,
-          rank: index + 1,
-          matchPercentage: _fallbackPercentage(scored[index].shared),
-          reason: _fallbackReason(selected, candidate),
-          dietaryStatus: FoodPairingDietaryStatus.compatible,
-          warning: null,
-        ),
-      );
-    }
-    return pairings;
-  }
-
-  /// How many of category / cooking style / meal type [a] and [b] share.
-  int _sharedAttributeCount(LocalFood a, LocalFood b) {
-    int count = 0;
-    if (a.category.isNotEmpty && a.category == b.category) count++;
-    if (a.cookingStyle.isNotEmpty && a.cookingStyle == b.cookingStyle) count++;
-    if (a.mealType.isNotEmpty && a.mealType == b.mealType) count++;
-    return count;
-  }
-
-  /// Fallback strength scales with shared attributes, capped well below what
-  /// a confident Gemini pairing would claim.
-  int _fallbackPercentage(int shared) => switch (shared) {
-    3 => 78,
-    2 => 72,
-    1 => 65,
-    _ => 58,
-  };
-
-  /// A short, honest reason for a fallback pairing.
-  String _fallbackReason(LocalFood selected, LocalFood candidate) {
-    final List<String> shared = <String>[
-      if (selected.category.isNotEmpty &&
-          selected.category == candidate.category)
-        selected.category,
-      if (selected.cookingStyle.isNotEmpty &&
-          selected.cookingStyle == candidate.cookingStyle)
-        selected.cookingStyle,
-      if (selected.mealType.isNotEmpty &&
-          selected.mealType == candidate.mealType)
-        selected.mealType,
-    ];
-    if (shared.isEmpty) return 'Pairs well with ${selected.name}.';
-    return 'Shares the same ${shared.join(' and ')} as ${selected.name} - a natural pairing.';
   }
 
   @visibleForTesting
