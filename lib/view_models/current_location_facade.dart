@@ -16,7 +16,9 @@ import 'dashboard_view_model.dart';
 /// ```
 ///
 /// `LocationMonitor` knows this facade and nothing above it; the facade knows
-/// the ViewModels. No ViewModel is ever handed to a background process.
+/// the ViewModels. A user-requested fresh fix may also be published by the
+/// dashboard before a location-dependent route is opened. No background
+/// process ever holds a ViewModel reference directly.
 ///
 /// **Two ways up, on purpose.**
 ///
@@ -63,8 +65,9 @@ class CurrentLocationFacade {
   void unregister(CurrentLocationListener listener) =>
       _listeners.remove(listener);
 
-  /// Called by `LocationMonitor`. Fans out to every ViewModel that wants the
-  /// tourist's position, by whichever of the two routes it uses.
+  /// Publishes the latest authoritative fix. Normally called by
+  /// `LocationMonitor`; the dashboard also calls it after an explicit Find Me
+  /// or Quick Mode request so the destination route receives that same fix.
   void publish(TouristLocation location) {
     _latest = location;
 

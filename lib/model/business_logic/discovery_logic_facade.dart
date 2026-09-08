@@ -120,6 +120,14 @@ class DiscoveryLogicFacade {
     limit: limit,
   );
 
+  Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
+    required TouristLocation location,
+    required int limit,
+  }) => restaurantDiscovery.nearbyLandmarksWithAutomaticExpansion(
+    location: location,
+    limit: limit,
+  );
+
   /// Nearby restaurant data shared by discovery experiences such as Matches.
   /// Quick Mode keeps its named forwarding method so its existing contract is
   /// not changed by the Matches feature.
