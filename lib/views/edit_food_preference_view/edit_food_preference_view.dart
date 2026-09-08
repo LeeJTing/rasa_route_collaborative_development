@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
+import '../../app/theme/preference_icons.dart';
 import '../../domain_model/food_preference.dart';
 import '../../view_models/edit_food_preference_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
@@ -263,6 +264,9 @@ class _OptionsRow extends StatelessWidget {
               padding: const EdgeInsets.only(right: AppSpacing.md),
               child: PreferenceOptionCard(
                 label: preference.name,
+                iconAsset: PreferenceIcons.foodPreferenceIconAsset(
+                  preference.name,
+                ),
                 isSelected: isSelected(preference),
                 onTap: () => onToggle(preference),
                 // Keep the option row a uniform height - a long taste/culture

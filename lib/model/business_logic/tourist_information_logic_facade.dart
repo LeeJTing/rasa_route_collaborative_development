@@ -68,6 +68,10 @@ class TouristInformationLogicFacade {
   Future<List<DietaryRestriction>> getDietaryRestrictions() =>
       userProfile.getDietaryRestrictions();
 
+  /// C3 first-run gate: true while the signed-in tourist has no food
+  /// preferences AND no dietary restrictions yet (see `UserProfileLogic`).
+  Future<bool> needsProfileSetup() => userProfile.needsProfileSetup();
+
   /// Every dietary restriction a tourist can pick.
   Future<List<DietaryRestriction>> dietaryRestrictionOptions() =>
       userProfile.dietaryRestrictionOptions();

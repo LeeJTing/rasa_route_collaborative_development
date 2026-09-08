@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
+import '../../core/view_state.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../view_models/profile_view_model.dart';
 import '../common_widgets/app_tag_chip.dart';
@@ -60,7 +61,15 @@ class _ProfileViewState extends State<ProfileView> {
                     padding: AppSpacing.screenPadding,
                     children: <Widget>[
                       // Email -----------------------------------------------
-                      ProfileEmailCard(email: viewModel.email),
+                      // While the first load is in flight the email is still
+                      // empty, so show a loader rather than briefly flashing
+                      // the misleading "Not signed in" fallback.
+                      ProfileEmailCard(
+                        email: viewModel.email,
+                        isLoading:
+                            viewModel.state == ViewState.busy &&
+                            viewModel.email.isEmpty,
+                      ),
                       const SizedBox(height: AppSpacing.lg),
 
                       // Food Preference -------------------------------------

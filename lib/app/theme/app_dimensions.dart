@@ -345,6 +345,10 @@ abstract final class AppSizes {
   /// Trailing icon (chevron / edit) inside the Profile screen's rows.
   static const double profileListTrailingIconSize = 20;
 
+  /// Inline loader diameter shown in the Profile email card while the
+  /// tourist's profile is still being fetched on first open.
+  static const double profileEmailLoaderSize = 18;
+
   /// Blur radius of the soft shadow under the edit-screen option cards.
   static const double cardShadowBlur = 8;
 

@@ -97,7 +97,43 @@ void main() {
 
       expect(viewModel.verified, isFalse);
       expect(viewModel.hasError, isTrue);
+      // The message is a plain sentence - never a "Bad state: ..." prefix.
+      expect(
+        viewModel.errorMessage,
+        'That verification code is invalid or has expired.',
+      );
     });
+
+    test(
+      'verifyEmailOtp shows the friendly message when Supabase rejects the code',
+      () async {
+        // SupabaseService translates the raw SDK AuthApiException into this
+        // plain Exception - the UI must show exactly that sentence, with no
+        // 'Exception:'/'AuthApiException(...)' internals leaking through.
+        final OtpViewModel viewModel = OtpViewModel(
+          touristLogic: _FakeTouristInformationLogicFacade(
+            pendingEmail: 'a@b.com',
+            verifyError: Exception(
+              'That verification code is invalid or has expired. '
+              'Please try again or request a new code.',
+            ),
+          ),
+        );
+        addTearDown(viewModel.dispose);
+        await viewModel.onInit();
+        viewModel.setToken('123456');
+
+        await viewModel.verifyEmailOtp();
+
+        expect(viewModel.verified, isFalse);
+        expect(viewModel.hasError, isTrue);
+        expect(
+          viewModel.errorMessage,
+          'That verification code is invalid or has expired. '
+          'Please try again or request a new code.',
+        );
+      },
+    );
 
     group('resend countdown', () {
       test('starts at 45 seconds and counts down to zero', () {
@@ -177,10 +213,14 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
   _FakeTouristInformationLogicFacade({
     this.pendingEmail = '',
     this.verifyResult,
+    this.verifyError,
   });
 
   final String pendingEmail;
   final AuthSession? verifyResult;
+
+  /// When set, [verifyEmailOtp] throws this instead of returning.
+  final Object? verifyError;
   int resendCount = 0;
 
   @override
@@ -190,7 +230,13 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
   Future<AuthSession?> verifyEmailOtp({
     required String email,
     required String token,
-  }) async => verifyResult;
+  }) async {
+    if (verifyError != null) throw verifyError!;
+    return verifyResult;
+  }
+
+  @override
+  Future<bool> needsProfileSetup() async => false;
 
   @override
   Future<void> sendEmailOtp(String email) async {
