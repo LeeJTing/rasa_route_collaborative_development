@@ -129,25 +129,39 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                       const SizedBox(height: AppSpacing.lg),
                       if (viewModel.isLocalFood &&
                           viewModel.fitsCatalogueCategory) ...<Widget>[
-                        Text(
-                          viewModel.returnToFormAsAdditionalFood
-                              ? 'Add this food to the landmark?'
-                              : 'Would you like to add this as a new landmark?',
-                          textAlign: TextAlign.center,
-                          style: AppTextStyles.bodyMedium,
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: viewModel.proceedToAddLandmark,
-                            child: Text(
-                              viewModel.returnToFormAsAdditionalFood
-                                  ? 'Add to Landmark'
-                                  : 'Add New Landmark',
+                        if (viewModel.isAddLandmarkBlockedByLocation &&
+                            !viewModel
+                                .returnToFormAsAdditionalFood) ...<Widget>[
+                          // At sea / outside Malaysia (A9): the food can still
+                          // be viewed, but it must not become a landmark.
+                          Text(
+                            viewModel.addLandmarkLocationBlockMessage!,
+                            textAlign: TextAlign.center,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.warning,
                             ),
                           ),
-                        ),
+                        ] else ...<Widget>[
+                          Text(
+                            viewModel.returnToFormAsAdditionalFood
+                                ? 'Add this food to the landmark?'
+                                : 'Would you like to add this as a new landmark?',
+                            textAlign: TextAlign.center,
+                            style: AppTextStyles.bodyMedium,
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: viewModel.proceedToAddLandmark,
+                              child: Text(
+                                viewModel.returnToFormAsAdditionalFood
+                                    ? 'Add to Landmark'
+                                    : 'Add New Landmark',
+                              ),
+                            ),
+                          ),
+                        ],
                       ] else if (!viewModel.isLocalFood) ...<Widget>[
                         // Not Malaysian local food - showing the info is the
                         // whole point of this screen, but it must never be
