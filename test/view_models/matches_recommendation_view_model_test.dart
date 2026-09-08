@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
+import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation_tab.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
+import 'package:rasa_route_collaborative_development/model/business_logic/discovery_logic_facade.dart';
 import 'package:rasa_route_collaborative_development/view_models/matches_recommendation_view_model.dart';
 
 import '../test_support/fake_discovery_logic_facade.dart';
@@ -10,9 +12,7 @@ void main() {
 
   test('loads restaurants with Restaurants as the default tab', () async {
     final MatchesRecommendationViewModel viewModel =
-        MatchesRecommendationViewModel(
-          discoveryLogic: FakeDiscoveryLogicFacade(),
-        );
+        _TestMatchesRecommendationViewModel(FakeDiscoveryLogicFacade());
 
     await viewModel.onInit();
 
@@ -30,8 +30,8 @@ void main() {
 
   test('expands each food group to its nearest restaurant on load', () async {
     final MatchesRecommendationViewModel viewModel =
-        MatchesRecommendationViewModel(
-          discoveryLogic: FakeDiscoveryLogicFacade(
+        _TestMatchesRecommendationViewModel(
+          FakeDiscoveryLogicFacade(
             matchesResult: MatchesRecommendationResult(
               stateCode: testMatchesResult.stateCode,
               stateName: testMatchesResult.stateName,
@@ -58,9 +58,7 @@ void main() {
 
   test('changes tabs and exposes Show Less after See More', () async {
     final MatchesRecommendationViewModel viewModel =
-        MatchesRecommendationViewModel(
-          discoveryLogic: FakeDiscoveryLogicFacade(),
-        );
+        _TestMatchesRecommendationViewModel(FakeDiscoveryLogicFacade());
     await viewModel.onInit();
 
     viewModel.selectTab(MatchesRecommendationTab.submittedLandmarks);
@@ -78,9 +76,7 @@ void main() {
 
   test('selects and toggles restaurant and landmark sorting', () async {
     final MatchesRecommendationViewModel viewModel =
-        MatchesRecommendationViewModel(
-          discoveryLogic: FakeDiscoveryLogicFacade(),
-        );
+        _TestMatchesRecommendationViewModel(FakeDiscoveryLogicFacade());
     await viewModel.onInit();
 
     viewModel.selectRestaurantSort(MatchesRestaurantSort.price);
@@ -108,9 +104,7 @@ void main() {
     'removing a liked food removes its entire recommendation group',
     () async {
       final MatchesRecommendationViewModel viewModel =
-          MatchesRecommendationViewModel(
-            discoveryLogic: FakeDiscoveryLogicFacade(),
-          );
+          _TestMatchesRecommendationViewModel(FakeDiscoveryLogicFacade());
       await viewModel.onInit();
 
       expect(viewModel.hasLikedFoods, isTrue);
@@ -122,6 +116,15 @@ void main() {
   );
 }
 
+class _TestMatchesRecommendationViewModel
+    extends MatchesRecommendationViewModel {
+  _TestMatchesRecommendationViewModel(this.logic);
+
+  final DiscoveryLogicFacade logic;
+
+  @override
+  DiscoveryLogicFacade createDiscoveryLogic() => logic;
+}
 Restaurant _restaurantAtDistance(
   Restaurant restaurant,
   double distanceMetres,

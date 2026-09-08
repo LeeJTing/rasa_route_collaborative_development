@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/core/view_state.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/food_logic_facade.dart';
-import 'package:rasa_route_collaborative_development/model/business_logic/tourist_information_logic_facade.dart';
 import 'package:rasa_route_collaborative_development/view_models/favourite_collection_view_model.dart';
 
 void main() {
@@ -15,13 +14,8 @@ void main() {
           _food(3, 'Maggie Goreng'),
         ],
       );
-      final _FakeTouristInformationLogicFacade touristLogic =
-          _FakeTouristInformationLogicFacade(savedIds: <int>{1, 3});
       final FavouriteCollectionViewModel viewModel =
-          FavouriteCollectionViewModel(
-            foodLogic: foodLogic,
-            touristLogic: touristLogic,
-          );
+          _TestFavouriteCollectionViewModel(foodLogic);
 
       await viewModel.load();
 
@@ -34,19 +28,15 @@ void main() {
       () async {
         final _FakeFoodLogicFacade foodLogic = _FakeFoodLogicFacade(
           foods: <LocalFood>[_food(1, 'Roti Canai'), _food(2, 'Nasi Lemak')],
+          savedIds: <int>{1, 2},
         );
-        final _FakeTouristInformationLogicFacade touristLogic =
-            _FakeTouristInformationLogicFacade(savedIds: <int>{1, 2});
         final FavouriteCollectionViewModel viewModel =
-            FavouriteCollectionViewModel(
-              foodLogic: foodLogic,
-              touristLogic: touristLogic,
-            );
+            _TestFavouriteCollectionViewModel(foodLogic);
         await viewModel.load();
 
         await viewModel.removeFavourite(_food(1, 'Roti Canai'));
 
-        expect(touristLogic.removedFoodIds, <int>[1]);
+        expect(foodLogic.removedFoodIds, <int>[1]);
         expect(viewModel.favourites.map((LocalFood f) => f.id), <int>[2]);
         expect(viewModel.hasError, isFalse);
       },
@@ -55,17 +45,11 @@ void main() {
     test('removeFavourite reloads when the deletion fails', () async {
       final _FakeFoodLogicFacade foodLogic = _FakeFoodLogicFacade(
         foods: <LocalFood>[_food(1, 'Roti Canai')],
+        savedIds: <int>{1},
+        throwOnRemove: true,
       );
-      final _FakeTouristInformationLogicFacade touristLogic =
-          _FakeTouristInformationLogicFacade(
-            savedIds: <int>{1},
-            throwOnRemove: true,
-          );
       final FavouriteCollectionViewModel viewModel =
-          FavouriteCollectionViewModel(
-            foodLogic: foodLogic,
-            touristLogic: touristLogic,
-          );
+          _TestFavouriteCollectionViewModel(foodLogic);
       await viewModel.load();
 
       await viewModel.removeFavourite(_food(1, 'Roti Canai'));
@@ -92,31 +76,35 @@ LocalFood _food(int id, String name) => LocalFood(
 
 /// Fakes the food facade - provides the catalogue.
 class _FakeFoodLogicFacade extends FoodLogicFacade {
-  _FakeFoodLogicFacade({required this.foods});
-
-  final List<LocalFood> foods;
-
-  @override
-  Future<List<LocalFood>> getLocalFoods() async => foods;
-}
-
-/// Fakes the tourist facade - provides the saved ids / deletion.
-class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
-  _FakeTouristInformationLogicFacade({
-    this.savedIds = const <int>{},
+  _FakeFoodLogicFacade({
+    required this.foods,
+    this.savedIds = const <int>{1, 3},
     this.throwOnRemove = false,
   });
 
+  final List<LocalFood> foods;
   final Set<int> savedIds;
   final bool throwOnRemove;
   final List<int> removedFoodIds = <int>[];
 
   @override
+  Future<List<LocalFood>> getLocalFoods() async => foods;
+
+  @override
   Future<Set<int>> favouriteFoodIds() async => savedIds;
 
   @override
-  Future<void> removeFavourite(int localFoodId) async {
+  Future<void> removeFavouriteFood(int localFoodId) async {
     if (throwOnRemove) throw StateError('delete failed');
     removedFoodIds.add(localFoodId);
   }
+}
+
+class _TestFavouriteCollectionViewModel extends FavouriteCollectionViewModel {
+  _TestFavouriteCollectionViewModel(this.fakeFoodLogic);
+
+  final FoodLogicFacade fakeFoodLogic;
+
+  @override
+  FoodLogicFacade createFoodLogic() => fakeFoodLogic;
 }

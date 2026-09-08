@@ -21,8 +21,7 @@ import '../data_models/submitted_landmark_data_model.dart';
 ///     identity column, so the DB assigns it.
 ///   * `opening_hours` - one row per day/range. `opening_hours_id` has no
 ///     identity default - supplied the same way as `landmark_id`. The table
-///     has NO `status` column: an Open day writes its times; a Closed/Unknown
-///     day writes one row with null times (that's the whole representation).
+///     stores the ERD `status` plus nullable times for Closed/Unknown days.
 ///
 /// These writes require RLS insert/update policies - until they are applied,
 /// every write is denied (see ARCHITECTURE_ANALYSIS.md, Known Gaps).
@@ -123,6 +122,93 @@ class SubmittedLandmarkRepository {
     );
   }
 
+  /// A tourist just re-confirmed (in person, within ~100m) that this place
+  /// exists, so an older submission of the same place is reactivated AND
+  /// cleaned: `reported_count` -> 0 and `status` -> 'available'. Used by the
+  /// Add-Landmark merge/dedupe flow on any existing submitted landmark that
+  /// matches the new submission's restaurant name + location.
+  Future<void> clearReportsAndReactivate(int landmarkId) async {
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{
+        'reported_count': 0,
+        'status': LandmarkStatus.available.name,
+      },
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// Increments `submitted_landmark.reported_count` by one after a report is
+  /// recorded and returns the new value (read-modify-write - fine at the
+  /// current dev scale; a later authenticated RPC can make it atomic).
+  Future<int> incrementReportCount(int landmarkId) async {
+    final Map<String, dynamic>? row = await api.selectOne(
+      APIManager.tableSubmittedLandmark,
+      columns: 'reported_count',
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+    final int next = ((row?['reported_count'] as num?)?.toInt() ?? 0) + 1;
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{'reported_count': next},
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+    return next;
+  }
+
+  /// Freezes a landmark (`status` -> 'frozen') once its report count passes
+  /// the threshold - the map/search/list filters only show 'available'
+  /// places, so a frozen landmark disappears from discovery until it is
+  /// reactivated (A20 / [reactivate]).
+  Future<void> freeze(int landmarkId) async {
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{'status': 'frozen'},
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// Every submitted landmark whose name equals [name] (trimmed,
+  /// case-insensitive). Lightweight rows (no dishes/opening hours) - the
+  /// submit flow only needs id + coordinates to decide which previously
+  /// submitted landmarks belong to the same place (~100m) and should be
+  /// reactivated/cleared.
+  Future<List<SubmittedLandmark>> findByName(String name) async {
+    final String normalized = name.trim().toLowerCase();
+    if (normalized.isEmpty) return const <SubmittedLandmark>[];
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableSubmittedLandmark,
+      columns:
+          'landmark_id, landmark_name, latitude, longitude, reported_count, '
+          'status',
+    );
+    final List<SubmittedLandmark> matches = <SubmittedLandmark>[];
+    for (final Map<String, dynamic> row in rows) {
+      final String rowName = (row['landmark_name'] as String? ?? '')
+          .trim()
+          .toLowerCase();
+      if (rowName != normalized) continue;
+      matches.add(
+        SubmittedLandmark(
+          id: (row['landmark_id'] as num).toInt(),
+          name: row['landmark_name'] as String? ?? '',
+          latitude: (row['latitude'] as num?)?.toDouble(),
+          longitude: (row['longitude'] as num?)?.toDouble(),
+          category: '',
+          reportedCount: (row['reported_count'] as num?)?.toInt() ?? 0,
+          status:
+              (row['status'] as String? ?? '').toLowerCase() ==
+                  LandmarkStatus.frozen.name
+              ? LandmarkStatus.frozen
+              : LandmarkStatus.available,
+          items: const <LandmarkItem>[],
+          openingHours: const <OpeningHour>[],
+        ),
+      );
+    }
+    return matches;
+  }
+
   /// Reads ONE submitted landmark with everything its detail screen needs:
   /// the `submitted_landmark` row, its `landmark_item` dishes and its
   /// `opening_hours`. Returns null when no such landmark exists. Rows are
@@ -149,7 +235,7 @@ class SubmittedLandmarkRepository {
         api.selectAll(
           APIManager.tableOpeningHours,
           columns:
-              'opening_hours_id, day, opening_time, closing_time, '
+              'opening_hours_id, day, status, opening_time, closing_time, '
               'landmark_id, restaurant_id',
           eq: <String, Object?>{'landmark_id': landmarkId},
         ),
@@ -236,23 +322,26 @@ class SubmittedLandmarkRepository {
     );
   }
 
-  /// `opening_hours` row -> `OpeningHour`. Null times mean the day is
-  /// recorded as closed - the same convention `MapRepository` uses for map
-  /// pins. Returns null when the day text doesn't parse.
+  /// `opening_hours` row -> `OpeningHour`. Returns null when its enum text
+  /// does not match the ERD values.
   OpeningHour? _toOpeningHour(Map<String, dynamic> row) {
     final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
     final Weekday? day = _weekday(data.day);
-    if (day == null) return null;
+    final DayStatus? status = _dayStatus(data.status);
+    if (day == null || status == null) return null;
     final int? opensAt = _minutesOfDay(data.openingTime);
-    final int? closesAt = _minutesOfDay(data.closingTime);
+    int? closesAt = _minutesOfDay(data.closingTime);
+    if (status == DayStatus.open &&
+        opensAt == 0 &&
+        data.closingTime?.startsWith('23:59') == true) {
+      closesAt = 1440;
+    }
     return OpeningHour(
       id: data.openingHoursId,
       day: day,
-      status: opensAt == null || closesAt == null
-          ? DayStatus.closed
-          : DayStatus.open,
-      opensAt: opensAt,
-      closesAt: closesAt,
+      status: status,
+      opensAt: status == DayStatus.open ? opensAt : null,
+      closesAt: status == DayStatus.open ? closesAt : null,
     );
   }
 
@@ -260,6 +349,14 @@ class SubmittedLandmarkRepository {
     final String name = value.trim().toLowerCase();
     for (final Weekday day in Weekday.values) {
       if (day.name == name) return day;
+    }
+    return null;
+  }
+
+  static DayStatus? _dayStatus(String value) {
+    final String name = value.trim().toLowerCase();
+    for (final DayStatus status in DayStatus.values) {
+      if (status.name == name) return status;
     }
     return null;
   }
@@ -400,6 +497,7 @@ class SubmittedLandmarkRepository {
       await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
         'opening_hours_id': nextId++,
         'day': _dayName(hour.day),
+        'status': hour.status.name,
         'opening_time': isOpen && hour.opensAt != null
             ? _formatTime(hour.opensAt!)
             : null,

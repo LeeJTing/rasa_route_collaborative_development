@@ -4,6 +4,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/restaurant_item.dart';
 import '../../common_widgets/app_image.dart';
+import '../../common_widgets/food_image_fallback.dart';
 
 class RestaurantExpandedInfo extends StatelessWidget {
   const RestaurantExpandedInfo({super.key, required this.items});
@@ -46,7 +47,7 @@ class RestaurantExpandedInfo extends StatelessWidget {
                         source: item.imageUrl,
                         borderRadius: AppRadius.cardRadius,
                         semanticLabel: item.foodName,
-                        fallback: const _FoodImageFallback(),
+                        fallback: const FoodImageFallback(),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
@@ -100,16 +101,4 @@ class RestaurantExpandedInfo extends StatelessWidget {
       ),
     );
   }
-}
-
-class _FoodImageFallback extends StatelessWidget {
-  const _FoodImageFallback();
-
-  @override
-  Widget build(BuildContext context) => const ColoredBox(
-    color: AppColors.surfaceVariant,
-    child: Center(
-      child: Icon(Icons.ramen_dining, color: AppColors.textSecondary),
-    ),
-  );
 }

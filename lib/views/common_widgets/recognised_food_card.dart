@@ -35,12 +35,18 @@ class RecognisedFoodCard extends StatefulWidget {
     this.image,
     this.collapsible = false,
     this.footer,
+    this.dietaryConflicts = const <String>[],
   });
 
   final LocalFood food;
   final XFile? image;
   final bool collapsible;
   final Widget? footer;
+
+  /// The signed-in tourist's dietary restrictions this dish conflicts with
+  /// (e.g. "No Pork"). When non-empty a warning banner is shown - adding is
+  /// still allowed.
+  final List<String> dietaryConflicts;
 
   @override
   State<RecognisedFoodCard> createState() => _RecognisedFoodCardState();
@@ -82,6 +88,10 @@ class _RecognisedFoodCardState extends State<RecognisedFoodCard> {
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
+            if (widget.dietaryConflicts.isNotEmpty) ...<Widget>[
+              _DietaryConflictWarning(conflicts: widget.dietaryConflicts),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -146,6 +156,46 @@ class _RecognisedFoodCardState extends State<RecognisedFoodCard> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Warning box: this dish conflicts with the signed-in tourist's dietary
+/// restrictions. Informative only - adding is still allowed.
+class _DietaryConflictWarning extends StatelessWidget {
+  const _DietaryConflictWarning({required this.conflicts});
+
+  final List<String> conflicts;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.bannerCautionBackground,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: AppSizes.inlineNoticeIconSize,
+            color: AppColors.warning,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              'Your profile avoids: ${conflicts.join(', ')}. '
+              "This dish may not suit you - you can still add it.",
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.warning,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

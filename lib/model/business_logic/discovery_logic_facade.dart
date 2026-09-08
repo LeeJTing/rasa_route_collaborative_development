@@ -1,4 +1,4 @@
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/exploration_filter.dart';
 import '../../domain_model/exploration_search.dart';
@@ -7,6 +7,7 @@ import '../../domain_model/map.dart';
 import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
+import '../../domain_model/restaurant_report_reason.dart';
 import '../../domain_model/swipe_mode.dart';
 import '../../domain_model/swipe_session.dart';
 import '../../domain_model/tourist_location.dart';
@@ -23,17 +24,20 @@ import 'restaurant_discovery_logic.dart';
 /// facade fans out to as many business-logic classes as the feature needs. No
 /// business rules live here, and it never imports Flutter.
 class DiscoveryLogicFacade {
-  DiscoveryLogicFacade({
-    @visibleForTesting FoodDiscoveryLogic? foodDiscovery,
-    @visibleForTesting MatchesRecommendationLogic? matchesRecommendation,
-  }) : foodDiscovery = foodDiscovery ?? FoodDiscoveryLogic(),
-       matchesRecommendation =
-           matchesRecommendation ?? MatchesRecommendationLogic();
+  DiscoveryLogicFacade();
+
+  @protected
+  FoodDiscoveryLogic createFoodDiscovery() => FoodDiscoveryLogic();
+
+  @protected
+  MatchesRecommendationLogic createMatchesRecommendation() =>
+      MatchesRecommendationLogic();
 
   final RestaurantDiscoveryLogic restaurantDiscovery =
       RestaurantDiscoveryLogic();
-  final FoodDiscoveryLogic foodDiscovery;
-  final MatchesRecommendationLogic matchesRecommendation;
+  late final FoodDiscoveryLogic foodDiscovery = createFoodDiscovery();
+  late final MatchesRecommendationLogic matchesRecommendation =
+      createMatchesRecommendation();
   final MapExplorationLogic mapExploration = MapExplorationLogic();
 
   // ---------------------------------------------------------------------------
@@ -92,6 +96,21 @@ class DiscoveryLogicFacade {
 
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
       restaurantDiscovery.findById(restaurantId);
+
+  /// Records a tourist's report against a catalogue restaurant (the report
+  /// sheet on the restaurant detail page) - sign-in required, dedupe per
+  /// tourist, count bump, freeze once it passes the threshold; `frozePlace`
+  /// is true when this report froze the restaurant. Flat passthrough.
+  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
+  submitRestaurantReport({
+    required int restaurantId,
+    required RestaurantReportReason reason,
+    String? touristId,
+  }) => restaurantDiscovery.submitRestaurantReport(
+    restaurantId: restaurantId,
+    reason: reason,
+    touristId: touristId,
+  );
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,

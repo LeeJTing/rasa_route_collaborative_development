@@ -1,11 +1,12 @@
 import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected, visibleForTesting;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
+import '../../domain_model/restaurant_report_reason.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
 
@@ -14,17 +15,83 @@ import '../repositories/discovery_repository_facade.dart';
 /// A business-logic class knows exactly one thing below it: a repository
 /// facade. It never sees a repository, a shared client or Flutter.
 class RestaurantDiscoveryLogic {
-  RestaurantDiscoveryLogic({
-    @visibleForTesting DiscoveryRepositoryFacade? discoveryRepository,
-    @visibleForTesting DateTime Function()? now,
-  }) : repository = discoveryRepository ?? DiscoveryRepositoryFacade(),
-       _now = now ?? DateTime.now;
+  RestaurantDiscoveryLogic();
 
-  final DiscoveryRepositoryFacade repository;
-  final DateTime Function() _now;
+  @protected
+  DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
+
+  @protected
+  DateTime currentTime() => DateTime.now();
+
+  late final DiscoveryRepositoryFacade repository = createRepository();
 
   Future<Restaurant?> findById(int restaurantId) =>
       repository.getRestaurantById(restaurantId);
+
+  /// Records a tourist's report against a catalogue restaurant (the shared
+  /// `report` table) and applies the moderation rule: `report_count` is
+  /// incremented, and once it reaches [_reportFreezeAtReports] the
+  /// restaurant is frozen (`status` 'frozen') so the discovery/list filters
+  /// stop showing it. `frozePlace: true` tells the caller that THIS report
+  /// was the one that froze it - the UI leaves the page and refreshes the
+  /// map, dropping the now-hidden pin.
+  ///
+  /// Reporting is a signed-in feature: when no tourist is resolved (no auth
+  /// session) nothing is written and `requiresSignIn: true` is returned so
+  /// the UI can ask the user to sign in. When signed in, one tourist may
+  /// report a place only once - a duplicate is detected first and
+  /// `alreadyReported: true` is returned without touching the count.
+  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
+  submitRestaurantReport({
+    required int restaurantId,
+    required RestaurantReportReason reason,
+    String? touristId,
+  }) async {
+    final String? resolvedTouristId =
+        touristId ?? await repository.currentTouristId();
+    if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
+      return (requiresSignIn: true, alreadyReported: false, frozePlace: false);
+    }
+    final bool duplicate = await repository.report.alreadyReported(
+      kind: 'restaurant',
+      placeId: restaurantId,
+      touristId: resolvedTouristId,
+    );
+    if (duplicate) {
+      return (requiresSignIn: false, alreadyReported: true, frozePlace: false);
+    }
+    await repository.report.insertReport(
+      kind: 'restaurant',
+      placeId: restaurantId,
+      reason: reason.name,
+      touristId: resolvedTouristId,
+    );
+    final int count = await repository.restaurant.incrementReportCount(
+      restaurantId,
+    );
+    final bool frozePlace = shouldFreezeAfterReport(count);
+    if (frozePlace) {
+      await repository.restaurant.freeze(restaurantId);
+      // Frozen places are no longer 'available', so cached map pins must go:
+      // the next read (right after the UI leaves the page) has no pin for it.
+      repository.map.clearCache();
+    }
+    return (
+      requiresSignIn: false,
+      alreadyReported: false,
+      frozePlace: frozePlace,
+    );
+  }
+
+  /// Freeze once the reported count REACHES [_reportFreezeAtReports] (so the
+  /// 5th report freezes). Pure so the boundary is unit-testable without a
+  /// repository seam.
+  @visibleForTesting
+  static bool shouldFreezeAfterReport(int reportedCount) =>
+      reportedCount >= _reportFreezeAtReports;
+
+  /// A restaurant is frozen once its report count reaches this many reports.
+  static const int _reportFreezeAtReports = 5;
 
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
@@ -176,11 +243,13 @@ class RestaurantDiscoveryLogic {
   }
 
   List<Restaurant> _availableSummaries(List<Restaurant> restaurants) {
-    final DateTime malaysiaNow = _now().toUtc().add(const Duration(hours: 8));
+    final DateTime malaysiaNow = currentTime().toUtc().add(
+      const Duration(hours: 8),
+    );
     return restaurants
         .where(
           (Restaurant restaurant) =>
-              restaurant.status?.trim().toLowerCase() != 'hidden' &&
+              restaurant.status?.trim().toLowerCase() == 'available' &&
               !_isConfidentlyClosed(restaurant, malaysiaNow),
         )
         .toList(growable: false);
@@ -264,7 +333,6 @@ class RestaurantDiscoveryLogic {
                 .where(
                   (RestaurantItem item) => !_conflictsWithRestrictions(
                     item,
-                    restrictions: restrictions,
                     activeRestrictionIds: activeRestrictionIds,
                     restrictionIdsByFood: restrictionIdsByFood,
                   ),
@@ -284,111 +352,11 @@ class RestaurantDiscoveryLogic {
 
   bool _conflictsWithRestrictions(
     RestaurantItem item, {
-    required List<DietaryRestriction> restrictions,
     required Set<int> activeRestrictionIds,
     required Map<int, List<int>> restrictionIdsByFood,
-  }) {
-    final List<int> linked =
-        restrictionIdsByFood[item.localFoodId] ?? const <int>[];
-    if (linked.any(activeRestrictionIds.contains)) return true;
-
-    final String itemText = _normaliseWords(
-      '${item.foodName} ${item.ingredients ?? ''}',
-    );
-    for (final DietaryRestriction restriction in restrictions) {
-      final String normalizedName = restriction.name.trim().toLowerCase();
-      final List<String> keywords =
-          _restrictionKeywords[normalizedName] ??
-          normalizedName
-              .replaceFirst(RegExp(r'^no\s+'), '')
-              .split('/')
-              .map((String value) => value.trim())
-              .where((String value) => value.isNotEmpty)
-              .toList(growable: false);
-      if (keywords.any(
-        (String keyword) =>
-            itemText.contains(' ${_normaliseWords(keyword).trim()} '),
-      )) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  String _normaliseWords(String value) =>
-      ' ${value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim()} ';
-
-  static const Map<String, List<String>> _restrictionKeywords =
-      <String, List<String>>{
-        'no pork': <String>['pork', 'bacon', 'ham', 'lard', 'char siu'],
-        'no beef': <String>['beef'],
-        'no chicken': <String>['chicken'],
-        'no mutton': <String>['mutton', 'lamb'],
-        'no duck': <String>['duck'],
-        'no organ meat': <String>[
-          'liver',
-          'intestine',
-          'tripe',
-          'kidney',
-          'offal',
-        ],
-        'no fish': <String>[
-          'fish',
-          'anchovy',
-          'ikan',
-          'tuna',
-          'salmon',
-          'sardine',
-          'mackerel',
-        ],
-        'no shellfish': <String>[
-          'shellfish',
-          'prawn',
-          'shrimp',
-          'crab',
-          'lobster',
-          'clam',
-          'oyster',
-          'mussel',
-        ],
-        'no shrimp/prawn': <String>['shrimp', 'prawn'],
-        'no squid/octopus': <String>['squid', 'octopus', 'sotong'],
-        'no egg': <String>['egg', 'mayonnaise', 'mayo'],
-        'no dairy': <String>[
-          'milk',
-          'dairy',
-          'cheese',
-          'butter',
-          'cream',
-          'yoghurt',
-          'yogurt',
-          'ghee',
-        ],
-        'no peanuts': <String>['peanut'],
-        'no tree nuts': <String>[
-          'almond',
-          'cashew',
-          'walnut',
-          'hazelnut',
-          'pistachio',
-          'macadamia',
-          'pecan',
-        ],
-        'no sesame': <String>['sesame'],
-        'no soy': <String>['soy', 'soya', 'tofu', 'tempeh'],
-        'no wheat': <String>['wheat', 'flour'],
-        'no gluten': <String>['gluten', 'wheat', 'flour'],
-        'no coconut': <String>['coconut', 'santan'],
-        'no corn': <String>['corn', 'maize'],
-        'no mushrooms': <String>['mushroom'],
-        'no tomato': <String>['tomato'],
-        'no garlic': <String>['garlic'],
-        'no onion': <String>['onion', 'shallot'],
-        'no ginger': <String>['ginger'],
-        'no coriander/cilantro': <String>['coriander', 'cilantro'],
-        'no mayonnaise': <String>['mayonnaise', 'mayo'],
-        'no mustard': <String>['mustard'],
-      };
+  }) => (restrictionIdsByFood[item.localFoodId] ?? const <int>[]).any(
+    activeRestrictionIds.contains,
+  );
 
   double _distanceMetres(double lat1, double lon1, double lat2, double lon2) {
     const double earthRadius = 6371000;

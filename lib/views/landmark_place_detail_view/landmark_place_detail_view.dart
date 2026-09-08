@@ -74,15 +74,33 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
         onSubmit: viewModel.submitReport,
       ),
     );
-    if (!mounted || submitted != true || !viewModel.reportSubmitted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Report selected for this UI preview. Backend submission is not available yet.',
-        ),
-      ),
-    );
+    if (!mounted || submitted != true) return;
+    final String message;
+    if (viewModel.requiresSignIn) {
+      message =
+          'Sign in to report this place. Please sign in from the profile page and try again.';
+    } else if (viewModel.reportFailed) {
+      message = 'Sorry, your report could not be sent. Please try again.';
+    } else if (viewModel.alreadyReported) {
+      message =
+          'You have already reported this landmark. Thanks for looking out!';
+    } else if (viewModel.reportSubmitted) {
+      message = 'Report received. Thank you for helping keep the map accurate.';
+    } else {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+    final bool leavePage = viewModel.reportFrozePlace;
     viewModel.consumeReportSubmitted();
+    // A report that froze the landmark hides it - leave the page (back to the
+    // map) so the now-hidden pin is no longer shown. The ViewModel already
+    // asked every live dashboard to drop its caches and re-read, so the map
+    // underneath is current by the time the tourist lands on it.
+    if (leavePage && mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -311,7 +329,7 @@ class _Photo extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         const Icon(Icons.location_on, size: 40, color: AppColors.textSecondary),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpacing.xs),
         Text(label, style: AppTextStyles.bodySmall),
       ],
     ),
@@ -376,7 +394,7 @@ class _MetaLine extends StatelessWidget {
                         size: AppSizes.iconSmall,
                         color: AppColors.primary,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       Text(
                         location,
                         style: AppTextStyles.bodyMedium.copyWith(
@@ -384,7 +402,7 @@ class _MetaLine extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       const Icon(
                         Icons.copy_outlined,
                         size: AppSizes.inlineNoticeIconSize,
@@ -410,7 +428,7 @@ class _MetaLine extends StatelessWidget {
                         size: AppSizes.inlineNoticeIconSize,
                         color: AppColors.primary,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: AppSpacing.xs),
                       Text(
                         'Open Google Maps',
                         style: AppTextStyles.bodySmall.copyWith(
@@ -433,7 +451,7 @@ class _MetaLine extends StatelessWidget {
                 size: 14,
                 color: AppColors.warning,
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: AppSpacing.xs),
               Text(reports, style: AppTextStyles.bodySmall),
             ],
           ),
@@ -465,8 +483,12 @@ Future<void> _openInGoogleMaps(
   }
 }
 
-/// The landmark's recorded hours, one line per row. Days with no recorded
-/// times read "Closed" (the wire format has no separate "unknown" row).
+/// The landmark's recorded hours, one line per row, honouring all three
+/// [DayStatus] states (matching the add-landmark form's wording): an Open row
+/// shows its time range, a day recorded as Unknown reads "Hours not known" -
+/// never "Closed" - and only a day the submitter confirmed closed reads
+/// "Closed". The app does not tell a tourist a place is shut when it does not
+/// know (the same rule the map's "Hours unknown" label follows).
 class _OpeningHoursList extends StatelessWidget {
   const _OpeningHoursList({required this.hours});
 
@@ -478,11 +500,12 @@ class _OpeningHoursList extends StatelessWidget {
       for (final OpeningHour hour in hours)
         (
           _dayName(hour.day),
-          hour.status == DayStatus.open &&
-                  hour.opensAt != null &&
-                  hour.closesAt != null
-              ? '${_clock(hour.opensAt!)} - ${_clock(hour.closesAt!)}'
-              : 'Closed',
+          switch (hour.status) {
+            DayStatus.open when hour.opensAt != null && hour.closesAt != null =>
+              '${_clock(hour.opensAt!)} - ${_clock(hour.closesAt!)}',
+            DayStatus.unknown => 'Hours not known',
+            _ => 'Closed',
+          },
         ),
     ];
     return Container(

@@ -1,0 +1,1 @@
+enum MatchesRecommendationTab { restaurants, submittedLandmarks }
