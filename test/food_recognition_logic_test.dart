@@ -88,8 +88,7 @@ class _FakeFoodKnowledgeRepository extends FoodKnowledgeRepository {
   /// be exercised without a network call.
   Future<List<DietaryRestriction>> foodDietaryRestrictions(
     int localFoodId,
-  ) async =>
-      foodRestrictionLinks[localFoodId] ?? const <DietaryRestriction>[];
+  ) async => foodRestrictionLinks[localFoodId] ?? const <DietaryRestriction>[];
 }
 
 class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
@@ -137,9 +136,8 @@ class _FakeFoodRepositoryFacade extends FoodRepositoryFacade {
   ) async {}
 
   @override
-  Future<List<DietaryRestriction>> foodDietaryRestrictions(
-    int localFoodId,
-  ) => fakeKnowledge.foodDietaryRestrictions(localFoodId);
+  Future<List<DietaryRestriction>> foodDietaryRestrictions(int localFoodId) =>
+      fakeKnowledge.foodDietaryRestrictions(localFoodId);
 }
 
 LocalFood _food(String name) => LocalFood(

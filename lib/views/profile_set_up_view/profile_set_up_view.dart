@@ -71,6 +71,19 @@ class _ProfileSetUpViewState extends State<ProfileSetUpView> {
     );
   }
 
+  void _skip(ProfileSetUpViewModel viewModel) {
+    viewModel.skipForNow();
+    if (!mounted || _navigated || !viewModel.skipped) return;
+    _navigated = true;
+    // Skip for now - nothing is saved, so the next login routes back here
+    // until the tourist completes set-up.
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      AppRoutes.mainShell,
+      (Route<dynamic> _) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<ProfileSetUpViewModel>.value(
@@ -98,6 +111,13 @@ class _ProfileSetUpViewState extends State<ProfileSetUpView> {
                     child: ListView(
                       padding: AppSpacing.screenPadding,
                       children: <Widget>[
+                        // The account being set up, with an escape hatch for
+                        // a tourist who signed up with the wrong account.
+                        _AccountBar(
+                          email: viewModel.email,
+                          onSwitchAccount: viewModel.switchAccount,
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
                         Text(
                           "Tell us what you like so we can recommend "
                           "the best Malaysian food for you.",
@@ -183,25 +203,38 @@ class _ProfileSetUpViewState extends State<ProfileSetUpView> {
                       ],
                     ),
                   ),
-                  // Continue footer ------------------------------------
+                  // Continue / Skip footer -----------------------------
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.fromLTRB(
                       AppSpacing.lg,
                       AppSpacing.md,
                       AppSpacing.lg,
-                      AppSpacing.xl,
+                      AppSpacing.xs,
                     ),
-                    child: ElevatedButton(
-                      onPressed: viewModel.canContinue
-                          ? () => _continue(viewModel)
-                          : null,
-                      style: ElevatedButton.styleFrom(
-                        shape: const StadiumBorder(),
-                      ),
-                      child: viewModel.state == ViewState.busy
-                          ? const CircularProgressIndicator()
-                          : const Text('Continue'),
+                    child: Column(
+                      children: <Widget>[
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: viewModel.canContinue
+                                ? () => _continue(viewModel)
+                                : null,
+                            style: ElevatedButton.styleFrom(
+                              shape: const StadiumBorder(),
+                            ),
+                            child: viewModel.state == ViewState.busy
+                                ? const CircularProgressIndicator()
+                                : const Text('Continue'),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: viewModel.isBusy
+                              ? null
+                              : () => _skip(viewModel),
+                          child: const Text('Skip for now'),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -209,6 +242,76 @@ class _ProfileSetUpViewState extends State<ProfileSetUpView> {
             },
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The account this first-run set-up is being performed for, with a fallback
+/// to abandon it and sign in with a different account - a tourist who
+/// registered with the wrong Google account / email can switch without having
+/// to finish the set-up first.
+class _AccountBar extends StatelessWidget {
+  const _AccountBar({required this.email, required this.onSwitchAccount});
+
+  /// The signed-in account's email. Falls back to a generic label when the
+  /// session doesn't carry one.
+  final String email;
+
+  /// Signs out and returns to the Log In screen (see
+  /// `ProfileSetUpViewModel.switchAccount`).
+  final VoidCallback onSwitchAccount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: AppRadius.cardRadius,
+        border: Border.all(color: AppColors.cardBorderWarm),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(
+            Icons.account_circle_outlined,
+            color: AppColors.accentBrown,
+            size: AppSizes.iconMedium,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Signed in as',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textDisabled,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  email.isEmpty ? 'Signed in' : email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.accentBrown,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onSwitchAccount,
+            child: const Text('Not you? Switch account'),
+          ),
+        ],
       ),
     );
   }

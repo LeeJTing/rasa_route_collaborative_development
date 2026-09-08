@@ -1,11 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/core/view_state.dart';
+import 'package:rasa_route_collaborative_development/domain_model/auth_session.dart';
 import 'package:rasa_route_collaborative_development/domain_model/dietary_restriction.dart';
 import 'package:rasa_route_collaborative_development/domain_model/food_preference.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/tourist_information_logic_facade.dart';
 import 'package:rasa_route_collaborative_development/view_models/profile_set_up_view_model.dart';
 
 void main() {
+  // `switchAccount` navigates via AppNavigator (a GlobalKey on the navigator),
+  // which reads WidgetsBinding.instance - initialize it so the "not yet
+  // initialized" FlutterError doesn't leak into the test zone.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('ProfileSetUpViewModel', () {
     test('load fills options and the existing selection', () async {
       final _FakeTouristInformationLogicFacade
@@ -125,6 +131,52 @@ void main() {
         expect(viewModel.hasError, isFalse);
       },
     );
+
+    test('load exposes the signed-in account email', () async {
+      final _FakeTouristInformationLogicFacade facade =
+          _FakeTouristInformationLogicFacade()
+            ..session = const AuthSession(
+              accessToken: 'access',
+              refreshToken: 'refresh',
+              userId: 'auth-1',
+              email: 'wrong.account@example.com',
+            );
+      final ProfileSetUpViewModel viewModel = ProfileSetUpViewModel(
+        touristLogic: facade,
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.email, 'wrong.account@example.com');
+      expect(viewModel.state, ViewState.ready);
+    });
+
+    test('switchAccount signs out (wrong-account fallback)', () async {
+      final _FakeTouristInformationLogicFacade facade =
+          _FakeTouristInformationLogicFacade();
+      final ProfileSetUpViewModel viewModel = ProfileSetUpViewModel(
+        touristLogic: facade,
+      );
+
+      await viewModel.switchAccount();
+
+      expect(facade.signOutCalls, 1);
+    });
+
+    test('skipForNow marks the session skip without persisting anything', () {
+      final _FakeTouristInformationLogicFacade facade =
+          _FakeTouristInformationLogicFacade();
+      final ProfileSetUpViewModel viewModel = ProfileSetUpViewModel(
+        touristLogic: facade,
+      );
+
+      // Skip is "for now" only: nothing is saved or written anywhere, so the
+      // next login routes back here until the tourist completes set-up.
+      viewModel.skipForNow();
+
+      expect(viewModel.skipped, isTrue);
+      expect(viewModel.state, ViewState.idle);
+    });
   });
 }
 
@@ -136,6 +188,19 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
   List<DietaryRestriction> currentRestrictions = const <DietaryRestriction>[];
   List<int> savedPreferenceIds = const <int>[];
   List<int> savedRestrictionIds = const <int>[];
+
+  /// The session returned by [getCurrentSession] - null by default, so the
+  /// email tests set it explicitly and the option tests never see one.
+  AuthSession? session;
+  int signOutCalls = 0;
+
+  @override
+  Future<AuthSession?> getCurrentSession() async => session;
+
+  @override
+  Future<void> signOut() async {
+    signOutCalls++;
+  }
 
   @override
   Future<List<FoodPreference>> foodPreferenceOptions() async =>

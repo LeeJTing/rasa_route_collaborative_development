@@ -6,7 +6,9 @@ import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
 import '../domain_model/food_recognition_result.dart';
 import '../domain_model/local_food.dart';
+import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
+import 'current_location_facade.dart';
 
 /// Temporary hand-off point for data crossing a route push into a BRAND NEW
 /// ViewModel.
@@ -306,8 +308,25 @@ typedef AdditionalFoodCaptureResult = ({
 ///   * state goes in private fields with read-only getters; commands wrap their
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
-class FoodRecognitionViewModel extends BaseViewModel {
+class FoodRecognitionViewModel extends BaseViewModel
+    implements CurrentLocationListener {
   FoodRecognitionViewModel();
+
+  /// Inbound: `LocationMonitor` publishes here so this screen knows where the
+  /// tourist is - a new landmark may only be added on Malaysian land (A9), so
+  /// an at-sea / outside-Malaysia fix blocks the "Add New Landmark" action.
+  final CurrentLocationFacade locationFacade = CurrentLocationFacade();
+
+  TouristLocation _currentLocation = TouristLocation.unknown;
+
+  /// The most recent fix. [TouristLocation.unknown] until one arrives.
+  TouristLocation get currentLocation => _currentLocation;
+
+  @override
+  void onCurrentLocationChanged(TouristLocation location) {
+    _currentLocation = location;
+    safeNotifyListeners();
+  }
 
   @protected
   LandmarkLogicFacade createLandmarkLogic() => LandmarkLogicFacade();
@@ -430,6 +449,27 @@ class FoodRecognitionViewModel extends BaseViewModel {
   /// already-decided answer so the View never compares numbers itself.
   bool get isLowConfidence => landmarkLogic.isLowConfidence(_confidence);
 
+  /// Whether the current fix makes "Add New Landmark" impossible (A9) - a
+  /// new landmark may only be added on Malaysian land, so a fix at sea or
+  /// outside Malaysia blocks it. `false` when there is no fix yet (nothing to
+  /// judge against).
+  bool get isAddLandmarkBlockedByLocation =>
+      _currentLocation.isKnown &&
+      !landmarkLogic.isOnLand(
+        _currentLocation.latitude,
+        _currentLocation.longitude,
+      );
+
+  /// Why "Add New Landmark" is unavailable for the current spot - shown on
+  /// the result card in place of the add prompt. Null when the location
+  /// allows adding.
+  String? get addLandmarkLocationBlockMessage =>
+      isAddLandmarkBlockedByLocation ? _offLandAddMessage : null;
+
+  static const String _offLandAddMessage =
+      'New landmarks can only be added on Malaysian land - you are at sea or '
+      'outside Malaysia, so a landmark cannot be added here.';
+
   /// Keeps [isProcessing] true until [minimumLoadingDuration] has elapsed
   /// since [startedAt]. The result is already stored by the time this runs -
   /// the loading state simply stays up so the card does not appear (and the
@@ -447,6 +487,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
   /// degrade to "no restrictions" (no warning) rather than blocking capture.
   @override
   Future<void> onInit() async {
+    locationFacade.register(this);
     _userDietaryRestrictions = await landmarkLogic.userDietaryRestrictions();
     _recomputeDietaryConflicts();
     safeNotifyListeners();
@@ -459,6 +500,12 @@ class FoodRecognitionViewModel extends BaseViewModel {
       userRestrictions: _userDietaryRestrictions,
       foodTags: _dietaryRestrictions,
     );
+  }
+
+  @override
+  void dispose() {
+    locationFacade.unregister(this);
+    super.dispose();
   }
 
   /// REQ106_1 - ask for the OS camera permission before the View opens the
@@ -639,6 +686,10 @@ class FoodRecognitionViewModel extends BaseViewModel {
     // landmark - the UI hides the button, this guard is the second line of
     // defence.
     if (!_isLocalFood || !_fitsCatalogueCategory) return;
+    // A new landmark may only be added on Malaysian land (A9) - while the fix
+    // is at sea / outside Malaysia the UI hides the button and this guard is
+    // the second line of defence.
+    if (isAddLandmarkBlockedByLocation) return;
     LandmarkDraftHandoff().pushAddLandmark(
       food,
       _capturedImage,
