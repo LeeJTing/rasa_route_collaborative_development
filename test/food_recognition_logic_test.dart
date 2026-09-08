@@ -68,6 +68,11 @@ class _FakeFoodKnowledgeRepository extends FoodKnowledgeRepository {
   List<LocalFood> catalogue = const <LocalFood>[];
   final List<LocalFood> inserted = <LocalFood>[];
 
+  /// Curated `food_dietary_restriction` links per food id - empty by default,
+  /// so tests that do not care see no dietary tags.
+  Map<int, List<DietaryRestriction>> foodRestrictionLinks =
+      const <int, List<DietaryRestriction>>{};
+
   @override
   Future<List<LocalFood>> getFoods() async => catalogue;
 
@@ -76,6 +81,15 @@ class _FakeFoodKnowledgeRepository extends FoodKnowledgeRepository {
     inserted.add(food);
     return food;
   }
+
+  /// Not an override - `FoodKnowledgeRepository` has no such method (the
+  /// facade routes it to the dietary-restriction repository), but the fake
+  /// exposes the stubbed links so [FoodRecognitionLogic._dietaryTagsFor] can
+  /// be exercised without a network call.
+  Future<List<DietaryRestriction>> foodDietaryRestrictions(
+    int localFoodId,
+  ) async =>
+      foodRestrictionLinks[localFoodId] ?? const <DietaryRestriction>[];
 }
 
 class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
@@ -121,6 +135,11 @@ class _FakeFoodRepositoryFacade extends FoodRepositoryFacade {
     int localFoodId,
     List<int> restrictionIds,
   ) async {}
+
+  @override
+  Future<List<DietaryRestriction>> foodDietaryRestrictions(
+    int localFoodId,
+  ) => fakeKnowledge.foodDietaryRestrictions(localFoodId);
 }
 
 LocalFood _food(String name) => LocalFood(
@@ -173,9 +192,9 @@ void main() {
     setUp(() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
-      logic = FoodRecognitionLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
-        foodRepository: _FakeFoodRepositoryFacade(knowledge),
+      logic = _TestFoodRecognitionLogic(
+        _FakeDiscoveryRepositoryFacade(recognition),
+        _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -599,6 +618,132 @@ void main() {
         'Roti Canai',
       ]);
     });
+
+    test('a confident catalogue hit reads tags from the curated row\'s own '
+        'food_dietary_restriction links (fast path)', () async {
+      final bubur = _food('Bubur Cha Cha');
+      knowledge.catalogue = <LocalFood>[bubur];
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'Bubur Cha Cha', confidence: 0.98);
+      // The curated catalogue links Bubur Cha Cha ONLY to No Coconut.
+      knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
+        bubur.id: <DietaryRestriction>[
+          const DietaryRestriction(id: 19, name: 'No Coconut'),
+        ],
+      };
+      bool analyzeFullCalled = false;
+      recognition.onAnalyzeFull = (List<int> _) async {
+        analyzeFullCalled = true;
+        return (
+          food: _food('Bubur Cha Cha'),
+          priceMin: 0.0,
+          priceMax: 0.0,
+          isLocal: true,
+          confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
+          foodType: 'Food',
+          dietaryRestrictions: const <String>['No Gluten', 'No Egg'],
+        );
+      };
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      // Fast path: full analysis never ran, so the only tags possible are
+      // the curated links - and they must be present (the warning relies on
+      // them).
+      expect(analyzeFullCalled, isFalse);
+      expect(result.candidates.single.id, bubur.id);
+      expect(result.dietaryRestrictions, <String>['No Coconut']);
+    });
+
+    test('a curated dish matched by the full analysis ignores Gemini\'s '
+        'free-text tags and uses its own links instead', () async {
+      final bubur = _food('Bubur Cha Cha');
+      knowledge.catalogue = <LocalFood>[bubur];
+      knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
+        bubur.id: <DietaryRestriction>[
+          const DietaryRestriction(id: 19, name: 'No Coconut'),
+        ],
+      };
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'Bubur Cha Cha', confidence: 0.4);
+      // The full analysis judges it a curated dish, but Gemini's own tags
+      // are noisy - it lists restrictions the dish is FREE of.
+      recognition.onAnalyzeFull = (List<int> _) async => (
+        food: _food('Bubur Cha Cha (Gemini)'),
+        priceMin: 2.0,
+        priceMax: 5.0,
+        isLocal: true,
+        confidence: 0.9,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 1.0,
+        observedFood: '',
+        foodType: 'Food',
+        dietaryRestrictions: const <String>[
+          'No Coconut',
+          'No Gluten',
+          'No Egg',
+        ],
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      // Curated wins: the dish resolves to the catalogue row and its own
+      // link is the ONLY tag - the gluten/egg noise is dropped so the tourist
+      // is not warned about restrictions the dish does not violate.
+      expect(result.candidates.single.id, bubur.id);
+      expect(result.dietaryRestrictions, <String>['No Coconut']);
+    });
+
+    test(
+      'a brand-new dish (no curated row) keeps Gemini\'s dietary tags',
+      () async {
+        knowledge.catalogue = const <LocalFood>[];
+        recognition.onIdentify = (_) async =>
+            _quickResponse(dish: 'Some New Dessert', confidence: 0.4);
+        recognition.onAnalyzeFull = (List<int> _) async => (
+          food: LocalFood(
+            id: 0, // Not yet saved - a brand-new Gemini dish.
+            name: 'Some New Dessert',
+            description: 'Description',
+            origin: 'Malaysia',
+            culturalBackground: '',
+            ingredients: '',
+            category: 'Malay',
+            cookingStyle: 'Frying',
+            mealType: 'Dessert',
+            foodType: 'Dessert',
+          ),
+          priceMin: 2.0,
+          priceMax: 5.0,
+          isLocal: true,
+          confidence: 0.9,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
+          foodType: 'Dessert',
+          dietaryRestrictions: const <String>['No Coconut'],
+        );
+
+        final FoodRecognitionResult result = await logic.recognizeFood(<int>[
+          1,
+        ]);
+
+        expect(result.candidates.single.id, 0);
+        expect(result.dietaryRestrictions, <String>['No Coconut']);
+      },
+    );
   });
 
   group('FoodRecognitionLogic.resolveByName (manual entry)', () {
@@ -609,9 +754,9 @@ void main() {
     setUp(() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
-      logic = FoodRecognitionLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
-        foodRepository: _FakeFoodRepositoryFacade(knowledge),
+      logic = _TestFoodRecognitionLogic(
+        _FakeDiscoveryRepositoryFacade(recognition),
+        _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -810,6 +955,38 @@ void main() {
       expect(result.food.id, 1);
       expect(result.priceMin, 0.0);
     });
+
+    test('a curated typed dish carries its own food_dietary_restriction links '
+        '(never Gemini\'s tags)', () async {
+      final murtabak = _food('Murtabak');
+      knowledge.catalogue = <LocalFood>[murtabak];
+      knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
+        murtabak.id: <DietaryRestriction>[
+          const DietaryRestriction(id: 1, name: 'No Pork'),
+        ],
+      };
+      recognition.onAnalyzeByName = (List<int> _, String name) async => (
+        food: _food('Murtabak (Gemini)'),
+        priceMin: 3.0,
+        priceMax: 8.0,
+        isLocal: true,
+        confidence: 1.0,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 1.0,
+        observedFood: '',
+        foodType: 'Food',
+        // Gemini's noisy tags - must be ignored for the curated row.
+        dietaryRestrictions: const <String>['No Pork', 'No Gluten'],
+      );
+
+      final result = await logic.resolveByName(<int>[1], 'Murtabak');
+
+      expect(result.food.id, murtabak.id);
+      expect(result.dietaryRestrictions, <String>['No Pork']);
+    });
   });
 
   group('FoodRecognitionLogic.enrichCandidate (picker)', () {
@@ -820,9 +997,9 @@ void main() {
     setUp(() {
       recognition = _FakeRecognitionRepository();
       knowledge = _FakeFoodKnowledgeRepository();
-      logic = FoodRecognitionLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
-        foodRepository: _FakeFoodRepositoryFacade(knowledge),
+      logic = _TestFoodRecognitionLogic(
+        _FakeDiscoveryRepositoryFacade(recognition),
+        _FakeFoodRepositoryFacade(knowledge),
       );
     });
 
@@ -865,6 +1042,39 @@ void main() {
         expect(analyzeByNameCalled, isFalse);
       },
     );
+
+    test(
+      'a curated pick carries its own food_dietary_restriction links',
+      () async {
+        final murtabak = _food('Murtabak');
+        knowledge.catalogue = <LocalFood>[murtabak];
+        knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
+          murtabak.id: <DietaryRestriction>[
+            const DietaryRestriction(id: 19, name: 'No Coconut'),
+          ],
+        };
+        recognition.onAnalyzeByName = (List<int> _, String name) async => (
+          food: _food('Murtabak (Gemini)'),
+          priceMin: 3.0,
+          priceMax: 8.0,
+          isLocal: true,
+          confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
+          foodType: 'Food',
+          dietaryRestrictions: const <String>['No Gluten'],
+        );
+
+        final result = await logic.enrichCandidate(<int>[1], 'Murtabak');
+
+        expect(result.food.id, murtabak.id);
+        expect(result.dietaryRestrictions, <String>['No Coconut']);
+      },
+    );
   });
 
   group(
@@ -904,9 +1114,9 @@ void main() {
       setUp(() {
         recognition = _FakeRecognitionRepository();
         knowledge = _FakeFoodKnowledgeRepository();
-        logic = FoodRecognitionLogic(
-          discoveryRepository: _FakeDiscoveryRepositoryFacade(recognition),
-          foodRepository: _FakeFoodRepositoryFacade(knowledge),
+        logic = _TestFoodRecognitionLogic(
+          _FakeDiscoveryRepositoryFacade(recognition),
+          _FakeFoodRepositoryFacade(knowledge),
         );
       });
 
@@ -1055,4 +1265,17 @@ void main() {
       expect(FoodRecognitionLogic.fitsCatalogueCategory('   '), isTrue);
     });
   });
+}
+
+class _TestFoodRecognitionLogic extends FoodRecognitionLogic {
+  _TestFoodRecognitionLogic(this.discovery, this.food);
+
+  final DiscoveryRepositoryFacade discovery;
+  final FoodRepositoryFacade food;
+
+  @override
+  DiscoveryRepositoryFacade createDiscoveryRepository() => discovery;
+
+  @override
+  FoodRepositoryFacade createFoodRepository() => food;
 }

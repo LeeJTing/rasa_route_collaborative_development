@@ -57,6 +57,10 @@ class LandmarkDetailViewModel extends BaseViewModel {
   /// new catalogue row.
   List<String> _dietaryRestrictions = const <String>[];
 
+  /// The signed-in tourist's restrictions this recognised food conflicts
+  /// with - shown as a warning on the card (adding is still allowed).
+  List<String> _dietaryConflicts = const <String>[];
+
   /// Whether the confirm button should return this food to the *existing*
   /// `AddLandmarkView` (additional-food flow) instead of pushing a fresh
   /// form (primary flow). Set from `LandmarkDraftHandoff` in the View's
@@ -72,6 +76,7 @@ class LandmarkDetailViewModel extends BaseViewModel {
   double get priceMin => _priceMin;
   double get priceMax => _priceMax;
   List<String> get dietaryRestrictions => _dietaryRestrictions;
+  List<String> get dietaryConflicts => _dietaryConflicts;
 
   void setIsLocalFood(bool value) {
     _isLocalFood = value;
@@ -88,6 +93,10 @@ class LandmarkDetailViewModel extends BaseViewModel {
 
   void setDietaryRestrictions(List<String> dietaryRestrictions) {
     _dietaryRestrictions = dietaryRestrictions;
+  }
+
+  void setDietaryRestrictionConflicts(List<String> conflicts) {
+    _dietaryConflicts = conflicts;
   }
 
   void setReturnToFormAsAdditionalFood(bool value) {
@@ -144,6 +153,7 @@ class LandmarkDetailViewModel extends BaseViewModel {
       priceMin: _priceMin,
       priceMax: _priceMax,
       dietaryRestrictions: _dietaryRestrictions,
+      dietaryConflicts: _dietaryConflicts,
     );
   }
 }

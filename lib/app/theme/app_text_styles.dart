@@ -129,6 +129,33 @@ abstract final class AppTextStyles {
     color: AppColors.textSecondary,
   );
 
+  /// Dense labels drawn over the map where the regular 11pt label will not fit.
+  static const TextStyle mapMicroLabel = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 9,
+    fontWeight: FontWeight.w500,
+    height: 1.2,
+    color: AppColors.textSecondary,
+  );
+
+  /// Small counters and badges inside compact discovery controls.
+  static const TextStyle compactBadgeLabel = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 10,
+    fontWeight: FontWeight.w500,
+    height: 1.2,
+    color: AppColors.textSecondary,
+  );
+
+  /// Text inside the compact map search and filter controls.
+  static const TextStyle compactControlLabel = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+    height: 1.2,
+    color: AppColors.textPrimary,
+  );
+
   /// [Figma] Operating-hours grid - day abbreviation (Mon/Tue/...) and the
   /// Open/Unknown/Closed checkbox labels. Deliberately much smaller than the
   /// rest of the scale - matches the mock-up's compact grid.

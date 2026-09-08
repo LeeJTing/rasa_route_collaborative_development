@@ -95,9 +95,17 @@ abstract class BaseViewModel extends ChangeNotifier {
 
   String _humanise(Object error) {
     final String raw = error.toString();
-    return raw.startsWith('Exception: ')
-        ? raw.substring('Exception: '.length)
-        : raw;
+    // Error types used for user-facing failures stringify with a technical
+    // prefix (`Exception: ...`, `Bad state: ...`). Strip it so the message a
+    // screen shows is the plain sentence, never the Dart type or a raw SDK
+    // exception dump.
+    if (raw.startsWith('Exception: ')) {
+      return raw.substring('Exception: '.length);
+    }
+    if (raw.startsWith('Bad state: ')) {
+      return raw.substring('Bad state: '.length);
+    }
+    return raw;
   }
 
   @override

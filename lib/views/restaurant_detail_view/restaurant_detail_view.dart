@@ -13,9 +13,16 @@ import 'widgets/restaurant_information_section.dart';
 import 'widgets/restaurant_menu_preview.dart';
 
 class RestaurantDetailView extends StatefulWidget {
-  const RestaurantDetailView({super.key, @visibleForTesting this.viewModel});
+  const RestaurantDetailView({super.key});
 
-  final RestaurantDetailViewModel? viewModel;
+  @protected
+  RestaurantDetailViewModel createViewModel() => RestaurantDetailViewModel();
+
+  @protected
+  int? selectedRestaurantId(BuildContext context) {
+    final Object? argument = ModalRoute.of(context)?.settings.arguments;
+    return argument is int ? argument : null;
+  }
 
   @override
   State<RestaurantDetailView> createState() => _RestaurantDetailViewState();
@@ -28,7 +35,7 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
   @override
   void initState() {
     super.initState();
-    _viewModel = widget.viewModel ?? RestaurantDetailViewModel();
+    _viewModel = widget.createViewModel();
   }
 
   @override
@@ -36,16 +43,8 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
     super.didChangeDependencies();
     if (_didLoadArguments) return;
     _didLoadArguments = true;
-    final Object? argument = ModalRoute.of(context)?.settings.arguments;
-    if (argument is int) {
-      _viewModel.loadRestaurant(argument);
-    } else if (widget.viewModel == null) {
-      _viewModel.rejectMissingRestaurantId();
-    } else {
-      // Injected ViewModels are used by isolated widget tests where there is
-      // no named route. Production navigation must always provide the ID.
-      _viewModel.loadRestaurant(1);
-    }
+    _viewModel.selectRestaurant(widget.selectedRestaurantId(context));
+    _viewModel.onInit();
   }
 
   @override
@@ -147,14 +146,32 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
         onSubmit: viewModel.submitReport,
       ),
     );
-    if (!mounted || submitted != true || !viewModel.reportSubmitted) return;
+    if (!mounted || submitted != true) return;
+    final String message;
+    if (viewModel.requiresSignIn) {
+      message =
+          'Sign in to report this place. Please sign in from the profile page and try again.';
+    } else if (viewModel.reportFailed) {
+      message = 'Sorry, your report could not be sent. Please try again.';
+    } else if (viewModel.alreadyReported) {
+      message = 'You have already reported this restaurant. Thanks for looking out!';
+    } else if (viewModel.reportSubmitted) {
+      message =
+          'Report received. Thank you for helping keep the map accurate.';
+    } else {
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Report selected for this UI preview. Backend submission is not available yet.',
-        ),
-      ),
+      SnackBar(content: Text(message)),
     );
+    final bool leavePage = viewModel.reportFrozePlace;
     viewModel.consumeReportSubmitted();
+    // A report that froze the restaurant hides it - leave the page (back to
+    // the map) so the now-hidden pin is no longer shown. The ViewModel already
+    // asked every live dashboard to drop its caches and re-read, so the map
+    // underneath is current by the time the tourist lands on it.
+    if (leavePage && mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 }

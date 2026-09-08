@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/dietary_restriction.dart';
+import 'package:rasa_route_collaborative_development/domain_model/food_distribution.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant_item.dart';
 import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
@@ -19,8 +20,8 @@ void main() {
             _restaurant(index, distanceKm: 2 + (index - 5) * 0.04),
           _restaurant(20, distanceKm: 11),
         ];
-        final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-          discoveryRepository: _FakeDiscoveryRepositoryFacade(restaurants),
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          _FakeDiscoveryRepositoryFacade(restaurants),
         );
 
         final List<Restaurant> results = await logic
@@ -43,8 +44,8 @@ void main() {
           _restaurant(3, distanceKm: 9),
           _restaurant(4, distanceKm: 11),
         ];
-        final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-          discoveryRepository: _FakeDiscoveryRepositoryFacade(restaurants),
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          _FakeDiscoveryRepositoryFacade(restaurants),
         );
 
         final List<Restaurant> results = await logic
@@ -53,6 +54,80 @@ void main() {
         expect(
           results.map((Restaurant item) => item.id),
           orderedEquals(<int>[1, 2, 3]),
+        );
+      },
+    );
+
+    test(
+      'excludes restaurants without coordinates from radius results',
+      () async {
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          _FakeDiscoveryRepositoryFacade(<Restaurant>[
+            Restaurant(
+              id: 99,
+              name: 'Unknown location',
+              category: 'Malaysian',
+              address: '',
+              phone: '',
+              website: '',
+              openingHours: const <OpeningHour>[],
+            ),
+            _restaurant(1, distanceKm: 0.5),
+          ]),
+        );
+
+        final List<Restaurant> results = await logic
+            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+
+        expect(
+          results.map((Restaurant item) => item.id),
+          orderedEquals(<int>[1]),
+        );
+      },
+    );
+
+    test(
+      'filters submitted landmarks by radius, hours and dietary associations',
+      () async {
+        final _FakeDiscoveryRepositoryFacade repository =
+            _FakeDiscoveryRepositoryFacade(
+              const <Restaurant>[],
+              restrictions: const <DietaryRestriction>[
+                DietaryRestriction(id: 9, name: 'No Coconut'),
+              ],
+              restrictionIdsByFood: const <int, List<int>>{
+                100: <int>[9],
+              },
+              occurrences: <FoodOccurrence>[
+                _landmarkOccurrence(1, 101, 'Chicken Rice', distanceKm: 0.5),
+                _landmarkOccurrence(2, 100, 'Nasi Lemak', distanceKm: 0.4),
+                _landmarkOccurrence(3, 101, 'Far Chicken Rice', distanceKm: 11),
+                _landmarkOccurrence(4, 101, 'Closed Food', distanceKm: 0.3),
+              ],
+              placeOpeningHours: const <String, List<OpeningHour>>{
+                'submittedLandmark:4': <OpeningHour>[
+                  OpeningHour(
+                    id: 4,
+                    day: Weekday.monday,
+                    status: DayStatus.closed,
+                  ),
+                ],
+              },
+            );
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          repository,
+          now: () => DateTime.utc(2026, 8, 31, 2),
+        );
+
+        final results = await logic.nearbyLandmarksWithAutomaticExpansion(
+          location: _testLocation,
+          limit: 20,
+        );
+
+        expect(results.map((item) => item.id), orderedEquals(<int>[1]));
+        expect(
+          results.single.foodNames,
+          orderedEquals(<String>['Chicken Rice']),
         );
       },
     );
@@ -67,8 +142,8 @@ void main() {
         ];
         final _FakeDiscoveryRepositoryFacade repository =
             _FakeDiscoveryRepositoryFacade(summaries);
-        final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-          discoveryRepository: repository,
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          repository,
         );
 
         final List<Restaurant> results = await logic.nearby(
@@ -113,8 +188,8 @@ void main() {
           ],
         ),
       ];
-      final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(restaurants),
+      final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+        _FakeDiscoveryRepositoryFacade(restaurants),
         now: () => DateTime.utc(2026, 8, 31, 2),
       );
 
@@ -137,10 +212,8 @@ void main() {
           OpeningHour(id: 0, day: Weekday.monday, status: DayStatus.unknown),
         ],
       );
-      final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-        discoveryRepository: _FakeDiscoveryRepositoryFacade(<Restaurant>[
-          restaurant,
-        ]),
+      final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+        _FakeDiscoveryRepositoryFacade(<Restaurant>[restaurant]),
         now: () => DateTime.utc(2026, 8, 31, 2),
       );
 
@@ -167,6 +240,7 @@ void main() {
               ],
               restrictionIdsByFood: const <int, List<int>>{
                 100: <int>[9],
+                102: <int>[9],
               },
               menuItemsByRestaurant: <int, List<RestaurantItem>>{
                 1: const <RestaurantItem>[
@@ -200,8 +274,8 @@ void main() {
                 ],
               },
             );
-        final RestaurantDiscoveryLogic logic = RestaurantDiscoveryLogic(
-          discoveryRepository: repository,
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          repository,
         );
 
         final List<Restaurant> results = await logic
@@ -217,6 +291,41 @@ void main() {
         );
       },
     );
+
+    test('does not infer dietary restrictions from ingredient text', () async {
+      final Restaurant restaurant = _restaurant(1, distanceKm: 0.2);
+      final _FakeDiscoveryRepositoryFacade repository =
+          _FakeDiscoveryRepositoryFacade(
+            <Restaurant>[restaurant],
+            restrictions: const <DietaryRestriction>[
+              DietaryRestriction(id: 9, name: 'No Shrimp/Prawn'),
+            ],
+            menuItemsByRestaurant: const <int, List<RestaurantItem>>{
+              1: <RestaurantItem>[
+                RestaurantItem(
+                  id: 10,
+                  restaurantId: 1,
+                  localFoodId: 100,
+                  foodName: 'Seafood Noodles',
+                  ingredients: 'Fresh shrimp and stock',
+                  currency: 'RM',
+                  foodCategory: 'Noodle',
+                ),
+              ],
+            },
+          );
+      final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+        repository,
+      );
+
+      final List<Restaurant> results = await logic.nearbyWithAutomaticExpansion(
+        location: _testLocation,
+        limit: 20,
+      );
+
+      expect(results, hasLength(1));
+      expect(results.single.items, hasLength(1));
+    });
   });
 }
 
@@ -225,11 +334,25 @@ const TouristLocation _testLocation = TouristLocation(
   longitude: 101,
 );
 
+class _TestRestaurantDiscoveryLogic extends RestaurantDiscoveryLogic {
+  _TestRestaurantDiscoveryLogic(this.fakeRepository, {DateTime Function()? now})
+    : now = now ?? DateTime.now;
+
+  final DiscoveryRepositoryFacade fakeRepository;
+  final DateTime Function() now;
+
+  @override
+  DiscoveryRepositoryFacade createRepository() => fakeRepository;
+
+  @override
+  DateTime currentTime() => now();
+}
+
 Restaurant _restaurant(
   int id, {
   required double distanceKm,
   List<OpeningHour> openingHours = const <OpeningHour>[],
-  String? status,
+  String status = 'available',
 }) => Restaurant(
   id: id,
   name: 'Restaurant $id',
@@ -243,18 +366,38 @@ Restaurant _restaurant(
   status: status,
 );
 
+FoodOccurrence _landmarkOccurrence(
+  int landmarkId,
+  int localFoodId,
+  String foodName, {
+  required double distanceKm,
+}) => FoodOccurrence(
+  sourceId: '$landmarkId',
+  source: FoodOccurrenceSource.submittedLandmark,
+  placeName: 'Landmark $landmarkId',
+  localFoodId: localFoodId,
+  foodName: foodName,
+  latitude: _testLocation.latitude + distanceKm / 111.2,
+  longitude: _testLocation.longitude,
+  placeCategory: 'Food stall',
+);
+
 class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   _FakeDiscoveryRepositoryFacade(
     this.restaurants, {
     this.menuItemsByRestaurant = const <int, List<RestaurantItem>>{},
     this.restrictions = const <DietaryRestriction>[],
     this.restrictionIdsByFood = const <int, List<int>>{},
+    this.occurrences = const <FoodOccurrence>[],
+    this.placeOpeningHours = const <String, List<OpeningHour>>{},
   });
 
   final List<Restaurant> restaurants;
   final Map<int, List<RestaurantItem>> menuItemsByRestaurant;
   final List<DietaryRestriction> restrictions;
   final Map<int, List<int>> restrictionIdsByFood;
+  final List<FoodOccurrence> occurrences;
+  final Map<String, List<OpeningHour>> placeOpeningHours;
   List<int> requestedRestaurantIds = const <int>[];
 
   @override
@@ -297,6 +440,13 @@ class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   @override
   Future<Map<int, List<int>>> getRestrictionIdsByFood() async =>
       restrictionIdsByFood;
+
+  @override
+  Future<List<FoodOccurrence>> foodOccurrences() async => occurrences;
+
+  @override
+  Future<Map<String, List<OpeningHour>>> openingHoursByPlace() async =>
+      placeOpeningHours;
 
   List<RestaurantItem> _itemsFor(int restaurantId) =>
       menuItemsByRestaurant[restaurantId] ??

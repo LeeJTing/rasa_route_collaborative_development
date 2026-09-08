@@ -75,6 +75,11 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
     _viewModel.setDietaryRestrictions(
       LandmarkDraftHandoff().takeDietaryRestrictions(),
     );
+    // The tourist's restrictions this food conflicts with - shown as a
+    // warning on the card (adding is still allowed).
+    _viewModel.setDietaryRestrictionConflicts(
+      LandmarkDraftHandoff().takeDietaryConflicts(),
+    );
 
     _viewModel.onInit();
   }
@@ -119,6 +124,7 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                         food: food,
                         image: viewModel.capturedImage,
                         collapsible: false,
+                        dietaryConflicts: viewModel.dietaryConflicts,
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       if (viewModel.isLocalFood &&

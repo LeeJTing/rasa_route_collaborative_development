@@ -2,7 +2,9 @@ import 'dart:developer' as developer;
 
 import '../../core/json_model.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/pronunciation_playback_result.dart';
 import '../../shared_client/api_manager/api_manager.dart';
+import '../../shared_client/device_capability_manager/device_capability_manager.dart';
 import '../data_models/food_preference_data_model.dart';
 import '../data_models/local_food_data_model.dart';
 import '../data_models/local_food_image_data_model.dart';
@@ -27,6 +29,24 @@ class FoodKnowledgeRepository {
   FoodKnowledgeRepository();
 
   final APIManager api = APIManager();
+  final DeviceCapabilityManager deviceCapabilities = DeviceCapabilityManager();
+
+  Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) async {
+    final DevicePronunciationPlaybackResult result = await deviceCapabilities
+        .playPronunciation(
+          foodName: food.name,
+          audioUrl: food.audioGuideUrl,
+          fallbackText: food.pronunciationText,
+        );
+    return switch (result) {
+      DevicePronunciationPlaybackResult.curatedAudio =>
+        PronunciationPlaybackResult.curatedAudio,
+      DevicePronunciationPlaybackResult.deviceVoice =>
+        PronunciationPlaybackResult.deviceVoice,
+      DevicePronunciationPlaybackResult.unavailable =>
+        PronunciationPlaybackResult.unavailable,
+    };
+  }
 
   // ---------------------------------------------------------------------------
   // Catalogue cache
@@ -265,14 +285,9 @@ class FoodKnowledgeRepository {
     }
   }
 
-  Future<void> toggleFavourite(int localFoodId) async {
-    // ====== Auth/Profile (ChinShunYon): FIX - resolve the real tourist_id ======
-    // The original code gated on `api.currentUserId` (the auth user id) and
-    // wrote that same id into `favourite_food.tourist_id`. RLS policy 6 keys
-    // on `tourist.tourist_id`, so those writes were silently rejected and the
-    // profile module could never see the rows. Resolve the real id first.
+  /// Toggles one favourite and returns the state confirmed by the database.
+  Future<bool> toggleFavourite(int localFoodId) async {
     final String touristId = await api.resolveCurrentTouristId();
-    // ====== End of Auth/Profile (ChinShunYon) ======
     if (touristId.isEmpty) {
       throw Exception('Sign in to save local food to your favourites.');
     }
@@ -283,27 +298,23 @@ class FoodKnowledgeRepository {
         await api.deleteRows(
           APIManager.tableFavouriteFood,
           eq: <String, Object?>{
-            // 'tourist_id': api.currentUserId, // ORIGINAL (food module) -
-            //   the auth user id, not tourist.tourist_id; RLS policy 6
-            //   rejected it. Kept for record.
-            'tourist_id': touristId, // FIX (ChinShunYon): real tourist_id
+            'tourist_id': touristId,
             'local_food_id': localFoodId,
           },
         );
+        invalidate();
+        return false;
       } else {
         await api.insertRow(APIManager.tableFavouriteFood, <String, dynamic>{
-          // 'tourist_id': api.currentUserId, // ORIGINAL (food module) -
-          //   same wrong id as above. Kept for record.
-          'tourist_id': touristId, // FIX (ChinShunYon): real tourist_id
+          'tourist_id': touristId,
           'local_food_id': localFoodId,
         });
+        invalidate();
+        return true;
       }
     } catch (_) {
       throw Exception('Unable to update favourites. Please try again.');
     }
-
-    // The cached catalogue carries `isFavourite`, so it is now wrong.
-    invalidate();
   }
 
   /// The signed-in tourist's favourited food ids (`favourite_food`), or an
@@ -426,7 +437,7 @@ class FoodKnowledgeRepository {
       mainTaste: mainTaste,
       pronunciationText: food.pronunciationText ?? '',
       audioGuideUrl: food.audioGuideUrl,
-      synonyms: JsonReader.asStringList(food.synonyms),
+      synonyms: _splitValues(food.synonyms ?? ''),
       imageUrls: _resolveImageUrls(
         images
             .map((LocalFoodImageDataModel image) => image.imageName)

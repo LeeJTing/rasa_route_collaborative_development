@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
@@ -8,24 +9,35 @@ import '../../app/theme/app_dimensions.dart';
 /// options. Tapping it toggles selection, which is drawn with a green border
 /// and a white box.
 ///
-/// Used by `EditFoodPreferenceView` and `EditDietaryRestrictionView`, so it
-/// lives in `common_widgets/` rather than a view's private `widgets/` folder.
+/// Used by `EditFoodPreferenceView`, `EditDietaryRestrictionView` and
+/// `ProfileSetUpView`, so it lives in `common_widgets/` rather than a view's
+/// private `widgets/` folder.
 ///
-/// NOTE: the option images are not added yet - the box shows a placeholder
-/// icon until the real images (one per option) exist. Swap the icon for the
-/// image once available.
+/// [iconAsset] (from `PreferenceIcons`) shows the per-option icon SVG, tinted
+/// to the selection colour; when null the [icon] Material glyph is used as a
+/// generic placeholder.
 class PreferenceOptionCard extends StatelessWidget {
   const PreferenceOptionCard({
     super.key,
     required this.label,
     required this.isSelected,
     required this.onTap,
+    this.icon = Icons.local_dining,
+    this.iconAsset,
     this.maxLabelLines = 2,
   });
 
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
+
+  /// Material icon shown when [iconAsset] is null. Defaults to the generic
+  /// food placeholder.
+  final IconData icon;
+
+  /// Bundled SVG asset for this option (see `PreferenceIcons`), tinted to the
+  /// selection colour. Null renders [icon] instead.
+  final String? iconAsset;
 
   /// How many lines the label may take before it is ellipsised. The dietary
   /// "Chosen on top" Wrap passes 1 so a long restriction name truncates to a
@@ -59,11 +71,27 @@ class PreferenceOptionCard extends StatelessWidget {
                   width: AppSizes.borderWidthStrong,
                 ),
               ),
-              child: Icon(
-                Icons.local_dining,
-                size: AppSizes.profileOptionIcon,
-                color: isSelected ? AppColors.success : AppColors.textSecondary,
-              ),
+              child: iconAsset != null
+                  ? SizedBox(
+                      width: AppSizes.profileOptionIcon,
+                      height: AppSizes.profileOptionIcon,
+                      child: SvgPicture.asset(
+                        iconAsset!,
+                        colorFilter: ColorFilter.mode(
+                          isSelected
+                              ? AppColors.success
+                              : AppColors.textSecondary,
+                          BlendMode.srcIn,
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      icon,
+                      size: AppSizes.profileOptionIcon,
+                      color: isSelected
+                          ? AppColors.success
+                          : AppColors.textSecondary,
+                    ),
             ),
             const SizedBox(height: AppSpacing.sm),
             // Long names (e.g. "No Coriander/Cilantro") wrap onto two lines

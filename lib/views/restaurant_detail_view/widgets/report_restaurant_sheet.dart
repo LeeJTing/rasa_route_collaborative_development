@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/theme/app_dimensions.dart';
-import '../../../view_models/restaurant_detail_view_model.dart';
+import '../../../domain_model/restaurant_report_reason.dart';
 
 class ReportRestaurantSheet extends StatefulWidget {
   const ReportRestaurantSheet({

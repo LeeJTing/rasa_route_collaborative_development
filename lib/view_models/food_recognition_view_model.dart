@@ -1,5 +1,5 @@
 import 'package:image_picker/image_picker.dart';
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../app/routing/app_navigator.dart';
 import '../app/routing/app_routes.dart';
@@ -103,6 +103,11 @@ class LandmarkDraftHandoff {
   /// `LocalFood`.
   List<String> pendingDietaryRestrictions = const <String>[];
 
+  /// The signed-in tourist's dietary restrictions that [pendingRecognizedFood]
+  /// conflicts with - carried so the "Add New Landmark" form keeps warning
+  /// (adding is still allowed) until the food is submitted.
+  List<String> pendingDietaryConflicts = const <String>[];
+
   LocalFood? takeRecognizedFood() {
     final LocalFood? value = pendingRecognizedFood;
     pendingRecognizedFood = null;
@@ -164,6 +169,12 @@ class LandmarkDraftHandoff {
     return value;
   }
 
+  List<String> takeDietaryConflicts() {
+    final List<String> value = pendingDietaryConflicts;
+    pendingDietaryConflicts = const <String>[];
+    return value;
+  }
+
   /// Stashes [food] and [image] for the food-detail screen
   /// (`LandmarkDetailView`, at `AppRoutes.landmarkDetail`) and
   /// navigates there - the one shared implementation of "go view details
@@ -184,6 +195,7 @@ class LandmarkDraftHandoff {
     double priceMax = 0,
     double confidence = 0,
     List<String> dietaryRestrictions = const <String>[],
+    List<String> dietaryConflicts = const <String>[],
   }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
@@ -192,6 +204,7 @@ class LandmarkDraftHandoff {
     pendingPriceMin = priceMin;
     pendingPriceMax = priceMax;
     pendingDietaryRestrictions = dietaryRestrictions;
+    pendingDietaryConflicts = dietaryConflicts;
     // Only overwrite when a real confidence is passed - a later re-push
     // without one (e.g. from the detail screen) must keep the value set here.
     if (confidence > 0) pendingConfidence = confidence;
@@ -212,6 +225,7 @@ class LandmarkDraftHandoff {
     double priceMax = 0,
     double confidence = 0,
     List<String> dietaryRestrictions = const <String>[],
+    List<String> dietaryConflicts = const <String>[],
   }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
@@ -220,6 +234,7 @@ class LandmarkDraftHandoff {
     pendingPriceMin = priceMin;
     pendingPriceMax = priceMax;
     pendingDietaryRestrictions = dietaryRestrictions;
+    pendingDietaryConflicts = dietaryConflicts;
     // Only overwrite when a real confidence is passed - see pushLandmarkDetail.
     if (confidence > 0) pendingConfidence = confidence;
     AppNavigator.push(AppRoutes.addLandmark);
@@ -239,6 +254,7 @@ class LandmarkDraftHandoff {
     pendingPriceMax = 0;
     pendingConfidence = 0;
     pendingDietaryRestrictions = const <String>[];
+    pendingDietaryConflicts = const <String>[];
   }
 }
 
@@ -291,12 +307,12 @@ typedef AdditionalFoodCaptureResult = ({
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
 class FoodRecognitionViewModel extends BaseViewModel {
-  FoodRecognitionViewModel({
-    @visibleForTesting LandmarkLogicFacade? landmarkLogic,
-    @visibleForTesting this.minimumLoadingDuration = const Duration(seconds: 3),
-  }) : landmarkLogic = landmarkLogic ?? LandmarkLogicFacade();
+  FoodRecognitionViewModel();
 
-  final LandmarkLogicFacade landmarkLogic;
+  @protected
+  LandmarkLogicFacade createLandmarkLogic() => LandmarkLogicFacade();
+
+  late final LandmarkLogicFacade landmarkLogic = createLandmarkLogic();
 
   /// How long the "Analysing image..." loading state must stay up at minimum
   /// after a capture / manual name entry / picker enrichment starts. Gemini
@@ -304,8 +320,8 @@ class FoodRecognitionViewModel extends BaseViewModel {
   /// recognised-food card (and the "View Details" data carried with it) is
   /// never shown while the result is still settling. `Duration.zero` in
   /// tests, so they don't each wait out the floor.
-  @visibleForTesting
-  final Duration minimumLoadingDuration;
+  @protected
+  Duration get minimumLoadingDuration => const Duration(seconds: 3);
 
   // --- MODE ---
   FoodRecognitionPurpose _purpose = FoodRecognitionPurpose.food;
@@ -346,6 +362,15 @@ class FoodRecognitionViewModel extends BaseViewModel {
   /// new catalogue row - NOT on `LocalFood` (dietary is an association).
   List<String> _dietaryRestrictions = const <String>[];
 
+  /// Dietary restriction names (e.g. "No Pork") the signed-in tourist holds
+  /// (`user_dietary_restriction`) - loaded once on init so a recognised dish
+  /// that conflicts can warn on the result card (adding is still allowed).
+  List<String> _userDietaryRestrictions = const <String>[];
+
+  /// Of [_userDietaryRestrictions], the ones the recognised food conflicts
+  /// with (matched against [_dietaryRestrictions]).
+  List<String> _dietaryConflicts = const <String>[];
+
   /// Gemini's confidence (0..1) in the recognised food - surfaced in the UI
   /// so a shaky result is never presented as certain. For manual name entry
   /// this is the name-vs-photo verification confidence, so a name Gemini
@@ -383,6 +408,14 @@ class FoodRecognitionViewModel extends BaseViewModel {
   double get priceMin => _priceMin;
   double get priceMax => _priceMax;
   List<String> get dietaryRestrictions => _dietaryRestrictions;
+
+  /// Whether the recognised food conflicts with the signed-in tourist's
+  /// dietary restrictions - the result card shows a warning (adding is still
+  /// allowed).
+  bool get hasDietaryConflict => _dietaryConflicts.isNotEmpty;
+
+  /// The user's restriction names this food conflicts with (their wording).
+  List<String> get dietaryConflicts => _dietaryConflicts;
   double get confidence => _confidence;
   bool get nameMismatch => _nameMismatch;
   String? get observedFoodName => _observedFoodName;
@@ -407,6 +440,25 @@ class FoodRecognitionViewModel extends BaseViewModel {
     if (remaining > Duration.zero) {
       await Future<void>.delayed(remaining);
     }
+  }
+
+  /// Loads the signed-in tourist's dietary restrictions once, so
+  /// [hasDietaryConflict] can warn as soon as a dish is recognised. Failures
+  /// degrade to "no restrictions" (no warning) rather than blocking capture.
+  @override
+  Future<void> onInit() async {
+    _userDietaryRestrictions = await landmarkLogic.userDietaryRestrictions();
+    _recomputeDietaryConflicts();
+    safeNotifyListeners();
+  }
+
+  /// Re-derives [_dietaryConflicts] from the current food tags and the user's
+  /// saved restrictions - call whenever either side changes.
+  void _recomputeDietaryConflicts() {
+    _dietaryConflicts = landmarkLogic.dietaryConflicts(
+      userRestrictions: _userDietaryRestrictions,
+      foodTags: _dietaryRestrictions,
+    );
   }
 
   /// REQ106_1 - ask for the OS camera permission before the View opens the
@@ -443,6 +495,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
       _priceMax = result.priceMax;
       _confidence = result.confidence;
       _dietaryRestrictions = result.dietaryRestrictions;
+      _recomputeDietaryConflicts();
       if (result.candidates.length > 1) {
         // Gemini was unsure between a few likely dishes (A5) - show the
         // top-3 picker instead of a single result.
@@ -503,6 +556,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
       _priceMin = resolved.priceMin;
       _priceMax = resolved.priceMax;
       _dietaryRestrictions = resolved.dietaryRestrictions;
+      _recomputeDietaryConflicts();
       _fitsCatalogueCategory = resolved.fitsCatalogueCategory;
       await _holdLoadingUntil(startedAt);
       notifyListeners();
@@ -549,6 +603,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
           _fitsCatalogueCategory = resolved.fitsCatalogueCategory;
           _confidence = resolved.matchConfidence;
           _dietaryRestrictions = resolved.dietaryRestrictions;
+          _recomputeDietaryConflicts();
           _nameMismatch = false;
           _observedFoodName = null;
           _typedName = null;
@@ -593,6 +648,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
       priceMax: _priceMax,
       confidence: _confidence,
       dietaryRestrictions: _dietaryRestrictions,
+      dietaryConflicts: _dietaryConflicts,
     );
   }
 
@@ -618,6 +674,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
       priceMax: _priceMax,
       confidence: _confidence,
       dietaryRestrictions: _dietaryRestrictions,
+      dietaryConflicts: _dietaryConflicts,
     );
   }
 
@@ -665,6 +722,7 @@ class FoodRecognitionViewModel extends BaseViewModel {
     _priceMin = 0;
     _priceMax = 0;
     _dietaryRestrictions = const <String>[];
+    _dietaryConflicts = const <String>[];
     _nameMismatch = false;
     _observedFoodName = null;
     _typedName = null;

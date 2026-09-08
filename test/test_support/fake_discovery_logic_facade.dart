@@ -2,6 +2,7 @@ import 'package:rasa_route_collaborative_development/domain_model/local_food.dar
 import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant_item.dart';
+import 'package:rasa_route_collaborative_development/domain_model/restaurant_report_reason.dart';
 import 'package:rasa_route_collaborative_development/domain_model/swipe_session.dart';
 import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/discovery_logic_facade.dart';
@@ -139,6 +140,42 @@ class FakeDiscoveryLogicFacade extends DiscoveryLogicFacade {
   final List<Restaurant> restaurants;
   final Restaurant? restaurant;
   final MatchesRecommendationResult matchesResult;
+
+  /// Report-flow knobs - lets detail-VM tests exercise every outcome without
+  /// touching a network.
+  bool duplicateReport = false;
+  bool failReport = false;
+  bool requireSignIn = false;
+  bool frozePlace = false;
+
+  @override
+  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
+      submitRestaurantReport({
+    required int restaurantId,
+    required RestaurantReportReason reason,
+    String? touristId,
+  }) async {
+    if (failReport) throw Exception('Could not reach the report service.');
+    if (requireSignIn) {
+      return (
+        requiresSignIn: true,
+        alreadyReported: false,
+        frozePlace: false,
+      );
+    }
+    if (frozePlace) {
+      return (
+        requiresSignIn: false,
+        alreadyReported: false,
+        frozePlace: true,
+      );
+    }
+    return (
+      requiresSignIn: false,
+      alreadyReported: duplicateReport,
+      frozePlace: false,
+    );
+  }
 
   @override
   Future<List<Restaurant>> getNearbyRestaurants({

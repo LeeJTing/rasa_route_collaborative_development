@@ -6,6 +6,7 @@ import '../../app/theme/app_dimensions.dart';
 import '../../app/routing/app_routes.dart';
 import '../../core/view_state.dart';
 import '../../view_models/login_register_view_model.dart';
+import '../common_widgets/scrollable_centered_body.dart';
 import 'widgets/auth_text_field.dart';
 
 /// Sign in screen.
@@ -52,8 +53,9 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
   }
 
   /// Once the entry session check has finished and a session exists, skip the
-  /// form and open the shell (clearing the stack). Guarded so this only fires
-  /// once per screen life.
+  /// form and open the shell (clearing the stack). A brand-new tourist whose
+  /// profile is still empty is routed to the C3 set-up screen first. Guarded
+  /// so this only fires once per screen life.
   void _onSessionChecked() {
     if (_navigatedToShell ||
         _viewModel.checkingSession ||
@@ -65,7 +67,9 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
       if (!mounted) return;
       Navigator.pushNamedAndRemoveUntil(
         context,
-        AppRoutes.mainShell,
+        _viewModel.needsProfileSetup
+            ? AppRoutes.profileSetUp
+            : AppRoutes.mainShell,
         (Route<dynamic> _) => false,
       );
     });
@@ -101,14 +105,17 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
   }
 
   /// Finishes a Google sign-in after the browser returns. On success, clears
-  /// the stack and lands on the shell (same as the OTP path).
+  /// the stack and lands on the shell (same as the OTP path) - or on the C3
+  /// profile set-up screen when the tourist's profile is still empty.
   Future<void> _completeGoogleSignIn() async {
     await _viewModel.completeGoogleSignIn();
     if (!mounted) return;
     if (_viewModel.googleSignInComplete) {
       Navigator.pushNamedAndRemoveUntil(
         context,
-        AppRoutes.mainShell,
+        _viewModel.needsProfileSetup
+            ? AppRoutes.profileSetUp
+            : AppRoutes.mainShell,
         (Route<dynamic> _) => false,
       );
     } else if (_viewModel.hasError) {
@@ -141,11 +148,12 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
                   if (viewModel.checkingSession) {
                     return const _SessionCheckSplash();
                   }
-                  return Padding(
-                    padding: AppSpacing.screenPadding,
+                  // Keyboard-safe body: centred when there is room, scrollable
+                  // when the keyboard + an inline error leave too little.
+                  return ScrollableCenteredBody(
                     child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: <Widget>[
-                        const Spacer(flex: AppLayoutRatios.authTopSpacerFlex),
                         CircleAvatar(
                           radius: AppSizes.authAvatarRadius,
                           backgroundColor: Theme.of(
@@ -166,7 +174,7 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
                                 fontWeight: FontWeight.w700,
                               ),
                         ),
-                        const Spacer(flex: AppLayoutRatios.authTopSpacerFlex),
+                        const SizedBox(height: AppSpacing.xxl),
                         Align(
                           alignment: Alignment.centerLeft,
                           child: Row(
@@ -257,9 +265,9 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
                             ),
                           ),
                         ),
-                        const Spacer(
-                          flex: AppLayoutRatios.authBottomSpacerFlex,
-                        ),
+                        // Breathing room below the last control so it is never
+                        // flush against the bottom edge while scrolled.
+                        const SizedBox(height: AppSpacing.xxl),
                       ],
                     ),
                   );

@@ -57,6 +57,61 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   bool _isCameraInitializing = true;
   String? _cameraError;
 
+  /// The cameras this device/browser exposes, from `availableCameras()` - kept
+  /// so the tourist can flip between front/back when more than one exists
+  /// (REQ106_1). `cameras.first` is NOT trustworthy: browsers often enumerate
+  /// the front (user) camera first, which is useless for photographing food.
+  List<CameraDescription> _cameras = const <CameraDescription>[];
+
+  /// Index into [_cameras] that [_cameraController] was opened with - the flip
+  /// button advances it (wrapping) and re-opens the camera.
+  int _activeCameraIndex = 0;
+
+  /// Live digital-zoom factor (1.0 = no zoom). Applied to BOTH the on-screen
+  /// preview (a scale on the live feed) and the captured crop (the framed
+  /// region shrinks by 1/zoom), so what the tourist frames while zoomed is
+  /// exactly what reaches Gemini. This is a crop on the captured photo rather
+  /// than the camera plugin's native zoom, because the web build the tourist
+  /// tests on does not support `setZoomLevel`.
+  double _zoom = 1.0;
+
+  static const double _minZoom = 1.0;
+  static const double _maxZoom = 4.0;
+
+  /// The zoom level when the current pinch gesture started - so the pinch
+  /// adjusts relative to it rather than jittering from wherever it was.
+  double _zoomAtPinchStart = 1.0;
+
+  void _zoomBy(double delta) {
+    final double next = _zoom.clamp(_minZoom, _maxZoom) + delta;
+    final double clamped = next.clamp(_minZoom, _maxZoom).toDouble();
+    if (clamped == _zoom) return;
+    setState(() {
+      _zoom = clamped;
+    });
+  }
+
+  void _resetZoom() {
+    if (_zoom == _minZoom) return;
+    setState(() {
+      _zoom = _minZoom;
+    });
+  }
+
+  void _onZoomScaleStart(ScaleStartDetails details) {
+    _zoomAtPinchStart = _zoom;
+  }
+
+  void _onZoomScaleUpdate(ScaleUpdateDetails details) {
+    final double next = (_zoomAtPinchStart * details.scale)
+        .clamp(_minZoom, _maxZoom)
+        .toDouble();
+    if (next == _zoom) return;
+    setState(() {
+      _zoom = next;
+    });
+  }
+
   /// The size of the camera viewfinder area, captured during layout - the
   /// frame guide is drawn against this, and `_cropToFrame` needs it to map
   /// the guide rectangle into the captured photo's pixel space.
@@ -112,21 +167,18 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
         return;
       }
 
-      final CameraController controller = CameraController(
-        cameras.first,
-        ResolutionPreset.high,
-        enableAudio: false, // Stills only - no microphone permission needed.
+      _cameras = cameras;
+      // Food photography needs the rear/environment lens, but browsers often
+      // enumerate the front (user) camera first - so prefer back/external
+      // instead of blindly taking `cameras.first`. The flip button then lets
+      // the tourist move between them.
+      final int rear = cameras.indexWhere(
+        (CameraDescription c) =>
+            c.lensDirection == CameraLensDirection.back ||
+            c.lensDirection == CameraLensDirection.external,
       );
-      await controller.initialize();
-
-      if (!mounted) {
-        await controller.dispose();
-        return;
-      }
-      setState(() {
-        _cameraController = controller;
-        _isCameraInitializing = false;
-      });
+      _activeCameraIndex = rear < 0 ? 0 : rear;
+      await _openCamera(cameras[_activeCameraIndex]);
     } on CameraException {
       if (mounted) {
         setState(() {
@@ -137,6 +189,69 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
       }
     }
   }
+
+  /// Initialises [camera] into [_cameraController]. Shared by [_initCamera]
+  /// and [_switchCamera] so flipping never duplicates the error handling.
+  Future<void> _openCamera(CameraDescription camera) async {
+    final CameraController controller = CameraController(
+      camera,
+      ResolutionPreset.high,
+      enableAudio: false, // Stills only - no microphone permission needed.
+    );
+    try {
+      await controller.initialize();
+    } on CameraException {
+      if (mounted) {
+        setState(() {
+          _cameraError =
+              'Unable to access the camera. Check camera permission in Settings.';
+          _isCameraInitializing = false;
+        });
+      }
+      return;
+    }
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+    setState(() {
+      _cameraController = controller;
+      _isCameraInitializing = false;
+    });
+  }
+
+  /// Flips between the front/back cameras when the device exposes more than
+  /// one (REQ106_1). The camera plugin has no "switch lens" call, so a flip is
+  /// a release of the current controller and a re-open of the next one.
+  Future<void> _switchCamera() async {
+    if (_cameras.length < 2) return;
+    final CameraController? old = _cameraController;
+    if (!mounted) return;
+    setState(() {
+      _isCameraInitializing = true;
+      // A different lens has a different field of view - start it un-zoomed.
+      _zoom = _minZoom;
+    });
+    await old?.dispose();
+    _cameraController = null;
+    _activeCameraIndex = (_activeCameraIndex + 1) % _cameras.length;
+    await _openCamera(_cameras[_activeCameraIndex]);
+  }
+
+  /// Whether the flip (front/back) button should show: only when more than
+  /// one camera exists AND the current one is actually live (not while
+  /// initialising, not on an error screen).
+  bool get _canFlipCamera =>
+      _cameras.length > 1 &&
+      _cameraController != null &&
+      _cameraController!.value.isInitialized;
+
+  /// Whether pinch/button zoom is available: the live camera is up (no
+  /// initialising spinner, no error screen, no frozen shot behind a popup).
+  bool get _canZoom =>
+      _cameraController != null &&
+      _cameraController!.value.isInitialized &&
+      _cameraError == null;
 
   // The camera plugin no longer manages lifecycle transitions itself (as of
   // v0.5.0) - the app is responsible for releasing/reacquiring the camera.
@@ -182,6 +297,7 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
     final XFile framed = await _cropToFrame(
       image,
       _frameFactorsFor(viewModel.purpose),
+      zoom: _zoom,
     );
 
     switch (viewModel.purpose) {
@@ -205,8 +321,9 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   /// Gemini reports it as `partially_captured`.
   Future<XFile> _cropToFrame(
     XFile image,
-    ({double width, double height}) factors,
-  ) async {
+    ({double width, double height}) factors, {
+    double zoom = 1.0,
+  }) async {
     final Uint8List bytes = await image.readAsBytes();
     final ui.Codec codec = await ui.instantiateImageCodec(bytes);
     final ui.FrameInfo frame = await codec.getNextFrame();
@@ -228,11 +345,16 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
     final double ox = (vf.width - wp * scale) / 2;
     final double oy = (vf.height - hp * scale) / 2;
 
-    // Guide rect in viewfinder coords (centred).
-    final double gx0 = vf.width * (1 - factors.width) / 2;
-    final double gx1 = vf.width * (1 + factors.width) / 2;
-    final double gy0 = vf.height * (1 - factors.height) / 2;
-    final double gy1 = vf.height * (1 + factors.height) / 2;
+    // Guide rect in viewfinder coords (centred). Digital zoom shrinks the
+    // effective guide: 1x captures the whole base frame guide; 2x captures
+    // the central half of it (which is what the zoomed preview shows under
+    // the same on-screen guide) - so the shot matches the framing.
+    final double effectiveWidth = (factors.width / zoom).clamp(0.0, 1.0);
+    final double effectiveHeight = (factors.height / zoom).clamp(0.0, 1.0);
+    final double gx0 = vf.width * (1 - effectiveWidth) / 2;
+    final double gx1 = vf.width * (1 + effectiveWidth) / 2;
+    final double gy0 = vf.height * (1 - effectiveHeight) / 2;
+    final double gy1 = vf.height * (1 + effectiveHeight) / 2;
 
     // Viewfinder -> preview coords.
     final double px0 = (gx0 - ox) / scale;
@@ -370,6 +492,7 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           nameMismatch: viewModel.nameMismatch,
           observedFoodName: viewModel.observedFoodName,
           typedName: viewModel.typedName,
+          dietaryConflicts: viewModel.dietaryConflicts,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
           onViewDetails: viewModel.proceedToViewDetails,
           // Non-addable (not local, or a Malaysian snack/package): details +
@@ -399,6 +522,7 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           nameMismatch: viewModel.nameMismatch,
           observedFoodName: viewModel.observedFoodName,
           typedName: viewModel.typedName,
+          dietaryConflicts: viewModel.dietaryConflicts,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
           // Same "View Details" as the primary capture; the detail screen's
           // confirm then returns this food to the existing form (see
@@ -480,17 +604,47 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
                                   // against, so `_cropToFrame` can map the guide
                                   // into the captured photo.
                                   _viewfinderSize = constraints.biggest;
-                                  return _CameraViewfinder(
-                                    controller: _cameraController,
-                                    isInitializing: _isCameraInitializing,
-                                    error: _cameraError,
-                                    instruction: _instructionFor(
-                                      viewModel.purpose,
+                                  // Pinch to zoom in/out on the live feed;
+                                  // double-tap resets to 1x. Buttons (in the
+                                  // capture bar) do the same for pointer
+                                  // devices without touch.
+                                  return GestureDetector(
+                                    onScaleStart: _onZoomScaleStart,
+                                    onScaleUpdate: _onZoomScaleUpdate,
+                                    onDoubleTap: _resetZoom,
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: <Widget>[
+                                        _CameraViewfinder(
+                                          controller: _cameraController,
+                                          isInitializing: _isCameraInitializing,
+                                          error: _cameraError,
+                                          instruction: _instructionFor(
+                                            viewModel.purpose,
+                                          ),
+                                          frameFactors: _frameFactorsFor(
+                                            viewModel.purpose,
+                                          ),
+                                          frozenImage: viewModel.capturedImage,
+                                          zoom: _zoom,
+                                        ),
+                                        // Front/back flip - only when the
+                                        // device exposes more than one camera
+                                        // and the current one is live
+                                        // (REQ106_1). Bottom-right keeps it
+                                        // clear of the instruction pill at
+                                        // the top and of every purpose's
+                                        // frame guide.
+                                        if (_canFlipCamera)
+                                          Positioned(
+                                            bottom: AppSpacing.md,
+                                            right: AppSpacing.md,
+                                            child: _CameraFlipButton(
+                                              onFlip: _switchCamera,
+                                            ),
+                                          ),
+                                      ],
                                     ),
-                                    frameFactors: _frameFactorsFor(
-                                      viewModel.purpose,
-                                    ),
-                                    frozenImage: viewModel.capturedImage,
                                   );
                                 },
                           ),
@@ -499,6 +653,12 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
                           onCapture: cameraReady
                               ? () => _capture(viewModel)
                               : null,
+                          // Zoom in/out buttons - active only while the live
+                          // camera is up (the frozen shot behind the popup
+                          // can't be zoomed further).
+                          zoom: _canZoom ? _zoom : null,
+                          onZoomIn: _canZoom ? () => _zoomBy(0.5) : null,
+                          onZoomOut: _canZoom ? () => _zoomBy(-0.5) : null,
                         ),
                       ],
                     ),
@@ -532,12 +692,20 @@ class _CameraViewfinder extends StatelessWidget {
     required this.instruction,
     required this.frameFactors,
     required this.frozenImage,
+    this.zoom = 1.0,
   });
 
   final CameraController? controller;
   final bool isInitializing;
   final String? error;
   final String instruction;
+
+  /// Live digital-zoom factor (1.0 = no zoom) - scales the live feed about
+  /// its centre so the tourist sees the closer view before capturing. The
+  /// frame guide overlay is NOT scaled: it stays at its normal screen size,
+  /// which under zoom corresponds to a smaller central region of the photo -
+  /// exactly the region `FoodRecognitionView._cropToFrame` captures.
+  final double zoom;
 
   /// Width/height of the frame guide, as a fraction of this viewfinder's
   /// own size - see `FoodRecognitionView._frameFactorsFor`, which picks the
@@ -554,14 +722,14 @@ class _CameraViewfinder extends StatelessWidget {
   Widget build(BuildContext context) {
     if (frozenImage != null) {
       return ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: _FrozenImage(image: frozenImage!),
       );
     }
 
     if (error != null) {
       return ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: Center(
           child: Padding(
             padding: AppSpacing.screenPadding,
@@ -580,7 +748,7 @@ class _CameraViewfinder extends StatelessWidget {
     final CameraController? camera = controller;
     if (isInitializing || camera == null || !camera.value.isInitialized) {
       return const ColoredBox(
-        color: Colors.black,
+        color: AppColors.cameraBackground,
         child: Center(
           child: CircularProgressIndicator(color: AppColors.primary),
         ),
@@ -588,7 +756,7 @@ class _CameraViewfinder extends StatelessWidget {
     }
 
     return ColoredBox(
-      color: Colors.black,
+      color: AppColors.cameraBackground,
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
@@ -603,12 +771,16 @@ class _CameraViewfinder extends StatelessWidget {
               final Size previewSize =
                   camera.value.previewSize ?? const Size(1, 1);
               return ClipRect(
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: previewSize.height,
-                    height: previewSize.width,
-                    child: CameraPreview(camera),
+                child: Transform.scale(
+                  scale: zoom,
+                  alignment: Alignment.center,
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: previewSize.height,
+                      height: previewSize.width,
+                      child: CameraPreview(camera),
+                    ),
                   ),
                 ),
               );
@@ -685,21 +857,100 @@ class _FrozenImage extends StatelessWidget {
   }
 }
 
-/// Dedicated control area below the viewfinder, holding the shutter button.
-/// Kept separate from [_CameraViewfinder] so the button never overlaps the
+/// Dedicated control area below the viewfinder, holding the shutter button
+/// (and, while the live camera is up, the zoom in/out buttons flanking it).
+/// Kept separate from [_CameraViewfinder] so the controls never overlap the
 /// live feed.
 class _CaptureControlBar extends StatelessWidget {
-  const _CaptureControlBar({required this.onCapture});
+  const _CaptureControlBar({
+    required this.onCapture,
+    this.zoom,
+    this.onZoomIn,
+    this.onZoomOut,
+  });
 
   final VoidCallback? onCapture;
 
+  /// Current zoom factor (non-null while zoom controls are active).
+  final double? zoom;
+  final VoidCallback? onZoomIn;
+  final VoidCallback? onZoomOut;
+
   @override
   Widget build(BuildContext context) {
+    final bool canZoom = zoom != null && onZoomIn != null && onZoomOut != null;
     return ColoredBox(
-      color: Colors.black,
+      color: AppColors.cameraBackground,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
-        child: Center(child: _CaptureButton(onTap: onCapture)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                if (canZoom) ...<Widget>[
+                  _ZoomButton(
+                    icon: Icons.zoom_out,
+                    label: 'Zoom out',
+                    onTap: onZoomOut,
+                  ),
+                ],
+                const SizedBox(width: AppSpacing.xl),
+                _CaptureButton(onTap: onCapture),
+                const SizedBox(width: AppSpacing.xl),
+                if (canZoom) ...<Widget>[
+                  _ZoomButton(
+                    icon: Icons.zoom_in,
+                    label: 'Zoom in',
+                    onTap: onZoomIn,
+                  ),
+                ],
+              ],
+            ),
+            if (canZoom)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.xs),
+                child: Text(
+                  '${zoom!.toStringAsFixed(1)}x',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.onPrimary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Small circular zoom in/out button flanking the shutter - an alternative to
+/// pinch for pointer devices, and the only zoom affordance on desktop web.
+class _ZoomButton extends StatelessWidget {
+  const _ZoomButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: AppColors.scrim,
+        shape: const CircleBorder(),
+        child: IconButton(
+          tooltip: label,
+          icon: Icon(icon, color: AppColors.onPrimary),
+          onPressed: onTap,
+        ),
       ),
     );
   }
@@ -736,6 +987,35 @@ class _CaptureButton extends StatelessWidget {
             ),
             child: const Icon(Icons.camera_alt, color: AppColors.onPrimary),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small circular control overlaid at the bottom-right of the live
+/// viewfinder - flips between the front and back cameras when more than one is
+/// available (REQ106_1). Hidden while the camera is initialising or errored.
+class _CameraFlipButton extends StatelessWidget {
+  const _CameraFlipButton({required this.onFlip});
+
+  final VoidCallback onFlip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Switch camera',
+      child: Material(
+        color: AppColors.scrim,
+        shape: const CircleBorder(),
+        child: IconButton(
+          tooltip: 'Switch camera',
+          icon: const Icon(
+            Icons.flip_camera_android,
+            color: AppColors.onPrimary,
+          ),
+          onPressed: onFlip,
         ),
       ),
     );
