@@ -8,9 +8,19 @@ import '../../../app/theme/app_dimensions.dart';
 ///
 /// Mirrors the mock-up's cards: white surface, warm border, rounded corners.
 class ProfileEmailCard extends StatelessWidget {
-  const ProfileEmailCard({super.key, required this.email});
+  const ProfileEmailCard({
+    super.key,
+    required this.email,
+    this.isLoading = false,
+  });
 
   final String email;
+
+  /// True while the tourist's profile is still being fetched on first open.
+  /// While loading the trailing slot shows a small progress indicator instead
+  /// of the email, so a profile that is about to show a real address never
+  /// flashes the misleading "Not signed in" fallback for a moment.
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -32,21 +42,30 @@ class ProfileEmailCard extends StatelessWidget {
           Expanded(
             child: Text(
               'Email',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
           Flexible(
-            child: Text(
-              email.isEmpty ? 'Not signed in' : email,
-              textAlign: TextAlign.right,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppColors.accentBrown,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: isLoading
+                ? const Align(
+                    alignment: Alignment.centerRight,
+                    child: SizedBox(
+                      width: AppSizes.profileEmailLoaderSize,
+                      height: AppSizes.profileEmailLoaderSize,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : Text(
+                    email.isEmpty ? 'Not signed in' : email,
+                    textAlign: TextAlign.right,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.accentBrown,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
           ),
         ],
       ),

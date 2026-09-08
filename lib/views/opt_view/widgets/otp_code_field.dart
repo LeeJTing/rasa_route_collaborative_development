@@ -81,6 +81,11 @@ class _OtpCodeFieldState extends State<OtpCodeField> {
 
   @override
   Widget build(BuildContext context) {
+    // A bold, large-enough digit per box so the code is easy to read and the
+    // text stays vertically centred inside each box.
+    final TextStyle? digitStyle = Theme.of(
+      context,
+    ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700);
     return SizedBox(
       height: AppSizes.fieldHeight,
       child: Row(
@@ -99,8 +104,12 @@ class _OtpCodeFieldState extends State<OtpCodeField> {
                     ? TextInputAction.done
                     : TextInputAction.next,
                 maxLength: 1,
+                style: digitStyle,
                 onChanged: (String value) => _onDigitChanged(index, value),
-                decoration: const InputDecoration(counterText: ''),
+                decoration: const InputDecoration(
+                  counterText: '',
+                  contentPadding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                ),
               ),
             ),
           );

@@ -43,7 +43,7 @@ void main() {
 
     expect(
       find.text(
-        'Report selected for this UI preview. Backend submission is not available yet.',
+        'Report received. Thank you for helping keep the map accurate.',
       ),
       findsOneWidget,
     );

@@ -219,12 +219,91 @@ class RestaurantRepository {
 
   /// UC500's "Restaurant Already Exists" check.
   Future<Restaurant?> findByName(String name) async {
+    final List<Restaurant> matches = await findByNameList(name);
+    return matches.isEmpty ? null : matches.first;
+  }
+
+  /// Every catalogue restaurant whose name equals [name] (trimmed,
+  /// case-insensitive). Unlike [findByName] this returns ALL matches - the
+  /// submit flow then picks the one within ~100m of the landmark's location
+  /// (see `LandmarkSubmissionLogic`), so two same-named restaurants in
+  /// different towns are not confused with each other.
+  Future<List<Restaurant>> findByNameList(String name) async {
     final String normalized = name.trim().toLowerCase();
+    if (normalized.isEmpty) return const <Restaurant>[];
     final List<Restaurant> restaurants = await getRestaurants();
-    for (final Restaurant restaurant in restaurants) {
-      if (restaurant.name.toLowerCase() == normalized) return restaurant;
-    }
-    return null;
+    return <Restaurant>[
+      for (final Restaurant restaurant in restaurants)
+        if (restaurant.name.trim().toLowerCase() == normalized) restaurant,
+    ];
+  }
+
+  /// Attaches one submitted dish to [restaurantId] as a new `restaurant_item`
+  /// row (the merge path of the Add-Landmark flow - "this is the same place,
+  /// so add the dish to the existing restaurant instead of creating a new
+  /// landmark"). `restaurant_item_id` is left for the DB to assign (identity).
+  /// [localFoodId] is required by the table - the caller resolves it first
+  /// (a genuinely-new dish is registered to `local_food` before this is
+  /// called, Option-C style).
+  Future<void> addRestaurantItem({
+    required int restaurantId,
+    required int localFoodId,
+    required String name,
+    String? ingredients,
+    String? foodImgUrl,
+    String? foodCategory,
+    double? price,
+  }) async {
+    await api.insertRow(APIManager.tableRestaurantItem, <String, dynamic>{
+      'restaurant_id': restaurantId,
+      'local_food_id': localFoodId,
+      'restaurant_item_name': name,
+      'ingredients': ingredients,
+      'food_img_url': foodImgUrl,
+      'food_category': foodCategory,
+      'restaurant_item_price': price,
+    });
+  }
+
+  /// Clears a catalogue restaurant's moderation state - a tourist just
+  /// confirmed (by re-submitting it in person, within ~100m) that the place
+  /// exists, so any accumulated reports are dropped and its status returns to
+  /// 'available' (A20-style reactivation on the restaurant side).
+  Future<void> resetRestaurantModeration(int restaurantId) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'report_count': 0, 'status': 'available'},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+  }
+
+  /// Increments `restaurant.report_count` by one after a report is recorded
+  /// and returns the new value (read-modify-write - fine at the current dev
+  /// scale; a later authenticated RPC can make it atomic).
+  Future<int> incrementReportCount(int restaurantId) async {
+    final Map<String, dynamic>? row = await api.selectOne(
+      APIManager.tableRestaurant,
+      columns: 'report_count',
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    final int next = ((row?['report_count'] as num?)?.toInt() ?? 0) + 1;
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'report_count': next},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    return next;
+  }
+
+  /// Freezes a restaurant (`status` -> 'frozen') once its report count passes
+  /// the threshold - discovery/list filters only show 'available' places, so
+  /// a frozen restaurant disappears until it is reset to 'available'.
+  Future<void> freeze(int restaurantId) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'status': 'frozen'},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
   }
 
   Restaurant _toDomain(Map<String, dynamic> row) {

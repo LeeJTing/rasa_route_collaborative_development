@@ -352,7 +352,7 @@ Restaurant _restaurant(
   int id, {
   required double distanceKm,
   List<OpeningHour> openingHours = const <OpeningHour>[],
-  String? status,
+  String status = 'available',
 }) => Restaurant(
   id: id,
   name: 'Restaurant $id',

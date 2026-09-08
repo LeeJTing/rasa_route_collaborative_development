@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
+import '../../app/theme/preference_icons.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../view_models/edit_dietary_restriction_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
@@ -119,6 +120,10 @@ class _EditDietaryRestrictionViewState
                                             in viewModel.selectedRestrictions)
                                           PreferenceOptionCard(
                                             label: r.name,
+                                            iconAsset:
+                                                PreferenceIcons.dietaryRestrictionIconAsset(
+                                                  r.name,
+                                                ),
                                             isSelected: true,
                                             onTap: () => viewModel.toggle(r),
                                           ),
@@ -196,6 +201,10 @@ class _EditDietaryRestrictionViewState
                                             in viewModel.restrictions)
                                           PreferenceOptionCard(
                                             label: r.name,
+                                            iconAsset:
+                                                PreferenceIcons.dietaryRestrictionIconAsset(
+                                                  r.name,
+                                                ),
                                             isSelected: viewModel.isSelected(r),
                                             onTap: () => viewModel.toggle(r),
                                           ),

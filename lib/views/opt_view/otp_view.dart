@@ -5,6 +5,7 @@ import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../view_models/otp_view_model.dart';
+import '../common_widgets/scrollable_centered_body.dart';
 import 'widgets/otp_code_field.dart';
 
 /// Verify your email screen.
@@ -46,9 +47,13 @@ class _OtpViewState extends State<OtpView> {
   Future<void> _verify(OtpViewModel viewModel) async {
     await viewModel.verifyEmailOtp();
     if (!mounted || !viewModel.verified) return;
+    // C3: a brand-new tourist is routed to profile set-up before the
+    // dashboard; everyone else goes straight to the shell.
     Navigator.pushNamedAndRemoveUntil(
       context,
-      AppRoutes.mainShell,
+      viewModel.needsProfileSetup
+          ? AppRoutes.profileSetUp
+          : AppRoutes.mainShell,
       (Route<dynamic> _) => false,
     );
   }
@@ -61,11 +66,10 @@ class _OtpViewState extends State<OtpView> {
         body: SafeArea(
           child: Consumer<OtpViewModel>(
             builder: (BuildContext context, OtpViewModel viewModel, Widget? _) {
-              return Padding(
-                padding: AppSpacing.screenPadding,
+              return ScrollableCenteredBody(
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
-                    const Spacer(flex: AppLayoutRatios.authTopSpacerFlex),
                     CircleAvatar(
                       radius: AppSizes.authBadgeRadius,
                       backgroundColor: Theme.of(
@@ -143,7 +147,7 @@ class _OtpViewState extends State<OtpView> {
                                   ),
                             ),
                     ),
-                    const Spacer(),
+                    const SizedBox(height: AppSpacing.xl),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
