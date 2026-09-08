@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/restaurant.dart';
+import '../../../domain_model/restaurant_item.dart';
 import '../../common_widgets/app_image.dart';
 import 'restaurant_expanded_info.dart';
 
@@ -14,6 +15,7 @@ class RestaurantCard extends StatelessWidget {
     required this.expanded,
     required this.onExpand,
     required this.onTap,
+    required this.onFoodImageTap,
   });
 
   final Restaurant restaurant;
@@ -21,6 +23,7 @@ class RestaurantCard extends StatelessWidget {
   final bool expanded;
   final VoidCallback onExpand;
   final VoidCallback onTap;
+  final ValueChanged<RestaurantItem> onFoodImageTap;
 
   @override
   Widget build(BuildContext context) {
@@ -93,7 +96,11 @@ class RestaurantCard extends StatelessWidget {
               ),
             ),
           ),
-          if (expanded) RestaurantExpandedInfo(items: restaurant.items),
+          if (expanded)
+            RestaurantExpandedInfo(
+              items: restaurant.items,
+              onFoodImageTap: onFoodImageTap,
+            ),
           Center(
             child: IconButton(
               tooltip: expanded ? 'Hide local food' : 'Show local food',

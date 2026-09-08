@@ -320,7 +320,9 @@ class MapRepository {
     final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
       for (final Map<String, dynamic> row in landmarks)
         if (_asInt(row['landmark_id']) != 0 &&
-            _asString(row['status']).toLowerCase() != 'hidden')
+            !_hiddenLandmarkStatuses.contains(
+              _asString(row['status']).toLowerCase(),
+            ))
           _asInt(row['landmark_id']): row,
     };
 
@@ -511,6 +513,13 @@ class MapRepository {
     final String text = '$value';
     return text.isEmpty ? null : text;
   }
+
+  /// `frozen` is the ERD/domain value. `hidden` is retained only for legacy
+  /// imported rows; neither may appear in discovery results.
+  static const Set<String> _hiddenLandmarkStatuses = <String>{
+    'frozen',
+    'hidden',
+  };
 
   /// Legacy landmark image URLs (written before the bucket-prefix guard in
   /// `SubmittedLandmarkRepository.uploadImage` existed) double the bucket

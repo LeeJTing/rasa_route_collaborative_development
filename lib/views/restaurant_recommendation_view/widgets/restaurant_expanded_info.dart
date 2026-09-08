@@ -7,9 +7,14 @@ import '../../common_widgets/app_image.dart';
 import '../../common_widgets/food_image_fallback.dart';
 
 class RestaurantExpandedInfo extends StatelessWidget {
-  const RestaurantExpandedInfo({super.key, required this.items});
+  const RestaurantExpandedInfo({
+    super.key,
+    required this.items,
+    required this.onFoodImageTap,
+  });
 
   final List<RestaurantItem> items;
+  final ValueChanged<RestaurantItem> onFoodImageTap;
 
   static const int _previewItemLimit = 4;
 
@@ -41,13 +46,19 @@ class RestaurantExpandedInfo extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: <Widget>[
-                    SizedBox.square(
-                      dimension: AppSizes.pairingImage,
-                      child: AppImage(
-                        source: item.imageUrl,
-                        borderRadius: AppRadius.cardRadius,
-                        semanticLabel: item.foodName,
-                        fallback: const FoodImageFallback(),
+                    InkWell(
+                      onTap: item.imageUrl?.trim().isNotEmpty == true
+                          ? () => onFoodImageTap(item)
+                          : null,
+                      borderRadius: AppRadius.cardRadius,
+                      child: SizedBox.square(
+                        dimension: AppSizes.pairingImage,
+                        child: AppImage(
+                          source: item.imageUrl,
+                          borderRadius: AppRadius.cardRadius,
+                          semanticLabel: item.foodName,
+                          fallback: const FoodImageFallback(),
+                        ),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),

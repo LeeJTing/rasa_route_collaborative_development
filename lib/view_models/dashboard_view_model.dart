@@ -16,6 +16,7 @@ import '../domain_model/swipe_mode.dart';
 import '../domain_model/swipe_session.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
+import 'current_location_facade.dart';
 
 /// Which of the two dashboard maps is showing (REQ102_12, REQ102_13).
 enum DashboardMapMode { heatmap, detailed }
@@ -631,6 +632,10 @@ class DashboardViewModel extends BaseViewModel {
           .currentLocation()
           .timeout(_locateTimeout, onTimeout: () => TouristLocation.unknown);
       _sharedLocation = fix;
+      // Quick Mode reads its origin from the inbound location facade. Publish
+      // this user-requested fix immediately so the destination screen cannot
+      // race the background monitor and search from an older position.
+      CurrentLocationFacade().publish(fix);
 
       if (!fix.isKnown) {
         // Say so. Silently falling back to the country view looks like the
@@ -886,7 +891,18 @@ class DashboardViewModel extends BaseViewModel {
     // A9 step 2 happens after the icon is selected. Do not rely on an old
     // background fix: permission or GPS may have changed since it arrived.
     await locateTourist();
-    if (!_locationPermissionGranted || !_sharedLocation.isKnown) return;
+    if (!_locationPermissionGranted) {
+      _notice = 'Location permission is required to use Quick Mode.';
+      safeNotifyListeners();
+      return;
+    }
+    if (!_sharedLocation.isKnown) {
+      _notice =
+          'Could not get your location. Check that GPS is switched on, '
+          'then try Quick Mode again.';
+      safeNotifyListeners();
+      return;
+    }
     if (!_locationInMalaysia) {
       _notice = notInMalaysiaMessage;
       safeNotifyListeners();

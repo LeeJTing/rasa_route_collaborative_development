@@ -2,6 +2,7 @@ import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/origin_verification.dart';
+import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
@@ -98,6 +99,9 @@ class DiscoveryRepositoryFacade {
   Future<List<Region>> malaysiaRegions() => map.malaysiaRegions();
 
   Future<List<FoodOccurrence>> foodOccurrences() => map.foodOccurrences();
+
+  Future<Map<String, List<OpeningHour>>> openingHoursByPlace() =>
+      map.openingHours();
 
   Future<String?> currentTouristId() => auth.currentTouristId();
 
