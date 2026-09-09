@@ -269,6 +269,78 @@ class DashboardViewModel extends BaseViewModel {
   int _pinLoadRevision = 0;
   List<MapPin> get pins => _pins;
 
+  // ---------------------------------------------------------------------------
+  // How much of the answer is on screen
+  // ---------------------------------------------------------------------------
+  //
+  // The detailed map draws at most `DiscoveryLogicFacade.pinLimitForZoom(zoom)`
+  // pins - see there for why the cap moves with zoom. These carry the rest of
+  // the truth so the View can say what is missing instead of the map implying
+  // that this is all there is.
+
+  int _pinsInView = 0;
+  int _pinLimit = 0;
+
+  /// Every place inside the current viewport that matched, drawn or not.
+  int get pinsInView => _pinsInView;
+
+  /// The cap the current zoom allows.
+  int get pinLimit => _pinLimit;
+
+  /// Matching places in view that did not fit on the map.
+  int get hiddenPinCount {
+    final int hidden = _pinsInView - _pins.length;
+    return hidden > 0 ? hidden : 0;
+  }
+
+  /// Whether the last pin load actually drew pins - the other half of the
+  /// threshold hysteresis, and what tells [_viewportChangedSinceLastPinLoad]
+  /// that the threshold itself was crossed.
+  bool _lastPinVisible = false;
+
+  /// REQ102_41 - do pins belong on screen at the current camera?
+  ///
+  /// Pins appear at `DiscoveryLogicFacade.pinMinimumZoom` and are kept until
+  /// `pinHideZoom`, so a pinch resting on the threshold does not strobe the
+  /// marker layer.
+  ///
+  /// **A Target Frame dish is exempt**, so Swipe Mode is untouched by this: a
+  /// dish somebody asked to see is shown at every zoom, exactly as before.
+  bool get _pinsBelongOnScreen => DiscoveryLogicFacade.pinsVisibleAtZoom(
+    _zoom,
+    localFoodId: _activePinFoodId,
+    pinsAlreadyShown: _pins.isNotEmpty,
+  );
+
+  /// The detailed map is zoomed too far out to draw pins. Never true while a
+  /// dish is in the Target Frame.
+  bool get pinsHiddenByZoom => isDetailedView && !_pinsBelongOnScreen;
+
+  /// The state under the middle of the detailed map, as the heatmap counted it.
+  ///
+  /// This is the heatmap's own number reused: `RegionAvailability
+  /// .restaurantCount` is the distinct places in that state matching the active
+  /// filter (C1's numerator), so the detailed view can put the pins on screen
+  /// in proportion without counting anything a second time.
+  RegionAvailability? _regionInView;
+  RegionAvailability? get regionInView => _regionInView;
+
+  /// "Selangor - 1,432 places in this state", from the heatmap tally.
+  ///
+  /// Says *matching* when a filter or a Target Frame dish is narrowing the
+  /// count, because that is what the heatmap counted - claiming a plain total
+  /// while a filter is on would be a different number entirely.
+  String? get regionInViewMessage {
+    final RegionAvailability? availability = _regionInView;
+    if (availability == null || !isDetailedView) return null;
+    final int count = availability.restaurantCount;
+    if (count == 0) return null;
+    final bool narrowed = _filter.selectionCount > 0 || _activePinFoodId != null;
+    return '${availability.region.name} - $count '
+        '${narrowed ? 'matching ' : ''}'
+        '${count == 1 ? 'place' : 'places'} in this state';
+  }
+
   List<CountryOutline> _countryOutlines = const <CountryOutline>[];
 
   /// REQ102_1 - the tight coastline the painted overview clips its blur to.
@@ -1304,6 +1376,9 @@ class DashboardViewModel extends BaseViewModel {
     // Leaving the detailed view invalidates its pins.
     if (_pins.isNotEmpty) {
       _pins = const <MapPin>[];
+      _pinsInView = 0;
+      _pinLimit = 0;
+      _regionInView = null;
       safeNotifyListeners();
     }
     _distribution = await discoveryLogic.foodDistribution(
@@ -1326,13 +1401,36 @@ class DashboardViewModel extends BaseViewModel {
 
     if (clearFirst && _pins.isNotEmpty) {
       _pins = const <MapPin>[];
+      _pinsInView = 0;
+      _pinLimit = 0;
       safeNotifyListeners();
     }
 
     _lastPinLatitude = _centreLatitude;
     _lastPinLongitude = _centreLongitude;
     _lastPinZoom = _zoom;
-    final List<MapPin> loadedPins = await discoveryLogic.mapPins(
+
+    // Too far out for pins: drop any that are showing and stop here. Checked
+    // before the call, not inside it, so panning around at state zoom does no
+    // work at all - no query, no join, no opening hours. `MapExplorationLogic`
+    // enforces the same floor for any other caller.
+    if (!_pinsBelongOnScreen) {
+      _lastPinVisible = false;
+      if (_pins.isNotEmpty) {
+        _pins = const <MapPin>[];
+        _pinsInView = 0;
+        _pinLimit = 0;
+        safeNotifyListeners();
+      }
+      // Which state the map is over is still a fair question with no pins on
+      // it, and answering costs one point-in-polygon test against an already
+      // cached catalogue - no fetch.
+      await _refreshRegionInView(revision);
+      return;
+    }
+    // The zoom decides the cap: a state-wide view draws far fewer markers than
+    // a street, because at a state's scale they would be an unreadable mat.
+    final MapPinPage page = await discoveryLogic.mapPins(
       filter: _filter,
       localFoodId: requestedFoodId,
       south: _viewportSouth,
@@ -1341,12 +1439,40 @@ class DashboardViewModel extends BaseViewModel {
       east: _viewportEast,
       fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
       fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
+      zoom: _zoom,
     );
     if (revision != _pinLoadRevision || requestedFoodId != _activePinFoodId) {
       return;
     }
-    _pins = loadedPins;
+    _pins = page.pins;
+    _pinsInView = page.totalInView;
+    _pinLimit = page.limit;
+    _lastPinVisible = !page.suppressedByZoom;
+    await _refreshRegionInView(revision);
   }, silent: true);
+
+  /// Reads the state under the middle of the map out of the heatmap tally.
+  ///
+  /// Costs nothing beyond a point-in-polygon test: `_distribution` was already
+  /// computed for the heatmap, and the region catalogue is cached.
+  Future<void> _refreshRegionInView(int revision) async {
+    final Region? region = await discoveryLogic.regionAt(
+      _centreLatitude,
+      _centreLongitude,
+    );
+    if (revision != _pinLoadRevision) return;
+    if (region == null) {
+      _regionInView = null;
+      return;
+    }
+    for (final RegionAvailability availability in _distribution.regions) {
+      if (availability.region.code == region.code) {
+        _regionInView = availability;
+        return;
+      }
+    }
+    _regionInView = null;
+  }
 
   int? get _activePinFoodId => _targetFrameOwnsSelection && !_swipePanelExpanded
       ? null
@@ -1355,6 +1481,11 @@ class DashboardViewModel extends BaseViewModel {
   /// Has the viewport moved or scaled enough that the pins on screen could
   /// differ from the ones already fetched?
   bool _viewportChangedSinceLastPinLoad() {
+    // Crossing the pin threshold always counts, however small the move. The
+    // zoom gate below is 0.1, far too coarse to notice 10.99 -> 11.01 - and
+    // that particular hair's breadth is the difference between an empty map and
+    // a full one.
+    if (_pinsBelongOnScreen != _lastPinVisible) return true;
     final double? lastLatitude = _lastPinLatitude;
     final double? lastLongitude = _lastPinLongitude;
     final double? lastZoom = _lastPinZoom;
