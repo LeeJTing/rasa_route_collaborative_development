@@ -110,6 +110,32 @@ class APIManager {
     rangeEnd: rangeEnd,
   );
 
+  /// `select` returning **every** matching row rather than the first page.
+  ///
+  /// [selectAll] is answered by PostgREST with at most 1000 rows and no
+  /// indication that it stopped there, so any table that can grow past that -
+  /// `restaurant`, `restaurant_item`, `opening_hours` - must be read through
+  /// this instead. [orderBy] must be a unique column (the primary key), or the
+  /// paging is not stable.
+  Future<List<Map<String, dynamic>>> selectEvery(
+    String table, {
+    required String orderBy,
+    String columns = '*',
+    Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, List<Object?>>? inFilter,
+    bool ascending = true,
+  }) => _supabase.selectEvery(
+    table,
+    orderBy: orderBy,
+    columns: columns,
+    eq: eq,
+    inFilter: inFilter,
+    ascending: ascending,
+  );
+
+  /// How many rows a table holds, without downloading them.
+  Future<int> countRows(String table) => _supabase.countRows(table);
+
   Future<Map<String, dynamic>?> selectOne(
     String table, {
     String columns = '*',

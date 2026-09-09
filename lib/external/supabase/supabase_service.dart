@@ -122,6 +122,92 @@ class SupabaseService {
     return rows.cast<Map<String, dynamic>>();
   }
 
+  // ---------------------------------------------------------------------------
+  // Paging
+  // ---------------------------------------------------------------------------
+  //
+  // PostgREST will not stream a whole table. A select with no `Range` header is
+  // answered with at most `max-rows` rows - 1000 on a Supabase project - and
+  // **says nothing about it**: no error, no flag, just a short array. A table
+  // that outgrows that ceiling therefore looks to the app as though most of its
+  // rows had been deleted. Every read of a table that can pass 1000 rows has to
+  // page, which is what [selectEvery] does.
+
+  /// Rows per request. Must not exceed the project's `max-rows` setting, or
+  /// every request silently loses the tail of its page.
+  static const int selectPageSize = 1000;
+
+  /// Hard stop on the paging loop. 400 pages is 400k rows - far past anything
+  /// this app reads - so reaching it means something is wrong, and returning
+  /// what we have beats looping forever.
+  static const int selectMaxPages = 400;
+
+  /// Pages requested at once. Paging one page after another turns a 78k-row
+  /// table into 79 sequential round trips, which on mobile latency alone is
+  /// slower than the query will ever be; asking for a wave of pages together
+  /// collapses that to a handful of waits. Kept small so a phone is not opening
+  /// a burst of sockets.
+  static const int selectPagesInFlight = 8;
+
+  /// `select` returning **every** matching row, page by page.
+  ///
+  /// [orderBy] is required and must be unique (the primary key): `range` paging
+  /// is only stable if the server sorts the same way for every page. Ordering
+  /// by a non-unique column lets rows move between pages, which duplicates some
+  /// and skips others.
+  Future<List<Map<String, dynamic>>> selectEvery(
+    String table, {
+    required String orderBy,
+    String columns = '*',
+    Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, List<Object?>>? inFilter,
+    bool ascending = true,
+    int pageSize = selectPageSize,
+  }) async {
+    final List<Map<String, dynamic>> all = <Map<String, dynamic>>[];
+    int page = 0;
+    while (page < selectMaxPages) {
+      final List<Future<List<Map<String, dynamic>>>> wave =
+          <Future<List<Map<String, dynamic>>>>[];
+      final int remaining = selectMaxPages - page;
+      final int pagesThisWave = selectPagesInFlight < remaining
+          ? selectPagesInFlight
+          : remaining;
+      for (int i = 0; i < pagesThisWave; i++) {
+        final int start = (page + i) * pageSize;
+        wave.add(
+          selectAll(
+            table,
+            columns: columns,
+            eq: eq,
+            inFilter: inFilter,
+            orderBy: orderBy,
+            ascending: ascending,
+            rangeStart: start,
+            rangeEnd: start + pageSize - 1,
+          ),
+        );
+      }
+
+      final List<List<Map<String, dynamic>>> pages = await Future.wait(wave);
+      bool reachedEnd = false;
+      for (final List<Map<String, dynamic>> rows in pages) {
+        all.addAll(rows);
+        // Only the last page can be short, and everything after it is empty -
+        // so a short page anywhere in the wave means the table is exhausted.
+        if (rows.length < pageSize) reachedEnd = true;
+      }
+      if (reachedEnd) break;
+      page += wave.length;
+    }
+    return all;
+  }
+
+  /// How many rows a table holds, without downloading any of them - a `HEAD`
+  /// request answered by the `Content-Range` header.
+  Future<int> countRows(String table) async =>
+      await _client.from(table).count(CountOption.exact);
+
   /// `select` returning at most one row, or `null` when there isn't one.
   Future<Map<String, dynamic>?> selectOne(
     String table, {
