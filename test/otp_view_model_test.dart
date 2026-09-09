@@ -6,8 +6,21 @@ import 'package:rasa_route_collaborative_development/model/business_logic/touris
 import 'package:rasa_route_collaborative_development/view_models/otp_view_model.dart';
 
 void main() {
-  group('OtpViewModel', () {
-    test('onInit loads the pending email from the facade', () async {
+  group('OtpViewModel onInit - email resolution', () {
+    test('uses the email from the route argument', () async {
+      final OtpViewModel viewModel = OtpViewModel(
+        touristLogic: _FakeTouristInformationLogicFacade(),
+      );
+      addTearDown(viewModel.dispose);
+      viewModel.emailArgument = 'a@b.com';
+
+      await viewModel.onInit();
+
+      expect(viewModel.email, 'a@b.com');
+      expect(viewModel.hasError, isFalse);
+    });
+
+    test('falls back to the pending email when no argument is supplied', () async {
       final OtpViewModel viewModel = OtpViewModel(
         touristLogic: _FakeTouristInformationLogicFacade(
           pendingEmail: 'a@b.com',
@@ -31,7 +44,164 @@ void main() {
 
       expect(viewModel.hasError, isTrue);
     });
+  });
 
+  group('OtpViewModel send decision', () {
+    test('sends a fresh code on first entry (no pending code)', () async {
+      final _FakeTouristInformationLogicFacade facade =
+          _FakeTouristInformationLogicFacade(pendingEmail: 'a@b.com');
+      final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+      addTearDown(viewModel.dispose);
+
+      await viewModel.onInit();
+
+      expect(facade.sendCount, 1);
+      expect(viewModel.hasError, isFalse);
+      expect(viewModel.state, ViewState.ready);
+    });
+
+    test('does not re-send when a valid pending code is still within its window',
+        () async {
+      final _FakeTouristInformationLogicFacade facade =
+          _FakeTouristInformationLogicFacade(
+            pendingEmail: 'a@b.com',
+            pendingOtpSentAtOverride: DateTime.now(),
+          );
+      final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+      addTearDown(viewModel.dispose);
+
+      await viewModel.onInit();
+
+      expect(facade.sendCount, 0);
+      expect(viewModel.hasError, isFalse);
+    });
+
+    test('sends a fresh code when the pending code has expired', () async {
+      final _FakeTouristInformationLogicFacade facade =
+          _FakeTouristInformationLogicFacade(
+            pendingEmail: 'a@b.com',
+            pendingOtpSentAtOverride: DateTime.now().subtract(
+              const Duration(hours: 2),
+            ),
+          );
+      final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+      addTearDown(viewModel.dispose);
+
+      await viewModel.onInit();
+
+      expect(facade.sendCount, 1);
+    });
+
+    test('sends a fresh code when the pending email does not match', () async {
+      final _FakeTouristInformationLogicFacade facade =
+          _FakeTouristInformationLogicFacade(
+            pendingEmail: 'someone-else@x.com',
+            pendingOtpSentAtOverride: DateTime.now(),
+          );
+      final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+      addTearDown(viewModel.dispose);
+      viewModel.emailArgument = 'a@b.com';
+
+      await viewModel.onInit();
+
+      expect(viewModel.email, 'a@b.com');
+      expect(facade.sendCount, 1);
+    });
+
+    test('surfaces a 3-per-10 gate error on entry send', () async {
+      final OtpViewModel viewModel = OtpViewModel(
+        touristLogic: _FakeTouristInformationLogicFacade(
+          pendingEmail: 'a@b.com',
+          throwOnSend: true,
+        ),
+      );
+      addTearDown(viewModel.dispose);
+
+      await viewModel.onInit();
+
+      expect(viewModel.hasError, isTrue);
+      expect(viewModel.errorMessage, 'Too many attempts, please try again later.');
+    });
+
+    test('reusing an existing code is exposed so the View can hint at it',
+        () async {
+      // The server already emailed a code for this address - the screen must
+      // not pretend a fresh code is on its way.
+      final _FakeTouristInformationLogicFacade facade =
+          _FakeTouristInformationLogicFacade(
+            pendingEmail: 'a@b.com',
+            pendingOtpSentAtOverride: DateTime.now().subtract(
+              const Duration(seconds: 10),
+            ),
+          );
+      final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+      addTearDown(viewModel.dispose);
+
+      await viewModel.onInit();
+
+      expect(facade.sendCount, 0);
+      expect(viewModel.hasError, isFalse);
+      expect(viewModel.reusingExistingCode, isTrue);
+    });
+
+    test('over-limit resend shows the message and is not a silent no-op', () {
+      fakeAsync((FakeAsync async) {
+        final _FakeTouristInformationLogicFacade facade =
+            _FakeTouristInformationLogicFacade(
+              pendingEmail: 'a@b.com',
+              pendingOtpSentAtOverride: DateTime.now().subtract(
+                const Duration(seconds: 10),
+              ),
+            );
+        final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+        viewModel.onInit();
+        async.flushMicrotasks();
+
+        // Reuse path resumes ~50s. Once that ends, the next resend is over the
+        // 3-per-10 gate and is rejected.
+        facade.throwOnSend = true;
+        async.elapse(const Duration(seconds: 60));
+
+        viewModel.resendEmailOtp();
+        async.flushMicrotasks();
+
+        // The rejection is never swallowed: the tourist sees why it failed...
+        expect(viewModel.hasError, isTrue);
+        expect(
+          viewModel.errorMessage,
+          'Too many attempts, please try again later.',
+        );
+        // ...still learns the earlier code is usable...
+        expect(viewModel.reusingExistingCode, isTrue);
+        // ...and the cooldown runs so the button cannot be hammered silently.
+        expect(viewModel.canResend, isFalse);
+        expect(viewModel.resendCooldown, greaterThan(0));
+        viewModel.dispose();
+      });
+    });
+
+    test('an unresolvable send error leaves the message but not a spammable button',
+        () {
+      fakeAsync((FakeAsync async) {
+        final _FakeTouristInformationLogicFacade facade =
+            _FakeTouristInformationLogicFacade(
+              pendingEmail: 'a@b.com',
+              throwOnSend: true,
+            );
+        final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+        viewModel.onInit();
+        async.flushMicrotasks();
+
+        // No reusable code exists, so the error stays - but the cooldown now
+        // runs so the Resend control cannot be hammered.
+        expect(viewModel.hasError, isTrue);
+        expect(viewModel.canResend, isFalse);
+        viewModel.dispose();
+      });
+    });
+  });
+
+  group('OtpViewModel token & verify', () {
     test('canVerify requires exactly 6 digits', () async {
       final OtpViewModel viewModel = OtpViewModel(
         touristLogic: _FakeTouristInformationLogicFacade(
@@ -134,68 +304,95 @@ void main() {
         );
       },
     );
+  });
 
-    group('resend countdown', () {
-      test('starts at 45 seconds and counts down to zero', () {
-        fakeAsync((FakeAsync async) {
-          final OtpViewModel viewModel = OtpViewModel(
-            touristLogic: _FakeTouristInformationLogicFacade(
+  group('resend countdown', () {
+    test('starts at 60 seconds and counts down to zero after a fresh send', () {
+      fakeAsync((FakeAsync async) {
+        final _FakeTouristInformationLogicFacade facade =
+            _FakeTouristInformationLogicFacade(pendingEmail: 'a@b.com');
+        final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+        viewModel.onInit();
+        async.flushMicrotasks();
+
+        expect(facade.sendCount, 1);
+        expect(viewModel.resendCooldown, OtpViewModel.resendCooldownSeconds);
+        expect(viewModel.canResend, isFalse);
+
+        async.elapse(
+          const Duration(seconds: OtpViewModel.resendCooldownSeconds),
+        );
+
+        expect(viewModel.resendCooldown, 0);
+        expect(viewModel.canResend, isTrue);
+        viewModel.dispose();
+      });
+    });
+
+    test('resumes the remaining countdown when reusing a pending code', () {
+      fakeAsync((FakeAsync async) {
+        // Sent 10s ago: 50s of the 60s resend window remain.
+        final _FakeTouristInformationLogicFacade facade =
+            _FakeTouristInformationLogicFacade(
               pendingEmail: 'a@b.com',
-            ),
-          );
-          viewModel.onInit();
-          async.flushMicrotasks();
+              pendingOtpSentAtOverride: DateTime.now().subtract(
+                const Duration(seconds: 10),
+              ),
+            );
+        final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+        viewModel.onInit();
+        async.flushMicrotasks();
 
-          expect(viewModel.resendCooldown, OtpViewModel.resendCooldownSeconds);
-          expect(viewModel.canResend, isFalse);
+        expect(facade.sendCount, 0);
+        // ~10s already elapsed of the 60s window - allow a little drift.
+        expect(viewModel.resendCooldown, inInclusiveRange(48, 50));
+        expect(viewModel.canResend, isFalse);
 
-          async.elapse(
-            const Duration(seconds: OtpViewModel.resendCooldownSeconds),
-          );
+        async.elapse(const Duration(seconds: 50));
 
-          expect(viewModel.resendCooldown, 0);
-          expect(viewModel.canResend, isTrue);
-          viewModel.dispose();
-        });
+        expect(viewModel.resendCooldown, 0);
+        expect(viewModel.canResend, isTrue);
+        viewModel.dispose();
       });
+    });
 
-      test('does not send a new code while still cooling down', () {
-        fakeAsync((FakeAsync async) {
-          final _FakeTouristInformationLogicFacade facade =
-              _FakeTouristInformationLogicFacade(pendingEmail: 'a@b.com');
-          final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
-          viewModel.onInit();
-          async.flushMicrotasks();
+    test('does not send a new code while still cooling down', () {
+      fakeAsync((FakeAsync async) {
+        final _FakeTouristInformationLogicFacade facade =
+            _FakeTouristInformationLogicFacade(pendingEmail: 'a@b.com');
+        final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+        viewModel.onInit();
+        async.flushMicrotasks();
 
-          viewModel.resendEmailOtp();
-          async.flushMicrotasks();
+        viewModel.resendEmailOtp();
+        async.flushMicrotasks();
 
-          expect(facade.resendCount, 0);
-          expect(viewModel.resendCooldown, OtpViewModel.resendCooldownSeconds);
-          viewModel.dispose();
-        });
+        // onInit already sent the first code; the blocked resend adds none.
+        expect(facade.sendCount, 1);
+        expect(viewModel.resendCooldown, OtpViewModel.resendCooldownSeconds);
+        viewModel.dispose();
       });
+    });
 
-      test('restarts the countdown after a successful resend', () {
-        fakeAsync((FakeAsync async) {
-          final _FakeTouristInformationLogicFacade facade =
-              _FakeTouristInformationLogicFacade(pendingEmail: 'a@b.com');
-          final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
-          viewModel.onInit();
-          async.flushMicrotasks();
+    test('restarts the countdown after a successful resend', () {
+      fakeAsync((FakeAsync async) {
+        final _FakeTouristInformationLogicFacade facade =
+            _FakeTouristInformationLogicFacade(pendingEmail: 'a@b.com');
+        final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+        viewModel.onInit();
+        async.flushMicrotasks();
 
-          async.elapse(
-            const Duration(seconds: OtpViewModel.resendCooldownSeconds),
-          );
+        async.elapse(
+          const Duration(seconds: OtpViewModel.resendCooldownSeconds),
+        );
 
-          viewModel.resendEmailOtp();
-          async.flushMicrotasks();
+        viewModel.resendEmailOtp();
+        async.flushMicrotasks();
 
-          expect(facade.resendCount, 1);
-          expect(viewModel.resendCooldown, OtpViewModel.resendCooldownSeconds);
-          expect(viewModel.canResend, isFalse);
-          viewModel.dispose();
-        });
+        expect(facade.sendCount, 2); // first entry send + resend
+        expect(viewModel.resendCooldown, OtpViewModel.resendCooldownSeconds);
+        expect(viewModel.canResend, isFalse);
+        viewModel.dispose();
       });
     });
   });
@@ -212,19 +409,29 @@ const AuthSession _session = AuthSession(
 class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
   _FakeTouristInformationLogicFacade({
     this.pendingEmail = '',
+    this.pendingOtpSentAtOverride,
     this.verifyResult,
     this.verifyError,
+    this.throwOnSend = false,
   });
 
   final String pendingEmail;
+  final DateTime? pendingOtpSentAtOverride;
   final AuthSession? verifyResult;
 
   /// When set, [verifyEmailOtp] throws this instead of returning.
   final Object? verifyError;
-  int resendCount = 0;
+
+  /// When set, [sendEmailOtp] throws the 3-per-10 gate error. Mutable so a
+  /// test can flip behaviour mid-flow.
+  bool throwOnSend;
+  int sendCount = 0;
 
   @override
   String get pendingAuthEmail => pendingEmail;
+
+  @override
+  DateTime? get pendingOtpSentAt => pendingOtpSentAtOverride;
 
   @override
   Future<AuthSession?> verifyEmailOtp({
@@ -240,6 +447,9 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
 
   @override
   Future<void> sendEmailOtp(String email) async {
-    resendCount++;
+    if (throwOnSend) {
+      throw StateError('Too many attempts, please try again later.');
+    }
+    sendCount++;
   }
 }
