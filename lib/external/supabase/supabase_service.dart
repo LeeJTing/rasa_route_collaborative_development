@@ -208,6 +208,25 @@ class SupabaseService {
   Future<int> countRows(String table) async =>
       await _client.from(table).count(CountOption.exact);
 
+  // ---------------------------------------------------------------------------
+  // Postgres functions (RPC)
+  // ---------------------------------------------------------------------------
+
+  /// Calls a Postgres function and returns the rows it produced.
+  ///
+  /// This is how the map asks Postgres to do the work instead of doing it here:
+  /// `map_food_clusters` and `map_food_pins` take the viewport and answer with
+  /// the handful of markers actually drawn, rather than the app downloading a
+  /// hundred thousand rows and filtering them on the phone.
+  Future<List<Map<String, dynamic>>> callFunction(
+    String name, {
+    Map<String, Object?> params = const <String, Object?>{},
+  }) async {
+    final dynamic rows = await _client.rpc(name, params: params);
+    if (rows == null) return const <Map<String, dynamic>>[];
+    return (rows as List<dynamic>).cast<Map<String, dynamic>>();
+  }
+
   /// `select` returning at most one row, or `null` when there isn't one.
   Future<Map<String, dynamic>?> selectOne(
     String table, {
