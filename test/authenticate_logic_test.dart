@@ -83,6 +83,45 @@ void main() {
       expect(logic.emailError(''), isNull);
       expect(logic.emailError('   '), isNull);
     });
+
+    test('names the specific problem, not a generic message', () {
+      final AuthenticateLogic logic = AuthenticateLogic(
+        repository: _FakeTouristRepositoryFacade(),
+      );
+
+      expect(
+        logic.emailError('user name@domain.com'),
+        AuthenticateLogic.emailSpaceMessage,
+      );
+      expect(
+        logic.emailError('user..name@domain.com'),
+        AuthenticateLogic.emailDotMessage,
+      );
+      expect(
+        logic.emailError('username@domain'),
+        AuthenticateLogic.emailNoTldMessage,
+      );
+      expect(
+        logic.emailError('username@domain.c'),
+        AuthenticateLogic.emailTldBadMessage,
+      );
+      expect(
+        logic.emailError('!^&abc@gmail.com'),
+        AuthenticateLogic.emailInvalidCharMessage,
+      );
+      expect(
+        logic.emailError('username@'),
+        AuthenticateLogic.emailMissingDomainMessage,
+      );
+      expect(
+        logic.emailError('@domain.com'),
+        AuthenticateLogic.emailMissingNameMessage,
+      );
+      expect(
+        logic.emailError('user@name@domain.com'),
+        AuthenticateLogic.emailTooManyAtMessage,
+      );
+    });
   });
 
   group('AuthenticateLogic.sendEmailOtp', () {
