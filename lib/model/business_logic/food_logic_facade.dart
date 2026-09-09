@@ -51,8 +51,13 @@ class FoodLogicFacade {
   Future<List<LocalFood>> getSimilarFoods(int foodId) =>
       recommendation.getSimilarFoods(foodId);
 
-  Future<List<FoodPairing>> getFoodPairingRecommendations(int foodId) =>
-      recommendation.getPairingRecommendations(foodId);
+  Future<List<FoodPairing>> getFoodPairingRecommendations(
+    int foodId, {
+    void Function(String model)? onFallbackModel,
+  }) => recommendation.getPairingRecommendations(
+    foodId,
+    onFallbackModel: onFallbackModel,
+  );
 
   Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) =>
       knowledge.playPronunciation(food);

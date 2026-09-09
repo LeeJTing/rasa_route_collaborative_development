@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 
-enum FoodNoticeType { allergy, caution }
+enum FoodNoticeType { allergy, caution, degraded }
 
 class FoodNoticeBanner extends StatelessWidget {
   const FoodNoticeBanner({
@@ -19,13 +19,26 @@ class FoodNoticeBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool warning = type == FoodNoticeType.allergy;
-    final Color background = warning
-        ? AppColors.bannerWarningBackground
-        : AppColors.bannerCautionBackground;
-    final Color foreground = warning
-        ? AppColors.bannerWarningText
-        : AppColors.bannerCautionText;
+    final (Color background, Color foreground, IconData icon) = switch (type) {
+      // Severe warning (e.g. an allergy to confirm with the seller).
+      FoodNoticeType.allergy => (
+        AppColors.bannerWarningBackground,
+        AppColors.bannerWarningText,
+        Icons.warning_amber_rounded,
+      ),
+      // Gentle notice (e.g. a possible name collision).
+      FoodNoticeType.caution => (
+        AppColors.bannerCautionBackground,
+        AppColors.bannerCautionText,
+        Icons.info_outline,
+      ),
+      // The AI service rotated to an env-configured fallback - caution only.
+      FoodNoticeType.degraded => (
+        AppColors.bannerCautionBackground,
+        AppColors.bannerCautionText,
+        Icons.warning_amber_rounded,
+      ),
+    };
     return Material(
       color: background,
       borderRadius: AppRadius.cardRadius,
@@ -36,10 +49,7 @@ class FoodNoticeBanner extends StatelessWidget {
           padding: AppSpacing.cardPadding,
           child: Row(
             children: <Widget>[
-              Icon(
-                warning ? Icons.warning_amber_rounded : Icons.info_outline,
-                color: foreground,
-              ),
+              Icon(icon, color: foreground),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Text(
