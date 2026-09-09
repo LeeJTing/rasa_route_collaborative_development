@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../core/json_model.dart';
+import '../../core/name_normalization.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
@@ -276,12 +277,12 @@ class RestaurantRepository {
   /// (see `LandmarkSubmissionLogic`), so two same-named restaurants in
   /// different towns are not confused with each other.
   Future<List<Restaurant>> findByNameList(String name) async {
-    final String normalized = name.trim().toLowerCase();
+    final String normalized = placeNameKey(name);
     if (normalized.isEmpty) return const <Restaurant>[];
     final List<Restaurant> restaurants = await getRestaurants();
     return <Restaurant>[
       for (final Restaurant restaurant in restaurants)
-        if (restaurant.name.trim().toLowerCase() == normalized) restaurant,
+        if (placeNameKey(restaurant.name) == normalized) restaurant,
     ];
   }
 

@@ -32,6 +32,11 @@ void main() {
     test('leaves plain lowercase names unchanged', () {
       expect(FoodNameMatcher.normalize('nasi lemak'), 'nasi lemak');
     });
+
+    test('folds Traditional Chinese into Simplified', () {
+      expect(FoodNameMatcher.normalize('天義 TIAN YI'), '天义 tian yi');
+      expect(FoodNameMatcher.normalize('福建麵'), '福建面');
+    });
   });
 
   group('FoodNameMatcher.bestMatch', () {
@@ -55,6 +60,17 @@ void main() {
       );
       expect(result, same(nasiLemak));
     });
+
+    test(
+      'a Traditional-script dish name matches a Simplified catalogue row',
+      () {
+        final hokkienMee = _food(1, 'Hokkien Mee', synonyms: <String>['福建面']);
+        final result = FoodNameMatcher.bestMatch('福建麵', <LocalFood>[
+          hokkienMee,
+        ]);
+        expect(result, same(hokkienMee));
+      },
+    );
 
     test('exact beats fuzzy - a specific Gemini name uses the exact row', () {
       final nasiLemak = _food(1, 'Nasi Lemak');
