@@ -69,8 +69,8 @@ enum FoodOccurrenceSource { restaurant, submittedLandmark }
 class RegionAvailability {
   const RegionAvailability({
     required this.region,
-    required this.restaurantCount,
-    required this.maximumRestaurantCount,
+    required this.placeCount,
+    required this.maximumPlaceCount,
     required this.score,
     required this.foodCount,
   });
@@ -84,11 +84,11 @@ class RegionAvailability {
   /// Counted per *place*, not per menu entry: a restaurant serving six
   /// matching dishes is still one restaurant, and counting entries would let a
   /// single large menu outweigh a whole town.
-  final int restaurantCount;
+  final int placeCount;
 
-  /// The denominator of C1 - the highest [restaurantCount] any state reached
+  /// The denominator of C1 - the highest [placeCount] any state reached
   /// for this same filter set.
-  final int maximumRestaurantCount;
+  final int maximumPlaceCount;
 
   /// `restaurantCount / maximumRestaurantCount`, 0..1.
   final double score;
@@ -102,13 +102,13 @@ class RegionAvailability {
 class FoodDistribution {
   const FoodDistribution({
     required this.regions,
-    required this.maximumRestaurantCount,
+    required this.maximumPlaceCount,
     required this.matchingFoodCount,
   });
 
   static const FoodDistribution empty = FoodDistribution(
     regions: <RegionAvailability>[],
-    maximumRestaurantCount: 0,
+    maximumPlaceCount: 0,
     matchingFoodCount: 0,
   );
 
@@ -116,8 +116,8 @@ class FoodDistribution {
   /// drawn, in grey.
   final List<RegionAvailability> regions;
 
-  /// C1's denominator (see [RegionAvailability.maximumRestaurantCount]).
-  final int maximumRestaurantCount;
+  /// C1's denominator (see [RegionAvailability.maximumPlaceCount]).
+  final int maximumPlaceCount;
 
   /// How many catalogue entries survived the active filters. Zero means the
   /// filter combination matches nothing, not that the map failed to load.
