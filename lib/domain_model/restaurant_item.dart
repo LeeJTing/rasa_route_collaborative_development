@@ -15,6 +15,7 @@ class RestaurantItem {
     this.price,
     required this.currency,
     required this.foodCategory,
+    this.isRemoved = false,
   });
 
   final int id;
@@ -26,4 +27,9 @@ class RestaurantItem {
   final double? price;
   final String currency;
   final String foodCategory;
+
+  /// Soft-removal flag (`restaurant_item.is_removed`) - set when enough
+  /// tourists reported this item does not exist. Removed items are excluded
+  /// from the menu, the report picker and the map.
+  final bool isRemoved;
 }

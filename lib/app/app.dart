@@ -19,6 +19,7 @@ import '../views/matches_recommendation_view/matches_recommendation_view.dart';
 import '../views/opt_view/otp_view.dart';
 import '../views/profile_set_up_view/profile_set_up_view.dart';
 import '../views/profile_view/profile_view.dart';
+import '../views/report_place_view/report_place_view.dart';
 import '../views/restaurant_detail_view/restaurant_detail_view.dart';
 import '../views/restaurant_item_list_view/restaurant_item_list_view.dart';
 import '../views/restaurant_recommendation_view/restaurant_recommendation_view.dart';
@@ -111,6 +112,8 @@ class RasaRouteApp extends StatelessWidget {
             const LandmarkPlaceDetailView(),
         AppRoutes.landmarkItemDetail: (BuildContext context) =>
             const LandmarkItemDetailView(),
+        AppRoutes.reportPlace: (BuildContext context) =>
+            const ReportPlaceView(),
       },
     );
   }

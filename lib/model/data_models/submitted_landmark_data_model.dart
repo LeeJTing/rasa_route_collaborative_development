@@ -17,6 +17,9 @@ class SubmittedLandmarkDataModel implements JsonModel {
     this.imageUrl,
     this.imageId,
     this.imageCategory,
+    this.phone,
+    this.website,
+    this.address,
   });
 
   /// `submitted_landmark.landmark_id` (bigint, PK - no identity, supply it).
@@ -41,6 +44,12 @@ class SubmittedLandmarkDataModel implements JsonModel {
   final String? imageId;
   final String? imageCategory;
 
+  /// Optional tourist-supplied contact/address (`submitted_landmark.phone` /
+  /// `.website` / `.address` - all text, null when never provided).
+  final String? phone;
+  final String? website;
+  final String? address;
+
   factory SubmittedLandmarkDataModel.fromJson(Map<String, dynamic> json) {
     return SubmittedLandmarkDataModel(
       landmarkId: JsonReader.asInt(json['landmark_id']),
@@ -53,6 +62,9 @@ class SubmittedLandmarkDataModel implements JsonModel {
       imageUrl: JsonReader.asStringOrNull(json['image_url']),
       imageId: JsonReader.asStringOrNull(json['image_id']),
       imageCategory: JsonReader.asStringOrNull(json['image_category']),
+      phone: JsonReader.asStringOrNull(json['phone']),
+      website: JsonReader.asStringOrNull(json['website']),
+      address: JsonReader.asStringOrNull(json['address']),
     );
   }
 
@@ -68,5 +80,8 @@ class SubmittedLandmarkDataModel implements JsonModel {
     'image_url': imageUrl,
     'image_id': imageId,
     'image_category': imageCategory,
+    'phone': phone,
+    'website': website,
+    'address': address,
   };
 }

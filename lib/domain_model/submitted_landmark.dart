@@ -19,6 +19,9 @@ class SubmittedLandmark {
     this.imageUrl,
     this.imageId,
     this.imageCategory,
+    this.phone = '',
+    this.website = '',
+    this.address = '',
     required this.items,
     required this.openingHours,
   });
@@ -41,6 +44,20 @@ class SubmittedLandmark {
   /// What kind of photo [imageUrl]/[imageId] is - `'signboard'` or `'stall'`
   /// (see `AddLandmarkViewModel._capturedImageType`).
   final String? imageCategory;
+
+  /// Optional tourist-supplied contact/address for the place, collected on
+  /// the Add New Landmark form and persisted on `submitted_landmark`
+  /// (`phone` / `website` / `address`). Empty string when not provided.
+  ///
+  /// Written when a BRAND-NEW landmark row is created, and on a merge into an
+  /// existing submitted landmark only for fields the re-submission actually
+  /// changed (see `SubmittedLandmarkRepository.changedContactFields`) - an
+  /// emptier second submission never blanks data an earlier one stored. A
+  /// merge into a catalogue restaurant keeps that place's own curated data
+  /// (no submitted row exists to hold tourist contact details).
+  final String phone;
+  final String website;
+  final String address;
 
   final List<LandmarkItem> items;
   final List<OpeningHour> openingHours;
@@ -81,6 +98,7 @@ class LandmarkItem {
     required this.seasonal,
     required this.cookingStyle,
     required this.mealType,
+    this.isRemoved = false,
     this.isFake = false,
   });
 
@@ -124,6 +142,11 @@ class LandmarkItem {
   final String seasonal;
   final String cookingStyle;
   final String mealType;
+
+  /// Soft-removal flag (`landmark_item.is_removed`) - set when enough
+  /// tourists reported this dish does not exist. Removed dishes are excluded
+  /// from the place detail and the report picker.
+  final bool isRemoved;
 
   /// Test/QA marker - `true` for "fake food" added while verifying the
   /// Supabase insert flow. No dedicated column exists in the real
