@@ -6,6 +6,8 @@ import '../../domain_model/map.dart';
 import '../../domain_model/map_place.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
+import '../../domain_model/restaurant.dart';
+import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
 import 'dart:math' as math;
@@ -72,12 +74,11 @@ class MapExplorationLogic {
   static const double malaysiaCentreLatitude = 4.10;
   static const double malaysiaCentreLongitude = 109.50;
 
-  ///
-  /// 4.7, not 5.3: Malaysia's bounding box is 20.3 degrees of longitude wide,
+  /// 5.1, not 5.3: Malaysia's bounding box is 20.3 degrees of longitude wide,
   /// and at 5.3 that does not fit a 390pt phone - Sabah fell off the right
-  /// edge. Measured, not guessed: 360 / (256 * 2^4.7) degrees per pixel puts
+  /// edge. Measured, not guessed: 360 / (256 * 2^5.1) degrees per pixel puts
   /// 21.1 degrees across 390pt.
-  static const double malaysiaOverviewZoom = 4.7;
+  static const double malaysiaOverviewZoom = 5.1;
 
   /// REQ102_12 / REQ102_13 - "the predefined zoom level". At or above this the
   /// dashboard is a detailed map view; below it, the heatmap.
@@ -87,10 +88,11 @@ class MapExplorationLogic {
   ///
   /// The overview is a painted, stylised Malaysia (see `RegionHeatmapCanvas`),
   /// so "the predefined zoom level" is a canvas scale factor there, not a
-  /// slippy-map zoom. Pinching or pressing "+" past 3x hands over to the real
-  /// OpenStreetMap detailed view, centred on the state under the middle of the
-  /// screen.
-  static const double heatmapDetailScale = 3;
+  /// slippy-map zoom.
+  ///
+  /// Crossing [heatmapDetailScale] now hands over to the detailed OpenStreetMap
+  /// view directly.
+  static const double heatmapDetailScale = 4.0;
 
   /// Where a city search result settles the map (REQ102_22).
   static const double cityZoom = 13;
@@ -139,71 +141,33 @@ class MapExplorationLogic {
   static const double zoomStep = 1;
 
   // ===========================================================================
-  // How many pins the detailed map draws
+  // How many markers the detailed map draws
   // ===========================================================================
-  //
-  // A viewport at state zoom can contain several thousand restaurants. Drawing
-  // them all is unreadable, and building them all costs a frame, so the map
-  // draws the [pinLimitForZoom] places nearest the centre of the screen and
-  // reports the rest as hidden rather than pretending they do not exist.
-  //
-  // The cap rises with zoom instead of staying fixed. Each zoom level quarters
-  // the ground area on screen, so a larger cap deeper in is still *fewer*
-  // markers per square kilometre - and a tourist who has zoomed to a street has
-  // asked for that level of detail. The numbers are marker counts a phone can
-  // still be read through, not a hardware limit.
 
-  /// 7.5 - 9: a whole state fills the screen.
-  static const int pinLimitState = 80;
-
-  /// 9 - 11: a district or a conurbation.
-  static const int pinLimitDistrict = 150;
-
-  /// 11 - 13: a town or a city centre.
-  static const int pinLimitCity = 250;
-
-  /// 13 - 16: a neighbourhood.
-  static const int pinLimitNeighbourhood = 400;
-
-  /// 16 and in: individual streets, where every pin is separately tappable.
-  static const int pinLimitStreet = 600;
-
-  /// The zoom at which restaurant pins start being drawn at all.
+  /// There is **no zoom at which clustering stops.**
   ///
-  /// Below this the detailed map is tiles and the country mask only - the way a
-  /// general-purpose map shows no business pins while a whole state is on
-  /// screen. Measured rather than picked: a tile map covers
-  /// `360 / (256 * 2^zoom)` degrees per pixel, so on a 390pt-wide phone zoom 11
-  /// spans 0.27 degrees, about 30 km - a city and its outskirts. The same
-  /// screen at zoom 9 spans 120 km, where a marker is a smear the size of a
-  /// town and tapping the right one is guesswork.
-  static const double pinMinimumZoom = 11;
+  /// It used to stop at 11, and that was the bug: past the threshold every place
+  /// in view was drawn, so a dense city became a mat of overlapping markers. The
+  /// grouping is now decided per grid cell in `map_food_markers` - a cell with
+  /// one place is that place, a cell with several is a count - and the cell is
+  /// about 56 screen pixels at whatever the current zoom is.
+  ///
+  /// Two consequences worth knowing:
+  ///
+  ///  * markers can never be denser than the grid, so the map cannot become
+  ///    unreadable however many restaurants are underneath it;
+  ///  * zooming in splits cells, and places drop out of their clusters as pins
+  ///    exactly when there is room to draw them.
 
-  /// Pins already on screen survive down to here before being dropped.
+  /// How far outside the visible box to query, as a fraction of its size.
   ///
-  /// Without the gap, a pinch that comes to rest on the threshold strobes the
-  /// whole marker layer. 0.3 is well under one press of the zoom buttons
-  /// ([zoomStep] is 1), so "-" still hides them in a single tap.
-  static const double pinHideZoom = pinMinimumZoom - 0.3;
+  /// REQ102_41 - panning a short way should find its markers already loaded
+  /// rather than flashing an empty edge. 25% each way roughly doubles the area
+  /// queried, which at these row counts is free.
+  static const double viewportBuffer = 0.25;
 
-  /// Whether pins belong on screen at [zoom].
-  ///
-  /// **A dish in the Target Frame or a searched food is exempt** - pass its
-  /// [localFoodId] and the answer is always yes. Swipe Mode (REQ103_8) asks
-  /// "where can I eat this", and the honest answer is every place that serves
-  /// it, at whatever zoom the tourist is looking from. The threshold exists to
-  /// declutter a general browse, not to hide an answer somebody asked for.
-  ///
-  /// [pinsAlreadyShown] applies the hysteresis: pins appear at
-  /// [pinMinimumZoom] and are kept until [pinHideZoom].
-  static bool pinsVisibleAtZoom(
-    double zoom, {
-    int? localFoodId,
-    bool pinsAlreadyShown = false,
-  }) {
-    if (localFoodId != null) return true;
-    return zoom >= (pinsAlreadyShown ? pinHideZoom : pinMinimumZoom);
-  }
+  /// How many dish names the pin sheet lists before it stops.
+  static const int maximumServedFoods = 8;
 
   /// How many pins the detailed map may draw at [zoom].
   ///
@@ -211,16 +175,14 @@ class MapExplorationLogic {
   /// [cityZoom] is where a city search settles, [addressZoom] where a street
   /// address does.
   ///
-  /// The two rungs below [pinMinimumZoom] are not dead: a Target Frame dish
-  /// skips the threshold but still needs a cap, and at country zoom that is
-  /// exactly the rung it lands on.
-  static int pinLimitForZoom(double zoom) {
-    if (zoom < 9) return pinLimitState;
-    if (zoom < 11) return pinLimitDistrict;
-    if (zoom < cityZoom) return pinLimitCity;
-    if (zoom < addressZoom) return pinLimitNeighbourhood;
-    return pinLimitStreet;
-  }
+  /// A safety net, not a working limit: the cell grid already bounds the answer
+  /// to roughly a screenful (measured: 12 markers for the whole of Malaysia,
+  /// 66 for Kuala Lumpur at zoom 11, 10 at street level). This only bites if a
+  /// caller asks for a box far larger than a screen.
+  static int pinLimitForZoom(double zoom) => maximumMarkers;
+
+  /// Ceiling on marker rows from one viewport query.
+  static const int maximumMarkers = 400;
 
   // ===========================================================================
   // Smart Filtering options (REQ102_23 - REQ102_27)
@@ -330,12 +292,26 @@ class MapExplorationLogic {
   /// The state containing [latitude] / [longitude], or null when the point is
   /// outside every Malaysian state (A3).
   ///
-  /// **Strict**: the point must be inside an outline. This answers "where is
-  /// the tourist" and "which state did they tap", where being generous would
-  /// mean claiming somebody standing in Singapore is in Johor. The heatmap
-  /// tally uses [_regionOf] with `snap: true` instead - see there.
-  Future<Region?> regionAt(double latitude, double longitude) async =>
-      _regionOf(await regions(), latitude, longitude);
+  /// **Strict**: the point must be inside a boundary. This answers "where is
+  /// the tourist" and "which state is the map centred on", where being generous
+  /// would mean claiming somebody standing in Singapore is in Johor.
+  ///
+  /// Decided by Postgres against the real administrative boundary. Answering it
+  /// from the hand-drawn outlines is what reported every point in Kuala Lumpur
+  /// as Selangor: the two outlines overlap and Selangor came first in the
+  /// catalogue. The repository rounds and caches, so panning is at most one
+  /// request per kilometre travelled.
+  ///
+  /// Falls back to the offline outlines when the database cannot be reached, so
+  /// a lost connection degrades to the old, coarser answer rather than to no
+  /// answer at all.
+  Future<Region?> regionAt(double latitude, double longitude) async {
+    try {
+      return await repository.map.regionAt(latitude, longitude);
+    } catch (_) {
+      return _regionOf(await regions(), latitude, longitude);
+    }
+  }
 
   /// REQ102_8 / REQ102_14 - is the tourist somewhere the dashboard can centre
   /// on? Checked against the state outlines rather than the bounding box, so a
@@ -361,137 +337,113 @@ class MapExplorationLogic {
   Future<FoodDistribution> distribution({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
+    int level = Region.stateLevel,
+    String? parentCode,
+    String? parentName,
   }) async {
-    final List<Object> gathered = await Future.wait(<Future<Object>>[
-      regions(),
-      repository.getLocalFoods(),
-      repository.map.foodOccurrences(),
-    ]);
-    final List<Region> allRegions = gathered[0] as List<Region>;
-    final List<LocalFood> catalogue = gathered[1] as List<LocalFood>;
-    final List<FoodOccurrence> rawOccurrences =
-        gathered[2] as List<FoodOccurrence>;
-
-    final List<LocalFood> matching = catalogue
-        .where(
-          (LocalFood food) =>
-              (localFoodId == null || food.id == localFoodId) &&
-              matchesFilter(food, filter),
-        )
-        .toList(growable: false);
-
-    final Set<int> matchingIds = matching
-        .map((LocalFood food) => food.id)
-        .toSet();
-
-    final List<FoodOccurrence> occurrences = _resolve(
-      rawOccurrences,
-      catalogue,
+    // REQ102_12 - the counting happens in Postgres now, against the real
+    // administrative boundaries in `region_boundary`.
+    //
+    // What this replaced: every restaurant in the country (12,660 rows) and
+    // every menu entry (78,355) downloaded to the phone, then a ray-cast
+    // point-in-polygon test per place against hand-drawn state outlines, on
+    // every redraw of the heatmap. Those outlines were coarse enough that
+    // Selangor's polygon swallowed Kuala Lumpur - 1,900 restaurants counted
+    // under the wrong state and Kuala Lumpur reported as empty - and 699 places
+    // fell in the gaps between two outlines and were counted by nobody.
+    //
+    // The same tally now arrives as sixteen rows.
+    final List<int>? foodIds = await _foodIdsFor(
+      filter: filter,
+      localFoodId: localFoodId,
     );
 
-    // When viewing "All local food" (no filter, no specific dish), include
-    // EVERY landmark even if its dish text hasn't been matched to a catalogue
-    // row yet - matching the logic used for map pins.
-    final bool includesAllLandmarks =
-        localFoodId == null && filter.selectionCount == 0;
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      repository.map.regionDistribution(
+        level: level,
+        parentCode: parentCode,
+        foodIds: foodIds,
+      ),
+      repository.getLocalFoods(),
+    ]);
+    final List<RegionTally> tallies = gathered[0] as List<RegionTally>;
+    final List<LocalFood> catalogue = gathered[1] as List<LocalFood>;
 
-    // Collapse the occurrence list to one entry per place first. A place
-    // with ten matching dishes still counts once (C1), and - the reason this is
-    // a separate pass - the point-in-polygon test then runs once per place
-    // rather than once per dish, which is the difference between ~12k tests and
-    // ~78k on every heatmap redraw.
-    final Map<String, _PlaceTally> tallies = <String, _PlaceTally>{};
-    for (final FoodOccurrence occurrence in occurrences) {
-      final bool isMatchingFood = matchingIds.contains(occurrence.localFoodId);
-      final bool isUnresolvedLandmark =
-          includesAllLandmarks &&
-          occurrence.source == FoodOccurrenceSource.submittedLandmark &&
-          occurrence.localFoodId == 0;
-
-      if (!isMatchingFood && !isUnresolvedLandmark) continue;
-
-      tallies
-          .putIfAbsent(
-            '${occurrence.source.name}:${occurrence.sourceId}',
-            () => _PlaceTally(occurrence.latitude, occurrence.longitude),
-          )
-          .foods
-          .add(occurrence.localFoodId);
-    }
-
-    // Two tallies per state: the places (what the gradient measures) and the
-    // distinct dishes (context on the state card).
-    final Map<String, int> placesByRegion = <String, int>{
-      for (final Region region in allRegions) region.code: 0,
-    };
-    final Map<String, Set<int>> foodsByRegion = <String, Set<int>>{
-      for (final Region region in allRegions) region.code: <int>{},
-    };
-
-    for (final _PlaceTally tally in tallies.values) {
-      final Region? region = _regionOf(
-        allRegions,
-        tally.latitude,
-        tally.longitude,
-        // The heatmap is a count of every place in the country, so a place
-        // that fell in a gap between two coarse outlines must still land
-        // somewhere. See [regionSnapMetres].
-        snap: true,
-      );
-      if (region == null) continue;
-      placesByRegion[region.code] = placesByRegion[region.code]! + 1;
-      foodsByRegion[region.code]!.addAll(tally.foods);
-    }
-
+    // C1's denominator is the largest count *in the set on screen*. At state
+    // level that is the national maximum; drilled into one state it is that
+    // state's busiest district, so the colour ramp re-spreads across the
+    // districts actually being shown rather than leaving them all one shade of
+    // Johor's 3,155.
     int maximum = 0;
-    for (final int places in placesByRegion.values) {
-      if (places > maximum) maximum = places;
+    for (final RegionTally tally in tallies) {
+      if (tally.placeCount > maximum) maximum = tally.placeCount;
     }
 
-    final List<RegionAvailability> availability = allRegions
-        .map((Region region) {
-          final int places = placesByRegion[region.code]!;
-          return RegionAvailability(
-            region: region,
-            placeCount: places,
+    final List<RegionAvailability> availability = tallies
+        .map(
+          (RegionTally tally) => RegionAvailability(
+            region: tally.region,
+            placeCount: tally.placeCount,
             maximumPlaceCount: maximum,
             // REQ102_17 - the gradient between green and grey is generated
-            // from this, never picked per state.
-            score: maximum == 0 ? 0 : places / maximum,
-            foodCount: foodsByRegion[region.code]!.length,
-          );
-        })
+            // from this, never picked per area.
+            score: maximum == 0 ? 0 : tally.placeCount / maximum,
+            foodCount: tally.foodCount,
+            restaurantCount: tally.restaurantCount,
+            landmarkCount: tally.landmarkCount,
+          ),
+        )
         .toList(growable: false);
 
     return FoodDistribution(
       regions: availability,
       maximumPlaceCount: maximum,
-      matchingFoodCount: matching.length,
+      matchingFoodCount: catalogue
+          .where(
+            (LocalFood food) =>
+                (localFoodId == null || food.id == localFoodId) &&
+                matchesFilter(food, filter),
+          )
+          .length,
+      level: level,
+      parentCode: parentCode,
+      parentName: parentName,
     );
   }
 
-  /// REQ102_32 - the restaurant and submitted-landmark pins drawn on the
-  /// detailed map view.
+  /// REQ102_12 - the districts of one state, for the level of the heatmap
+  /// below the country view.
   ///
-  /// With [localFoodId] set, only the places serving that dish are pinned;
-  /// otherwise every place serving anything that survives [filter] is.
+  /// Returns an empty list when the state has no district outlines, which is
+  /// what the ViewModel checks before offering to drill in.
+  Future<List<Region>> districtsOf(String stateCode) =>
+      repository.map.districtsOf(stateCode);
+
+  /// REQ102_41 - the markers drawn on the detailed map view.
   ///
-  /// Two things bound the answer, and they are different:
+  /// **Nothing is downloaded and filtered here.** The viewport, the food
+  /// selection and the zoom go to Postgres, which answers with the markers
+  /// actually drawn: seven cluster rows for the whole of Malaysia, a couple of
+  /// hundred pins for a city. Before this the app read every restaurant and
+  /// every menu row in the country on the first pan.
   ///
-  ///  * the **viewport box** ([south] / [west] / [north] / [east]) decides what
-  ///    is even a candidate - a place off screen is not on the map;
-  ///  * the **zoom** decides how many of those candidates are drawn, through
-  ///    [pinLimitForZoom]. Pass [limit] to override it.
+  /// Three things decide the answer, and they are independent:
   ///
-  /// When more places match than the cap allows, the ones kept are those
-  /// nearest the centre of the viewport - what the tourist is looking at -
-  /// rather than whichever the occurrence list happened to reach first. The
-  /// number left out travels back in [MapPinPage.hiddenCount] so the map can
-  /// say "zoom in for the rest" instead of quietly losing them.
+  ///  * the **viewport box** ([south] / [west] / [north] / [east]), widened by
+  ///    [viewportBuffer] so a place just off the edge is already loaded;
+  ///  * the **zoom**, which sets the size of the grid cell each marker stands
+  ///    for - so it decides how much is grouped, not whether grouping happens;
+  ///  * the **food**, either one dish ([localFoodId]) or every dish surviving
+  ///    [filter]. Null means no food constraint, and Postgres skips the menu
+  ///    lookup entirely.
+  ///
+  /// A pin comes back bare - id, name, position, rating, photo. Its menu,
+  /// opening hours and category arrive from [pinDetail] when it is tapped.
   ///
   /// **This is where REQ103_8 lands.** The food resting in the Target Frame
-  /// becomes [localFoodId], and the pins it produces are the ones that appear
-  /// on the detailed map.
+  /// becomes [localFoodId], and the query returns only places serving it. The
+  /// camera is untouched, so swiping from one dish to the next re-draws the
+  /// markers where the tourist is already looking.
   ///
   /// @param localFoodId (swipe mode) - `LocalFood.id` of the dish in the
   ///        Target Frame, or null for every matching food.
@@ -507,148 +459,330 @@ class MapExplorationLogic {
     double zoom = detailedViewZoom,
     int? limit,
   }) async {
-    // The zoom gate, before anything is fetched or counted: below it there are
-    // no pins to draw, so there is no reason to read a row. A Target Frame dish
-    // is exempt - see [pinsVisibleAtZoom].
-    //
-    // The floor here is [pinHideZoom], the permissive end of the hysteresis.
-    // Deciding when pins first *appear* belongs to whoever is driving the
-    // camera; refusing to answer below the point where they would be dropped
-    // anyway is the hard rule, and it holds for every caller.
-    if (localFoodId == null && zoom < pinHideZoom) {
-      return MapPinPage.hiddenByZoom;
+    // Without a box there is nothing to ask about. The detailed map always has
+    // one; this is the guard for anyone calling before the first camera event.
+    if (south == null || west == null || north == null || east == null) {
+      return MapPinPage.empty;
     }
 
-    final int cap = limit ?? pinLimitForZoom(zoom);
-    // Catalogue and occurrences are independent reads, so they go together;
-    // cached, they cost nothing at all on a pan. Opening hours deliberately do
-    // *not* join them - which places need hours is not known until the viewport
-    // and the filter have been applied, and asking for all of them is a read
-    // seven times the size of the restaurant table.
-    final List<Object> gathered = await Future.wait(<Future<Object>>[
-      repository.getLocalFoods(),
-      repository.map.foodOccurrences(),
-    ]);
-    final List<LocalFood> catalogue = gathered[0] as List<LocalFood>;
-    final List<FoodOccurrence> rawOccurrences =
-        gathered[1] as List<FoodOccurrence>;
+    final int cap = limit ?? maximumMarkers;
 
+    // Which foods count. `null` is "no constraint" and is not the same as an
+    // empty list, which is "a filter is on and nothing matches it" - the first
+    // skips the menu lookup, the second is an empty map.
+    final List<int>? foodIds = await _foodIdsFor(
+      filter: filter,
+      localFoodId: localFoodId,
+    );
+
+    // REQ102_41 - a little wider than the screen, so panning a short way finds
+    // its markers already loaded instead of flashing an empty edge.
+    final double latitudeSpan = (north - south).abs();
+    final double longitudeSpan = (east - west).abs();
+    final double latitudePad = latitudeSpan * viewportBuffer;
+    final double longitudePad = longitudeSpan * viewportBuffer;
+
+    final MapMarkerSet markers = await repository.map.mapMarkers(
+      southLatitude: south - latitudePad,
+      westLongitude: west - longitudePad,
+      northLatitude: north + latitudePad,
+      eastLongitude: east + longitudePad,
+      zoom: zoom,
+      foodIds: foodIds,
+      limit: cap,
+    );
+
+    // Distance to the tourist is the one thing Postgres was not asked for: it
+    // changes with every GPS fix, and recomputing it here costs nothing.
+    final List<MapPin> withDistance = fromLatitude == null ||
+            fromLongitude == null
+        ? markers.pins
+        : markers.pins
+              .map(
+                (MapPin pin) => _withDistance(
+                  pin,
+                  _distanceMetres(
+                    fromLatitude,
+                    fromLongitude,
+                    pin.latitude,
+                    pin.longitude,
+                  ),
+                ),
+              )
+              .toList(growable: false);
+
+    return MapPinPage(
+      pins: List<MapPin>.unmodifiable(withDistance),
+      clusters: markers.clusters,
+      // Markers produced, not places found - `placesRepresented` is the second
+      // number, and it counts what is inside the clusters too.
+      totalInView: withDistance.length + markers.clusters.length,
+      limit: cap,
+    );
+  }
+
+  /// REQ102_41 - what a tap on [cluster] should do.
+  ///
+  /// Returns the zoom that visibly breaks the cluster up, so one tap does what
+  /// three used to fail to do. When no zoom separates the members - places at
+  /// the same coordinates - the answer instead carries every member, so the map
+  /// can draw them individually rather than a badge that can never be opened.
+  ///
+  /// Members that would land on top of each other are spread onto a small
+  /// circle so each is separately tappable. That moves the **drawn** position by
+  /// a few metres at maximum zoom; `referenceId` is untouched, so tapping still
+  /// opens the right restaurant.
+  Future<ClusterExpansion> expandCluster(
+    MapCluster cluster, {
+    required double zoom,
+    ExplorationFilter filter = ExplorationFilter.none,
+    int? localFoodId,
+  }) async {
+    final List<int>? foodIds = await _foodIdsFor(
+      filter: filter,
+      localFoodId: localFoodId,
+    );
+
+    final ({double? splitZoom, int memberCount}) probe = await repository.map
+        .clusterSplitZoom(
+          latitude: cluster.latitude,
+          longitude: cluster.longitude,
+          zoom: zoom,
+          maximumZoom: maximumZoom,
+          foodIds: foodIds,
+        );
+
+    if (probe.splitZoom != null) {
+      return ClusterExpansion(
+        splitZoom: probe.splitZoom,
+        memberCount: probe.memberCount,
+      );
+    }
+
+    final List<MapPin> members = await repository.map.clusterMembers(
+      latitude: cluster.latitude,
+      longitude: cluster.longitude,
+      zoom: zoom,
+      foodIds: foodIds,
+    );
+    return ClusterExpansion(
+      splitZoom: null,
+      memberCount: probe.memberCount == 0 ? members.length : probe.memberCount,
+      members: _spreadColliding(members, maximumZoom),
+    );
+  }
+
+  /// Pushes markers that share a position onto a small circle around it.
+  ///
+  /// Without this, "show them individually" draws six pins on top of each other
+  /// and only the last is tappable. The radius is [collisionSpreadPixels]
+  /// converted to degrees at [zoom] - about four metres at maximum zoom, which
+  /// is below the accuracy of the coordinates themselves.
+  static List<MapPin> _spreadColliding(List<MapPin> members, double zoom) {
+    if (members.length < 2) return members;
+
+    // Places within a marker's width of each other, grouped by rounded position.
+    final Map<String, List<MapPin>> byPosition = <String, List<MapPin>>{};
+    for (final MapPin member in members) {
+      final String key =
+          '${member.latitude.toStringAsFixed(5)}:'
+          '${member.longitude.toStringAsFixed(5)}';
+      byPosition.putIfAbsent(key, () => <MapPin>[]).add(member);
+    }
+
+    final double degreesPerPixel = 360 / (256 * math.pow(2, zoom));
+    final double radius = collisionSpreadPixels * degreesPerPixel;
+
+    final List<MapPin> out = <MapPin>[];
+    for (final List<MapPin> group in byPosition.values) {
+      if (group.length == 1) {
+        out.add(group.first);
+        continue;
+      }
+      for (int i = 0; i < group.length; i++) {
+        final double angle = 2 * math.pi * i / group.length;
+        final MapPin member = group[i];
+        out.add(
+          _movedTo(
+            member,
+            member.latitude + radius * math.sin(angle),
+            member.longitude +
+                radius * math.cos(angle) / math.cos(_radians(member.latitude)),
+          ),
+        );
+      }
+    }
+    return List<MapPin>.unmodifiable(out);
+  }
+
+  static MapPin _movedTo(MapPin pin, double latitude, double longitude) =>
+      MapPin(
+        referenceId: pin.referenceId,
+        kind: pin.kind,
+        latitude: latitude,
+        longitude: longitude,
+        label: pin.label,
+        weight: pin.weight,
+        imageUrl: pin.imageUrl,
+        category: pin.category,
+        rating: pin.rating,
+        servedFoods: pin.servedFoods,
+        priceRange: pin.priceRange,
+        openNow: pin.openNow,
+        distanceMetres: pin.distanceMetres,
+      );
+
+  /// How far apart to push markers that share a position, in screen pixels.
+  static const double collisionSpreadPixels = 18;
+
+  /// The `local_food_id`s a viewport query should be constrained to.
+  ///
+  /// Null when nothing is constraining the map, so the query skips the menu
+  /// lookup. A single id when a dish is in the Target Frame or has been
+  /// searched. Otherwise every catalogue food surviving the filter chips -
+  /// resolved here rather than in SQL, so the filter rules stay in one place
+  /// and the 368-row catalogue is read from cache.
+  Future<List<int>?> _foodIdsFor({
+    required ExplorationFilter filter,
+    required int? localFoodId,
+  }) async {
+    if (localFoodId != null) return <int>[localFoodId];
+    if (filter.selectionCount == 0) return null;
+
+    // The same four chips produce the same ids every time, and this is asked on
+    // every pan. Resolve once per filter selection rather than walking the
+    // catalogue again for each load.
+    final String key =
+        '${filter.meal}|${filter.category}|${filter.taste}|${filter.type}';
+    final List<int>? cached = _foodIdCache[key];
+    if (cached != null) return cached;
+
+    final List<LocalFood> catalogue = await repository.getLocalFoods();
+    final List<int> ids = catalogue
+        .where((LocalFood food) => matchesFilter(food, filter))
+        .map((LocalFood food) => food.id)
+        .toList(growable: false);
+    if (_foodIdCache.length > 32) _foodIdCache.clear();
+    _foodIdCache[key] = ids;
+    return ids;
+  }
+
+  static final Map<String, List<int>> _foodIdCache = <String, List<int>>{};
+
+  /// REQ102_47 - everything the "Click Map Pin" sheet shows, fetched by id the
+  /// moment a pin is tapped.
+  ///
+  /// The map markers carry only what they draw. This is the other half of that
+  /// bargain: one row by primary key, its menu, and its opening hours - three
+  /// small reads for one place, instead of those three columns on every place
+  /// in the country.
+  ///
+  /// Returns [pin] unchanged when the detail cannot be read, so a tap always
+  /// opens a sheet with at least the name and photo already on the marker.
+  Future<MapPin> pinDetail(
+    MapPin pin, {
+    ExplorationFilter filter = ExplorationFilter.none,
+    int? localFoodId,
+  }) async {
+    final int? id = int.tryParse(pin.referenceId);
+    if (id == null || id <= 0) return pin;
+    if (pin.kind != MapPinKind.restaurant) return pin;
+
+    final Restaurant? restaurant;
+    final List<RestaurantItem> items;
+    final Map<String, List<OpeningHour>> hours;
+    try {
+      final List<Object?> gathered = await Future.wait(<Future<Object?>>[
+        repository.getRestaurantById(id),
+        repository.getRestaurantItemsByRestaurantIds(<int>[id]),
+        repository.openingHoursByPlace(
+          placeKeys: <String>{'restaurant:$id'},
+        ),
+      ]);
+      restaurant = gathered[0] as Restaurant?;
+      items = gathered[1] as List<RestaurantItem>;
+      hours = gathered[2] as Map<String, List<OpeningHour>>;
+    } catch (_) {
+      return pin;
+    }
+    if (restaurant == null) return pin;
+
+    // "Serves: ..." lists what the tourist is looking for first. With nothing
+    // selected that is simply the menu, catalogue names preferred over the
+    // restaurant's own spelling so the sheet matches the rest of the app.
+    final List<LocalFood> catalogue = await repository.getLocalFoods();
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
-    final Set<int> matchingIds = catalogue
-        .where(
-          (LocalFood food) =>
-              (localFoodId == null || food.id == localFoodId) &&
-              matchesFilter(food, filter),
-        )
-        .map((LocalFood food) => food.id)
-        .toSet();
+    final Set<int> wanted = <int>{
+      for (final LocalFood food in catalogue)
+        if ((localFoodId == null || food.id == localFoodId) &&
+            matchesFilter(food, filter))
+          food.id,
+    };
+    final bool narrowed = localFoodId != null || filter.selectionCount > 0;
 
-    final List<FoodOccurrence> occurrences = _resolve(
-      rawOccurrences,
-      catalogue,
-    );
-
-    // A dish only has to match the catalogue when the tourist is actually
-    // looking for one - a filter is active or a specific dish search is set.
-    // An unresolved submitted landmark (free-text dish, `localFoodId` 0) still
-    // has valid coordinates, so with nothing filtering the map it deserves a
-    // pin; it just cannot honestly be matched against a criterion it was never
-    // checked against, so it is excluded the moment a criterion exists. This
-    // is deliberately different from `distribution()`, where an unmatched dish
-    // counting by no state is the honest outcome for a diversity score.
-    final bool requiresCatalogueMatch =
-        localFoodId != null || filter.selectionCount > 0;
-
-    // One pin per place, gathering every matching dish served there.
-    final Map<String, _PinBuilder> byPlace = <String, _PinBuilder>{};
-    for (final FoodOccurrence occurrence in occurrences) {
-      if (requiresCatalogueMatch &&
-          !matchingIds.contains(occurrence.localFoodId)) {
-        continue;
-      }
-      if (south != null && occurrence.latitude < south) continue;
-      if (north != null && occurrence.latitude > north) continue;
-      if (west != null && occurrence.longitude < west) continue;
-      if (east != null && occurrence.longitude > east) continue;
-
-      final String key = '${occurrence.source.name}:${occurrence.sourceId}';
-      // Deliberately *not* capped here. The cap is applied after every
-      // candidate is known, because a count that stopped at the cap could only
-      // ever report the cap - which is how a map ends up lying about how much
-      // it is not showing.
-      byPlace
-          .putIfAbsent(key, () => _PinBuilder(occurrence))
-          .add(occurrence, nameById[occurrence.localFoodId]);
+    final List<String> served = <String>[];
+    final List<double> prices = <double>[];
+    for (final RestaurantItem item in items) {
+      final bool matches = wanted.contains(item.localFoodId);
+      if (narrowed && !matches) continue;
+      final String name = (nameById[item.localFoodId] ?? item.foodName).trim();
+      if (name.isNotEmpty && !served.contains(name)) served.add(name);
+      final double? price = item.price;
+      if (price != null && price > 0) prices.add(price);
     }
 
-    final List<_PinCandidate> candidates = <_PinCandidate>[];
-    // The middle of the viewport when there is one, the tourist otherwise.
-    final double? centreLatitude = south != null && north != null
-        ? (south + north) / 2
-        : fromLatitude;
-    final double? centreLongitude = west != null && east != null
-        ? (west + east) / 2
-        : fromLongitude;
-    for (final MapEntry<String, _PinBuilder> entry in byPlace.entries) {
-      candidates.add(
-        _PinCandidate(
-          entry.key,
-          entry.value,
-          centreLatitude == null || centreLongitude == null
-              ? 0
-              : _distanceMetres(
-                  centreLatitude,
-                  centreLongitude,
-                  entry.value.first.latitude,
-                  entry.value.first.longitude,
-                ),
-        ),
-      );
-    }
-
-    final int totalInView = candidates.length;
-    if (totalInView > cap) {
-      // Distance was measured once per place above, so this is a plain sort on
-      // a number rather than tens of thousands of repeated haversines.
-      candidates.sort(
-        (_PinCandidate a, _PinCandidate b) =>
-            a.fromCentre.compareTo(b.fromCentre),
-      );
-    }
-    final List<_PinCandidate> drawn = totalInView > cap
-        ? candidates.sublist(0, cap)
-        : candidates;
-
-    // Now that the drawn pins are known, and only now, fetch the hours for
-    // them - at most [cap] places rather than every place in the country.
-    final Map<String, List<OpeningHour>> hours = await repository.map
-        .openingHours(
-          placeKeys: drawn
-              .map((_PinCandidate candidate) => candidate.key)
-              .toSet(),
-        );
-
-    return MapPinPage(
-      pins: List<MapPin>.unmodifiable(
-        drawn.map(
-          (_PinCandidate candidate) => candidate.builder.build(
-            openNow: _openNow(hours[candidate.key]),
-            distanceMetres: fromLatitude == null || fromLongitude == null
-                ? null
-                : _distanceMetres(
-                    fromLatitude,
-                    fromLongitude,
-                    candidate.builder.first.latitude,
-                    candidate.builder.first.longitude,
-                  ),
-          ),
-        ),
+    return MapPin(
+      referenceId: pin.referenceId,
+      kind: pin.kind,
+      latitude: pin.latitude,
+      longitude: pin.longitude,
+      label: restaurant.name.isEmpty ? pin.label : restaurant.name,
+      weight: served.isEmpty ? pin.weight : served.length,
+      imageUrl: restaurant.imageUrl ?? pin.imageUrl,
+      category: restaurant.category.isEmpty ? null : restaurant.category,
+      rating: restaurant.rating ?? pin.rating,
+      servedFoods: List<String>.unmodifiable(
+        served.length > maximumServedFoods
+            ? served.sublist(0, maximumServedFoods)
+            : served,
       ),
-      totalInView: totalInView,
-      limit: cap,
+      priceRange: _priceRangeOf(prices),
+      openNow: _openNow(hours['restaurant:$id']),
+      distanceMetres: pin.distanceMetres,
     );
+  }
+
+  static MapPin _withDistance(MapPin pin, double distanceMetres) => MapPin(
+    referenceId: pin.referenceId,
+    kind: pin.kind,
+    latitude: pin.latitude,
+    longitude: pin.longitude,
+    label: pin.label,
+    weight: pin.weight,
+    imageUrl: pin.imageUrl,
+    category: pin.category,
+    rating: pin.rating,
+    servedFoods: pin.servedFoods,
+    priceRange: pin.priceRange,
+    openNow: pin.openNow,
+    distanceMetres: distanceMetres,
+  );
+
+  /// "RM20-40", or "RM20" when everything costs the same. Null when no dish
+  /// here carries a price - better an absent line than an invented one.
+  static String? _priceRangeOf(List<double> prices) {
+    if (prices.isEmpty) return null;
+    double low = prices.first;
+    double high = prices.first;
+    for (final double price in prices) {
+      if (price < low) low = price;
+      if (price > high) high = price;
+    }
+    final int from = low.round();
+    final int to = high.round();
+    return from == to ? 'RM$from' : 'RM$from-$to';
   }
 
   /// Is the place open at this moment (UC300 C12)?
@@ -835,25 +969,29 @@ class MapExplorationLogic {
 
     // Addresses: the places already on the map answer "where is X" too, and a
     // tourist searching a restaurant name expects to find it.
-    final Set<String> seenAddresses = <String>{};
-    for (final FoodOccurrence occurrence in occurrences) {
-      final int score = _score(needle, <String>[occurrence.placeName]);
+    //
+    // Scored against a prepared index rather than the raw occurrence list. The
+    // occurrences are one row per dish - 78,355 of them for 12,666 places - and
+    // the old loop scored every one, lower-casing and regex-splitting the same
+    // restaurant name six times over, on every keystroke. Every occurrence of a
+    // place carries the same name and position, so scoring the place once gives
+    // **the same result** and does a sixth of the work.
+    for (final _SearchablePlace place in _placeIndexFor(occurrences)) {
+      final int score = _scorePrepared(needle, place);
       if (score == 0) continue;
-      final String key = '${occurrence.source.name}:${occurrence.sourceId}';
-      if (!seenAddresses.add(key)) continue;
       scored.add(
         _ScoredPlace(
           // One step below a named place: a restaurant called "Penang Village"
           // must not outrank Penang.
           score - 1,
           PlaceSuggestion(
-            name: occurrence.placeName,
-            subtitle: occurrence.source == FoodOccurrenceSource.restaurant
+            name: place.name,
+            subtitle: place.source == FoodOccurrenceSource.restaurant
                 ? 'Restaurant'
                 : 'Submitted landmark',
             kind: PlaceKind.address,
-            latitude: occurrence.latitude,
-            longitude: occurrence.longitude,
+            latitude: place.latitude,
+            longitude: place.longitude,
             zoom: addressZoom,
           ),
         ),
@@ -887,6 +1025,46 @@ class MapExplorationLogic {
   /// Ranked rather than a flat `contains`, because with 148 places a bare
   /// substring match buries the obvious answer: typing "kl" should offer Kuala
   /// Lumpur and KLCC before Kluang and Kuala Selangor.
+  /// One searchable place, with the per-keystroke work already done.
+  ///
+  /// Built once per occurrence list and reused for every keystroke.
+  static List<_SearchablePlace> _placeIndexFor(
+    List<FoodOccurrence> occurrences,
+  ) {
+    // Occurrences are cached and replaced wholesale, so identity is a sound and
+    // very cheap staleness test.
+    if (identical(_indexedOccurrences, occurrences) && _placeIndex != null) {
+      return _placeIndex!;
+    }
+    final Set<String> seen = <String>{};
+    final List<_SearchablePlace> index = <_SearchablePlace>[];
+    for (final FoodOccurrence occurrence in occurrences) {
+      final String key = '${occurrence.source.name}:${occurrence.sourceId}';
+      if (!seen.add(key)) continue;
+      index.add(_SearchablePlace(occurrence));
+    }
+    _indexedOccurrences = occurrences;
+    _placeIndex = List<_SearchablePlace>.unmodifiable(index);
+    return _placeIndex!;
+  }
+
+  static List<FoodOccurrence>? _indexedOccurrences;
+  static List<_SearchablePlace>? _placeIndex;
+
+  /// [_score] for a place whose lower-cased name and word list are already in
+  /// hand. Same ladder, same numbers, same answer - just no re-work.
+  static int _scorePrepared(String needle, _SearchablePlace place) {
+    final String value = place.nameLower;
+    if (value.isEmpty) return 0;
+    if (value == needle) return _scoreExact;
+    if (value.startsWith(needle)) return _scorePrefix;
+    for (final String word in place.words) {
+      if (word.startsWith(needle)) return _scoreWord;
+    }
+    if (value.contains(needle)) return _scoreContains;
+    return 0;
+  }
+
   static int _score(String needle, List<String> candidates) {
     int best = 0;
     for (final String candidate in candidates) {
@@ -1158,74 +1336,26 @@ class MapExplorationLogic {
   }
 }
 
-/// One place while the heatmap is being counted: where it is, and which
-/// matching dishes it serves.
-class _PlaceTally {
-  _PlaceTally(this.latitude, this.longitude);
+/// A place as the search sees it: the name already lower-cased and split into
+/// words, so a keystroke is a comparison rather than a string rebuild.
+class _SearchablePlace {
+  _SearchablePlace(FoodOccurrence occurrence)
+    : name = occurrence.placeName,
+      nameLower = occurrence.placeName.toLowerCase().trim(),
+      words = occurrence.placeName
+          .toLowerCase()
+          .trim()
+          .split(RegExp(r'[\s,./-]+')),
+      latitude = occurrence.latitude,
+      longitude = occurrence.longitude,
+      source = occurrence.source;
 
+  final String name;
+  final String nameLower;
+  final List<String> words;
   final double latitude;
   final double longitude;
-  final Set<int> foods = <int>{};
-}
-
-/// A place that qualified for a pin, with how far it sits from the middle of
-/// the viewport - the key the zoom cap sorts on.
-class _PinCandidate {
-  _PinCandidate(this.key, this.builder, this.fromCentre);
-
-  final String key;
-  final _PinBuilder builder;
-  final double fromCentre;
-}
-
-/// Gathers every matching dish at one place while the pins are being built.
-class _PinBuilder {
-  _PinBuilder(this.first);
-
-  final FoodOccurrence first;
-  final List<String> foods = <String>[];
-  final List<double> prices = <double>[];
-
-  void add(FoodOccurrence occurrence, String? foodName) {
-    final String name = (foodName ?? occurrence.foodName).trim();
-    if (name.isNotEmpty && !foods.contains(name)) foods.add(name);
-    final double? price = occurrence.itemPrice;
-    if (price != null && price > 0) prices.add(price);
-  }
-
-  MapPin build({required bool? openNow, required double? distanceMetres}) =>
-      MapPin(
-        referenceId: first.sourceId,
-        kind: first.source == FoodOccurrenceSource.restaurant
-            ? MapPinKind.restaurant
-            : MapPinKind.landmark,
-        latitude: first.latitude,
-        longitude: first.longitude,
-        label: first.placeName,
-        weight: foods.length,
-        imageUrl: first.placeImageUrl,
-        category: first.placeCategory,
-        rating: first.placeRating,
-        servedFoods: List<String>.unmodifiable(foods),
-        priceRange: _priceRange(),
-        openNow: openNow,
-        distanceMetres: distanceMetres,
-      );
-
-  /// "RM20-40", or "RM20" when everything costs the same. Null when no dish
-  /// here carries a price - better an absent line than an invented one.
-  String? _priceRange() {
-    if (prices.isEmpty) return null;
-    double low = prices.first;
-    double high = prices.first;
-    for (final double price in prices) {
-      if (price < low) low = price;
-      if (price > high) high = price;
-    }
-    final int from = low.round();
-    final int to = high.round();
-    return from == to ? 'RM$from' : 'RM$from-$to';
-  }
+  final FoodOccurrenceSource source;
 }
 
 /// One search hit with the score that ordered it.
