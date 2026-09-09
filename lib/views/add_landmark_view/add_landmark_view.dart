@@ -193,6 +193,13 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                               style: AppTextStyles.titleSmall,
                             ),
                             const SizedBox(height: AppSpacing.sm),
+                            if (viewModel.addLocationBlockMessage !=
+                                null) ...<Widget>[
+                              _LocationBlockedNotice(
+                                message: viewModel.addLocationBlockMessage!,
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                            ],
                             LocationPickerField(
                               center: viewModel.currentLocation,
                               pin: viewModel.adjustedLocation.isKnown
@@ -238,6 +245,44 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                 },
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Shown on the Location section when the current fix is at sea / outside
+/// Malaysia (A9): a hard notice that no landmark can be submitted from here.
+class _LocationBlockedNotice extends StatelessWidget {
+  const _LocationBlockedNotice({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: AppSpacing.cardPadding,
+      decoration: const BoxDecoration(
+        color: AppColors.bannerCautionBackground,
+        borderRadius: AppRadius.cardRadius,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(
+            Icons.location_off,
+            size: 18,
+            color: AppColors.bannerCautionText,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              message,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.bannerCautionText,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
