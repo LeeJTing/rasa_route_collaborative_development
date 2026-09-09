@@ -26,6 +26,65 @@ class ExplorationMap {
   final List<MapPin> pins;
 }
 
+/// One screenful of map pins: what is drawn, and how much of the truth that is.
+///
+/// The detailed map cannot draw every restaurant in a viewport - at state zoom
+/// that is thousands of markers, which is unreadable and slow - so [pins] is
+/// capped at [limit], and [limit] is chosen from the camera's zoom by
+/// `MapExplorationLogic.pinLimitForZoom`.
+///
+/// [totalInView] is the honest number of places that matched inside the
+/// viewport. It exists so the map can *say* how much it is holding back:
+/// silently dropping ninety percent of the answer is the same class of defect
+/// as a truncated query, and just as hard to notice.
+class MapPinPage {
+  const MapPinPage({
+    required this.pins,
+    required this.totalInView,
+    required this.limit,
+    this.suppressedByZoom = false,
+  });
+
+  static const MapPinPage empty = MapPinPage(
+    pins: <MapPin>[],
+    totalInView: 0,
+    limit: 0,
+  );
+
+  /// The map is zoomed too far out to draw pins at all - not the same thing as
+  /// there being nothing here. Nothing was fetched and nothing was counted, so
+  /// [totalInView] is 0 because the question was never asked.
+  static const MapPinPage hiddenByZoom = MapPinPage(
+    pins: <MapPin>[],
+    totalInView: 0,
+    limit: 0,
+    suppressedByZoom: true,
+  );
+
+  /// The pins actually drawn - the [limit] closest to the centre of the
+  /// viewport.
+  final List<MapPin> pins;
+
+  /// Every place inside the viewport that survived the filter, drawn or not.
+  final int totalInView;
+
+  /// The cap that was applied, from the zoom level.
+  final int limit;
+
+  /// True when the empty result means "too far out to show pins" rather than
+  /// "nothing matched here". Keeps the two apart for anything that reports to
+  /// the tourist.
+  final bool suppressedByZoom;
+
+  /// Places in view that did not fit on the map.
+  int get hiddenCount {
+    final int hidden = totalInView - pins.length;
+    return hidden > 0 ? hidden : 0;
+  }
+
+  bool get hasMore => hiddenCount > 0;
+}
+
 enum MapPinKind { restaurant, landmark, food, tourist }
 
 /// A single marker on the map, carrying everything the "Click Map Pin" sheet
@@ -33,8 +92,9 @@ enum MapPinKind { restaurant, landmark, food, tourist }
 ///
 /// The detail travels with the pin rather than being fetched when one is
 /// tapped: the sheet then opens instantly, and the fields all come from rows
-/// the pin query already had to read. Pin counts are bounded by
-/// `MapExplorationLogic.pins(limit:)`, so this stays cheap.
+/// the pin query already had to read. How many pins exist at once is bounded by
+/// the zoom, through `MapExplorationLogic.pinLimitForZoom` - see [MapPinPage] -
+/// so carrying the detail stays cheap.
 ///
 /// Domain models are plain data types. They carry no JSON - serialisation is
 /// the data model's job in `lib/model/data_models/`, and the repository is what

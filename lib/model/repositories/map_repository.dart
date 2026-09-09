@@ -118,23 +118,20 @@ class MapRepository {
   /// How much map data exists right now - polled by `RestaurantMonitor` to
   /// notice that another tourist has added a landmark.
   ///
-  /// Deliberately **not cached**: its whole job is to see past the cache. Reads
-  /// one id column from each table, so the payload stays small even as the
-  /// tables grow.
+  /// Deliberately **not cached**: its whole job is to see past the cache.
+  ///
+  /// Counted server-side (a `HEAD` request answered by `Content-Range`) rather
+  /// than by downloading an id column and measuring the list. Downloading was
+  /// both wasteful and *wrong*: PostgREST caps an unpaged select at 1000 rows,
+  /// so past a thousand restaurants every poll reported exactly 1000 and the
+  /// stamp could never change again.
   Future<MapDataStamp> mapDataStamp() async {
     try {
-      final List<List<Map<String, dynamic>>> rows =
-          await Future.wait(<Future<List<Map<String, dynamic>>>>[
-            api.selectAll(
-              APIManager.tableSubmittedLandmark,
-              columns: 'landmark_id',
-            ),
-            api.selectAll(APIManager.tableRestaurant, columns: 'restaurant_id'),
-          ]);
-      return MapDataStamp(
-        landmarkCount: rows[0].length,
-        restaurantCount: rows[1].length,
-      );
+      final List<int> counts = await Future.wait(<Future<int>>[
+        api.countRows(APIManager.tableSubmittedLandmark),
+        api.countRows(APIManager.tableRestaurant),
+      ]);
+      return MapDataStamp(landmarkCount: counts[0], restaurantCount: counts[1]);
     } catch (_) {
       // A failed poll must not look like "everything vanished" - that would
       // prompt the tourist to refresh into an empty map.
@@ -168,12 +165,12 @@ class MapRepository {
 
   Future<List<MapPlace>> _fetchPlaces() async {
     try {
-      final List<Map<String, dynamic>> rows = await api.selectAll(
+      final List<Map<String, dynamic>> rows = await api.selectEvery(
         APIManager.tablePlace,
+        orderBy: 'place_id',
         columns:
             'place_id, name, kind, state_name, latitude, longitude, '
             'zoom, aliases',
-        orderBy: 'name',
       );
       return rows
           .map(PlaceDataModel.fromJson)
@@ -231,14 +228,19 @@ class MapRepository {
       // Neither select depends on the other.
       final List<List<Map<String, dynamic>>> rows =
           await Future.wait(<Future<List<Map<String, dynamic>>>>[
-            api.selectAll(
+            // Paged, not `selectAll`: both tables are far past PostgREST's
+            // 1000-row ceiling, and a truncated read here is what makes a
+            // fully seeded database look like an almost empty map.
+            api.selectEvery(
               APIManager.tableRestaurant,
+              orderBy: 'restaurant_id',
               columns:
                   'restaurant_id, restaurant_name, latitude, longitude, '
                   'category, rating, restaurant_image_url, status',
             ),
-            api.selectAll(
+            api.selectEvery(
               APIManager.tableRestaurantItem,
+              orderBy: 'restaurant_item_id',
               columns:
                   'restaurant_id, local_food_id, restaurant_item_name, '
                   'restaurant_item_price',
@@ -253,10 +255,17 @@ class MapRepository {
       );
     }
 
+    // A restaurant is on the map unless it is explicitly marked otherwise.
+    //
+    // This used to require `status == 'available'`, which silently dropped
+    // every row where the column was never set - 3,368 of 12,584 in the seeded
+    // data, including 2,177 in Selangor and 579 in Johor. A scraped row with no
+    // status is not evidence that the place is shut; it is a column nobody
+    // filled in. Anything genuinely withdrawn carries a different value and is
+    // still excluded.
     final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
       for (final Map<String, dynamic> row in restaurants)
-        if (_asInt(row['restaurant_id']) != 0 &&
-            _asString(row['status']).trim().toLowerCase() == 'available')
+        if (_asInt(row['restaurant_id']) != 0 && _isVisible(row['status']))
           _asInt(row['restaurant_id']): row,
     };
 
@@ -294,14 +303,16 @@ class MapRepository {
     try {
       final List<List<Map<String, dynamic>>> rows =
           await Future.wait(<Future<List<Map<String, dynamic>>>>[
-            api.selectAll(
+            api.selectEvery(
               APIManager.tableSubmittedLandmark,
+              orderBy: 'landmark_id',
               columns:
                   'landmark_id, landmark_name, latitude, longitude, status, '
                   'image_url, category',
             ),
-            api.selectAll(
+            api.selectEvery(
               APIManager.tableLandmarkItem,
+              orderBy: 'landmark_item_id',
               columns:
                   'landmark_id, local_food_id, dish, image_url, item_price, '
                   'food_category',
@@ -367,8 +378,39 @@ class MapRepository {
   ///
   /// A place with no rows simply has no entry, which is how "hours unknown"
   /// reaches the sheet instead of being guessed as closed.
-  Future<Map<String, List<OpeningHour>>> openingHours() {
+  ///
+  /// Pass [placeKeys] to fetch only the places actually being drawn. The table
+  /// carries a row per place per weekday, so it is roughly seven times the size
+  /// of the restaurant table - reading all of it to decorate at most a couple
+  /// of hundred pins is the single most expensive thing the map used to do.
+  /// Omitting [placeKeys] reads and caches the whole table, which is what the
+  /// recommendation modules want.
+  Future<Map<String, List<OpeningHour>>> openingHours({
+    Set<String>? placeKeys,
+  }) {
     final Map<String, List<OpeningHour>>? cached = _cachedHours;
+
+    if (placeKeys != null) {
+      if (placeKeys.isEmpty) {
+        return Future<Map<String, List<OpeningHour>>>.value(
+          const <String, List<OpeningHour>>{},
+        );
+      }
+      // The whole table is already in hand - no reason to ask again for a
+      // subset of it.
+      if (cached != null && _isFresh(_cachedHoursAt)) {
+        return Future<Map<String, List<OpeningHour>>>.value(
+          <String, List<OpeningHour>>{
+            for (final String key in placeKeys)
+              if (cached[key] != null) key: cached[key]!,
+          },
+        );
+      }
+      // Deliberately uncached: a viewport-sized answer is not the truth about
+      // the table, and caching it would poison the full read.
+      return _fetchOpeningHours(placeKeys: placeKeys);
+    }
+
     if (cached != null && _isFresh(_cachedHoursAt)) {
       return Future<Map<String, List<OpeningHour>>>.value(cached);
     }
@@ -381,15 +423,27 @@ class MapRepository {
         .whenComplete(() => _hoursRequest = null);
   }
 
-  Future<Map<String, List<OpeningHour>>> _fetchOpeningHours() async {
+  /// How many ids go into one `in.(...)` filter. Kept well clear of the URL
+  /// length a proxy will accept, and each chunk is itself paged, so a chunk
+  /// spanning more than 1000 rows is not truncated.
+  static const int _idsPerRequest = 150;
+
+  static const String _openingHoursColumns =
+      'opening_hours_id, day, status, opening_time, closing_time, '
+      'landmark_id, restaurant_id';
+
+  Future<Map<String, List<OpeningHour>>> _fetchOpeningHours({
+    Set<String>? placeKeys,
+  }) async {
     final List<Map<String, dynamic>> rows;
     try {
-      rows = await api.selectAll(
-        APIManager.tableOpeningHours,
-        columns:
-            'opening_hours_id, day, status, opening_time, closing_time, '
-            'landmark_id, restaurant_id',
-      );
+      rows = placeKeys == null
+          ? await api.selectEvery(
+              APIManager.tableOpeningHours,
+              orderBy: 'opening_hours_id',
+              columns: _openingHoursColumns,
+            )
+          : await _openingHoursFor(placeKeys);
     } catch (_) {
       // Hours are a nice-to-have on a map pin; losing them must not take the
       // whole detailed view down.
@@ -445,6 +499,69 @@ class MapRepository {
       if (status.name == name) return status;
     }
     return null;
+  }
+
+  /// Opening hours for a bounded set of place keys, one request per column per
+  /// chunk of ids, all in flight together.
+  Future<List<Map<String, dynamic>>> _openingHoursFor(
+    Set<String> placeKeys,
+  ) async {
+    final List<Object?> restaurantIds = <Object?>[];
+    final List<Object?> landmarkIds = <Object?>[];
+    for (final String key in placeKeys) {
+      final int separator = key.indexOf(':');
+      if (separator < 0) continue;
+      final int? id = int.tryParse(key.substring(separator + 1));
+      if (id == null || id == 0) continue;
+      if (key.startsWith('restaurant:')) {
+        restaurantIds.add(id);
+      } else {
+        landmarkIds.add(id);
+      }
+    }
+
+    final List<Future<List<Map<String, dynamic>>>> requests =
+        <Future<List<Map<String, dynamic>>>>[
+          ..._chunkedRequests('restaurant_id', restaurantIds),
+          ..._chunkedRequests('landmark_id', landmarkIds),
+        ];
+    if (requests.isEmpty) return const <Map<String, dynamic>>[];
+
+    final List<List<Map<String, dynamic>>> pages = await Future.wait(requests);
+    return pages
+        .expand((List<Map<String, dynamic>> page) => page)
+        .toList(growable: false);
+  }
+
+  List<Future<List<Map<String, dynamic>>>> _chunkedRequests(
+    String column,
+    List<Object?> ids,
+  ) {
+    final List<Future<List<Map<String, dynamic>>>> out =
+        <Future<List<Map<String, dynamic>>>>[];
+    for (int start = 0; start < ids.length; start += _idsPerRequest) {
+      final int end = start + _idsPerRequest > ids.length
+          ? ids.length
+          : start + _idsPerRequest;
+      out.add(
+        api.selectEvery(
+          APIManager.tableOpeningHours,
+          orderBy: 'opening_hours_id',
+          columns: _openingHoursColumns,
+          inFilter: <String, List<Object?>>{
+            column: ids.sublist(start, end),
+          },
+        ),
+      );
+    }
+    return out;
+  }
+
+  /// Whether a `restaurant.status` value means the place should be shown.
+  /// Null or blank counts as visible - see [_restaurantOccurrences].
+  static bool _isVisible(Object? status) {
+    final String value = _asString(status).trim().toLowerCase();
+    return value.isEmpty || value == 'available';
   }
 
   static Weekday? _weekday(String value) {
