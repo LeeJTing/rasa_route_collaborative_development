@@ -192,7 +192,10 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
                           ),
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        AuthTextField(onChanged: viewModel.setEmail),
+                        AuthTextField(
+                          onChanged: viewModel.setEmail,
+                          errorText: viewModel.emailError,
+                        ),
                         const SizedBox(height: AppSpacing.xl),
                         SizedBox(
                           width: double.infinity,
