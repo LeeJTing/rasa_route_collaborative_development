@@ -14,13 +14,14 @@ class RecommendationRepository {
   final APIManager api = APIManager();
 
   Future<List<FoodPairing>> getPairings(
-      LocalFood food,
-      List<LocalFood> catalogue, {
-        List<int> touristDietaryRestrictionIds = const <int>[],
-        Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
-        List<FoodPreference> touristPreferences = const <FoodPreference>[],
-        int maximumResults = 5,
-      }) async {
+    LocalFood food,
+    List<LocalFood> catalogue, {
+    List<int> touristDietaryRestrictionIds = const <int>[],
+    Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
+    List<FoodPreference> touristPreferences = const <FoodPreference>[],
+    int maximumResults = 5,
+    void Function(String model)? onFallbackModel,
+  }) async {
     final int maxResults = maximumResults < 1
         ? 1
         : (maximumResults > 5 ? 5 : maximumResults);
@@ -32,13 +33,13 @@ class RecommendationRepository {
         .where((LocalFood c) => c.id != food.id)
         .where(
           (LocalFood c) => !_hasDietaryConflict(
-        c,
-        foodDietaryRestrictionIds,
-        touristRestrictionIds,
-      ),
-    )
+            c,
+            foodDietaryRestrictionIds,
+            touristRestrictionIds,
+          ),
+        )
         .toList(growable: false);
-        
+
     final List<LocalFood> candidates = filtered.toList(growable: false);
     if (candidates.isEmpty) return const <FoodPairing>[];
 
@@ -49,6 +50,7 @@ class RecommendationRepository {
         for (final FoodPreference preference in touristPreferences)
           preference.name,
       ],
+      onFallbackModel: onFallbackModel,
     );
     final List<FoodPairing> parsed = parsePairings(
       raw,
@@ -63,10 +65,10 @@ class RecommendationRepository {
   /// Whether [candidate]'s `food_dietary_restriction` ids intersect the
   /// tourist's chosen restriction ids. True = confirmed conflict = excluded.
   bool _hasDietaryConflict(
-      LocalFood candidate,
-      Map<int, List<int>> foodDietaryRestrictionIds,
-      Set<int> touristRestrictionIds,
-      ) {
+    LocalFood candidate,
+    Map<int, List<int>> foodDietaryRestrictionIds,
+    Set<int> touristRestrictionIds,
+  ) {
     if (touristRestrictionIds.isEmpty) return false;
     final List<int> ids =
         foodDietaryRestrictionIds[candidate.id] ?? const <int>[];
@@ -75,17 +77,15 @@ class RecommendationRepository {
 
   @visibleForTesting
   List<FoodPairing> parsePairings(
-      String raw, {
-        required LocalFood selected,
-        required List<LocalFood> candidates,
-        required int maximumResults,
-      }) {
+    String raw, {
+    required LocalFood selected,
+    required List<LocalFood> candidates,
+    required int maximumResults,
+  }) {
     final Map<String, dynamic> decoded;
     try {
       final Object? parsed = jsonDecode(_stripFences(raw));
-      decoded = parsed is Map<String, dynamic>
-          ? parsed
-          : <String, dynamic>{};
+      decoded = parsed is Map<String, dynamic> ? parsed : <String, dynamic>{};
     } catch (_) {
       return const <FoodPairing>[];
     }
@@ -101,9 +101,7 @@ class RecommendationRepository {
 
       final int? pairedId = (map['foodId'] as num?)?.toInt();
       final LocalFood? paired = _candidateById(candidates, pairedId);
-      if (paired == null ||
-          paired.id == selected.id ||
-          !seen.add(paired.id)) {
+      if (paired == null || paired.id == selected.id || !seen.add(paired.id)) {
         continue;
       }
 
@@ -122,16 +120,14 @@ class RecommendationRepository {
           pairedFoodName: paired.name,
           rank: 0, // reassigned after sorting
           matchPercentage: percentage,
-          reason: reason.isEmpty
-              ? 'Pairs well with ${selected.name}.'
-              : reason,
+          reason: reason.isEmpty ? 'Pairs well with ${selected.name}.' : reason,
           dietaryStatus: isWarning
               ? FoodPairingDietaryStatus.warning
               : FoodPairingDietaryStatus.compatible,
           warning: isWarning
               ? (warning == null || warning.isEmpty)
-              ? _defaultWarning
-              : warning
+                    ? _defaultWarning
+                    : warning
               : null,
         ),
       );
@@ -139,7 +135,7 @@ class RecommendationRepository {
 
     // Highest percentage first; ties keep CANDIDATES order.
     pairings.sort(
-          (FoodPairing a, FoodPairing b) =>
+      (FoodPairing a, FoodPairing b) =>
           b.matchPercentage.compareTo(a.matchPercentage),
     );
     final int take = pairings.length < maximumResults
@@ -175,9 +171,9 @@ class RecommendationRepository {
   /// "If you liked X, try Y" - dishes sharing category / cooking style / meal
   /// type with [food], ranked by how many attributes they share.
   Future<List<FoodSimilarity>> getSimilar(
-      LocalFood food,
-      List<LocalFood> catalogue,
-      ) async {
+    LocalFood food,
+    List<LocalFood> catalogue,
+  ) async {
     final List<FoodSimilarity> results = <FoodSimilarity>[];
 
     for (final LocalFood other in catalogue) {
@@ -206,7 +202,7 @@ class RecommendationRepository {
     }
 
     results.sort(
-          (FoodSimilarity a, FoodSimilarity b) => b.score.compareTo(a.score),
+      (FoodSimilarity a, FoodSimilarity b) => b.score.compareTo(a.score),
     );
     return results.take(10).toList();
   }

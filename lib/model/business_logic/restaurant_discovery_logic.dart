@@ -1,14 +1,14 @@
 import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show protected, visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/place_closure_rules.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
-import '../../domain_model/restaurant_report_reason.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
 
@@ -30,80 +30,18 @@ class RestaurantDiscoveryLogic {
   Future<Restaurant?> findById(int restaurantId) =>
       repository.getRestaurantById(restaurantId);
 
-  /// Records a tourist's report against a catalogue restaurant (the shared
-  /// `report` table) and applies the moderation rule: `report_count` is
-  /// incremented, and once it reaches [_reportFreezeAtReports] the
-  /// restaurant is frozen (`status` 'frozen') so the discovery/list filters
-  /// stop showing it. `frozePlace: true` tells the caller that THIS report
-  /// was the one that froze it - the UI leaves the page and refreshes the
-  /// map, dropping the now-hidden pin.
-  ///
-  /// Reporting is a signed-in feature: when no tourist is resolved (no auth
-  /// session) nothing is written and `requiresSignIn: true` is returned so
-  /// the UI can ask the user to sign in. When signed in, one tourist may
-  /// report a place only once - a duplicate is detected first and
-  /// `alreadyReported: true` is returned without touching the count.
-  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
-  submitRestaurantReport({
-    required int restaurantId,
-    required RestaurantReportReason reason,
-    String? touristId,
-  }) async {
-    final String? resolvedTouristId =
-        touristId ?? await repository.currentTouristId();
-    if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
-      return (requiresSignIn: true, alreadyReported: false, frozePlace: false);
-    }
-    final bool duplicate = await repository.report.alreadyReported(
-      kind: 'restaurant',
-      placeId: restaurantId,
-      touristId: resolvedTouristId,
-    );
-    if (duplicate) {
-      return (requiresSignIn: false, alreadyReported: true, frozePlace: false);
-    }
-    await repository.report.insertReport(
-      kind: 'restaurant',
-      placeId: restaurantId,
-      reason: reason.name,
-      touristId: resolvedTouristId,
-    );
-    final int count = await repository.restaurant.incrementReportCount(
-      restaurantId,
-    );
-    final bool frozePlace = shouldFreezeAfterReport(count);
-    if (frozePlace) {
-      await repository.restaurant.freeze(restaurantId);
-      // Frozen places are no longer 'available', so cached map pins must go:
-      // the next read (right after the UI leaves the page) has no pin for it.
-      repository.map.clearCache();
-    }
-    return (
-      requiresSignIn: false,
-      alreadyReported: false,
-      frozePlace: frozePlace,
-    );
-  }
-
-  /// Freeze once the reported count REACHES [_reportFreezeAtReports] (so the
-  /// 5th report freezes). Pure so the boundary is unit-testable without a
-  /// repository seam.
-  @visibleForTesting
-  static bool shouldFreezeAfterReport(int reportedCount) =>
-      reportedCount >= _reportFreezeAtReports;
-
-  /// A restaurant is frozen once its report count reaches this many reports.
-  static const int _reportFreezeAtReports = 5;
-
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
     required double radiusKm,
     required int limit,
   }) async {
+    final List<Restaurant> allMeasured = _measure(
+      await repository.getRestaurants(),
+      location,
+    );
+    await _reactivateExpiredClosures(allMeasured);
     final List<Restaurant> candidates = _withinRadius(
-      _availableSummaries(
-        _measure(await repository.getRestaurants(), location),
-      ),
+      _availableSummaries(allMeasured),
       radiusKm: radiusKm,
     );
     final List<Restaurant> eligible = await _eligibleRestaurants(candidates);
@@ -154,6 +92,7 @@ class RestaurantDiscoveryLogic {
     distanceMetres: distanceMetres ?? restaurant.distanceMetres,
     reviewCount: restaurant.reviewCount,
     status: restaurant.status,
+    closedUntil: restaurant.closedUntil,
     items: items ?? restaurant.items,
   );
 
@@ -195,9 +134,12 @@ class RestaurantDiscoveryLogic {
     double radiusStepKm = 1,
     double maximumRadiusKm = 10,
   }) async {
-    final List<Restaurant> measured = _availableSummaries(
-      _measure(await repository.getRestaurants(), location),
+    final List<Restaurant> allMeasured = _measure(
+      await repository.getRestaurants(),
+      location,
     );
+    await _reactivateExpiredClosures(allMeasured);
+    final List<Restaurant> measured = _availableSummaries(allMeasured);
     final List<Restaurant> eligible = await _eligibleRestaurants(
       _withinRadius(measured, radiusKm: maximumRadiusKm),
     );
@@ -367,10 +309,43 @@ class RestaurantDiscoveryLogic {
     return restaurants
         .where(
           (Restaurant restaurant) =>
-              restaurant.status?.trim().toLowerCase() == 'available' &&
+              // Only 'available' places are discovered - a place frozen by a
+              // report (or by a still-running temporary closure) is hidden.
+              // A frozen place whose TEMPORARY closure has passed is available
+              // again (see PlaceClosureRules) and is included on this read.
+              PlaceClosureRules.isEffectivelyAvailable(
+                status: restaurant.status,
+                closedUntil: restaurant.closedUntil,
+                now: currentTime(),
+              ) &&
               !_isConfidentlyClosed(restaurant, malaysiaNow),
         )
         .toList(growable: false);
+  }
+
+  /// Read-time auto-reactivation: any restaurant in [allMeasured] that is
+  /// frozen by a temporary closure whose `closed_until` has passed is written
+  /// back to 'available' with `closed_until` cleared, so the DB catches up
+  /// with what this read just decided. Best-effort (a failed write must not
+  /// take discovery down - the restaurant is treated as available this read
+  /// regardless).
+  Future<void> _reactivateExpiredClosures(List<Restaurant> allMeasured) async {
+    for (final Restaurant restaurant in allMeasured) {
+      if (!PlaceClosureRules.needsReactivation(
+        status: restaurant.status,
+        closedUntil: restaurant.closedUntil,
+        now: currentTime(),
+      )) {
+        continue;
+      }
+      try {
+        await repository.restaurant.reactivateRestaurantFromClosure(
+          restaurant.id,
+        );
+      } catch (_) {
+        // Best-effort - see method doc.
+      }
+    }
   }
 
   bool _isConfidentlyClosed(Restaurant restaurant, DateTime malaysiaNow) {

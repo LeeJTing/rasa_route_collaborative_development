@@ -1,7 +1,6 @@
 import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/food_recognition_result.dart';
-import '../../domain_model/landmark_report_reason.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/submitted_landmark.dart';
@@ -146,6 +145,41 @@ class LandmarkLogicFacade {
   bool isOnLand(double latitude, double longitude) =>
       submission.isOnLand(latitude, longitude);
 
+  // Add-Landmark contact / address validation (flat passthroughs - the pure
+  // rules live in `LandmarkSubmissionLogic`, reachability in the repository).
+
+  bool isValidMalaysianPhone(String phone) =>
+      submission.isValidMalaysianPhone(phone);
+
+  bool isValidWebsiteFormat(String website) =>
+      submission.isValidWebsiteFormat(website);
+
+  bool isValidAddressText(String address) =>
+      submission.isValidAddressText(address);
+
+  bool isValidRestaurantNameText(String name) =>
+      submission.isValidRestaurantNameText(name);
+
+  bool containsControlCharacters(String value) =>
+      submission.containsControlCharacters(value);
+
+  /// Add-Landmark field caps (mirrored in the View as TextField maxLength).
+  int get maxRestaurantNameLength =>
+      LandmarkSubmissionLogic.maxRestaurantNameLength;
+  int get maxPhoneLength => LandmarkSubmissionLogic.maxPhoneLength;
+  int get maxWebsiteLength => LandmarkSubmissionLogic.maxWebsiteLength;
+  int get maxAddressLength => LandmarkSubmissionLogic.maxAddressLength;
+
+  /// Submit limits (name <= 30, website <= 75) - typing may go a little
+  /// further (warn zone) but submission cannot.
+  int get restaurantNameSubmitMaxLength =>
+      LandmarkSubmissionLogic.restaurantNameSubmitMaxLength;
+  int get websiteSubmitMaxLength =>
+      LandmarkSubmissionLogic.websiteSubmitMaxLength;
+
+  Future<bool> isWebsiteReachable(String url) =>
+      submission.isWebsiteReachable(url);
+
   Future<LandmarkSubmitResult> submitLandmark({
     required String restaurantName,
     required double? latitude,
@@ -155,6 +189,9 @@ class LandmarkLogicFacade {
     String? imageUrl,
     String? imageId,
     String? imageCategory,
+    String? phone,
+    String? website,
+    String? address,
     required List<FoodSubmission> foods,
     required Map<Weekday, List<OpeningHour>> operatingHours,
   }) async {
@@ -173,6 +210,9 @@ class LandmarkLogicFacade {
       imageUrl: imageUrl,
       imageId: imageId,
       imageCategory: imageCategory,
+      phone: phone,
+      website: website,
+      address: address,
       foods: foods,
       operatingHours: operatingHours,
     );
@@ -237,20 +277,4 @@ class LandmarkLogicFacade {
       return result;
     }
   }
-
-  /// Records a tourist's report against a submitted landmark (the report
-  /// sheet on the landmark detail page) - sign-in required, dedupe per
-  /// tourist, count bump, freeze once it passes the threshold; `frozePlace`
-  /// is true when this report froze the landmark. Flat passthrough to the
-  /// submission logic.
-  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
-  submitLandmarkReport({
-    required int landmarkId,
-    required LandmarkReportReason reason,
-    String? touristId,
-  }) => submission.submitLandmarkReport(
-    landmarkId: landmarkId,
-    reason: reason,
-    touristId: touristId,
-  );
 }

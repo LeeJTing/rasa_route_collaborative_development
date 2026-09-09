@@ -7,7 +7,6 @@ import '../../domain_model/map.dart';
 import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
-import '../../domain_model/restaurant_report_reason.dart';
 import '../../domain_model/swipe_mode.dart';
 import '../../domain_model/swipe_session.dart';
 import '../../domain_model/tourist_location.dart';
@@ -96,21 +95,6 @@ class DiscoveryLogicFacade {
 
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
       restaurantDiscovery.findById(restaurantId);
-
-  /// Records a tourist's report against a catalogue restaurant (the report
-  /// sheet on the restaurant detail page) - sign-in required, dedupe per
-  /// tourist, count bump, freeze once it passes the threshold; `frozePlace`
-  /// is true when this report froze the restaurant. Flat passthrough.
-  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
-  submitRestaurantReport({
-    required int restaurantId,
-    required RestaurantReportReason reason,
-    String? touristId,
-  }) => restaurantDiscovery.submitRestaurantReport(
-    restaurantId: restaurantId,
-    reason: reason,
-    touristId: touristId,
-  );
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
