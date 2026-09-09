@@ -349,11 +349,11 @@ class MapExplorationLogic {
 
   /// Recomputes the whole heatmap for the current [filter].
   ///
-  /// C1: a state's score is the number of **restaurants** in it divided by the
-  /// maximum any state reached, so the best-served state is 1.0 (green,
-  /// REQ102_16) and a state with nothing is 0.0 (grey). Passing
-  /// [localFoodId] narrows the calculation to one dish, which is REQ102_33 -
-  /// the map redrawn around a searched food.
+  /// C1: a state's score is the number of **places** (restaurants and
+  /// submitted landmarks) in it divided by the maximum any state reached,
+  /// so the best-served state is 1.0 (green, REQ102_16) and a state with
+  /// nothing is 0.0 (grey). Passing [localFoodId] narrows the calculation
+  /// to one dish, which is REQ102_33 - the map redrawn around a searched food.
   ///
   /// @param localFoodId (swipe mode) - `LocalFood.id` of the dish in the
   ///        Target Frame, or null to score every food. Reaches here from
@@ -389,14 +389,27 @@ class MapExplorationLogic {
       catalogue,
     );
 
-    // Collapse the occurrence list to one entry per place first. A restaurant
+    // When viewing "All local food" (no filter, no specific dish), include
+    // EVERY landmark even if its dish text hasn't been matched to a catalogue
+    // row yet - matching the logic used for map pins.
+    final bool includesAllLandmarks =
+        localFoodId == null && filter.selectionCount == 0;
+
+    // Collapse the occurrence list to one entry per place first. A place
     // with ten matching dishes still counts once (C1), and - the reason this is
     // a separate pass - the point-in-polygon test then runs once per place
     // rather than once per dish, which is the difference between ~12k tests and
     // ~78k on every heatmap redraw.
     final Map<String, _PlaceTally> tallies = <String, _PlaceTally>{};
     for (final FoodOccurrence occurrence in occurrences) {
-      if (!matchingIds.contains(occurrence.localFoodId)) continue;
+      final bool isMatchingFood = matchingIds.contains(occurrence.localFoodId);
+      final bool isUnresolvedLandmark =
+          includesAllLandmarks &&
+          occurrence.source == FoodOccurrenceSource.submittedLandmark &&
+          occurrence.localFoodId == 0;
+
+      if (!isMatchingFood && !isUnresolvedLandmark) continue;
+
       tallies
           .putIfAbsent(
             '${occurrence.source.name}:${occurrence.sourceId}',
@@ -437,14 +450,14 @@ class MapExplorationLogic {
 
     final List<RegionAvailability> availability = allRegions
         .map((Region region) {
-          final int restaurants = placesByRegion[region.code]!;
+          final int places = placesByRegion[region.code]!;
           return RegionAvailability(
             region: region,
-            restaurantCount: restaurants,
-            maximumRestaurantCount: maximum,
+            placeCount: places,
+            maximumPlaceCount: maximum,
             // REQ102_17 - the gradient between green and grey is generated
             // from this, never picked per state.
-            score: maximum == 0 ? 0 : restaurants / maximum,
+            score: maximum == 0 ? 0 : places / maximum,
             foodCount: foodsByRegion[region.code]!.length,
           );
         })
@@ -452,7 +465,7 @@ class MapExplorationLogic {
 
     return FoodDistribution(
       regions: availability,
-      maximumRestaurantCount: maximum,
+      maximumPlaceCount: maximum,
       matchingFoodCount: matching.length,
     );
   }

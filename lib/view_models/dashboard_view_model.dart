@@ -319,7 +319,7 @@ class DashboardViewModel extends BaseViewModel {
   /// The state under the middle of the detailed map, as the heatmap counted it.
   ///
   /// This is the heatmap's own number reused: `RegionAvailability
-  /// .restaurantCount` is the distinct places in that state matching the active
+  /// .placeCount` is the distinct places in that state matching the active
   /// filter (C1's numerator), so the detailed view can put the pins on screen
   /// in proportion without counting anything a second time.
   RegionAvailability? _regionInView;
@@ -333,7 +333,7 @@ class DashboardViewModel extends BaseViewModel {
   String? get regionInViewMessage {
     final RegionAvailability? availability = _regionInView;
     if (availability == null || !isDetailedView) return null;
-    final int count = availability.restaurantCount;
+    final int count = availability.placeCount;
     if (count == 0) return null;
     final bool narrowed = _filter.selectionCount > 0 || _activePinFoodId != null;
     return '${availability.region.name} - $count '
