@@ -45,8 +45,8 @@ class FoodLogicFacade {
   Future<LocalFood?> detectNameCollision(int foodId) =>
       knowledge.detectNameCollision(foodId);
 
-  Future<List<String>> dietaryWarnings(int foodId) =>
-      knowledge.dietaryWarnings(foodId);
+  Future<String?> dietaryWarning(int foodId) =>
+      knowledge.dietaryWarning(foodId);
 
   Future<List<LocalFood>> getSimilarFoods(int foodId) =>
       recommendation.getSimilarFoods(foodId);

@@ -107,6 +107,36 @@ class DiscoveryRepositoryFacade {
   Future<Map<String, List<OpeningHour>>> openingHoursByPlace() =>
       map.openingHours();
 
+  /// Flat reporting API for restaurant discovery logic. Business logic must
+  /// not reach through this facade to concrete repositories.
+  Future<bool> restaurantReportAlreadyExists({
+    required int restaurantId,
+    required String touristId,
+  }) => report.alreadyReported(
+    kind: 'restaurant',
+    placeId: restaurantId,
+    touristId: touristId,
+  );
+
+  Future<void> insertRestaurantReport({
+    required int restaurantId,
+    required String reason,
+    required String touristId,
+  }) => report.insertReport(
+    kind: 'restaurant',
+    placeId: restaurantId,
+    reason: reason,
+    touristId: touristId,
+  );
+
+  Future<int> incrementRestaurantReportCount(int restaurantId) =>
+      restaurant.incrementReportCount(restaurantId);
+
+  Future<void> freezeRestaurant(int restaurantId) =>
+      restaurant.freeze(restaurantId);
+
+  void clearMapCache() => map.clearCache();
+
   Future<String?> currentTouristId() => auth.currentTouristId();
 
   Future<SwipeSession?> getSwipeSession({

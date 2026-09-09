@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart' show protected;
+
 import '../core/base_view_model.dart';
 import '../domain_model/matches_recommendation.dart';
 import '../domain_model/restaurant.dart';
@@ -11,11 +13,18 @@ enum RestaurantSource { google, submitted }
 /// Quick Mode state: nearby restaurants, source tab and expanded menus.
 class RestaurantRecommendationViewModel extends BaseViewModel
     implements CurrentLocationListener, RestaurantUpdateListener {
-  final DiscoveryLogicFacade discoveryLogic = DiscoveryLogicFacade();
-  final CurrentLocationFacade locationFacade = CurrentLocationFacade();
-  final UpdateRestaurantFacade restaurantFacade = UpdateRestaurantFacade();
+  @protected
+  DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
 
-  static const int _restaurantLimit = 20;
+  @protected
+  CurrentLocationFacade createLocationFacade() => CurrentLocationFacade();
+
+  @protected
+  UpdateRestaurantFacade createRestaurantFacade() => UpdateRestaurantFacade();
+
+  late final DiscoveryLogicFacade discoveryLogic = createDiscoveryLogic();
+  late final CurrentLocationFacade locationFacade = createLocationFacade();
+  late final UpdateRestaurantFacade restaurantFacade = createRestaurantFacade();
 
   TouristLocation _location = TouristLocation.unknown;
   List<Restaurant> _restaurants = const <Restaurant>[];
@@ -24,6 +33,8 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   RestaurantSource _source = RestaurantSource.google;
   final Set<int> _expandedRestaurantIds = <int>{};
   final Set<int> _expandedLandmarkIds = <int>{};
+  bool _isLoadingNearby = false;
+  bool _reloadNearbyRequested = false;
 
   List<Restaurant> get restaurants => _restaurants;
   List<SubmittedLandmarkRecommendation> get landmarks => _landmarks;
@@ -46,21 +57,31 @@ class RestaurantRecommendationViewModel extends BaseViewModel
     await loadNearbyRestaurants();
   }
 
-  Future<void> loadNearbyRestaurants() => runGuarded(() async {
-    final List<Object> results = await Future.wait(<Future<Object>>[
-      discoveryLogic.getQuickModeRestaurants(
-        location: _location,
-        limit: _restaurantLimit,
-      ),
-      discoveryLogic.getQuickModeLandmarks(
-        location: _location,
-        limit: _restaurantLimit,
-      ),
-    ]);
-    _restaurants = results[0] as List<Restaurant>;
-    _landmarks = results[1] as List<SubmittedLandmarkRecommendation>;
-    _sort();
-  });
+  Future<void> loadNearbyRestaurants() async {
+    if (_isLoadingNearby) {
+      _reloadNearbyRequested = true;
+      return;
+    }
+    _isLoadingNearby = true;
+    try {
+      do {
+        _reloadNearbyRequested = false;
+        final TouristLocation requestedLocation = _location;
+        await runGuarded(() async {
+          final List<Object> results = await Future.wait(<Future<Object>>[
+            discoveryLogic.getQuickModeRestaurants(location: requestedLocation),
+            discoveryLogic.getQuickModeLandmarks(location: requestedLocation),
+          ]);
+          if (_reloadNearbyRequested || requestedLocation != _location) return;
+          _restaurants = results[0] as List<Restaurant>;
+          _landmarks = results[1] as List<SubmittedLandmarkRecommendation>;
+          _sort();
+        });
+      } while (_reloadNearbyRequested);
+    } finally {
+      _isLoadingNearby = false;
+    }
+  }
 
   void selectSource(RestaurantSource source) {
     _source = source;

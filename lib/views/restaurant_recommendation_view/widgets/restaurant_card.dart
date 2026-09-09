@@ -58,34 +58,38 @@ class RestaurantCard extends StatelessWidget {
                       children: <Widget>[
                         Text(
                           restaurant.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: AppSpacing.xs),
                         Row(
                           children: <Widget>[
-                            const Icon(
-                              Icons.star,
-                              size: AppSizes.iconCompact,
-                              color: AppColors.secondary,
-                            ),
-                            const SizedBox(width: AppSpacing.xs),
-                            Text(
-                              restaurant.reviewCount == null
-                                  ? restaurant.rating?.toStringAsFixed(1) ?? '—'
-                                  : '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount})',
+                            Expanded(
+                              child: _RestaurantMetric(
+                                icon: Icons.star,
+                                iconColor: AppColors.secondary,
+                                label: restaurant.reviewCount == null
+                                    ? restaurant.rating?.toStringAsFixed(1) ??
+                                          '—'
+                                    : '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount})',
+                              ),
                             ),
                             const SizedBox(width: AppSpacing.md),
-                            const Icon(
-                              Icons.location_on_outlined,
-                              size: AppSizes.iconCompact,
+                            Expanded(
+                              child: _RestaurantMetric(
+                                icon: Icons.location_on_outlined,
+                                label: distanceLabel,
+                              ),
                             ),
-                            Text(distanceLabel),
                           ],
                         ),
                         if (restaurant.category.isNotEmpty) ...<Widget>[
                           const SizedBox(height: AppSpacing.sm),
                           Text(
                             restaurant.category,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -114,4 +118,27 @@ class RestaurantCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RestaurantMetric extends StatelessWidget {
+  const _RestaurantMetric({
+    required this.icon,
+    required this.label,
+    this.iconColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color? iconColor;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      Icon(icon, size: AppSizes.iconCompact, color: iconColor),
+      const SizedBox(width: AppSpacing.xs),
+      Expanded(
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    ],
+  );
 }

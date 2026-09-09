@@ -25,7 +25,7 @@ void main() {
         );
 
         final List<Restaurant> results = await logic
-            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+            .nearbyWithAutomaticExpansion(location: _testLocation);
 
         expect(results, hasLength(20));
         expect(
@@ -49,7 +49,7 @@ void main() {
         );
 
         final List<Restaurant> results = await logic
-            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+            .nearbyWithAutomaticExpansion(location: _testLocation);
 
         expect(
           results.map((Restaurant item) => item.id),
@@ -77,7 +77,7 @@ void main() {
         );
 
         final List<Restaurant> results = await logic
-            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+            .nearbyWithAutomaticExpansion(location: _testLocation);
 
         expect(
           results.map((Restaurant item) => item.id),
@@ -121,7 +121,6 @@ void main() {
 
         final results = await logic.nearbyLandmarksWithAutomaticExpansion(
           location: _testLocation,
-          limit: 20,
         );
 
         expect(results.map((item) => item.id), orderedEquals(<int>[1]));
@@ -195,7 +194,6 @@ void main() {
 
       final List<Restaurant> results = await logic.nearbyWithAutomaticExpansion(
         location: _testLocation,
-        limit: 20,
       );
 
       expect(
@@ -219,7 +217,6 @@ void main() {
 
       final List<Restaurant> results = await logic.nearbyWithAutomaticExpansion(
         location: _testLocation,
-        limit: 20,
       );
 
       expect(results, hasLength(1));
@@ -279,7 +276,7 @@ void main() {
         );
 
         final List<Restaurant> results = await logic
-            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+            .nearbyWithAutomaticExpansion(location: _testLocation);
 
         expect(
           results.map((Restaurant item) => item.id),
@@ -320,7 +317,6 @@ void main() {
 
       final List<Restaurant> results = await logic.nearbyWithAutomaticExpansion(
         location: _testLocation,
-        limit: 20,
       );
 
       expect(results, hasLength(1));

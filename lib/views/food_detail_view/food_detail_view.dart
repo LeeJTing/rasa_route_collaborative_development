@@ -88,11 +88,11 @@ class _FoodDetailViewState extends State<FoodDetailView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          if (vm.allergyWarnings.isNotEmpty)
+          if (vm.allergyWarning != null)
             Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.md),
               child: FoodNoticeBanner(
-                message: vm.allergyWarnings.join('\n'),
+                message: vm.allergyWarning!,
                 type: FoodNoticeType.allergy,
               ),
             ),

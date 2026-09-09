@@ -19,6 +19,11 @@ import '../repositories/discovery_repository_facade.dart';
 class RestaurantDiscoveryLogic {
   RestaurantDiscoveryLogic();
 
+  static const int _quickModeResultTarget = 20;
+  static const double _quickModeInitialRadiusKm = 1;
+  static const double _quickModeRadiusStepKm = 1;
+  static const double _quickModeMaximumRadiusKm = 10;
+
   @protected
   DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
 
@@ -54,29 +59,27 @@ class RestaurantDiscoveryLogic {
     if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
       return (requiresSignIn: true, alreadyReported: false, frozePlace: false);
     }
-    final bool duplicate = await repository.report.alreadyReported(
-      kind: 'restaurant',
-      placeId: restaurantId,
+    final bool duplicate = await repository.restaurantReportAlreadyExists(
+      restaurantId: restaurantId,
       touristId: resolvedTouristId,
     );
     if (duplicate) {
       return (requiresSignIn: false, alreadyReported: true, frozePlace: false);
     }
-    await repository.report.insertReport(
-      kind: 'restaurant',
-      placeId: restaurantId,
+    await repository.insertRestaurantReport(
+      restaurantId: restaurantId,
       reason: reason.name,
       touristId: resolvedTouristId,
     );
-    final int count = await repository.restaurant.incrementReportCount(
+    final int count = await repository.incrementRestaurantReportCount(
       restaurantId,
     );
     final bool frozePlace = shouldFreezeAfterReport(count);
     if (frozePlace) {
-      await repository.restaurant.freeze(restaurantId);
+      await repository.freezeRestaurant(restaurantId);
       // Frozen places are no longer 'available', so cached map pins must go:
       // the next read (right after the UI leaves the page) has no pin for it.
-      repository.map.clearCache();
+      repository.clearMapCache();
     }
     return (
       requiresSignIn: false,
@@ -186,33 +189,29 @@ class RestaurantDiscoveryLogic {
     return matches;
   }
 
-  /// Quick Mode starts at 1 km and expands silently until [limit] nearest
+  /// Quick Mode starts at 1 km and expands silently until 20 nearest
   /// eligible restaurants are found or the 10 km Use Case boundary is reached.
   Future<List<Restaurant>> nearbyWithAutomaticExpansion({
     required TouristLocation location,
-    required int limit,
-    double initialRadiusKm = 1,
-    double radiusStepKm = 1,
-    double maximumRadiusKm = 10,
   }) async {
     final List<Restaurant> measured = _availableSummaries(
       _measure(await repository.getRestaurants(), location),
     );
     final List<Restaurant> eligible = await _eligibleRestaurants(
-      _withinRadius(measured, radiusKm: maximumRadiusKm),
+      _withinRadius(measured, radiusKm: _quickModeMaximumRadiusKm),
     );
-    double radiusKm = initialRadiusKm;
+    double radiusKm = _quickModeInitialRadiusKm;
     List<Restaurant> available = const <Restaurant>[];
-    while (radiusKm <= maximumRadiusKm) {
+    while (radiusKm <= _quickModeMaximumRadiusKm) {
       final List<Restaurant> results = _withinRadius(
         eligible,
         radiusKm: radiusKm,
-      ).take(limit).toList(growable: false);
+      ).take(_quickModeResultTarget).toList(growable: false);
       available = results;
-      if (results.length >= limit || !location.isKnown) {
+      if (results.length >= _quickModeResultTarget || !location.isKnown) {
         return _hydrateSelected(results);
       }
-      radiusKm += radiusStepKm;
+      radiusKm += _quickModeRadiusStepKm;
     }
     return _hydrateSelected(available);
   }
@@ -223,10 +222,6 @@ class RestaurantDiscoveryLogic {
   Future<List<SubmittedLandmarkRecommendation>>
   nearbyLandmarksWithAutomaticExpansion({
     required TouristLocation location,
-    required int limit,
-    double initialRadiusKm = 1,
-    double radiusStepKm = 1,
-    double maximumRadiusKm = 10,
   }) async {
     if (!location.isKnown) return const <SubmittedLandmarkRecommendation>[];
 
@@ -314,19 +309,19 @@ class RestaurantDiscoveryLogic {
           a.distanceMetres.compareTo(b.distanceMetres),
     );
 
-    double radiusKm = initialRadiusKm;
+    double radiusKm = _quickModeInitialRadiusKm;
     List<SubmittedLandmarkRecommendation> available =
         const <SubmittedLandmarkRecommendation>[];
-    while (radiusKm <= maximumRadiusKm) {
+    while (radiusKm <= _quickModeMaximumRadiusKm) {
       available = measured
           .where(
             (SubmittedLandmarkRecommendation landmark) =>
                 landmark.distanceMetres <= radiusKm * 1000,
           )
-          .take(limit)
+          .take(_quickModeResultTarget)
           .toList(growable: false);
-      if (available.length >= limit) return available;
-      radiusKm += radiusStepKm;
+      if (available.length >= _quickModeResultTarget) return available;
+      radiusKm += _quickModeRadiusStepKm;
     }
     return available;
   }

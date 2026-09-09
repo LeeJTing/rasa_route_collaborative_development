@@ -63,6 +63,8 @@ class LocalFoodCard extends StatelessWidget {
                   children: <Widget>[
                     Text(
                       food.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: AppSpacing.xs),
@@ -71,16 +73,16 @@ class LocalFoodCard extends StatelessWidget {
                       runSpacing: AppSpacing.xs,
                       children: <Widget>[
                         AppTagChip(
-                          label: food.mealType,
+                          label: _compactTagLabel(food.mealType),
                           style: AppTagStyle.meal,
                         ),
                         AppTagChip(
-                          label: food.category,
+                          label: _compactTagLabel(food.category),
                           style: AppTagStyle.category,
                         ),
                         if (food.mainTaste.isNotEmpty)
                           AppTagChip(
-                            label: food.mainTaste,
+                            label: _compactTagLabel(food.mainTaste),
                             style: AppTagStyle.taste,
                           ),
                       ],
@@ -123,6 +125,13 @@ class LocalFoodCard extends StatelessWidget {
   }
 }
 
+String _compactTagLabel(String value) {
+  const int maximumCodePoints = 32;
+  final String trimmed = value.trim();
+  if (trimmed.runes.length <= maximumCodePoints) return trimmed;
+  return '${String.fromCharCodes(trimmed.runes.take(maximumCodePoints))}…';
+}
+
 class _FoodImageUnavailable extends StatelessWidget {
   const _FoodImageUnavailable();
 
@@ -139,6 +148,8 @@ class _FoodImageUnavailable extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           Text(
             'No image',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: Theme.of(
               context,
             ).textTheme.labelSmall?.copyWith(color: AppColors.accentBrownMuted),
