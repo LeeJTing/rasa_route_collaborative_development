@@ -199,6 +199,12 @@ class AddLandmarkViewModel extends BaseViewModel
   // --- FORM STATE ---
   String _restaurantName = '';
 
+  /// Optional contact/address for the place (validated when provided): a
+  /// Malaysian phone number, an http(s) website, and a free-text address.
+  String _phone = '';
+  String _website = '';
+  String _address = '';
+
   /// Bumped by [setExtractedRestaurantName] whenever a signboard capture
   /// overwrites [_restaurantName]. `AddLandmarkView` compares this to the
   /// version it last applied to its text field to tell a fresh signboard
@@ -289,6 +295,113 @@ class AddLandmarkViewModel extends BaseViewModel
   /// See [_extractedRestaurantNameVersion].
   int get extractedRestaurantNameVersion => _extractedRestaurantNameVersion;
 
+  String get restaurantPhone => _phone;
+  String get restaurantWebsite => _website;
+  String get restaurantAddress => _address;
+
+  /// Field caps exposed to the View (TextField maxLength).
+  int get restaurantNameMaxLength => landmarkLogic.maxRestaurantNameLength;
+  int get phoneMaxLength => landmarkLogic.maxPhoneLength;
+  int get websiteMaxLength => landmarkLogic.maxWebsiteLength;
+  int get addressMaxLength => landmarkLogic.maxAddressLength;
+
+  /// Required-name error (empty / invalid characters / hard limit reached).
+  String? get restaurantNameError {
+    if (_restaurantName.isEmpty) return 'Restaurant name is required';
+    if (landmarkLogic.containsControlCharacters(_restaurantName)) {
+      return 'Restaurant name contains invalid characters.';
+    }
+    if (!landmarkLogic.isValidRestaurantNameText(_restaurantName)) {
+      return 'Restaurant name uses unsupported characters.';
+    }
+    if (_restaurantName.length >= landmarkLogic.maxRestaurantNameLength) {
+      return 'Restaurant name limit is '
+          '${landmarkLogic.maxRestaurantNameLength} characters.';
+    }
+    return null;
+  }
+
+  /// Amber warning while the name is past the submit limit (31-39 chars) but
+  /// still below the hard input stop - the tourist can keep typing but NOT
+  /// submit until it is 30 characters or fewer.
+  String? get restaurantNameWarning {
+    final int length = _restaurantName.length;
+    final int submitMax = landmarkLogic.restaurantNameSubmitMaxLength;
+    if (length >= submitMax + 1 &&
+        length < landmarkLogic.maxRestaurantNameLength) {
+      return 'Restaurant name should be $submitMax characters or fewer '
+          '(currently $length).';
+    }
+    return null;
+  }
+
+  /// Optional-field errors - null when the field is empty (allowed) or valid.
+  String? get restaurantPhoneError {
+    if (_phone.isEmpty) return null;
+    if (landmarkLogic.containsControlCharacters(_phone)) {
+      return 'Phone number contains invalid characters.';
+    }
+    if (!landmarkLogic.isValidMalaysianPhone(_phone)) {
+      return 'Enter a valid Malaysian mobile or landline, e.g. +60 12-345 6789.';
+    }
+    return null;
+  }
+
+  String? get restaurantWebsiteError {
+    if (_website.isEmpty) return null;
+    if (landmarkLogic.containsControlCharacters(_website)) {
+      return 'Website contains invalid characters.';
+    }
+    if (!landmarkLogic.isValidWebsiteFormat(_website)) {
+      return 'Enter a valid public http(s) website, e.g. https://example.com.';
+    }
+    if (_website.length >= landmarkLogic.maxWebsiteLength) {
+      return 'Website limit is ${landmarkLogic.maxWebsiteLength} characters.';
+    }
+    return null;
+  }
+
+  /// Amber warning while the website is past the submit limit (76-79 chars)
+  /// but below the hard input stop - typing continues, submission does not.
+  String? get restaurantWebsiteWarning {
+    final int length = _website.length;
+    final int submitMax = landmarkLogic.websiteSubmitMaxLength;
+    if (length >= submitMax + 1 && length < landmarkLogic.maxWebsiteLength) {
+      return 'Website should be $submitMax characters or fewer '
+          '(currently $length).';
+    }
+    return null;
+  }
+
+  String? get restaurantAddressError {
+    if (_address.isEmpty) return null;
+    if (landmarkLogic.containsControlCharacters(_address)) {
+      return 'Address contains invalid characters.';
+    }
+    if (_address.length < 5) {
+      return 'Address is too short (at least 5 characters).';
+    }
+    if (!landmarkLogic.isValidAddressText(_address)) {
+      return 'Address uses unsupported characters.';
+    }
+    if (_address.length >= landmarkLogic.maxAddressLength) {
+      return 'Address limit is ${landmarkLogic.maxAddressLength} characters.';
+    }
+    return null;
+  }
+
+  /// Amber warning while the address is close to its 150 cap (141-149) -
+  /// typing continues to the cap; the hard-stop error shows at 150.
+  String? get restaurantAddressWarning {
+    final int length = _address.length;
+    final int maxLength = landmarkLogic.maxAddressLength;
+    if (length >= maxLength - 9 && length < maxLength) {
+      return 'Address should stay under $maxLength characters '
+          '(currently $length).';
+    }
+    return null;
+  }
+
   Map<Weekday, List<OpeningHour>> get operatingHours =>
       Map<Weekday, List<OpeningHour>>.unmodifiable(_operatingHours);
 
@@ -347,7 +460,12 @@ class AddLandmarkViewModel extends BaseViewModel
   bool get canSubmit =>
       !isAddLocationBlocked &&
       _capturedImage != null &&
-      _restaurantName.isNotEmpty &&
+      restaurantNameError == null &&
+      restaurantPhoneError == null &&
+      restaurantWebsiteError == null &&
+      restaurantAddressError == null &&
+      restaurantNameWarning == null &&
+      restaurantWebsiteWarning == null &&
       _primaryFood != null &&
       _primaryFood!.price != null &&
       _additionalFoods.every(
@@ -371,6 +489,9 @@ class AddLandmarkViewModel extends BaseViewModel
     if (_restaurantName.isEmpty) {
       return 'Restaurant name is required';
     }
+    if (!landmarkLogic.isValidRestaurantNameText(_restaurantName)) {
+      return 'Restaurant name uses unsupported characters.';
+    }
     if (_primaryFood == null) {
       return 'Recognise a food first (capture and add your food)';
     }
@@ -382,6 +503,16 @@ class AddLandmarkViewModel extends BaseViewModel
         return 'Please enter a price for every added food';
       }
     }
+    final String? phoneError = restaurantPhoneError;
+    if (phoneError != null) return phoneError;
+    final String? websiteError = restaurantWebsiteError;
+    if (websiteError != null) return websiteError;
+    final String? addressError = restaurantAddressError;
+    if (addressError != null) return addressError;
+    final String? nameWarning = restaurantNameWarning;
+    if (nameWarning != null) return nameWarning;
+    final String? websiteWarning = restaurantWebsiteWarning;
+    if (websiteWarning != null) return websiteWarning;
     return _operatingHoursError();
   }
 
@@ -539,7 +670,10 @@ class AddLandmarkViewModel extends BaseViewModel
   /// skip it, leaving the tourist's typed name on screen).
   void setExtractedRestaurantName(String? name) {
     if (name != null && name.trim().isNotEmpty) {
-      _restaurantName = name.trim();
+      _restaurantName = _clampTo(
+        name.trim(),
+        landmarkLogic.maxRestaurantNameLength,
+      );
       _extractedRestaurantNameVersion++;
       safeNotifyListeners();
     }
@@ -547,9 +681,34 @@ class AddLandmarkViewModel extends BaseViewModel
 
   /// Manually set restaurant name (user types)
   void setRestaurantName(String name) {
-    _restaurantName = name.trim();
+    _restaurantName = _clampTo(
+      name.trim(),
+      landmarkLogic.maxRestaurantNameLength,
+    );
     safeNotifyListeners();
   }
+
+  /// Optional contact/address setters - capped to their field limits while
+  /// typing (the View's TextField maxLength enforces the same cap).
+  void setRestaurantPhone(String value) {
+    _phone = _clampTo(value, landmarkLogic.maxPhoneLength);
+    safeNotifyListeners();
+  }
+
+  void setRestaurantWebsite(String value) {
+    _website = _clampTo(value, landmarkLogic.maxWebsiteLength);
+    safeNotifyListeners();
+  }
+
+  void setRestaurantAddress(String value) {
+    _address = _clampTo(value, landmarkLogic.maxAddressLength);
+    safeNotifyListeners();
+  }
+
+  /// Caps [value] at [maxLength] characters so a pasted blob can never
+  /// exceed a field's limit (belt-and-suspenders behind TextField maxLength).
+  static String _clampTo(String value, int maxLength) =>
+      value.length <= maxLength ? value : value.substring(0, maxLength);
 
   /// Set a day's status (Open / Unknown / Closed - BF-19..23, A14, A15).
   /// Not a plain open/closed toggle: "Unknown" is a real third answer, not
@@ -851,8 +1010,39 @@ class AddLandmarkViewModel extends BaseViewModel
       safeNotifyListeners();
       return;
     }
-    if (_restaurantName.isEmpty) {
-      _submitError = 'Restaurant name is required';
+    final String? nameError = restaurantNameError;
+    if (nameError != null) {
+      _submitError = nameError;
+      safeNotifyListeners();
+      return;
+    }
+    final String? phoneError = restaurantPhoneError;
+    if (phoneError != null) {
+      _submitError = phoneError;
+      safeNotifyListeners();
+      return;
+    }
+    final String? websiteError = restaurantWebsiteError;
+    if (websiteError != null) {
+      _submitError = websiteError;
+      safeNotifyListeners();
+      return;
+    }
+    final String? addressError = restaurantAddressError;
+    if (addressError != null) {
+      _submitError = addressError;
+      safeNotifyListeners();
+      return;
+    }
+    final String? nameWarning = restaurantNameWarning;
+    if (nameWarning != null) {
+      _submitError = nameWarning;
+      safeNotifyListeners();
+      return;
+    }
+    final String? websiteWarning = restaurantWebsiteWarning;
+    if (websiteWarning != null) {
+      _submitError = websiteWarning;
       safeNotifyListeners();
       return;
     }
@@ -900,6 +1090,17 @@ class AddLandmarkViewModel extends BaseViewModel
     safeNotifyListeners();
 
     try {
+      // The optional website field gets a STRICT reachability check (HTTP
+      // 200-399 within 5s) before anything is uploaded/saved. Best-effort
+      // from the client for form validation; production should move this to
+      // the backend (SSRF).
+      if (_website.trim().isNotEmpty &&
+          !await landmarkLogic.isWebsiteReachable(_website)) {
+        _submitError = 'Website is not reachable. Check the URL and try again.';
+        _isSubmitting = false;
+        safeNotifyListeners();
+        return;
+      }
       // The signed-in tourist - null when nobody is signed in (the entry
       // gate routes to sign-in first, so a signed-in tourist is expected
       // here).
@@ -942,6 +1143,9 @@ class AddLandmarkViewModel extends BaseViewModel
         imageUrl: landmarkPhoto?.url,
         imageId: landmarkPhoto?.id,
         imageCategory: _capturedImageType,
+        phone: _phone.trim(),
+        website: _website.trim(),
+        address: _address.trim(),
         foods: <FoodSubmission>[
           FoodSubmission(
             food: _primaryFood!.food,

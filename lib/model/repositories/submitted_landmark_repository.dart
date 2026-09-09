@@ -56,11 +56,197 @@ class SubmittedLandmarkRepository {
       'image_url': landmark.imageUrl,
       'image_id': landmark.imageId,
       'image_category': landmark.imageCategory,
+      // Optional tourist-supplied contact/address - written only on a new
+      // landmark row (see the AddLandmarkViewModel validation caps). Empty
+      // strings are stored as null (cleaner than '' in text columns).
+      'phone': landmark.phone.trim().isEmpty ? null : landmark.phone.trim(),
+      'website': landmark.website.trim().isEmpty
+          ? null
+          : landmark.website.trim(),
+      'address': landmark.address.trim().isEmpty
+          ? null
+          : landmark.address.trim(),
     });
 
     await addItems(landmarkId, landmark.items);
     await _insertOpeningHours(landmarkId, landmark.openingHours);
     return landmarkId;
+  }
+
+  /// A13 merge: a tourist re-submitted an EXISTING place, and the submission
+  /// carried contact/address details. Writes them onto the existing landmark
+  /// row so they are not silently dropped by the merge path (which otherwise
+  /// only attaches dishes).
+  ///
+  /// Merge rule - NEVER clobber richer existing data with an emptier
+  /// re-submission:
+  ///   * a field the re-submission leaves empty is NEVER written (an existing
+  ///     value is kept - never blanked with an empty string);
+  ///   * a field whose submitted value equals the stored one is skipped
+  ///     (nothing changed, nothing written);
+  ///   * only a field the re-submission ACTUALLY changed (different,
+  ///     non-empty value) is updated - see [changedContactFields].
+  /// Best-effort: a failure here is swallowed by the merge caller.
+  Future<void> updateContactFields(
+    int landmarkId, {
+    String? phone,
+    String? website,
+    String? address,
+  }) async {
+    // Read what is stored first so the merge writes ONLY the fields that
+    // changed - a second submission that lacks a field must not overwrite it,
+    // and a field the second submission did not change is left alone.
+    final Map<String, dynamic>? stored = await api.selectOne(
+      APIManager.tableSubmittedLandmark,
+      columns: 'phone, website, address',
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+    final Map<String, Object?> values = changedContactFields(
+      storedPhone: stored?['phone'] as String?,
+      storedWebsite: stored?['website'] as String?,
+      storedAddress: stored?['address'] as String?,
+      phone: phone,
+      website: website,
+      address: address,
+    );
+    if (values.isEmpty) return;
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      values,
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// Pure per-field merge decision for [updateContactFields]: given the values
+  /// already STORED on the landmark and the values a re-submission carries,
+  /// returns the columns to write. A column is written only when the
+  /// re-submission's trimmed value is non-empty AND differs from the stored
+  /// value - so an existing address/phone/website is never blanked or
+  /// needlessly rewritten by a later submission that lacks or repeats it.
+  /// Separated from the DB write so the rule is unit-testable.
+  static Map<String, Object?> changedContactFields({
+    String? storedPhone,
+    String? storedWebsite,
+    String? storedAddress,
+    String? phone,
+    String? website,
+    String? address,
+  }) {
+    final Map<String, Object?> values = <String, Object?>{};
+    void consider(String column, String? submitted, String? stored) {
+      final String? trimmed = submitted?.trim();
+      // Not supplied (null/blank) -> never touch the stored value.
+      if (trimmed == null || trimmed.isEmpty) return;
+      // Unchanged -> skip; only an actual change on this field is written.
+      if (trimmed == (stored ?? '').trim()) return;
+      values[column] = trimmed;
+    }
+
+    consider('phone', phone, storedPhone);
+    consider('website', website, storedWebsite);
+    consider('address', address, storedAddress);
+    return values;
+  }
+
+  /// A13 merge: a tourist re-submitted an EXISTING submitted landmark and the
+  /// form carried opening hours. Persists ONLY the days the re-submission
+  /// actually asserted (Open with times, or Closed) that also DIFFER from the
+  /// stored rows - a day left in the form's default "Unknown" state is never
+  /// touched, so an emptier second submission never blanks or rewrites hours
+  /// an earlier one stored (e.g. Tue-Fri 09:00-14:00 survive a second
+  /// submission that only changes Monday).
+  ///
+  /// Each changed day is replaced row-for-row: the stored rows for that day
+  /// are deleted and the submitted rows inserted (a day can carry several
+  /// rows when Open - one per range). See [changedOpeningHourDays] for the
+  /// pure per-day decision. Best-effort: a failure here is swallowed by the
+  /// merge caller. Requires the `opening_hours_delete` RLS policy (see
+  /// migration 20260910000000_grant_opening_hours_landmark_delete.sql) - it
+  /// only allows deleting rows that belong to a submitted landmark, never
+  /// curated restaurant hours.
+  Future<void> updateOpeningHoursOnMerge(
+    int landmarkId,
+    Map<Weekday, List<OpeningHour>> submitted,
+  ) async {
+    final List<Map<String, dynamic>> storedRows = await api.selectAll(
+      APIManager.tableOpeningHours,
+      columns:
+          'opening_hours_id, day, status, opening_time, closing_time, '
+          'landmark_id, restaurant_id',
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+    final Map<Weekday, List<OpeningHour>> storedByDay =
+        <Weekday, List<OpeningHour>>{};
+    for (final Map<String, dynamic> row in storedRows) {
+      final OpeningHour? hour = _toOpeningHour(row);
+      if (hour == null) continue;
+      storedByDay.putIfAbsent(hour.day, () => <OpeningHour>[]).add(hour);
+    }
+
+    final Set<Weekday> changedDays = changedOpeningHourDays(
+      storedByDay: storedByDay,
+      submitted: submitted,
+    );
+    if (changedDays.isEmpty) return;
+    for (final Weekday day in changedDays) {
+      await api.deleteRows(
+        APIManager.tableOpeningHours,
+        eq: <String, Object?>{'landmark_id': landmarkId, 'day': _dayName(day)},
+      );
+      final List<OpeningHour> rows = submitted[day] ?? const <OpeningHour>[];
+      if (rows.isEmpty) continue;
+      await _insertOpeningHours(landmarkId, rows);
+    }
+  }
+
+  /// Pure per-day merge decision for [updateOpeningHoursOnMerge]: given the
+  /// rows already STORED per weekday and the day-rows a re-submission
+  /// carries, returns the set of weekdays whose stored rows must be replaced.
+  ///
+  /// A weekday is "changed" only when the re-submission asserts a definitive
+  /// answer for it (at least one Open/Closed row - i.e. NOT left in the
+  /// form's default Unknown state) AND that asserted schedule differs from
+  /// what is stored. Unknown-only days and identical days are never
+  /// rewritten - the same "never clobber richer data with an emptier
+  /// re-submission" rule the contact fields follow (see
+  /// [changedContactFields]).
+  static Set<Weekday> changedOpeningHourDays({
+    required Map<Weekday, List<OpeningHour>> storedByDay,
+    required Map<Weekday, List<OpeningHour>> submitted,
+  }) {
+    final Set<Weekday> changed = <Weekday>{};
+    for (final Weekday day in Weekday.values) {
+      final List<OpeningHour> incoming =
+          submitted[day] ?? const <OpeningHour>[];
+      final bool asserted = incoming.any(
+        (OpeningHour hour) => hour.status != DayStatus.unknown,
+      );
+      if (!asserted) continue;
+      final List<OpeningHour> stored =
+          storedByDay[day] ?? const <OpeningHour>[];
+      if (!_sameDayHours(stored, incoming)) changed.add(day);
+    }
+    return changed;
+  }
+
+  /// Whether two days' hour rows are semantically identical - the same set of
+  /// (status, opensAt, closesAt) rows regardless of order or row ids. A day
+  /// whose stored rows exactly match the submission's rows is a no-op and is
+  /// not rewritten.
+  static bool _sameDayHours(List<OpeningHour> a, List<OpeningHour> b) {
+    final List<String> keyA = <String>[
+      for (final OpeningHour hour in a)
+        '${hour.status.name}|${hour.opensAt}|${hour.closesAt}',
+    ]..sort();
+    final List<String> keyB = <String>[
+      for (final OpeningHour hour in b)
+        '${hour.status.name}|${hour.opensAt}|${hour.closesAt}',
+    ]..sort();
+    if (keyA.length != keyB.length) return false;
+    for (int i = 0; i < keyA.length; i++) {
+      if (keyA[i] != keyB[i]) return false;
+    }
+    return true;
   }
 
   /// A13: attach new item(s) to an existing [landmarkId] - e.g. an extra dish
@@ -169,6 +355,102 @@ class SubmittedLandmarkRepository {
     );
   }
 
+  // ===========================================================================
+  // Report auto-apply writes (REPORT_REDESIGN_PLAN.md) - called when a claim
+  // reaches its threshold. Each is a single targeted UPDATE.
+  // ===========================================================================
+
+  /// 2a item_price: rewrites one submitted dish's price to the reported
+  /// value (`landmark_item.item_price`).
+  Future<void> updateLandmarkItemPrice(int itemId, double price) async {
+    await api.updateRow(
+      APIManager.tableLandmarkItem,
+      <String, Object?>{'item_price': price},
+      eq: <String, Object?>{'landmark_item_id': itemId},
+    );
+  }
+
+  /// 2b item_not_exist: soft-removes one submitted dish (`is_removed`),
+  /// hiding it from the place's detail without deleting the row.
+  Future<void> softRemoveLandmarkItem(int itemId) async {
+    await api.updateRow(
+      APIManager.tableLandmarkItem,
+      <String, Object?>{'is_removed': true},
+      eq: <String, Object?>{'landmark_item_id': itemId},
+    );
+  }
+
+  /// 2b: how many of [landmarkId]'s dishes are still shown (not removed) -
+  /// used to decide whether the whole landmark should be hidden when every
+  /// dish was reported not-exist.
+  Future<int> countVisibleLandmarkItems(int landmarkId) async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableLandmarkItem,
+      columns: 'landmark_item_id',
+      eq: <String, Object?>{'landmark_id': landmarkId, 'is_removed': false},
+    );
+    return rows.length;
+  }
+
+  /// 2b: hides a landmark whose every dish was reported not-exist
+  /// (`status` -> 'removed' - distinct from report-freeze 'frozen').
+  Future<void> removeLandmark(int landmarkId) async {
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{'status': 'removed'},
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// 3 address: rewrites the landmark's address to the reported value.
+  Future<void> updateLandmarkAddress(int landmarkId, String address) async {
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{'address': address},
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// 4a closed permanently / 4b closed temporarily: freezes the landmark.
+  /// For a TEMPORARY closure the caller sets [closedUntil] so the place can
+  /// auto-reactivate once that time passes (see [reactivateFromClosure]).
+  Future<void> freezeLandmark(int landmarkId, {DateTime? closedUntil}) async {
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{
+        'status': 'frozen',
+        if (closedUntil != null) 'closed_until': closedUntil.toUtc(),
+      },
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// 4b resume: clears a temporary closure that has expired - back to
+  /// 'available' with no `closed_until`.
+  Future<void> reactivateLandmarkFromClosure(int landmarkId) async {
+    await api.updateRow(
+      APIManager.tableSubmittedLandmark,
+      <String, Object?>{'status': 'available', 'closed_until': null},
+      eq: <String, Object?>{'landmark_id': landmarkId},
+    );
+  }
+
+  /// 1 operating hours: replaces ONE weekday's stored rows with the reported
+  /// proposal (delete that day's rows, insert the proposed rows). Used when a
+  /// day's hours claim reaches its threshold - only that day is touched.
+  Future<void> replaceLandmarkOpeningHourDay(
+    int landmarkId,
+    Weekday day,
+    List<OpeningHour> rows,
+  ) async {
+    await api.deleteRows(
+      APIManager.tableOpeningHours,
+      eq: <String, Object?>{'landmark_id': landmarkId, 'day': _dayName(day)},
+    );
+    if (rows.isEmpty) return;
+    await _insertOpeningHours(landmarkId, rows);
+  }
+
   /// Every submitted landmark whose name equals [name] (trimmed,
   /// case-insensitive). Lightweight rows (no dishes/opening hours) - the
   /// submit flow only needs id + coordinates to decide which previously
@@ -225,7 +507,8 @@ class SubmittedLandmarkRepository {
           APIManager.tableSubmittedLandmark,
           columns:
               'landmark_id, landmark_name, longitude, latitude, category, '
-              'reported_count, status, image_url, image_id, image_category',
+              'reported_count, status, image_url, image_id, image_category, '
+              'phone, website, address',
           eq: <String, Object?>{'landmark_id': landmarkId},
         ),
         api.selectAll(
@@ -259,6 +542,27 @@ class SubmittedLandmarkRepository {
     return _toDomain(landmarkRow, itemRows, hourRows);
   }
 
+  /// The landmark's CURRENT dishes for the report page's item picker -
+  /// lightweight rows (id + dish + price), excluding items already
+  /// soft-removed by earlier reports. A tourist can only report a price /
+  /// existence of a dish the place is still showing.
+  Future<List<LandmarkItem>> getReportableItems(int landmarkId) async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableLandmarkItem,
+      columns:
+          'landmark_item_id, landmark_id, tourist_id, local_food_id, '
+          'dish, item_price',
+      eq: <String, Object?>{'landmark_id': landmarkId, 'is_removed': false},
+      orderBy: 'landmark_item_id',
+    );
+    return List<LandmarkItem>.unmodifiable(
+      rows.map(
+        (Map<String, dynamic> row) =>
+            _toItem(LandmarkItemDataModel.fromJson(row)),
+      ),
+    );
+  }
+
   /// `submitted_landmark` + `landmark_item` + `opening_hours` rows -> the
   /// `SubmittedLandmark` domain model. Each table is parsed by its own data
   /// model before composition.
@@ -290,6 +594,9 @@ class SubmittedLandmarkRepository {
       imageUrl: landmark.imageUrl,
       imageId: landmark.imageId,
       imageCategory: landmark.imageCategory,
+      phone: landmark.phone ?? '',
+      website: landmark.website ?? '',
+      address: landmark.address ?? '',
       items: items,
       openingHours: hours,
     );
@@ -319,6 +626,7 @@ class SubmittedLandmarkRepository {
       seasonal: data.seasonal ?? '',
       cookingStyle: data.cookingStyle ?? '',
       mealType: data.mealType ?? '',
+      isRemoved: data.isRemoved,
       isFake: fake,
     );
   }

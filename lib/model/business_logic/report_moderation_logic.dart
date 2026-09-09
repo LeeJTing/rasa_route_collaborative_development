@@ -1,0 +1,352 @@
+import 'package:meta/meta.dart' show protected;
+
+import '../../domain_model/opening_hour.dart';
+import '../../domain_model/report_category.dart';
+import '../../domain_model/report_claim.dart';
+import '../../domain_model/report_outcome.dart';
+import '../../domain_model/restaurant_item.dart';
+import '../../domain_model/submitted_landmark.dart';
+import '../repositories/auth_repository.dart';
+import '../repositories/map_repository.dart';
+import '../repositories/report_repository.dart';
+import '../repositories/restaurant_repository.dart';
+import '../repositories/submitted_landmark_repository.dart';
+import 'report_moderation_rules.dart';
+
+/// The report flow shared by catalogue restaurants AND submitted landmarks:
+/// records one tourist's claim(s) about a place and, when enough DISTINCT
+/// tourists make the IDENTICAL claim, auto-applies the fix.
+///
+/// This logic spans BOTH place kinds (the same categories, thresholds and
+/// auto-apply actions exist for restaurants and landmarks), so it holds the
+/// submitted-landmark repo AND the catalogue restaurant repo alongside the
+/// shared `report` repo, `auth` and `map` (documented cross-place exception,
+/// like `MapExplorationLogic`).
+///
+/// Flow per claim (see `ReportModerationRules` for the pure decisions):
+///   1. resolve the signed-in tourist (reporting is signed-in-only);
+///   2. dedupe - one tourist may claim a specific issue only once;
+///   3. insert the claim row;
+///   4. count identical claims (same issue + same canonical payload) from
+///      distinct tourists; at/over the threshold, apply the fix and clear the
+///      matched rows so the count starts fresh.
+class ReportModerationLogic {
+  ReportModerationLogic();
+
+  // Test seam: each repository is behind a `@protected create*()` factory so a
+  // subclass can inject a fake (the same DI convention ViewModels use), rather
+  // than constructing real network-backed repositories.
+  @protected
+  ReportRepository createReportRepository() => ReportRepository();
+
+  @protected
+  RestaurantRepository createRestaurantRepository() => RestaurantRepository();
+
+  @protected
+  SubmittedLandmarkRepository createLandmarkRepository() =>
+      SubmittedLandmarkRepository();
+
+  @protected
+  AuthRepository createAuthRepository() => AuthRepository();
+
+  @protected
+  MapRepository createMapRepository() => MapRepository();
+
+  late final ReportRepository report = createReportRepository();
+  late final RestaurantRepository restaurant = createRestaurantRepository();
+  late final SubmittedLandmarkRepository landmark = createLandmarkRepository();
+  late final AuthRepository auth = createAuthRepository();
+  late final MapRepository map = createMapRepository();
+
+  /// The place's current (non-removed) menu items for the report picker.
+  Future<List<ReportableMenuItem>> reportableItemsFor({
+    required ReportPlaceKind placeKind,
+    required int placeId,
+  }) async {
+    if (placeKind == ReportPlaceKind.restaurant) {
+      final List<RestaurantItem> items = await restaurant.getReportableItems(
+        placeId,
+      );
+      return <ReportableMenuItem>[
+        for (final RestaurantItem item in items)
+          ReportableMenuItem(
+            itemKind: ReportItemKind.restaurantItem,
+            id: item.id,
+            name: item.foodName,
+            price: item.price,
+            isRemoved: item.isRemoved,
+          ),
+      ];
+    }
+    final List<LandmarkItem> items = await landmark.getReportableItems(placeId);
+    return <ReportableMenuItem>[
+      for (final LandmarkItem item in items)
+        ReportableMenuItem(
+          itemKind: ReportItemKind.landmarkItem,
+          id: item.id,
+          name: item.dish,
+          price: item.price,
+          isRemoved: item.isRemoved,
+        ),
+    ];
+  }
+
+  /// Submits [claims] against the place. Returns an aggregate [ReportSubmitOutcome].
+  ///
+  /// All claims must target the same place (they are built from one report
+  /// page visit). [touristId] may be passed in by the caller (already
+  /// resolved) or left null to resolve here; a null/empty resolved id means
+  /// nothing is written and [ReportSubmitOutcome.requiresSignIn] is true.
+  Future<ReportSubmitOutcome> submitClaims({
+    required List<ReportClaim> claims,
+    String? touristId,
+  }) async {
+    if (claims.isEmpty) {
+      return const ReportSubmitOutcome();
+    }
+    final String? resolvedTouristId =
+        touristId ?? await auth.currentTouristId();
+    if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
+      return const ReportSubmitOutcome(requiresSignIn: true);
+    }
+
+    int submittedCount = 0;
+    int duplicateCount = 0;
+    final List<String> applied = <String>[];
+    bool placeHiddenNow = false;
+    bool wroteAnything = false;
+
+    for (final ReportClaim claim in claims) {
+      final bool duplicate = await report.alreadyReported(
+        claim: claim,
+        touristId: resolvedTouristId,
+      );
+      if (duplicate) {
+        duplicateCount++;
+        continue;
+      }
+      await report.insertClaim(claim: claim, touristId: resolvedTouristId);
+      wroteAnything = true;
+      submittedCount++;
+
+      // Temporary closure is counted across DIFFERENT durations: ten tourists
+      // saying "closed temporarily" (each possibly with its own duration) is
+      // enough - the most-common reported duration is resolved at apply time.
+      // Every other category needs identical payloads (same hours / price /
+      // address / item).
+      final bool temporaryClosure =
+          claim.category == ReportCategory.closedTemporarily;
+      final int count = temporaryClosure
+          ? await report.countIssue(claim)
+          : await report.countIdentical(claim);
+      if (!ReportModerationRules.reachesThreshold(claim.category, count)) {
+        continue;
+      }
+
+      final _ApplyResult result;
+      if (temporaryClosure) {
+        final List<String> payloads = await report.payloadsForIssue(claim);
+        result = await _applyClosedTemporarily(claim, payloads);
+        // Every duration contributed to crossing the threshold - clear the
+        // whole issue so the next report starts a fresh count.
+        await report.deleteIssue(claim);
+      } else {
+        result = await _applyFix(claim);
+        // The fix matched this claim's identical group - clear those rows so
+        // the next report starts a fresh count (per approved plan).
+        await report.deleteIdentical(claim);
+      }
+      if (result.label != null) applied.add(result.label!);
+      if (result.hidPlace) placeHiddenNow = true;
+    }
+
+    if (wroteAnything && placeHiddenNow) {
+      // Frozen/removed places are no longer 'available', so cached map pins
+      // must go - the next read (after the UI leaves the page) has no pin.
+      map.clearCache();
+    }
+
+    return ReportSubmitOutcome(
+      requiresSignIn: false,
+      alreadyReported: wroteAnything ? false : duplicateCount > 0,
+      submittedCount: submittedCount,
+      duplicateCount: duplicateCount,
+      placeHiddenNow: placeHiddenNow,
+      applied: List<String>.unmodifiable(applied),
+    );
+  }
+
+  /// Applies the fix for one claim that reached its threshold. Temporary
+  /// closure never reaches here - `submitClaims` handles it separately (it
+  /// counts by issue and needs the whole issue's payloads to resolve the
+  /// most-common duration).
+  Future<_ApplyResult> _applyFix(ReportClaim claim) async {
+    switch (claim.category) {
+      case ReportCategory.operatingHours:
+        return _applyHours(claim);
+      case ReportCategory.itemPrice:
+        return _applyItemPrice(claim);
+      case ReportCategory.itemNotExist:
+        return _applyItemNotExist(claim);
+      case ReportCategory.address:
+        return _applyAddress(claim);
+      case ReportCategory.closedPermanently:
+        return _applyClosedPermanently(claim);
+      case ReportCategory.closedTemporarily:
+        // Handled in `submitClaims` (issue-counted); never dispatched here.
+        return const _ApplyResult();
+    }
+  }
+
+  Future<_ApplyResult> _applyHours(ReportClaim claim) async {
+    final Weekday? day = claim.day;
+    if (day == null) return const _ApplyResult();
+    final List<ProposedDayHours> proposed =
+        ReportModerationRules.parseHoursPayload(claim.payload);
+    if (proposed.isEmpty) return const _ApplyResult();
+    final List<OpeningHour> rows = <OpeningHour>[
+      for (final ProposedDayHours p in proposed)
+        OpeningHour(
+          id: 0,
+          day: day,
+          status: p.status,
+          opensAt: p.status == DayStatus.open ? p.opensAt : null,
+          closesAt: p.status == DayStatus.open ? p.closesAt : null,
+        ),
+    ];
+    if (claim.placeKind == ReportPlaceKind.restaurant) {
+      await restaurant.replaceRestaurantOpeningHourDay(
+        claim.placeId,
+        day,
+        rows,
+      );
+    } else {
+      await landmark.replaceLandmarkOpeningHourDay(claim.placeId, day, rows);
+    }
+    return _ApplyResult(label: '${_dayLabel(day)} hours updated');
+  }
+
+  Future<_ApplyResult> _applyItemPrice(ReportClaim claim) async {
+    final int? itemId = claim.itemId;
+    if (itemId == null) return const _ApplyResult();
+    final double? price = double.tryParse(
+      claim.payload.replaceFirst('price:', ''),
+    );
+    if (price == null) return const _ApplyResult();
+    if (claim.itemKind == ReportItemKind.restaurantItem) {
+      await restaurant.updateRestaurantItemPrice(itemId, price);
+    } else if (claim.itemKind == ReportItemKind.landmarkItem) {
+      await landmark.updateLandmarkItemPrice(itemId, price);
+    } else {
+      return const _ApplyResult();
+    }
+    return const _ApplyResult(label: 'Price updated');
+  }
+
+  Future<_ApplyResult> _applyItemNotExist(ReportClaim claim) async {
+    final int? itemId = claim.itemId;
+    if (itemId == null) return const _ApplyResult();
+    if (claim.itemKind == ReportItemKind.restaurantItem) {
+      await restaurant.softRemoveRestaurantItem(itemId);
+      // Price/not-exist claims about this item are moot now - clear them.
+      await report.deleteIssue(claim);
+      final int remaining = await restaurant.countVisibleRestaurantItems(
+        claim.placeId,
+      );
+      if (remaining == 0) {
+        await restaurant.removeRestaurant(claim.placeId);
+        return const _ApplyResult(
+          label: 'Item removed; restaurant hidden (no items left)',
+          hidPlace: true,
+        );
+      }
+      return const _ApplyResult(label: 'Item removed from menu');
+    }
+    if (claim.itemKind == ReportItemKind.landmarkItem) {
+      await landmark.softRemoveLandmarkItem(itemId);
+      await report.deleteIssue(claim);
+      final int remaining = await landmark.countVisibleLandmarkItems(
+        claim.placeId,
+      );
+      if (remaining == 0) {
+        await landmark.removeLandmark(claim.placeId);
+        return const _ApplyResult(
+          label: 'Item removed; landmark hidden (no items left)',
+          hidPlace: true,
+        );
+      }
+      return const _ApplyResult(label: 'Item removed from menu');
+    }
+    return const _ApplyResult();
+  }
+
+  Future<_ApplyResult> _applyAddress(ReportClaim claim) async {
+    final String address = claim.payload.replaceFirst('address:', '').trim();
+    if (address.isEmpty) return const _ApplyResult();
+    if (claim.placeKind == ReportPlaceKind.restaurant) {
+      await restaurant.updateRestaurantAddress(claim.placeId, address);
+    } else {
+      await landmark.updateLandmarkAddress(claim.placeId, address);
+    }
+    return const _ApplyResult(label: 'Address updated');
+  }
+
+  Future<_ApplyResult> _applyClosedPermanently(ReportClaim claim) async {
+    if (claim.placeKind == ReportPlaceKind.restaurant) {
+      await restaurant.freezeRestaurant(claim.placeId);
+    } else {
+      await landmark.freezeLandmark(claim.placeId);
+    }
+    return const _ApplyResult(
+      label: 'Place hidden (closed permanently)',
+      hidPlace: true,
+    );
+  }
+
+  Future<_ApplyResult> _applyClosedTemporarily(
+    ReportClaim claim,
+    List<String> issuePayloads,
+  ) async {
+    // Ten tourists said "closed temporarily" (durations may differ) - the
+    // MOST COMMON reported duration wins (ties -> longest, so the place is
+    // never re-opened early).
+    final ProposedClosure? closure =
+        ReportModerationRules.resolveMostCommonClosure(issuePayloads);
+    final DateTime? closedUntil = closure == null
+        ? null
+        : DateTime.now().add(
+            Duration(days: ReportModerationRules.closureDurationDays(closure)),
+          );
+    if (claim.placeKind == ReportPlaceKind.restaurant) {
+      await restaurant.freezeRestaurant(
+        claim.placeId,
+        closedUntil: closedUntil,
+      );
+    } else {
+      await landmark.freezeLandmark(claim.placeId, closedUntil: closedUntil);
+    }
+    return const _ApplyResult(
+      label: 'Place hidden (closed temporarily)',
+      hidPlace: true,
+    );
+  }
+}
+
+/// Result of one auto-apply: an optional human label for the confirmation
+/// message, and whether the action hid the whole place (freeze/remove).
+class _ApplyResult {
+  const _ApplyResult({this.label, this.hidPlace = false});
+
+  final String? label;
+  final bool hidPlace;
+}
+
+String _dayLabel(Weekday day) => switch (day) {
+  Weekday.monday => 'Monday',
+  Weekday.tuesday => 'Tuesday',
+  Weekday.wednesday => 'Wednesday',
+  Weekday.thursday => 'Thursday',
+  Weekday.friday => 'Friday',
+  Weekday.saturday => 'Saturday',
+  Weekday.sunday => 'Sunday',
+};

@@ -24,6 +24,7 @@ class Restaurant {
     this.distanceMetres,
     this.reviewCount,
     this.status,
+    this.closedUntil,
     this.items = const <RestaurantItem>[],
   });
 
@@ -41,6 +42,13 @@ class Restaurant {
   final double? distanceMetres;
   final int? reviewCount;
   final String? status;
+
+  /// When a temporary closure (`status='frozen'`) is due to end - read-time
+  /// availability treats a `frozen` place with `closed_until` in the past as
+  /// available again (see `PlaceClosureRules`). Null when never temporarily
+  /// closed, or already reactivated.
+  final DateTime? closedUntil;
+
   final List<RestaurantItem> items;
 
   String get distanceLabel {
@@ -66,6 +74,7 @@ class Restaurant {
     double? distanceMetres,
     int? reviewCount,
     String? status,
+    DateTime? closedUntil,
     List<RestaurantItem>? items,
   }) => Restaurant(
     id: id ?? this.id,
@@ -82,6 +91,7 @@ class Restaurant {
     distanceMetres: distanceMetres ?? this.distanceMetres,
     reviewCount: reviewCount ?? this.reviewCount,
     status: status ?? this.status,
+    closedUntil: closedUntil ?? this.closedUntil,
     items: items ?? this.items,
   );
 }

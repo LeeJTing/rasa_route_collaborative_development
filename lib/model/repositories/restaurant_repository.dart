@@ -39,6 +39,7 @@ class RestaurantRepository {
     restaurant_image_id,
     restaurant_image_url,
     status,
+    closed_until,
     restaurant_opening_hours:opening_hours!opening_hours_restaurant_id_fkey(
       opening_hours_id,
       day,
@@ -58,7 +59,8 @@ class RestaurantRepository {
     ingredients,
     food_img_url,
     food_category,
-    restaurant_item_price
+    restaurant_item_price,
+    is_removed
   ''';
 
   static const String _detailColumns =
@@ -73,6 +75,7 @@ class RestaurantRepository {
       food_img_url,
       food_category,
       restaurant_item_price,
+      is_removed,
       local_food(
         local_food_id,
         food_name,
@@ -161,6 +164,27 @@ class RestaurantRepository {
         'Unable to load restaurant menus. Check your connection and try again.',
       );
     }
+  }
+
+  /// The restaurant's CURRENT menu items for the report page's item picker -
+  /// lightweight rows (id + name + price), excluding items already
+  /// soft-removed by earlier reports. A tourist can only report a price /
+  /// existence of a dish the place is still showing.
+  Future<List<RestaurantItem>> getReportableItems(int restaurantId) async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableRestaurantItem,
+      columns:
+          'restaurant_item_id, restaurant_id, local_food_id, '
+          'restaurant_item_name, restaurant_item_price',
+      eq: <String, Object?>{'restaurant_id': restaurantId, 'is_removed': false},
+      orderBy: 'restaurant_item_id',
+    );
+    return List<RestaurantItem>.unmodifiable(
+      rows.map(
+        (Map<String, dynamic> row) =>
+            _itemDataToDomain(RestaurantItemDataModel.fromJson(row)),
+      ),
+    );
   }
 
   /// Loads the menu facts needed to decide Quick Mode eligibility without
@@ -354,6 +378,158 @@ class RestaurantRepository {
     );
   }
 
+  // ===========================================================================
+  // Report auto-apply writes (REPORT_REDESIGN_PLAN.md) - called when a claim
+  // reaches its threshold. Each is a single targeted UPDATE.
+  // ===========================================================================
+
+  /// 2a item_price: rewrites one menu item's price to the reported value.
+  Future<void> updateRestaurantItemPrice(int itemId, double price) async {
+    await api.updateRow(
+      APIManager.tableRestaurantItem,
+      <String, Object?>{'restaurant_item_price': price},
+      eq: <String, Object?>{'restaurant_item_id': itemId},
+    );
+  }
+
+  /// 2b item_not_exist: soft-removes one menu item (`is_removed`), hiding it
+  /// from the place's menu/discovery without deleting the row.
+  Future<void> softRemoveRestaurantItem(int itemId) async {
+    await api.updateRow(
+      APIManager.tableRestaurantItem,
+      <String, Object?>{'is_removed': true},
+      eq: <String, Object?>{'restaurant_item_id': itemId},
+    );
+  }
+
+  /// 2b: how many of [restaurantId]'s items are still shown (not removed) -
+  /// used to decide whether the whole place should be hidden when every item
+  /// was reported not-exist.
+  Future<int> countVisibleRestaurantItems(int restaurantId) async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableRestaurantItem,
+      columns: 'restaurant_item_id',
+      eq: <String, Object?>{'restaurant_id': restaurantId, 'is_removed': false},
+    );
+    return rows.length;
+  }
+
+  /// 2b: hides a restaurant whose every item was reported not-exist
+  /// (`status` -> 'removed' - distinct from report-freeze 'frozen').
+  Future<void> removeRestaurant(int restaurantId) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'status': 'removed'},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+  }
+
+  /// 3 address: rewrites the restaurant's address to the reported value.
+  Future<void> updateRestaurantAddress(int restaurantId, String address) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'address': address},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+  }
+
+  /// 4a closed permanently / 4b closed temporarily: freezes the restaurant.
+  /// For a TEMPORARY closure the caller sets [closedUntil] so the place can
+  /// auto-reactivate once that time passes (see [reactivateFromClosure]).
+  Future<void> freezeRestaurant(
+    int restaurantId, {
+    DateTime? closedUntil,
+  }) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{
+        'status': 'frozen',
+        if (closedUntil != null) 'closed_until': closedUntil.toUtc(),
+      },
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+  }
+
+  /// 4b resume: clears a temporary closure that has expired - back to
+  /// 'available' with no `closed_until`.
+  Future<void> reactivateRestaurantFromClosure(int restaurantId) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'status': 'available', 'closed_until': null},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+  }
+
+  /// 1 operating hours: replaces ONE weekday's stored rows with the reported
+  /// proposal (delete that day's rows, insert the proposed rows). Used when a
+  /// day's hours claim reaches its threshold - only that day is touched.
+  Future<void> replaceRestaurantOpeningHourDay(
+    int restaurantId,
+    Weekday day,
+    List<OpeningHour> rows,
+  ) async {
+    await api.deleteRows(
+      APIManager.tableOpeningHours,
+      eq: <String, Object?>{
+        'restaurant_id': restaurantId,
+        'day': _dayName(day),
+      },
+    );
+    if (rows.isEmpty) return;
+    await _insertOpeningHours(restaurantId, rows);
+  }
+
+  Future<void> _insertOpeningHours(
+    int restaurantId,
+    List<OpeningHour> hours,
+  ) async {
+    int nextId = await _nextOpeningHoursId();
+    for (final OpeningHour hour in hours) {
+      final bool isOpen = hour.status == DayStatus.open;
+      await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
+        'opening_hours_id': nextId++,
+        'day': _dayName(hour.day),
+        'status': hour.status.name,
+        'opening_time': isOpen && hour.opensAt != null
+            ? _formatTime(hour.opensAt!)
+            : null,
+        'closing_time': isOpen && hour.closesAt != null
+            ? _formatTime(hour.closesAt!)
+            : null,
+        'landmark_id': null,
+        'restaurant_id': restaurantId,
+      });
+    }
+  }
+
+  Future<int> _nextOpeningHoursId() async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableOpeningHours,
+      columns: 'opening_hours_id',
+      orderBy: 'opening_hours_id',
+      ascending: false,
+      limit: 1,
+    );
+    if (rows.isEmpty) return 1;
+    return ((rows.first['opening_hours_id'] as num?)?.toInt() ?? 0) + 1;
+  }
+
+  static String _dayName(Weekday day) => switch (day) {
+    Weekday.monday => 'Monday',
+    Weekday.tuesday => 'Tuesday',
+    Weekday.wednesday => 'Wednesday',
+    Weekday.thursday => 'Thursday',
+    Weekday.friday => 'Friday',
+    Weekday.saturday => 'Saturday',
+    Weekday.sunday => 'Sunday',
+  };
+
+  static String _formatTime(int minutes) {
+    final int h = minutes ~/ 60;
+    final int m = minutes % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:00';
+  }
+
   Restaurant _toDomain(Map<String, dynamic> row) {
     final RestaurantDataModel data = RestaurantDataModel.fromJson(row);
     final List<OpeningHour> openingHours = openingHoursFromRows(
@@ -383,6 +559,7 @@ class RestaurantRepository {
       imageUrl: data.restaurantImageUrl,
       openingHours: openingHours,
       status: data.status,
+      closedUntil: data.closedUntil,
       items: _deduplicateRestaurantItems(items),
     );
   }
@@ -463,6 +640,7 @@ class RestaurantRepository {
         price: data.restaurantItemPrice,
         currency: 'RM',
         foodCategory: data.foodCategory ?? '',
+        isRemoved: data.isRemoved,
       );
 
   RestaurantItem _itemToDomain(Map<String, dynamic> row) {
@@ -505,6 +683,7 @@ class RestaurantRepository {
       price: data.restaurantItemPrice,
       currency: 'RM',
       foodCategory: data.foodCategory ?? '',
+      isRemoved: data.isRemoved,
     );
   }
 

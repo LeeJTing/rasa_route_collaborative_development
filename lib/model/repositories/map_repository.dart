@@ -1,5 +1,6 @@
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/place_closure_rules.dart';
 import '../../domain_model/region.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../../shared_client/local_storage_manager/local_storage_manager.dart';
@@ -700,26 +701,27 @@ class MapRepository {
     final List<Map<String, dynamic>> items;
     try {
       // Neither select depends on the other.
-      final List<List<Map<String, dynamic>>> rows =
-          await Future.wait(<Future<List<Map<String, dynamic>>>>[
-            // Paged, not `selectAll`: both tables are far past PostgREST's
-            // 1000-row ceiling, and a truncated read here is what makes a
-            // fully seeded database look like an almost empty map.
-            api.selectEvery(
-              APIManager.tableRestaurant,
-              orderBy: 'restaurant_id',
-              columns:
-                  'restaurant_id, restaurant_name, latitude, longitude, '
-                  'category, rating, restaurant_image_url, status',
-            ),
-            api.selectEvery(
-              APIManager.tableRestaurantItem,
-              orderBy: 'restaurant_item_id',
-              columns:
-                  'restaurant_id, local_food_id, restaurant_item_name, '
-                  'restaurant_item_price',
-            ),
-          ]);
+      final List<List<Map<String, dynamic>>> rows = await Future.wait(
+        <Future<List<Map<String, dynamic>>>>[
+          // Paged, not `selectAll`: both tables are far past PostgREST's
+          // 1000-row ceiling, and a truncated read here is what makes a
+          // fully seeded database look like an almost empty map.
+          api.selectEvery(
+            APIManager.tableRestaurant,
+            orderBy: 'restaurant_id',
+            columns:
+                'restaurant_id, restaurant_name, latitude, longitude, '
+                'category, rating, restaurant_image_url, status, closed_until',
+          ),
+          api.selectEvery(
+            APIManager.tableRestaurantItem,
+            orderBy: 'restaurant_item_id',
+            columns:
+                'restaurant_id, local_food_id, restaurant_item_name, '
+                'restaurant_item_price',
+          ),
+        ],
+      );
       restaurants = rows[0];
       items = rows[1];
     } catch (_) {
@@ -737,11 +739,34 @@ class MapRepository {
     // status is not evidence that the place is shut; it is a column nobody
     // filled in. Anything genuinely withdrawn carries a different value and is
     // still excluded.
-    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
-      for (final Map<String, dynamic> row in restaurants)
-        if (_asInt(row['restaurant_id']) != 0 && _isVisible(row['status']))
-          _asInt(row['restaurant_id']): row,
-    };
+    //
+    // A place frozen by a TEMPORARY closure (status 'frozen' with a
+    // `closed_until` in the past) is available again - it stays on the map
+    // (see `PlaceClosureRules`) and is auto-reactivated on read so the DB
+    // catches up (status -> 'available', closed_until cleared).
+    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{};
+    final List<int> reactivateIds = <int>[];
+    final DateTime now = DateTime.now();
+    for (final Map<String, dynamic> row in restaurants) {
+      final int restaurantId = _asInt(row['restaurant_id']);
+      if (restaurantId == 0) continue;
+      if (_isVisible(row['status']) ||
+          PlaceClosureRules.isEffectivelyAvailable(
+            status: _asStringOrNull(row['status']),
+            closedUntil: _asDateTimeOrNull(row['closed_until']),
+            now: now,
+          )) {
+        byId[restaurantId] = row;
+      }
+      if (PlaceClosureRules.needsReactivation(
+        status: _asStringOrNull(row['status']),
+        closedUntil: _asDateTimeOrNull(row['closed_until']),
+        now: now,
+      )) {
+        reactivateIds.add(restaurantId);
+      }
+    }
+    await _reactivateExpiredRestaurants(reactivateIds);
 
     final List<FoodOccurrence> out = <FoodOccurrence>[];
     for (final Map<String, dynamic> item in items) {
@@ -782,7 +807,7 @@ class MapRepository {
               orderBy: 'landmark_id',
               columns:
                   'landmark_id, landmark_name, latitude, longitude, status, '
-                  'image_url, category',
+                  'image_url, category, closed_until',
             ),
             api.selectEvery(
               APIManager.tableLandmarkItem,
@@ -803,13 +828,32 @@ class MapRepository {
 
     // A landmark that reached the report threshold is frozen (`status`
     // 'frozen') and excluded from map pins, search results and
-    // recommendations - only 'available' landmarks are shown.
-    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
-      for (final Map<String, dynamic> row in landmarks)
-        if (_asInt(row['landmark_id']) != 0 &&
-            _asString(row['status']).trim().toLowerCase() == 'available')
-          _asInt(row['landmark_id']): row,
-    };
+    // recommendations - only 'available' landmarks are shown. A landmark
+    // frozen by a TEMPORARY closure whose `closed_until` has passed is
+    // available again (see `PlaceClosureRules`) - it comes back on the map
+    // and is auto-reactivated on read so the DB catches up.
+    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{};
+    final List<int> reactivateIds = <int>[];
+    final DateTime now = DateTime.now();
+    for (final Map<String, dynamic> row in landmarks) {
+      final int landmarkId = _asInt(row['landmark_id']);
+      if (landmarkId == 0) continue;
+      if (PlaceClosureRules.isEffectivelyAvailable(
+        status: _asStringOrNull(row['status']),
+        closedUntil: _asDateTimeOrNull(row['closed_until']),
+        now: now,
+      )) {
+        byId[landmarkId] = row;
+      }
+      if (PlaceClosureRules.needsReactivation(
+        status: _asStringOrNull(row['status']),
+        closedUntil: _asDateTimeOrNull(row['closed_until']),
+        now: now,
+      )) {
+        reactivateIds.add(landmarkId);
+      }
+    }
+    await _reactivateExpiredLandmarks(reactivateIds);
 
     final List<FoodOccurrence> out = <FoodOccurrence>[];
     for (final Map<String, dynamic> item in items) {
@@ -1022,9 +1066,7 @@ class MapRepository {
           APIManager.tableOpeningHours,
           orderBy: 'opening_hours_id',
           columns: _openingHoursColumns,
-          inFilter: <String, List<Object?>>{
-            column: ids.sublist(start, end),
-          },
+          inFilter: <String, List<Object?>>{column: ids.sublist(start, end)},
         ),
       );
     }
@@ -1103,6 +1145,48 @@ class MapRepository {
     if (value == null) return null;
     final String text = '$value';
     return text.isEmpty ? null : text;
+  }
+
+  /// Parses a `closed_until` timestamptz value (may arrive as ISO-8601 text
+  /// or already a [DateTime]).
+  static DateTime? _asDateTimeOrNull(Object? value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    return DateTime.tryParse('$value');
+  }
+
+  /// Read-time auto-reactivation: a restaurant frozen by a temporary closure
+  /// whose `closed_until` has passed is written back to 'available' with
+  /// `closed_until` cleared, so the DB catches up with what the read just
+  /// decided. Best-effort - a failed write must never take the map read down
+  /// (the place is already treated as available for this read regardless).
+  Future<void> _reactivateExpiredRestaurants(List<int> restaurantIds) async {
+    for (final int restaurantId in restaurantIds) {
+      try {
+        await api.updateRow(
+          APIManager.tableRestaurant,
+          <String, Object?>{'status': 'available', 'closed_until': null},
+          eq: <String, Object?>{'restaurant_id': restaurantId},
+        );
+      } catch (_) {
+        // Best-effort - see method doc.
+      }
+    }
+  }
+
+  /// Landmark half of [_reactivateExpiredRestaurants] - see that method.
+  Future<void> _reactivateExpiredLandmarks(List<int> landmarkIds) async {
+    for (final int landmarkId in landmarkIds) {
+      try {
+        await api.updateRow(
+          APIManager.tableSubmittedLandmark,
+          <String, Object?>{'status': 'available', 'closed_until': null},
+          eq: <String, Object?>{'landmark_id': landmarkId},
+        );
+      } catch (_) {
+        // Best-effort - see _reactivateExpiredRestaurants.
+      }
+    }
   }
 
   /// Legacy landmark image URLs (written before the bucket-prefix guard in
