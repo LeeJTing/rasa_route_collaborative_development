@@ -28,6 +28,10 @@ class TouristInformationLogicFacade {
 
   String get pendingAuthEmail => authenticate.pendingEmail;
 
+  /// When the freshest code for the pending email was sent, or null when no
+  /// code is pending (see `AuthRepository`'s Option B pending-OTP marker).
+  DateTime? get pendingOtpSentAt => authenticate.pendingOtpSentAt;
+
   /// Completes a Google OAuth sign-in after the browser returns - picks up
   /// the session and auto-creates the tourist row on first sign-in.
   Future<Tourist?> completeGoogleSignIn() =>

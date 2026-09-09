@@ -32,6 +32,7 @@ class ProfileEmailCard extends StatelessWidget {
         border: Border.all(color: AppColors.cardBorderWarm),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           const Icon(
             Icons.mail_outline,
@@ -40,32 +41,33 @@ class ProfileEmailCard extends StatelessWidget {
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
-            child: Text(
-              'Email',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Flexible(
-            child: isLoading
-                ? const Align(
-                    alignment: Alignment.centerRight,
-                    child: SizedBox(
-                      width: AppSizes.profileEmailLoaderSize,
-                      height: AppSizes.profileEmailLoaderSize,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Email',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                if (isLoading)
+                  const SizedBox(
+                    width: AppSizes.profileEmailLoaderSize,
+                    height: AppSizes.profileEmailLoaderSize,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text(
+                else
+                  Text(
                     email.isEmpty ? 'Not signed in' : email,
-                    textAlign: TextAlign.right,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.accentBrown,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+              ],
+            ),
           ),
         ],
       ),

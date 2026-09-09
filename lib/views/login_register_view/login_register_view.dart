@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/routing/app_routes.dart';
-import '../../core/view_state.dart';
 import '../../view_models/login_register_view_model.dart';
 import '../common_widgets/scrollable_centered_body.dart';
 import 'widgets/auth_text_field.dart';
@@ -88,12 +87,12 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
     }
   }
 
-  Future<void> _sendOtp(LoginRegisterViewModel viewModel) async {
-    await viewModel.sendEmailOtp();
-    if (!mounted) return;
-    if (viewModel.otpSent) {
-      await Navigator.pushNamed(context, AppRoutes.otp);
-    }
+  /// Option B: the login "Send OTP" button no longer sends a code itself -
+  /// it only opens the OTP screen, passing the email along. That screen owns
+  /// the decision of whether a fresh code must actually be requested (it
+  /// reuses a still-valid pending code and resumes the countdown otherwise).
+  void _sendOtp(LoginRegisterViewModel viewModel) {
+    Navigator.pushNamed(context, AppRoutes.otp, arguments: viewModel.email);
   }
 
   Future<void> _signInWithGoogle(LoginRegisterViewModel viewModel) async {
@@ -168,7 +167,7 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
                         Text(
                           "Log in or sign up to discover Malaysia's local foods.",
                           textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.titleLarge
+                          style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
                                 color: Theme.of(context).colorScheme.primary,
                                 fontWeight: FontWeight.w700,
@@ -194,17 +193,6 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
                         ),
                         const SizedBox(height: AppSpacing.sm),
                         AuthTextField(onChanged: viewModel.setEmail),
-                        if (viewModel.hasError) ...<Widget>[
-                          const SizedBox(height: AppSpacing.xs),
-                          Text(
-                            viewModel.errorMessage ??
-                                'Unable to send the code.',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                          ),
-                        ],
                         const SizedBox(height: AppSpacing.xl),
                         SizedBox(
                           width: double.infinity,
@@ -219,9 +207,7 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
                                 ),
                               ),
                             ),
-                            child: viewModel.state == ViewState.busy
-                                ? const CircularProgressIndicator()
-                                : const Text('Send One-Time Password'),
+                            child: const Text('Send One-Time Password'),
                           ),
                         ),
                         const SizedBox(height: AppSpacing.xl),

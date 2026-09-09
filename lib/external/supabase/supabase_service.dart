@@ -316,9 +316,23 @@ class SupabaseService {
         name: 'SupabaseService',
         error: error,
       );
+      // A 429 / "rate limit" rejection means a code was emailed very recently
+      // (Supabase enforces its own send-frequency cap on top of the app's
+      // 3-per-10 gate). Telling the tourist their email is wrong would be
+      // misleading, so translate that case separately.
+      final String message = error.message.toLowerCase();
+      final String status = (error.statusCode ?? '').toLowerCase();
+      final String code = (error.code ?? '').toLowerCase();
+      final bool rateLimited =
+          status == '429' ||
+          code.contains('rate_limit') ||
+          message.contains('rate limit') ||
+          message.contains('too many');
       throw Exception(
-        'Unable to send the code. Check that your email address is correct '
-        'and try again.',
+        rateLimited
+            ? 'Too many attempts, please try again later.'
+            : 'Unable to send the code. Check that your email address is '
+                  'correct and try again.',
       );
     }
   }

@@ -56,6 +56,7 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   CameraController? _cameraController;
   bool _isCameraInitializing = true;
   String? _cameraError;
+  bool _cameraOpenInProgress = false;
 
   /// The cameras this device/browser exposes, from `availableCameras()` - kept
   /// so the tourist can flip between front/back when more than one exists
@@ -193,6 +194,8 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   /// Initialises [camera] into [_cameraController]. Shared by [_initCamera]
   /// and [_switchCamera] so flipping never duplicates the error handling.
   Future<void> _openCamera(CameraDescription camera) async {
+    if (_cameraOpenInProgress) return;
+    _cameraOpenInProgress = true;
     final CameraController controller = CameraController(
       camera,
       ResolutionPreset.high,
@@ -200,7 +203,10 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
     );
     try {
       await controller.initialize();
+      await controller.setFocusMode(FocusMode.auto);
     } on CameraException {
+      _cameraOpenInProgress = false;
+      await controller.dispose();
       if (mounted) {
         setState(() {
           _cameraError =
@@ -211,13 +217,16 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
       return;
     }
     if (!mounted) {
+      _cameraOpenInProgress = false;
       await controller.dispose();
       return;
     }
     setState(() {
       _cameraController = controller;
       _isCameraInitializing = false;
+      _cameraError = null;
     });
+    _cameraOpenInProgress = false;
   }
 
   /// Flips between the front/back cameras when the device exposes more than
@@ -257,14 +266,38 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   // v0.5.0) - the app is responsible for releasing/reacquiring the camera.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive) {
+      final CameraController? controller = _cameraController;
+      if (controller == null || !controller.value.isInitialized) return;
+      controller.dispose();
+      _cameraController = null;
+      if (mounted) {
+        setState(() {
+          _isCameraInitializing = true;
+        });
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (_cameras.isNotEmpty) {
+        _openCamera(_cameras[_activeCameraIndex]);
+      } else {
+        _initCamera();
+      }
+    }
+  }
+
+  Future<void> _focusCamera(Offset position, Size previewSize) async {
     final CameraController? controller = _cameraController;
     if (controller == null || !controller.value.isInitialized) return;
 
-    if (state == AppLifecycleState.inactive) {
-      controller.dispose();
-      _cameraController = null;
-    } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
+    final Offset point = Offset(
+      (position.dx / previewSize.width).clamp(0.0, 1.0),
+      (position.dy / previewSize.height).clamp(0.0, 1.0),
+    );
+    try {
+      await controller.setFocusMode(FocusMode.auto);
+      await controller.setFocusPoint(point);
+    } on CameraException {
+      // Some web cameras expose no manual focus point; auto focus remains set.
     }
   }
 
@@ -621,6 +654,11 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
                                   return GestureDetector(
                                     onScaleStart: _onZoomScaleStart,
                                     onScaleUpdate: _onZoomScaleUpdate,
+                                    onTapDown: (TapDownDetails details) =>
+                                        _focusCamera(
+                                          details.localPosition,
+                                          constraints.biggest,
+                                        ),
                                     onDoubleTap: _resetZoom,
                                     child: Stack(
                                       fit: StackFit.expand,

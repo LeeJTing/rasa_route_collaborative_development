@@ -22,6 +22,77 @@ void main() {
       await logic.sendEmailOtp('  tourist@example.com  ');
 
       expect(repository.sentEmails, <String>['tourist@example.com']);
+      expect(repository.recordedOtpSends, <String>['tourist@example.com']);
+    });
+
+    test('allows up to the rate limit of sends per window', () async {
+      final _FakeTouristRepositoryFacade repository =
+          _FakeTouristRepositoryFacade();
+      final AuthenticateLogic logic = AuthenticateLogic(repository: repository);
+
+      for (int i = 0; i < AuthenticateLogic.otpSendRateLimit; i++) {
+        await logic.sendEmailOtp('tourist@example.com');
+      }
+
+      expect(repository.sentEmails.length, AuthenticateLogic.otpSendRateLimit);
+      expect(repository.recordedOtpSends.length, AuthenticateLogic.otpSendRateLimit);
+    });
+
+    test('rejects a send beyond the rate limit with the friendly message', () async {
+      final _FakeTouristRepositoryFacade repository =
+          _FakeTouristRepositoryFacade();
+      final AuthenticateLogic logic = AuthenticateLogic(repository: repository);
+
+      // Seed the stored history with the full quota inside the window.
+      repository.otpSendTimesResult = List<DateTime>.generate(
+        AuthenticateLogic.otpSendRateLimit,
+        (_) => DateTime.now(),
+      );
+
+      await expectLater(
+        logic.sendEmailOtp('tourist@example.com'),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            AuthenticateLogic.otpSendRateLimitMessage,
+          ),
+        ),
+      );
+
+      // A blocked send never reaches the repository.
+      expect(repository.sentEmails, isEmpty);
+    });
+
+    test('ignores sends older than the rate-limit window', () async {
+      final _FakeTouristRepositoryFacade repository =
+          _FakeTouristRepositoryFacade();
+      final AuthenticateLogic logic = AuthenticateLogic(repository: repository);
+
+      // Old sends happened long before the window - they must not count.
+      repository.otpSendTimesResult = List<DateTime>.generate(
+        AuthenticateLogic.otpSendRateLimit,
+        (_) => DateTime.now().subtract(
+          AuthenticateLogic.otpSendRateWindow + const Duration(minutes: 1),
+        ),
+      );
+
+      await logic.sendEmailOtp('tourist@example.com');
+
+      expect(repository.sentEmails, <String>['tourist@example.com']);
+    });
+
+    test('does not record a send the repository rejected', () async {
+      final _FakeTouristRepositoryFacade repository =
+          _FakeTouristRepositoryFacade(throwOnSend: true);
+      final AuthenticateLogic logic = AuthenticateLogic(repository: repository);
+
+      await expectLater(
+        logic.sendEmailOtp('tourist@example.com'),
+        throwsStateError,
+      );
+
+      expect(repository.recordedOtpSends, isEmpty);
     });
   });
 
@@ -133,19 +204,38 @@ class _FakeTouristRepositoryFacade extends TouristRepositoryFacade {
     this.verifyResult,
     this.currentSession,
     this.touristResult,
+    this.throwOnSend = false,
   });
 
   AuthSession? verifyResult;
   AuthSession? currentSession;
   Tourist? touristResult;
 
+  /// When true, [sendEmailOtp] throws before recording (a rejected address).
+  bool throwOnSend;
+
+  /// Pre-seeded OTP send history returned by [otpSendTimes].
+  List<DateTime> otpSendTimesResult = const <DateTime>[];
+
   final List<String> sentEmails = <String>[];
   final List<String> verifyCalls = <String>[];
   final List<AuthSession> provisionedSessions = <AuthSession>[];
+  final List<String> recordedOtpSends = <String>[];
 
   @override
   Future<void> sendEmailOtp(String email) async {
+    if (throwOnSend) {
+      throw StateError('Unable to send the code.');
+    }
     sentEmails.add(email);
+  }
+
+  @override
+  Future<List<DateTime>> otpSendTimes(String email) async => otpSendTimesResult;
+
+  @override
+  Future<void> recordOtpSend(String email) async {
+    recordedOtpSends.add(email);
   }
 
   @override
