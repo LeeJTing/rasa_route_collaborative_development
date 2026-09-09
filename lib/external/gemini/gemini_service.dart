@@ -46,12 +46,19 @@ class GeminiService {
   /// slow/failed AI response rather than hang the screen). Retries once on
   /// timeout or transient failure before giving up.
   ///
+  /// When the primary model fails with a transient error (HTTP 429/5xx) and a
+  /// fallback model from [Env.geminiFallbackModels] replies instead,
+  /// [onFallbackModel] is invoked with the model that actually served the
+  /// request - so a caller can surface "used a fallback model" to the tourist
+  /// rather than hide it.
+  ///
   /// [apiKey]/[model] - see [describeImage]'s doc.
   Future<String> generateText(
     String prompt, {
     int retries = 1,
     String? apiKey,
     String? model,
+    void Function(String model)? onFallbackModel,
   }) async {
     Object? lastError;
     for (int attempt = 0; attempt <= retries; attempt++) {
@@ -62,6 +69,7 @@ class GeminiService {
           ],
           apiKey: apiKey,
           model: model,
+          onFallbackModel: onFallbackModel,
         ).timeout(Env.apiTimeout);
       } catch (error) {
         lastError = error;
@@ -90,15 +98,23 @@ class GeminiService {
     List<Map<String, Object?>> parts, {
     String? apiKey,
     String? model,
+    void Function(String model)? onFallbackModel,
   }) async {
+    final List<String> rotation = _modelRotation(model);
     Object? lastError;
-    for (final String candidate in _modelRotation(model)) {
+    for (int index = 0; index < rotation.length; index++) {
+      final String candidate = rotation[index];
       try {
-        return await _postToModel(
+        final String reply = await _postToModel(
           parts,
           apiKey: apiKey ?? Env.geminiApiKey,
           model: candidate,
         );
+        // The first model in the rotation is the requested primary; anything
+        // after it means the primary was unavailable and an env-configured
+        // fallback model ([Env.geminiFallbackModels]) replied.
+        if (index > 0) onFallbackModel?.call(candidate);
+        return reply;
       } on _GeminiTransientException catch (e) {
         // Model overloaded / rate-limited - move to the next one in the
         // rotation instead of failing the request.
@@ -192,6 +208,7 @@ class GeminiService {
     required LocalFood selected,
     required List<LocalFood> candidates,
     List<String> touristPreferences = const <String>[],
+    void Function(String model)? onFallbackModel,
   }) {
     final String prompt = <String>[
       _pairingInstructions,
@@ -201,7 +218,7 @@ class GeminiService {
         touristPreferences: touristPreferences,
       ),
     ].join('\n\n');
-    return generateText(prompt);
+    return generateText(prompt, onFallbackModel: onFallbackModel);
   }
 
   static const String _pairingInstructions = '''
