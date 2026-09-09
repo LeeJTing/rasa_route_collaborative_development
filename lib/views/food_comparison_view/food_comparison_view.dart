@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../app/theme/app_dimensions.dart';
 import '../../domain_model/food_comparison.dart';
+import '../../domain_model/local_food.dart';
 import '../../view_models/food_comparison_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
@@ -106,6 +107,8 @@ class _FoodComparisonViewState extends State<FoodComparisonView> {
                   QuickSwitcherBar(
                     foods: viewModel.quickSwitcherFoods,
                     replacementSide: viewModel.replacementSide,
+                    leftSlotName: comparison.leftFood.name,
+                    rightSlotName: comparison.rightFood.name,
                     onSideChanged: viewModel.chooseReplacementSide,
                     onFoodSelected: viewModel.replaceWith,
                   ),
@@ -113,11 +116,16 @@ class _FoodComparisonViewState extends State<FoodComparisonView> {
                 const SizedBox(height: AppSpacing.md),
                 ComparisonInsightCard(
                   comparison: comparison,
-                  recommendedFood: viewModel.recommendedFood,
                   bestValueFood: viewModel.bestValueFood,
                 ),
                 const SizedBox(height: AppSpacing.md),
-                ComparisonPairCard(comparison: comparison),
+                ComparisonPairCard(
+                  comparison: comparison,
+                  onPlayPronunciation: (LocalFood food) =>
+                      _playPronunciation(context, viewModel, food),
+                  playingPronunciationFoodIds:
+                      viewModel.playingPronunciationFoodIds,
+                ),
                 const SizedBox(height: AppSpacing.xl),
               ],
             ),
@@ -126,5 +134,21 @@ class _FoodComparisonViewState extends State<FoodComparisonView> {
         if (viewModel.isSwitching) const LinearProgressIndicator(),
       ],
     );
+  }
+
+  /// Plays a dish's pronunciation and surfaces any device/unavailable message
+  /// after it finishes (reuses the food-detail flow).
+  Future<void> _playPronunciation(
+    BuildContext context,
+    FoodComparisonViewModel viewModel,
+    LocalFood food,
+  ) async {
+    await viewModel.playPronunciation(food);
+    if (!mounted) return;
+    final String? message = viewModel.takePronunciationMessage();
+    if (message == null) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 }

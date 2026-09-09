@@ -243,6 +243,27 @@ class AddLandmarkViewModel extends BaseViewModel
   TouristLocation get adjustedLocation => _adjustedLocation;
   String? get locationError => _locationError;
 
+  /// Whether the current fix makes adding a landmark impossible (A9) - a new
+  /// landmark may only be submitted on Malaysian land, so a fix at sea or
+  /// outside Malaysia blocks the form. `false` when there is no fix yet
+  /// (nothing to judge against).
+  bool get isAddLocationBlocked =>
+      _currentLocation.isKnown &&
+      !landmarkLogic.isOnLand(
+        _currentLocation.latitude,
+        _currentLocation.longitude,
+      );
+
+  /// Why the form is blocked for the current spot - shown on the Location
+  /// card and as the disabled-Submit reason. Null when the location allows
+  /// adding.
+  String? get addLocationBlockMessage =>
+      isAddLocationBlocked ? _offLandAddMessage : null;
+
+  static const String _offLandAddMessage =
+      'New landmarks can only be added on Malaysian land - you are at sea or '
+      'outside Malaysia, so no landmark can be submitted here.';
+
   LocalFood? get recognizedFood => _primaryFood?.food;
   XFile? get recognizedFoodImage => _recognizedFoodImage;
   double? get primaryFoodPrice => _primaryFood?.price;
@@ -324,6 +345,7 @@ class AddLandmarkViewModel extends BaseViewModel
       value.length <= max ? value : '${value.substring(0, max - 1)}…';
 
   bool get canSubmit =>
+      !isAddLocationBlocked &&
       _capturedImage != null &&
       _restaurantName.isNotEmpty &&
       _primaryFood != null &&
@@ -338,6 +360,11 @@ class AddLandmarkViewModel extends BaseViewModel
   /// disabled button is never a mystery - previously a greyed-out button
   /// gave no clue which field was actually missing.
   String? get canSubmitReason {
+    // At sea / outside Malaysia (A9) - the whole form is blocked no matter
+    // what has been filled in.
+    if (isAddLocationBlocked) {
+      return addLocationBlockMessage;
+    }
     if (_capturedImage == null) {
       return 'Please capture either signboard or stall image';
     }

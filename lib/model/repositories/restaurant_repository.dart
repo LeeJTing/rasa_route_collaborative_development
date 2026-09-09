@@ -217,6 +217,53 @@ class RestaurantRepository {
     }
   }
 
+  Future<Map<int, ({double min, double max})>> restaurantPriceRangeByFood(
+    Set<int> localFoodIds,
+  ) async {
+    if (localFoodIds.isEmpty) {
+      return const <int, ({double min, double max})>{};
+    }
+    try {
+      final List<Map<String, dynamic>> rows = await api.selectAll(
+        APIManager.tableRestaurantItem,
+        columns: 'local_food_id, restaurant_item_price',
+        inFilter: <String, List<Object?>>{
+          'local_food_id': localFoodIds.cast<Object?>().toList(),
+        },
+      );
+      final Map<int, double> minByFood = <int, double>{};
+      final Map<int, double> maxByFood = <int, double>{};
+      for (final Map<String, dynamic> row in rows) {
+        final int? foodId = JsonReader.asIntOrNull(row['local_food_id']);
+        final double? price = JsonReader.asDoubleOrNull(
+          row['restaurant_item_price'],
+        );
+        if (foodId == null || price == null || price <= 0) continue;
+        final double currentMin = minByFood[foodId] ?? price;
+        final double currentMax = maxByFood[foodId] ?? price;
+        minByFood[foodId] = price < currentMin ? price : currentMin;
+        maxByFood[foodId] = price > currentMax ? price : currentMax;
+      }
+      return <int, ({double min, double max})>{
+        for (final MapEntry<int, double> entry in minByFood.entries)
+          entry.key: (
+            min: entry.value,
+            max: maxByFood[entry.key] ?? entry.value,
+          ),
+      };
+    } catch (error, stackTrace) {
+      developer.log(
+        'Restaurant price range query failed.',
+        name: 'RestaurantRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load restaurant prices. Check your connection and try again.',
+      );
+    }
+  }
+
   /// UC500's "Restaurant Already Exists" check.
   Future<Restaurant?> findByName(String name) async {
     final List<Restaurant> matches = await findByNameList(name);

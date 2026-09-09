@@ -483,6 +483,14 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
 
     switch (viewModel.purpose) {
       case FoodRecognitionPurpose.food:
+        // At sea / outside Malaysia (A9) the recognised food is still shown
+        // (the tourist can keep recognising) but "Add New Landmark" is not
+        // offered - a new landmark may only be added on Malaysian land.
+        final bool canAddFood =
+            viewModel.isLocalFood && viewModel.fitsCatalogueCategory;
+        final String? locationBlock = canAddFood
+            ? viewModel.addLandmarkLocationBlockMessage
+            : null;
         return RecognitionResultCard(
           food: viewModel.recognizedFood!,
           capturedImage: viewModel.capturedImage,
@@ -495,21 +503,23 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           dietaryConflicts: viewModel.dietaryConflicts,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
           onViewDetails: viewModel.proceedToViewDetails,
-          // Non-addable (not local, or a Malaysian snack/package): details +
-          // "View Details" stay, but there is no "Add New Landmark".
-          onAddLandmark:
-              viewModel.isLocalFood && viewModel.fitsCatalogueCategory
+          // Non-addable (not local, a Malaysian snack/package, or the fix is
+          // at sea / outside Malaysia): details + "View Details" stay, but
+          // there is no "Add New Landmark".
+          onAddLandmark: canAddFood && locationBlock == null
               ? viewModel.proceedToAddLandmark
               : null,
           onEnterName: viewModel.enterFoodName,
           isProcessing: viewModel.isProcessing,
-          promptText: viewModel.isLocalFood && viewModel.fitsCatalogueCategory
-              ? 'Would you like to add this as a new landmark?'
-              : !viewModel.isLocalFood
-              ? "This doesn't appear to be Malaysian local food, so it "
-                    "can't be added as a landmark."
-              : 'This is a Malaysian product but it is a snack or packaged '
-                    "item, so it can't be added.",
+          promptText:
+              locationBlock ??
+              (canAddFood
+                  ? 'Would you like to add this as a new landmark?'
+                  : !viewModel.isLocalFood
+                  ? "This doesn't appear to be Malaysian local food, so it "
+                        "can't be added as a landmark."
+                  : 'This is a Malaysian product but it is a snack or packaged '
+                        "item, so it can't be added."),
         );
 
       case FoodRecognitionPurpose.additionalFood:
