@@ -239,9 +239,10 @@ class DiscoveryLogicFacade {
   /// @param localFoodId (swipe mode) - `LocalFood.id` of the dish in the
   ///        Target Frame; only places serving it are pinned. Null pins every
   ///        place serving anything that survives the filter.
-  /// [zoom] sets how many pins may be drawn - see [pinLimitForZoom]. The
-  /// answer carries the number that matched but did not fit, so the map can say
-  /// so.
+  /// [zoom] sets the size of the grid cell each marker stands for, so it
+  /// decides how much of the viewport is grouped - never whether grouping
+  /// happens. The answer carries both shapes: cells holding one place come back
+  /// as pins, cells holding several as counts.
   Future<MapPinPage> mapPins({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
@@ -266,27 +267,36 @@ class DiscoveryLogicFacade {
     limit: limit,
   );
 
-  /// How many pins the detailed map may draw at [zoom]. Re-exposed because a
+  /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
-  static int pinLimitForZoom(double zoom) =>
-      MapExplorationLogic.pinLimitForZoom(zoom);
+  static const int maximumMarkers = MapExplorationLogic.maximumMarkers;
 
-  /// The zoom at which pins start being drawn at all.
-  static const double pinMinimumZoom = MapExplorationLogic.pinMinimumZoom;
-
-  /// The zoom at which pins already drawn are dropped again.
-  static const double pinHideZoom = MapExplorationLogic.pinHideZoom;
-
-  /// Whether pins belong on screen - see [MapExplorationLogic.pinsVisibleAtZoom]
-  /// for why a Target Frame dish is exempt.
-  static bool pinsVisibleAtZoom(
-    double zoom, {
+  /// REQ102_41 - what a tap on [cluster] should do: the zoom that visibly
+  /// breaks it up, or its members when no zoom ever separates them.
+  Future<ClusterExpansion> expandMapCluster(
+    MapCluster cluster, {
+    required double zoom,
+    ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-    bool pinsAlreadyShown = false,
-  }) => MapExplorationLogic.pinsVisibleAtZoom(
-    zoom,
+  }) => mapExploration.expandCluster(
+    cluster,
+    zoom: zoom,
+    filter: filter,
     localFoodId: localFoodId,
-    pinsAlreadyShown: pinsAlreadyShown,
+  );
+
+  /// REQ102_47 - the full detail behind one tapped marker, fetched by id.
+  ///
+  /// Map markers are deliberately bare; this is what fills the "Click Map Pin"
+  /// sheet in. Returns the pin unchanged if the detail cannot be read.
+  Future<MapPin> mapPinDetail(
+    MapPin pin, {
+    ExplorationFilter filter = ExplorationFilter.none,
+    int? localFoodId,
+  }) => mapExploration.pinDetail(
+    pin,
+    filter: filter,
+    localFoodId: localFoodId,
   );
 
   /// A8 - one keyword against locations and the local-food catalogue.

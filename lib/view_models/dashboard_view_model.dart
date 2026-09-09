@@ -267,16 +267,47 @@ class DashboardViewModel extends BaseViewModel {
 
   List<MapPin> _pins = const <MapPin>[];
   int _pinLoadRevision = 0;
-  List<MapPin> get pins => _pins;
+
+  /// What the map draws: the loaded pins, plus the members of a cluster that
+  /// was opened because no zoom could ever separate them.
+  ///
+  /// Combined once per load rather than in the getter - the View reads this on
+  /// every rebuild, and a getter that allocated would allocate every frame.
+  List<MapPin> _visiblePins = const <MapPin>[];
+  List<MapPin> get pins => _visiblePins;
+
+  List<MapCluster> _visibleClusters = const <MapCluster>[];
+
+  /// A cluster whose members share coordinates, opened into individual pins.
+  /// Its badge is removed from the map while its members are drawn.
+  MapCluster? _expandedCluster;
+  List<MapPin> _expandedPins = const <MapPin>[];
+
+  void _rebuildVisibleMarkers() {
+    final MapCluster? expanded = _expandedCluster;
+    _visiblePins = _expandedPins.isEmpty
+        ? _pins
+        : List<MapPin>.unmodifiable(<MapPin>[..._pins, ..._expandedPins]);
+    _visibleClusters = expanded == null
+        ? _clusters
+        : List<MapCluster>.unmodifiable(
+            _clusters.where((MapCluster c) => c.key != expanded.key),
+          );
+  }
+
+  void _collapseExpandedCluster() {
+    if (_expandedCluster == null && _expandedPins.isEmpty) return;
+    _expandedCluster = null;
+    _expandedPins = const <MapPin>[];
+  }
 
   // ---------------------------------------------------------------------------
   // How much of the answer is on screen
   // ---------------------------------------------------------------------------
   //
-  // The detailed map draws at most `DiscoveryLogicFacade.pinLimitForZoom(zoom)`
-  // pins - see there for why the cap moves with zoom. These carry the rest of
-  // the truth so the View can say what is missing instead of the map implying
-  // that this is all there is.
+  // Postgres folds each grid cell into one marker, so what arrives is already
+  // a screenful whatever the zoom. These carry the rest of the truth so the
+  // View can say what stands behind the markers.
 
   int _pinsInView = 0;
   int _pinLimit = 0;
@@ -293,28 +324,22 @@ class DashboardViewModel extends BaseViewModel {
     return hidden > 0 ? hidden : 0;
   }
 
-  /// Whether the last pin load actually drew pins - the other half of the
-  /// threshold hysteresis, and what tells [_viewportChangedSinceLastPinLoad]
-  /// that the threshold itself was crossed.
-  bool _lastPinVisible = false;
-
-  /// REQ102_41 - do pins belong on screen at the current camera?
+  /// REQ102_41 - the grid cells that held more than one place, drawn as counts.
   ///
-  /// Pins appear at `DiscoveryLogicFacade.pinMinimumZoom` and are kept until
-  /// `pinHideZoom`, so a pinch resting on the threshold does not strobe the
-  /// marker layer.
-  ///
-  /// **A Target Frame dish is exempt**, so Swipe Mode is untouched by this: a
-  /// dish somebody asked to see is shown at every zoom, exactly as before.
-  bool get _pinsBelongOnScreen => DiscoveryLogicFacade.pinsVisibleAtZoom(
-    _zoom,
-    localFoodId: _activePinFoodId,
-    pinsAlreadyShown: _pins.isNotEmpty,
-  );
+  /// Populated **alongside** [pins], not instead of them: the group-or-not
+  /// decision is made per cell, so a screen normally carries some of each and
+  /// zooming in converts clusters into pins as the cells shrink.
+  List<MapCluster> _clusters = const <MapCluster>[];
+  List<MapCluster> get clusters => _visibleClusters;
 
-  /// The detailed map is zoomed too far out to draw pins. Never true while a
-  /// dish is in the Target Frame.
-  bool get pinsHiddenByZoom => isDetailedView && !_pinsBelongOnScreen;
+  /// Whether any marker on screen stands for more than one place.
+  bool get isClustered => isDetailedView && _visibleClusters.isNotEmpty;
+
+  /// What the markers on screen stand for: every pin, plus everything inside
+  /// every cluster.
+  int get placesOnMap =>
+      _visiblePins.length +
+      _visibleClusters.fold<int>(0, (int sum, MapCluster c) => sum + c.count);
 
   /// The state under the middle of the detailed map, as the heatmap counted it.
   ///
@@ -700,6 +725,7 @@ class DashboardViewModel extends BaseViewModel {
   @override
   void dispose() {
     _pinRefreshTimer?.cancel();
+    _searchDebounce?.cancel();
     _swipePrepareRevision++;
     _live.remove(this);
     super.dispose();
@@ -951,14 +977,104 @@ class DashboardViewModel extends BaseViewModel {
   // Pin selection (A11)
   // ===========================================================================
 
+  /// A11 - a marker was tapped.
+  ///
+  /// The sheet opens immediately on what the marker already carries - name,
+  /// photo, rating, distance - and the rest (category, menu, price range, open
+  /// now) is fetched by id and filled in a moment later. Map markers are
+  /// deliberately lightweight; this is where the full row is read.
   void selectPin(MapPin pin) {
+    final int revision = ++_pinDetailRevision;
     _selectedPin = pin;
+    _pinDetailLoading = true;
+    safeNotifyListeners();
+    _loadPinDetail(pin, revision);
+  }
+
+  int _pinDetailRevision = 0;
+  bool _pinDetailLoading = false;
+
+  /// Whether the tapped pin's full detail is still on its way.
+  bool get pinDetailLoading => _pinDetailLoading;
+
+  Future<void> _loadPinDetail(MapPin pin, int revision) async {
+    final MapPin detailed = await discoveryLogic.mapPinDetail(
+      pin,
+      filter: _filter,
+      localFoodId: _activePinFoodId,
+    );
+    // Tapping a second pin, or dismissing the sheet, wins over a slower reply
+    // for the first.
+    if (revision != _pinDetailRevision) return;
+    if (_selectedPin?.referenceId != pin.referenceId ||
+        _selectedPin?.kind != pin.kind) {
+      return;
+    }
+    _selectedPin = detailed;
+    _pinDetailLoading = false;
     safeNotifyListeners();
   }
+
+  /// REQ102_41 - tapping a cluster opens it.
+  ///
+  /// It used to zoom a fixed two levels, which for a dense metro was not enough
+  /// to break the grid cell up: the same count came back and the tap looked like
+  /// nothing happened, three or four times in a row. Postgres now works out
+  /// where to go, and the tap goes straight there.
+  ///
+  /// When no zoom separates the members - places at the same coordinates - the
+  /// map goes to maximum zoom and draws every member individually instead, so a
+  /// cluster is never a dead end.
+  Future<void> zoomIntoCluster(MapCluster cluster) async {
+    if (_clusterOpening) return;
+    _clusterOpening = true;
+    try {
+      final ClusterExpansion expansion = await discoveryLogic.expandMapCluster(
+        cluster,
+        zoom: _zoom,
+        filter: _filter,
+        localFoodId: _activePinFoodId,
+      );
+
+      if (expansion.splits) {
+        _collapseExpandedCluster();
+        _rebuildVisibleMarkers();
+        _requestCamera(
+          cluster.latitude,
+          cluster.longitude,
+          _clampZoom(expansion.splitZoom!),
+        );
+        return;
+      }
+
+      // Nothing left to zoom into. Draw the members themselves rather than a
+      // badge that can never be opened.
+      if (expansion.members.isNotEmpty) {
+        _expandedCluster = cluster;
+        _expandedPins = expansion.members;
+        _rebuildVisibleMarkers();
+        _paintedSignature = _markerSignature();
+        safeNotifyListeners();
+      }
+      _requestCamera(
+        cluster.latitude,
+        cluster.longitude,
+        DiscoveryLogicFacade.maximumZoom,
+      );
+    } finally {
+      _clusterOpening = false;
+    }
+  }
+
+  /// One tap at a time - a second tap while the first is still being answered
+  /// would race the camera.
+  bool _clusterOpening = false;
 
   /// A11.1 - tap the map outside the overlay, or swipe it down.
   void dismissPin() {
     if (_selectedPin == null) return;
+    _pinDetailRevision++;
+    _pinDetailLoading = false;
     _selectedPin = null;
     safeNotifyListeners();
   }
@@ -1082,11 +1198,21 @@ class DashboardViewModel extends BaseViewModel {
   }
 
   /// A8-1 / A8-2 / A8-3 - one keyword, matched against locations and food.
-  Future<void> updateSearchKeyword(String keyword) async {
+  ///
+  /// **Debounced.** This is wired straight to the field's `onChanged`, so it
+  /// used to run a full search on every keystroke - typing "kuala lumpur" was
+  /// twelve searches, of which eleven were thrown away, each one walking the
+  /// place index and querying the food catalogue. Now the keystroke only
+  /// records the text and arms a timer; the search runs once the typing stops.
+  ///
+  /// The search itself, and its results, are unchanged.
+  void updateSearchKeyword(String keyword) {
     _searchKeyword = keyword;
     _searchMessage = null;
+    _searchDebounce?.cancel();
 
     if (keyword.trim().isEmpty) {
+      _searchRevision++;
       _searchResults = ExplorationSearchResults.empty;
       _searching = false;
       safeNotifyListeners();
@@ -1097,11 +1223,21 @@ class DashboardViewModel extends BaseViewModel {
     _searching = true;
     safeNotifyListeners();
 
+    final int revision = ++_searchRevision;
+    _searchDebounce = Timer(
+      _searchDebounceDelay,
+      () => _runSearch(keyword, revision),
+    );
+  }
+
+  Future<void> _runSearch(String keyword, int revision) async {
     try {
       final ExplorationSearchResults results = await discoveryLogic
           .searchExploration(keyword);
-      // A late reply for a keyword the tourist has already changed must not
-      // overwrite the current one.
+      // Two guards, because there are two ways to be stale: a newer keystroke
+      // started a newer search, and a late reply for a keyword the tourist has
+      // already changed.
+      if (revision != _searchRevision) return;
       if (results.keyword != _searchKeyword.trim()) return;
 
       _searchResults = results;
@@ -1110,12 +1246,22 @@ class DashboardViewModel extends BaseViewModel {
           ? noResultMessage
           : null;
     } catch (error, stackTrace) {
+      if (revision != _searchRevision) return;
       setError(error, stackTrace);
     } finally {
-      _searching = false;
-      safeNotifyListeners();
+      if (revision == _searchRevision) {
+        _searching = false;
+        safeNotifyListeners();
+      }
     }
   }
+
+  Timer? _searchDebounce;
+  int _searchRevision = 0;
+
+  /// Long enough to swallow a burst of typing, short enough that the results
+  /// feel immediate once the fingers stop.
+  static const Duration _searchDebounceDelay = Duration(milliseconds: 250);
 
   /// A8-4 / REQ102_22 - centre and zoom on the chosen state, city or location.
   void selectPlace(PlaceSuggestion place) {
@@ -1180,6 +1326,8 @@ class DashboardViewModel extends BaseViewModel {
 
   /// A8.3 - clear the keyword and put the map back the way it was.
   void clearSearch() {
+    _searchDebounce?.cancel();
+    _searchRevision++;
     final bool hadFood = _selectedFood != null;
     _searchKeyword = '';
     _searchResults = ExplorationSearchResults.empty;
@@ -1273,7 +1421,7 @@ class DashboardViewModel extends BaseViewModel {
 
   /// How long the map has to sit still before the pins are refetched. Short
   /// enough to feel immediate, long enough that one pinch is one query.
-  static const Duration _pinRefreshDelay = Duration(milliseconds: 250);
+  static const Duration _pinRefreshDelay = Duration(milliseconds: 350);
 
   /// Degrees of travel that justify refetching the pins for a new viewport.
   static const double _pinRefreshDelta = 0.05;
@@ -1374,11 +1522,15 @@ class DashboardViewModel extends BaseViewModel {
   Future<void> _loadHeatmap() => runGuarded(() async {
     _pinLoadRevision++;
     // Leaving the detailed view invalidates its pins.
-    if (_pins.isNotEmpty) {
+    if (_pins.isNotEmpty || _clusters.isNotEmpty) {
       _pins = const <MapPin>[];
+      _clusters = const <MapCluster>[];
+      _collapseExpandedCluster();
+      _rebuildVisibleMarkers();
       _pinsInView = 0;
       _pinLimit = 0;
       _regionInView = null;
+      _paintedSignature = _markerSignature();
       safeNotifyListeners();
     }
     _distribution = await discoveryLogic.foodDistribution(
@@ -1399,37 +1551,25 @@ class DashboardViewModel extends BaseViewModel {
     final int revision = ++_pinLoadRevision;
     final int? requestedFoodId = _activePinFoodId;
 
-    if (clearFirst && _pins.isNotEmpty) {
+    if (clearFirst && (_pins.isNotEmpty || _clusters.isNotEmpty)) {
       _pins = const <MapPin>[];
+      _clusters = const <MapCluster>[];
+      // A new filter or dish is a different question; an opened cluster from
+      // the old one no longer belongs on the map.
+      _collapseExpandedCluster();
+      _rebuildVisibleMarkers();
       _pinsInView = 0;
       _pinLimit = 0;
+      _paintedSignature = _markerSignature();
       safeNotifyListeners();
     }
 
     _lastPinLatitude = _centreLatitude;
     _lastPinLongitude = _centreLongitude;
     _lastPinZoom = _zoom;
-
-    // Too far out for pins: drop any that are showing and stop here. Checked
-    // before the call, not inside it, so panning around at state zoom does no
-    // work at all - no query, no join, no opening hours. `MapExplorationLogic`
-    // enforces the same floor for any other caller.
-    if (!_pinsBelongOnScreen) {
-      _lastPinVisible = false;
-      if (_pins.isNotEmpty) {
-        _pins = const <MapPin>[];
-        _pinsInView = 0;
-        _pinLimit = 0;
-        safeNotifyListeners();
-      }
-      // Which state the map is over is still a fair question with no pins on
-      // it, and answering costs one point-in-polygon test against an already
-      // cached catalogue - no fetch.
-      await _refreshRegionInView(revision);
-      return;
-    }
-    // The zoom decides the cap: a state-wide view draws far fewer markers than
-    // a street, because at a state's scale they would be an unreadable mat.
+    // The viewport and the food go to Postgres; what comes back is what is
+    // drawn. The zoom decides both the shape of the answer - cluster counts or
+    // individual pins - and how many of them.
     final MapPinPage page = await discoveryLogic.mapPins(
       filter: _filter,
       localFoodId: requestedFoodId,
@@ -1441,15 +1581,59 @@ class DashboardViewModel extends BaseViewModel {
       fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
       zoom: _zoom,
     );
+    // REQ103 - the race guard. Swiping Nasi Lemak -> Laksa -> Satay fires
+    // three loads; the first two must not land on top of the third. The
+    // revision covers "a newer load started", the food check covers "the Target
+    // Frame moved on while this one was in flight".
     if (revision != _pinLoadRevision || requestedFoodId != _activePinFoodId) {
       return;
     }
     _pins = page.pins;
+    _clusters = page.clusters;
     _pinsInView = page.totalInView;
     _pinLimit = page.limit;
-    _lastPinVisible = !page.suppressedByZoom;
+    _rebuildVisibleMarkers();
     await _refreshRegionInView(revision);
+
+    // **The map only redraws when this fires.** `runGuarded(silent: true)`
+    // deliberately does not notify, and for a long time neither did this - so
+    // new markers were assigned and never painted, and the map updated only
+    // when something unrelated happened to notify. That is what made tapping a
+    // cluster look like it did nothing.
+    //
+    // Skipped when the answer is identical to what is already on screen, which
+    // is the common case when panning back over ground already visited: the
+    // whole dashboard is one `Consumer`, so a needless notify rebuilds the map,
+    // the panels and every marker.
+    final String signature = _markerSignature();
+    if (signature == _paintedSignature) return;
+    _paintedSignature = signature;
+    safeNotifyListeners();
   }, silent: true);
+
+  /// Exactly what is on screen, so an unchanged answer can skip the rebuild.
+  /// Built from every id and count rather than a length, because two different
+  /// sets of the same size must not compare equal.
+  String _markerSignature() {
+    final StringBuffer buffer = StringBuffer();
+    for (final MapPin pin in _visiblePins) {
+      buffer
+        ..write(pin.kind.name)
+        ..write(pin.referenceId)
+        ..write(',');
+    }
+    buffer.write('|');
+    for (final MapCluster cluster in _visibleClusters) {
+      buffer
+        ..write(cluster.key)
+        ..write('x')
+        ..write(cluster.count)
+        ..write(',');
+    }
+    return buffer.toString();
+  }
+
+  String _paintedSignature = '';
 
   /// Reads the state under the middle of the map out of the heatmap tally.
   ///
@@ -1481,11 +1665,6 @@ class DashboardViewModel extends BaseViewModel {
   /// Has the viewport moved or scaled enough that the pins on screen could
   /// differ from the ones already fetched?
   bool _viewportChangedSinceLastPinLoad() {
-    // Crossing the pin threshold always counts, however small the move. The
-    // zoom gate below is 0.1, far too coarse to notice 10.99 -> 11.01 - and
-    // that particular hair's breadth is the difference between an empty map and
-    // a full one.
-    if (_pinsBelongOnScreen != _lastPinVisible) return true;
     final double? lastLatitude = _lastPinLatitude;
     final double? lastLongitude = _lastPinLongitude;
     final double? lastZoom = _lastPinZoom;
@@ -1545,9 +1724,16 @@ class DashboardViewModel extends BaseViewModel {
 
     if (changed) {
       if (next == DashboardMapMode.detailed) {
-        _loadPins();
+        // Deliberately **not** loading pins here. The viewport bounds are only
+        // known once the map widget reports the move back through
+        // `onCameraChanged`; loading now would query the previous - often
+        // country-sized - box at the new zoom and flash several hundred markers
+        // in the wrong places before the correct answer replaced them. Every
+        // other camera command already relies on that callback.
         _prepareSwipeModeForActiveState();
       } else {
+        // The heatmap is painted, not a slippy map, so nothing reports back
+        // for it.
         _loadHeatmap();
       }
     }

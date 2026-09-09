@@ -3,11 +3,13 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../../shared_client/local_storage_manager/local_storage_manager.dart';
+import '../../domain_model/map.dart';
 import '../../domain_model/map_data_stamp.dart';
 import '../../domain_model/map_place.dart';
 import '../data_models/malaysia_outline_data_model.dart';
 import '../data_models/malaysia_region_data_model.dart';
 import '../data_models/map_data_model.dart';
+import '../data_models/map_marker_row_data_model.dart';
 import '../data_models/opening_hours_data_model.dart';
 import '../data_models/place_data_model.dart';
 
@@ -95,6 +97,16 @@ class MapRepository {
   static DateTime? _cachedHoursAt;
   static Future<Map<String, List<OpeningHour>>>? _hoursRequest;
 
+  // Viewport marker answers, keyed by the request that produced them. Panning
+  // back to somewhere already visited - or swiping Nasi Lemak -> Laksa -> Nasi
+  // Lemak - is then free. Short-lived and small: the map is a live view, not an
+  // archive.
+  static const Duration markerCacheTtl = Duration(minutes: 2);
+  static const int markerCacheEntries = 48;
+
+  static final Map<String, _CachedMarkers> _markerCache =
+      <String, _CachedMarkers>{};
+
   static bool _isFresh(DateTime? at) =>
       at != null && DateTime.now().difference(at) < cacheTtl;
 
@@ -108,12 +120,233 @@ class MapRepository {
     _cachedHoursAt = null;
     _cachedPlaces = null;
     _cachedPlacesAt = null;
+    _markerCache.clear();
   }
 
   /// Drops the cached map data from an instance. Same as [invalidate]; exists
   /// because a business-logic class holds a repository, not the class itself,
   /// and Dart will not let it reach a static through the instance.
   void clearCache() => invalidate();
+
+  // ---------------------------------------------------------------------------
+  // Viewport markers (REQ102_41)
+  // ---------------------------------------------------------------------------
+
+  /// The markers for one viewport, filtered and grouped **in Postgres**.
+  ///
+  /// This is the read that replaced downloading the country. `map_food_markers`
+  /// takes the bounding box, the zoom and an optional set of `local_food_id`s,
+  /// and answers with one row per grid cell - about a screenful, whatever the
+  /// zoom. A GiST index on `restaurant.geom` makes the box test an index scan.
+  ///
+  /// A cell holding one place comes back as that place, with its real id; a cell
+  /// holding several comes back as a count. So the answer normally contains both
+  /// pins and clusters, and zooming in turns clusters into pins as the cells
+  /// shrink past the point where markers would overlap.
+  ///
+  /// Only marker fields are selected - id, name, position, rating, photo. A
+  /// menu, opening hours and a description are fetched by id when a pin is
+  /// tapped, never for everything on screen.
+  ///
+  /// [foodIds] null means no food filter at all, and Postgres skips the menu
+  /// lookup entirely. An **empty** list means "a filter is active and nothing
+  /// matches it", which is a legitimate empty map rather than a reason to query.
+  Future<MapMarkerSet> mapMarkers({
+    required double southLatitude,
+    required double westLongitude,
+    required double northLatitude,
+    required double eastLongitude,
+    required double zoom,
+    List<int>? foodIds,
+    int limit = 400,
+  }) async {
+    if (foodIds != null && foodIds.isEmpty) return MapMarkerSet.empty;
+
+    final String key = _markerKey(
+      south: southLatitude,
+      west: westLongitude,
+      north: northLatitude,
+      east: eastLongitude,
+      zoom: zoom,
+      foodIds: foodIds,
+      limit: limit,
+    );
+    final _CachedMarkers? cached = _markerCache[key];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < markerCacheTtl) {
+      return cached.markers;
+    }
+
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await api.callFunction(
+        APIManager.functionMapMarkers,
+        params: <String, Object?>{
+          'p_min_lat': southLatitude,
+          'p_min_lng': westLongitude,
+          'p_max_lat': northLatitude,
+          'p_max_lng': eastLongitude,
+          'p_zoom': zoom,
+          'p_food_ids': foodIds,
+          'p_limit': limit,
+        },
+      );
+    } catch (_) {
+      throw Exception(
+        'Unable to load the map for this area. '
+        'Check your connection and try again.',
+      );
+    }
+
+    final List<MapCluster> clusters = <MapCluster>[];
+    final List<MapPin> pins = <MapPin>[];
+    for (final Map<String, dynamic> row in rows) {
+      final MapMarkerRowDataModel data = MapMarkerRowDataModel.fromJson(
+        row,
+      );
+      if (data.isCluster) {
+        clusters.add(
+          MapCluster(
+            latitude: data.latitude,
+            longitude: data.longitude,
+            count: data.pointCount,
+          ),
+        );
+        continue;
+      }
+      // Deliberately bare. Everything the "Click Map Pin" sheet shows beyond
+      // this arrives from [MapExplorationLogic.pinDetail] when the pin is
+      // tapped - carrying it on every marker is what made the old read enormous.
+      final MapPin? pin = _toPin(row);
+      if (pin != null) pins.add(pin);
+    }
+
+    final MapMarkerSet markers = MapMarkerSet(
+      clusters: List<MapCluster>.unmodifiable(clusters),
+      pins: List<MapPin>.unmodifiable(pins),
+    );
+
+    // Cheapest possible eviction: the whole map is a two-minute view anyway, so
+    // dropping it wholesale beats tracking access order.
+    if (_markerCache.length >= markerCacheEntries) _markerCache.clear();
+    _markerCache[key] = _CachedMarkers(markers, DateTime.now());
+    return markers;
+  }
+
+  /// REQ102_41 - where a tap on the cluster at [latitude]/[longitude] should
+  /// zoom to, and how many places it holds.
+  ///
+  /// The cell arithmetic lives in `map_cluster_split_zoom` and is the same as
+  /// `map_food_markers`, so the cluster probed is exactly the cluster drawn.
+  /// A null zoom back means it never separates: its members share coordinates.
+  Future<({double? splitZoom, int memberCount})> clusterSplitZoom({
+    required double latitude,
+    required double longitude,
+    required double zoom,
+    required double maximumZoom,
+    List<int>? foodIds,
+  }) async {
+    if (foodIds != null && foodIds.isEmpty) {
+      return (splitZoom: null, memberCount: 0);
+    }
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await api.callFunction(
+        APIManager.functionClusterSplitZoom,
+        params: <String, Object?>{
+          'p_lat': latitude,
+          'p_lng': longitude,
+          'p_zoom': zoom,
+          'p_food_ids': foodIds,
+          'p_max_zoom': maximumZoom,
+        },
+      );
+    } catch (_) {
+      // A failed probe must not swallow the tap - the caller falls back to a
+      // plain zoom step.
+      return (splitZoom: null, memberCount: 0);
+    }
+    if (rows.isEmpty) return (splitZoom: null, memberCount: 0);
+    final Map<String, dynamic> row = rows.first;
+    return (
+      splitZoom: _asDoubleOrNull(row['split_zoom']),
+      memberCount: _asInt(row['member_count']),
+    );
+  }
+
+  /// Every place inside one cluster, individually.
+  ///
+  /// Only asked for when [clusterSplitZoom] says the cluster never separates,
+  /// so the map can draw its members rather than a badge that cannot be opened.
+  Future<List<MapPin>> clusterMembers({
+    required double latitude,
+    required double longitude,
+    required double zoom,
+    List<int>? foodIds,
+    int limit = 200,
+  }) async {
+    if (foodIds != null && foodIds.isEmpty) return const <MapPin>[];
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await api.callFunction(
+        APIManager.functionClusterMembers,
+        params: <String, Object?>{
+          'p_lat': latitude,
+          'p_lng': longitude,
+          'p_zoom': zoom,
+          'p_food_ids': foodIds,
+          'p_limit': limit,
+        },
+      );
+    } catch (_) {
+      return const <MapPin>[];
+    }
+    return List<MapPin>.unmodifiable(rows.map(_toPin).whereType<MapPin>());
+  }
+
+  /// One marker row from any of the three map functions.
+  static MapPin? _toPin(Map<String, dynamic> row) {
+    final MapMarkerRowDataModel data = MapMarkerRowDataModel.fromJson(row);
+    final int? id = data.referenceId;
+    if (data.isCluster || id == null) return null;
+    final bool isRestaurant = data.source == 'restaurant';
+    return MapPin(
+      referenceId: '$id',
+      kind: isRestaurant ? MapPinKind.restaurant : MapPinKind.landmark,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      label: data.name,
+      weight: 1,
+      imageUrl: isRestaurant
+          ? data.imageUrl
+          : _normalizeLandmarkImageUrl(data.imageUrl),
+      rating: data.rating,
+    );
+  }
+
+  /// The cache key: the request, rounded.
+  ///
+  /// Bounds are rounded to about 100 m so that the pixel-level jitter a finger
+  /// leaves on the map does not miss the cache. The zoom is **not** rounded into
+  /// buckets: it sets the grid cell size, so half a level really is a different
+  /// answer.
+  static String _markerKey({
+    required double south,
+    required double west,
+    required double north,
+    required double east,
+    required double zoom,
+    required List<int>? foodIds,
+    required int limit,
+  }) {
+    final String box =
+        '${south.toStringAsFixed(3)},${west.toStringAsFixed(3)},'
+        '${north.toStringAsFixed(3)},${east.toStringAsFixed(3)}';
+    final String foods = foodIds == null
+        ? 'all'
+        : (List<int>.of(foodIds)..sort()).join('.');
+    return '$box|${zoom.toStringAsFixed(1)}|$foods|$limit';
+  }
 
   /// How much map data exists right now - polled by `RestaurantMonitor` to
   /// notice that another tourist has added a landmark.
@@ -642,4 +875,12 @@ class MapRepository {
     if (trimmed == null || trimmed.isEmpty) return null;
     return trimmed.replaceAll(RegExp(r'(/object/public/[^/]+/)\1'), r'$1');
   }
+}
+
+/// One cached viewport answer and when it arrived.
+class _CachedMarkers {
+  const _CachedMarkers(this.markers, this.at);
+
+  final MapMarkerSet markers;
+  final DateTime at;
 }

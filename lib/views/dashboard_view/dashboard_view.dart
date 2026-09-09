@@ -530,6 +530,27 @@ class _DashboardViewState extends State<DashboardView> {
               ],
             ),
 
+          // REQ102_41 - aggregated counts while the map is zoomed out. One
+          // badge per grid cell, counted in Postgres: at a Malaysia-wide view
+          // this is seven markers instead of twelve thousand.
+          if (viewModel.clusters.isNotEmpty)
+            MarkerLayer(
+              markers: viewModel.clusters
+                  .map(
+                    (MapCluster cluster) => Marker(
+                      key: ValueKey<String>(cluster.key),
+                      point: LatLng(cluster.latitude, cluster.longitude),
+                      width: _clusterDiameter(cluster.count),
+                      height: _clusterDiameter(cluster.count),
+                      child: _ClusterMarker(
+                        count: cluster.count,
+                        onTap: () => viewModel.zoomIntoCluster(cluster),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+
           // REQ102_32 - restaurant and submitted-landmark pins.
           MarkerLayer(
             markers: viewModel.pins
@@ -569,6 +590,63 @@ class _DashboardViewState extends State<DashboardView> {
         ],
       ),
     );
+  }
+}
+
+/// A cluster badge grows with what it stands for, but slowly - a count ten
+/// times larger is not a marker ten times wider, or one busy city would cover
+/// the peninsula. Three sizes, chosen so the digits always fit.
+double _clusterDiameter(int count) {
+  if (count >= 1000) return 56;
+  if (count >= 100) return 48;
+  return 40;
+}
+
+/// "1,200 places here", drawn as one tappable circle.
+class _ClusterMarker extends StatelessWidget {
+  const _ClusterMarker({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: DecoratedBox(
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppColors.primary,
+        border: Border.fromBorderSide(
+          BorderSide(color: AppColors.surface, width: 2),
+        ),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: AppColors.shadow,
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Text(
+          _label(count),
+          textAlign: TextAlign.center,
+          style: AppTextStyles.compactBadgeLabel.copyWith(
+            color: AppColors.onPrimary,
+          ),
+        ),
+      ),
+    ),
+  );
+
+  /// Four digits do not fit on a 56pt circle, so past a thousand the count is
+  /// abbreviated rather than truncated.
+  static String _label(int count) {
+    if (count < 1000) return '$count';
+    final double thousands = count / 1000;
+    return thousands >= 10
+        ? '${thousands.round()}k'
+        : '${thousands.toStringAsFixed(1)}k';
   }
 }
 
