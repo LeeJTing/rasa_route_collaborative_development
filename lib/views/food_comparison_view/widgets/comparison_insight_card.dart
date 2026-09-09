@@ -8,14 +8,26 @@ import '../../../domain_model/local_food.dart';
 class ComparisonInsightCard extends StatelessWidget {
   const ComparisonInsightCard({
     required this.comparison,
-    required this.recommendedFood,
     required this.bestValueFood,
     super.key,
   });
 
   final FoodComparison comparison;
-  final LocalFood? recommendedFood;
   final LocalFood? bestValueFood;
+
+
+  String get _bestMatchText {
+    final bool leftOk = comparison.leftDietaryAssessment.isSuitable;
+    final bool rightOk = comparison.rightDietaryAssessment.isSuitable;
+    if (leftOk && rightOk) return "Try Both Food. Don't Miss Out!";
+    if (leftOk != rightOk) {
+      final String safeName = leftOk
+          ? comparison.leftFood.name
+          : comparison.rightFood.name;
+      return 'Try $safeName - It is Safe For You!';
+    }
+    return 'Both Foods Conflict With Your Dietary Restrictions. Be Careful!';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +65,7 @@ class ComparisonInsightCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           _InsightLine(
             label: 'Best match for you',
-            value: recommendedFood?.name ?? 'No clear match',
+            value: _bestMatchText,
           ),
           const SizedBox(height: AppSpacing.sm),
           _InsightLine(

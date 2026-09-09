@@ -31,6 +31,7 @@ class FoodComparison {
     required this.rows,
     this.foods = const <LocalFood>[],
     this.activeTouristRestrictions = const <String>[],
+    this.priceByFoodId = const <int, ({double min, double max})>{},
     this.leftDietaryAssessment = const DietaryAssessment(
       isSuitable: true,
       message: 'No dietary restrictions to check.',
@@ -50,6 +51,9 @@ class FoodComparison {
 
   /// The tourist's saved restrictions the comparison was checked against.
   final List<String> activeTouristRestrictions;
+
+  /// aggregated from `restaurant_item`. Dishes on no menu are absent.
+  final Map<int, ({double min, double max})> priceByFoodId;
 
   /// Dietary fit of the left / right dish.
   final DietaryAssessment leftDietaryAssessment;

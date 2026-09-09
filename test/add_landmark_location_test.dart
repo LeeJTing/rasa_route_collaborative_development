@@ -73,5 +73,44 @@ void main() {
         vm.dispose();
       },
     );
+
+    test('blocks submit while the fix is at sea / outside Malaysia', () async {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      await vm.onInit();
+      // "At sea" mock preset - Straits of Malacca.
+      vm.onCurrentLocationChanged(
+        TouristLocation(
+          latitude: 3.0,
+          longitude: 100.2,
+          accuracyMeters: 10,
+          capturedAt: DateTime.now(),
+        ),
+      );
+
+      expect(vm.isAddLocationBlocked, isTrue);
+      expect(vm.addLocationBlockMessage, isNotNull);
+      // The Submit bar is disabled with the location as the reason - even
+      // before any form field is filled in, the form can never be submitted.
+      expect(vm.canSubmit, isFalse);
+      expect(vm.canSubmitReason, contains('Malaysian land'));
+      vm.dispose();
+    });
+
+    test('a fix on Malaysian land does not block the form', () async {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      await vm.onInit();
+      vm.onCurrentLocationChanged(
+        TouristLocation(
+          latitude: 3.1390,
+          longitude: 101.6869,
+          accuracyMeters: 10,
+          capturedAt: DateTime.now(),
+        ),
+      );
+
+      expect(vm.isAddLocationBlocked, isFalse);
+      expect(vm.addLocationBlockMessage, isNull);
+      vm.dispose();
+    });
   });
 }
