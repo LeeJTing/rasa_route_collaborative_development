@@ -241,6 +241,19 @@ class _DashboardViewState extends State<DashboardView> {
               : _map(viewModel),
         ),
 
+        // REQ102_12 - the way back up a level. Without it the only way out of
+        // a state's districts is to open the detailed map and come back, which
+        // loses the tourist's place.
+        if (viewModel.isHeatmapView && viewModel.heatmapParentName != null)
+          Positioned(
+            left: AppSpacing.lg,
+            top: AppSpacing.lg,
+            child: _HeatmapLevelChip(
+              label: viewModel.heatmapParentName!,
+              onBack: viewModel.leaveDistrictLevel,
+            ),
+          ),
+
         if (viewModel.isHeatmapView)
           Positioned(
             left: AppSpacing.lg,
@@ -931,6 +944,49 @@ class _CustomCoordinatesDialogState extends State<_CustomCoordinatesDialog> {
 /// optional [subtitle] carries the heatmap's own count for the state under the
 /// map, so the number of pins can be read against the state total rather than
 /// mistaken for it.
+/// REQ102_12 - which state's districts are on screen, and the way back to the
+/// country view.
+class _HeatmapLevelChip extends StatelessWidget {
+  const _HeatmapLevelChip({required this.label, required this.onBack});
+
+  final String label;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: AppColors.surface,
+    borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
+    elevation: 1,
+    child: InkWell(
+      onTap: onBack,
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xs,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(
+              Icons.arrow_back,
+              size: 14,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Text(
+              label,
+              style: AppTextStyles.labelSmall.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _PinCoverageChip extends StatelessWidget {
   const _PinCoverageChip({required this.message, this.subtitle});
 

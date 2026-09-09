@@ -12,6 +12,7 @@ import '../data_models/map_data_model.dart';
 import '../data_models/map_marker_row_data_model.dart';
 import '../data_models/opening_hours_data_model.dart';
 import '../data_models/place_data_model.dart';
+import '../data_models/region_tally_data_model.dart';
 
 /// The exploration map: the Malaysian regions it is drawn from, the food
 /// occurrences plotted on it, and the viewport the tourist left it at.
@@ -46,6 +47,241 @@ class MapRepository {
     return _regions ??= MalaysiaRegionDataModel.catalogue
         .map((MalaysiaRegionDataModel data) => data.toDomain())
         .toList(growable: false);
+  }
+
+  /// One entry per level+parent+filter the heatmap has already asked for.
+  ///
+  /// Keyed rather than single-valued because the tourist moves between levels -
+  /// Malaysia, into Selangor, back out - and going back should not cost a round
+  /// trip. Cleared by [clearMapCache] along with everything else.
+  static final Map<String, List<RegionTallyDataModel>> _tallyCache =
+      <String, List<RegionTallyDataModel>>{};
+
+  /// REQ102_15 - the counts behind one level of the heatmap, worked out by
+  /// Postgres against the real administrative boundaries in `region_boundary`.
+  ///
+  /// [level] 1 with a null [parentCode] is the whole country; [level] 2 with a
+  /// state's code is that state's districts. [foodIds] narrows the tally to
+  /// those catalogue entries; null counts every food.
+  ///
+  /// Returns an empty list rather than throwing when the function is missing,
+  /// so a database that has not had the migration applied yet degrades to an
+  /// empty heatmap instead of a broken dashboard.
+  Future<List<RegionTally>> regionDistribution({
+    int level = Region.stateLevel,
+    String? parentCode,
+    List<int>? foodIds,
+  }) async {
+    final List<Region> areas =
+        level == Region.districtLevel && parentCode != null
+        ? await districtsOf(parentCode)
+        : await malaysiaRegions();
+
+    // An empty id list means "no catalogue food survived the filter", which is
+    // a real answer - every area scores zero - not a reason to query.
+    if (foodIds != null && foodIds.isEmpty) {
+      return areas
+          .map(
+            (Region region) => RegionTally(
+              region: region,
+              placeCount: 0,
+              foodCount: 0,
+              restaurantCount: 0,
+              landmarkCount: 0,
+            ),
+          )
+          .toList(growable: false);
+    }
+
+    final String key = _tallyKey(level, parentCode, foodIds);
+    List<RegionTallyDataModel>? rows = _tallyCache[key];
+    if (rows == null) {
+      final List<Map<String, dynamic>> raw = await api.callFunction(
+        APIManager.functionRegionDistribution,
+        params: <String, Object?>{
+          'p_level': level,
+          'p_parent_code': parentCode,
+          'p_food_ids': foodIds,
+        },
+      );
+      rows = raw.map(RegionTallyDataModel.fromJson).toList(growable: false);
+      if (_tallyCache.length >= tallyCacheEntries) _tallyCache.clear();
+      _tallyCache[key] = rows;
+    }
+
+    final Map<String, RegionTallyDataModel> byCode =
+        <String, RegionTallyDataModel>{
+          for (final RegionTallyDataModel row in rows) row.code: row,
+        };
+
+    // Driven by the outlines rather than by the rows: an area with nothing in
+    // it is still drawn, in grey (REQ102_16), and a row for an area the app has
+    // no outline for is not something it can paint.
+    return areas.map((Region region) {
+      final RegionTallyDataModel? row = byCode[region.code];
+      return RegionTally(
+        region: region,
+        placeCount: row?.placeCount ?? 0,
+        foodCount: row?.foodCount ?? 0,
+        restaurantCount: row?.restaurantCount ?? 0,
+        landmarkCount: row?.landmarkCount ?? 0,
+      );
+    }).toList(growable: false);
+  }
+
+  /// Levels x parents x filter selections worth keeping. Small: the tourist
+  /// moves between a handful of states with a handful of filter sets.
+  static const int tallyCacheEntries = 64;
+
+  /// Answers to [regionAt], keyed to about a kilometre.
+  static final Map<String, Region?> _regionAtCache = <String, Region?>{};
+
+  /// REQ102_12 - the state containing one point, decided by the real boundary
+  /// rather than by a hand-drawn outline.
+  ///
+  /// Rounded to two decimal places - roughly a kilometre - before it is asked
+  /// or cached, so panning across a city is one request, not one per frame.
+  ///
+  /// Throws nothing: an unreachable database returns null and the caller falls
+  /// back to the offline outlines.
+  Future<Region?> regionAt(double latitude, double longitude) async {
+    final String key =
+        '${latitude.toStringAsFixed(2)},${longitude.toStringAsFixed(2)}';
+    if (_regionAtCache.containsKey(key)) return _regionAtCache[key];
+
+    final List<Map<String, dynamic>> rows = await api.callFunction(
+      APIManager.functionRegionAt,
+      params: <String, Object?>{
+        'p_latitude': latitude,
+        'p_longitude': longitude,
+        'p_level': Region.stateLevel,
+      },
+    );
+    if (rows.isEmpty) {
+      if (_regionAtCache.length >= regionAtCacheEntries) {
+        _regionAtCache.clear();
+      }
+      _regionAtCache[key] = null;
+      return null;
+    }
+
+    final String code = '${rows.first['code'] ?? ''}';
+    final List<Region> catalogue = await malaysiaRegions();
+    Region? match;
+    for (final Region region in catalogue) {
+      if (region.code == code) {
+        match = region;
+        break;
+      }
+    }
+
+    if (_regionAtCache.length >= regionAtCacheEntries) _regionAtCache.clear();
+    _regionAtCache[key] = match;
+    return match;
+  }
+
+  static const int regionAtCacheEntries = 256;
+
+  static String _tallyKey(int level, String? parentCode, List<int>? foodIds) {
+    final String foods = foodIds == null
+        ? 'all'
+        : (List<int>.of(foodIds)..sort()).join(',');
+    return '$level|${parentCode ?? ''}|$foods';
+  }
+
+  /// Cached per state - a district outline never changes, and the tourist
+  /// drills into the same few states repeatedly.
+  static final Map<String, List<Region>> _districtCache =
+      <String, List<Region>>{};
+
+  /// REQ102_12 - the districts of one state, with the outlines they are
+  /// painted from.
+  ///
+  /// The rings are simplified server-side to about 300 m, which is well under
+  /// one screen pixel at the scale the heatmap paints them: 17 kB for
+  /// Selangor's nine districts, 92 kB for Sarawak's forty. The **full**
+  /// boundaries never leave Postgres - they are what assigns a restaurant to an
+  /// area, and simplifying those would move places across state lines.
+  Future<List<Region>> districtsOf(String stateCode) async {
+    final List<Region>? cached = _districtCache[stateCode];
+    if (cached != null) return cached;
+
+    final List<Map<String, dynamic>> rows = await api.callFunction(
+      APIManager.functionRegionRings,
+      params: <String, Object?>{
+        'p_level': Region.districtLevel,
+        'p_parent_code': stateCode,
+      },
+    );
+
+    final List<Region> districts = rows
+        .map(RegionRingDataModel.fromJson)
+        .map(_toDistrict)
+        .whereType<Region>()
+        .toList(growable: false);
+    _districtCache[stateCode] = districts;
+    return districts;
+  }
+
+  /// Builds the painted outline of one district.
+  ///
+  /// The centre is the centroid of the largest part rather than of all of them:
+  /// for a district with offshore islands, the average of every part lands in
+  /// the sea, and that is where the label would be drawn.
+  static Region? _toDistrict(RegionRingDataModel row) {
+    if (row.parts.isEmpty) return null;
+
+    final List<List<GeoPoint>> rings = row.parts
+        .map(
+          (List<List<double>> part) => part
+              .map((List<double> pair) => GeoPoint(pair[1], pair[0]))
+              .toList(growable: false),
+        )
+        .toList(growable: false);
+
+    List<GeoPoint> largest = rings.first;
+    for (final List<GeoPoint> ring in rings) {
+      if (ring.length > largest.length) largest = ring;
+    }
+
+    double minLatitude = double.infinity;
+    double minLongitude = double.infinity;
+    double maxLatitude = -double.infinity;
+    double maxLongitude = -double.infinity;
+    for (final List<GeoPoint> ring in rings) {
+      for (final GeoPoint point in ring) {
+        if (point.latitude < minLatitude) minLatitude = point.latitude;
+        if (point.latitude > maxLatitude) maxLatitude = point.latitude;
+        if (point.longitude < minLongitude) minLongitude = point.longitude;
+        if (point.longitude > maxLongitude) maxLongitude = point.longitude;
+      }
+    }
+
+    double latitudeSum = 0;
+    double longitudeSum = 0;
+    for (final GeoPoint point in largest) {
+      latitudeSum += point.latitude;
+      longitudeSum += point.longitude;
+    }
+
+    return Region(
+      code: row.code,
+      name: row.name,
+      centreLatitude: latitudeSum / largest.length,
+      centreLongitude: longitudeSum / largest.length,
+      // A district fills the screen at roughly a city's zoom; the detailed map
+      // opens there when one is picked.
+      defaultZoom: 11,
+      boundary: largest,
+      places: const <RegionPlace>[],
+      level: Region.districtLevel,
+      parentCode: row.parentCode,
+      rings: rings,
+      minLatitude: minLatitude,
+      minLongitude: minLongitude,
+      maxLatitude: maxLatitude,
+      maxLongitude: maxLongitude,
+    );
   }
 
   List<CountryOutline>? _outlines;
@@ -121,6 +357,11 @@ class MapRepository {
     _cachedPlaces = null;
     _cachedPlacesAt = null;
     _markerCache.clear();
+    _tallyCache.clear();
+    _regionAtCache.clear();
+    // District outlines are not invalidated: they are administrative
+    // boundaries, not data a tourist can change. Their *counts* live in
+    // _tallyCache, which is.
   }
 
   /// Drops the cached map data from an instance. Same as [invalidate]; exists

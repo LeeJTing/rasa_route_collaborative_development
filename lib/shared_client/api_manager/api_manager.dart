@@ -68,6 +68,18 @@ class APIManager {
 
   /// Every place inside one cluster, for the case where no zoom separates them.
   static const String functionClusterMembers = 'map_cluster_members';
+
+  /// REQ102_15 - one row per area for the level of heatmap being viewed:
+  /// the 16 states for Malaysia, one state's districts when drilled into.
+  static const String functionRegionDistribution = 'map_region_distribution';
+
+  /// REQ102_15 - the outlines painted for one level of the heatmap. Simplified
+  /// for display; assignment and counting always use the full boundary.
+  static const String functionRegionRings = 'map_region_rings';
+
+  /// REQ102_12 - which area one point falls in, decided by the same real
+  /// boundaries that assign a restaurant to a state.
+  static const String functionRegionAt = 'map_region_at';
   static const String tableFoodDietaryRestriction = 'food_dietary_restriction';
   static const String tableUserDietaryRestriction = 'user_dietary_restriction';
 

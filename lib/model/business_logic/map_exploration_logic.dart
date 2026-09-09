@@ -74,12 +74,11 @@ class MapExplorationLogic {
   static const double malaysiaCentreLatitude = 4.10;
   static const double malaysiaCentreLongitude = 109.50;
 
-  ///
-  /// 4.7, not 5.3: Malaysia's bounding box is 20.3 degrees of longitude wide,
+  /// 5.1, not 5.3: Malaysia's bounding box is 20.3 degrees of longitude wide,
   /// and at 5.3 that does not fit a 390pt phone - Sabah fell off the right
-  /// edge. Measured, not guessed: 360 / (256 * 2^4.7) degrees per pixel puts
+  /// edge. Measured, not guessed: 360 / (256 * 2^5.1) degrees per pixel puts
   /// 21.1 degrees across 390pt.
-  static const double malaysiaOverviewZoom = 4.7;
+  static const double malaysiaOverviewZoom = 5.1;
 
   /// REQ102_12 / REQ102_13 - "the predefined zoom level". At or above this the
   /// dashboard is a detailed map view; below it, the heatmap.
@@ -89,10 +88,11 @@ class MapExplorationLogic {
   ///
   /// The overview is a painted, stylised Malaysia (see `RegionHeatmapCanvas`),
   /// so "the predefined zoom level" is a canvas scale factor there, not a
-  /// slippy-map zoom. Pinching or pressing "+" past 3x hands over to the real
-  /// OpenStreetMap detailed view, centred on the state under the middle of the
-  /// screen.
-  static const double heatmapDetailScale = 3;
+  /// slippy-map zoom.
+  ///
+  /// Crossing [heatmapDetailScale] now hands over to the detailed OpenStreetMap
+  /// view directly.
+  static const double heatmapDetailScale = 4.0;
 
   /// Where a city search result settles the map (REQ102_22).
   static const double cityZoom = 13;
@@ -292,12 +292,26 @@ class MapExplorationLogic {
   /// The state containing [latitude] / [longitude], or null when the point is
   /// outside every Malaysian state (A3).
   ///
-  /// **Strict**: the point must be inside an outline. This answers "where is
-  /// the tourist" and "which state did they tap", where being generous would
-  /// mean claiming somebody standing in Singapore is in Johor. The heatmap
-  /// tally uses [_regionOf] with `snap: true` instead - see there.
-  Future<Region?> regionAt(double latitude, double longitude) async =>
-      _regionOf(await regions(), latitude, longitude);
+  /// **Strict**: the point must be inside a boundary. This answers "where is
+  /// the tourist" and "which state is the map centred on", where being generous
+  /// would mean claiming somebody standing in Singapore is in Johor.
+  ///
+  /// Decided by Postgres against the real administrative boundary. Answering it
+  /// from the hand-drawn outlines is what reported every point in Kuala Lumpur
+  /// as Selangor: the two outlines overlap and Selangor came first in the
+  /// catalogue. The repository rounds and caches, so panning is at most one
+  /// request per kilometre travelled.
+  ///
+  /// Falls back to the offline outlines when the database cannot be reached, so
+  /// a lost connection degrades to the old, coarser answer rather than to no
+  /// answer at all.
+  Future<Region?> regionAt(double latitude, double longitude) async {
+    try {
+      return await repository.map.regionAt(latitude, longitude);
+    } catch (_) {
+      return _regionOf(await regions(), latitude, longitude);
+    }
+  }
 
   /// REQ102_8 / REQ102_14 - is the tourist somewhere the dashboard can centre
   /// on? Checked against the state outlines rather than the bounding box, so a
@@ -323,114 +337,87 @@ class MapExplorationLogic {
   Future<FoodDistribution> distribution({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
+    int level = Region.stateLevel,
+    String? parentCode,
+    String? parentName,
   }) async {
-    final List<Object> gathered = await Future.wait(<Future<Object>>[
-      regions(),
-      repository.getLocalFoods(),
-      repository.map.foodOccurrences(),
-    ]);
-    final List<Region> allRegions = gathered[0] as List<Region>;
-    final List<LocalFood> catalogue = gathered[1] as List<LocalFood>;
-    final List<FoodOccurrence> rawOccurrences =
-        gathered[2] as List<FoodOccurrence>;
-
-    final List<LocalFood> matching = catalogue
-        .where(
-          (LocalFood food) =>
-              (localFoodId == null || food.id == localFoodId) &&
-              matchesFilter(food, filter),
-        )
-        .toList(growable: false);
-
-    final Set<int> matchingIds = matching
-        .map((LocalFood food) => food.id)
-        .toSet();
-
-    final List<FoodOccurrence> occurrences = _resolve(
-      rawOccurrences,
-      catalogue,
+    // REQ102_12 - the counting happens in Postgres now, against the real
+    // administrative boundaries in `region_boundary`.
+    //
+    // What this replaced: every restaurant in the country (12,660 rows) and
+    // every menu entry (78,355) downloaded to the phone, then a ray-cast
+    // point-in-polygon test per place against hand-drawn state outlines, on
+    // every redraw of the heatmap. Those outlines were coarse enough that
+    // Selangor's polygon swallowed Kuala Lumpur - 1,900 restaurants counted
+    // under the wrong state and Kuala Lumpur reported as empty - and 699 places
+    // fell in the gaps between two outlines and were counted by nobody.
+    //
+    // The same tally now arrives as sixteen rows.
+    final List<int>? foodIds = await _foodIdsFor(
+      filter: filter,
+      localFoodId: localFoodId,
     );
 
-    // When viewing "All local food" (no filter, no specific dish), include
-    // EVERY landmark even if its dish text hasn't been matched to a catalogue
-    // row yet - matching the logic used for map pins.
-    final bool includesAllLandmarks =
-        localFoodId == null && filter.selectionCount == 0;
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      repository.map.regionDistribution(
+        level: level,
+        parentCode: parentCode,
+        foodIds: foodIds,
+      ),
+      repository.getLocalFoods(),
+    ]);
+    final List<RegionTally> tallies = gathered[0] as List<RegionTally>;
+    final List<LocalFood> catalogue = gathered[1] as List<LocalFood>;
 
-    // Collapse the occurrence list to one entry per place first. A place
-    // with ten matching dishes still counts once (C1), and - the reason this is
-    // a separate pass - the point-in-polygon test then runs once per place
-    // rather than once per dish, which is the difference between ~12k tests and
-    // ~78k on every heatmap redraw.
-    final Map<String, _PlaceTally> tallies = <String, _PlaceTally>{};
-    for (final FoodOccurrence occurrence in occurrences) {
-      final bool isMatchingFood = matchingIds.contains(occurrence.localFoodId);
-      final bool isUnresolvedLandmark =
-          includesAllLandmarks &&
-          occurrence.source == FoodOccurrenceSource.submittedLandmark &&
-          occurrence.localFoodId == 0;
-
-      if (!isMatchingFood && !isUnresolvedLandmark) continue;
-
-      tallies
-          .putIfAbsent(
-            '${occurrence.source.name}:${occurrence.sourceId}',
-            () => _PlaceTally(occurrence.latitude, occurrence.longitude),
-          )
-          .foods
-          .add(occurrence.localFoodId);
-    }
-
-    // Two tallies per state: the places (what the gradient measures) and the
-    // distinct dishes (context on the state card).
-    final Map<String, int> placesByRegion = <String, int>{
-      for (final Region region in allRegions) region.code: 0,
-    };
-    final Map<String, Set<int>> foodsByRegion = <String, Set<int>>{
-      for (final Region region in allRegions) region.code: <int>{},
-    };
-
-    for (final _PlaceTally tally in tallies.values) {
-      final Region? region = _regionOf(
-        allRegions,
-        tally.latitude,
-        tally.longitude,
-        // The heatmap is a count of every place in the country, so a place
-        // that fell in a gap between two coarse outlines must still land
-        // somewhere. See [regionSnapMetres].
-        snap: true,
-      );
-      if (region == null) continue;
-      placesByRegion[region.code] = placesByRegion[region.code]! + 1;
-      foodsByRegion[region.code]!.addAll(tally.foods);
-    }
-
+    // C1's denominator is the largest count *in the set on screen*. At state
+    // level that is the national maximum; drilled into one state it is that
+    // state's busiest district, so the colour ramp re-spreads across the
+    // districts actually being shown rather than leaving them all one shade of
+    // Johor's 3,155.
     int maximum = 0;
-    for (final int places in placesByRegion.values) {
-      if (places > maximum) maximum = places;
+    for (final RegionTally tally in tallies) {
+      if (tally.placeCount > maximum) maximum = tally.placeCount;
     }
 
-    final List<RegionAvailability> availability = allRegions
-        .map((Region region) {
-          final int places = placesByRegion[region.code]!;
-          return RegionAvailability(
-            region: region,
-            placeCount: places,
+    final List<RegionAvailability> availability = tallies
+        .map(
+          (RegionTally tally) => RegionAvailability(
+            region: tally.region,
+            placeCount: tally.placeCount,
             maximumPlaceCount: maximum,
             // REQ102_17 - the gradient between green and grey is generated
-            // from this, never picked per state.
-            score: maximum == 0 ? 0 : places / maximum,
-            foodCount: foodsByRegion[region.code]!.length,
-          );
-        })
+            // from this, never picked per area.
+            score: maximum == 0 ? 0 : tally.placeCount / maximum,
+            foodCount: tally.foodCount,
+            restaurantCount: tally.restaurantCount,
+            landmarkCount: tally.landmarkCount,
+          ),
+        )
         .toList(growable: false);
 
     return FoodDistribution(
       regions: availability,
       maximumPlaceCount: maximum,
-      matchingFoodCount: matching.length,
+      matchingFoodCount: catalogue
+          .where(
+            (LocalFood food) =>
+                (localFoodId == null || food.id == localFoodId) &&
+                matchesFilter(food, filter),
+          )
+          .length,
+      level: level,
+      parentCode: parentCode,
+      parentName: parentName,
     );
   }
+
+  /// REQ102_12 - the districts of one state, for the level of the heatmap
+  /// below the country view.
+  ///
+  /// Returns an empty list when the state has no district outlines, which is
+  /// what the ViewModel checks before offering to drill in.
+  Future<List<Region>> districtsOf(String stateCode) =>
+      repository.map.districtsOf(stateCode);
 
   /// REQ102_41 - the markers drawn on the detailed map view.
   ///
@@ -1347,16 +1334,6 @@ class MapExplorationLogic {
     }
     return inside;
   }
-}
-
-/// One place while the heatmap is being counted: where it is, and which
-/// matching dishes it serves.
-class _PlaceTally {
-  _PlaceTally(this.latitude, this.longitude);
-
-  final double latitude;
-  final double longitude;
-  final Set<int> foods = <int>{};
 }
 
 /// A place as the search sees it: the name already lower-cased and split into
