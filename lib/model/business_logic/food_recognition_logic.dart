@@ -200,14 +200,66 @@ class FoodRecognitionLogic {
     return FoodNameMatcher.bestMatch(name, catalogue);
   }
 
+  /// Like [_matchCatalogue], but ALSO tries the Gemini-reported [aliases] of
+  /// the dish. The primary [name] goes through the usual tiered matcher; an
+  /// alias is only trusted on an EXACT hit against one curated row's
+  /// food_name or synonym (see [_exactSingleOwner]) - never a fuzzy
+  /// prefix/containment match, so a loosely-translated alias cannot catch a
+  /// similar-sounding dish, and an alias that several rows claim is ignored
+  /// as ambiguous rather than silently picking the first row.
+  Future<LocalFood?> _matchCatalogueWithAliases(
+    String name,
+    List<String> aliases,
+  ) async {
+    final List<LocalFood> catalogue = await foodRepository.getFoods();
+    final LocalFood? primary = FoodNameMatcher.bestMatch(name, catalogue);
+    if (primary != null) return primary;
+    for (final String alias in aliases) {
+      final LocalFood? hit = _exactSingleOwner(alias, catalogue);
+      if (hit != null) return hit;
+    }
+    return null;
+  }
+
+  /// The ONE curated row whose food_name or one of its synonyms EXACTLY
+  /// equals [alias], or null when there is no such row OR the alias is
+  /// ambiguous (owned by more than one row - a catalogue synonym collision
+  /// such as 'Bubur Pulut Hitam' currently sitting on several rows). Only
+  /// exact equality is trusted for Gemini aliases, never fuzzy matching, and
+  /// the comparison folds case + Traditional/Simplified Chinese like
+  /// [FoodNameMatcher.normalize].
+  static LocalFood? _exactSingleOwner(String alias, List<LocalFood> catalogue) {
+    final String needle = FoodNameMatcher.normalize(alias);
+    if (needle.isEmpty) return null;
+    LocalFood? owner;
+    for (final LocalFood food in catalogue) {
+      final bool hit =
+          FoodNameMatcher.normalize(food.name) == needle ||
+          food.synonyms.any(
+            (String synonym) => FoodNameMatcher.normalize(synonym) == needle,
+          );
+      if (!hit) continue;
+      if (owner != null) return null; // Ambiguous - more than one owner.
+      owner = food;
+    }
+    return owner;
+  }
+
   /// Gemini's full analysis is authoritative on WHICH dish a photo shows, but
   /// it must never overwrite an existing `local_food` record: if [fromGemini]
   /// is already curated, the stored row - its authoritative details AND its
   /// id (so a submitted `landmark_item` links to it instead of arriving
   /// unlinked with `local_food_id = 0`) - wins over the freshly-generated
   /// copy. Returns [fromGemini] itself only when there is no curated match.
+  /// A Gemini-reported [LocalFood.aliases] alias pointing at a single curated
+  /// row is treated as that match too (see [_matchCatalogueWithAliases]), so
+  /// "bubur ca ca" with the alias "Bubur Cha Cha" resolves to the curated
+  /// row instead of creating a duplicate.
   Future<LocalFood> _preferCuratedOverGemini(LocalFood fromGemini) async {
-    final LocalFood? match = await _matchCatalogue(fromGemini.name);
+    final LocalFood? match = await _matchCatalogueWithAliases(
+      fromGemini.name,
+      fromGemini.aliases,
+    );
     return match ?? fromGemini;
   }
 
@@ -422,8 +474,14 @@ class FoodRecognitionLogic {
     // matched. A mismatch still warns via [observedFood]; if the tourist
     // confirms the typed name anyway, the carried food is the curated row -
     // never Gemini's overwrite of it - and its id is what links the eventual
-    // `landmark_item` to the existing `local_food`.
-    final LocalFood? match = await _matchCatalogue(trimmed);
+    // `landmark_item` to the existing `local_food`. Gemini aliases are only
+    // trusted when the photo really shows the typed name - on a MISMATCH they
+    // describe the OBSERVED dish, which must never relabel what the tourist
+    // typed (see the mismatch branch below).
+    final LocalFood? match = await _matchCatalogueWithAliases(
+      trimmed,
+      analysis.nameMatchesPhoto ? analysis.food.aliases : const <String>[],
+    );
     if (match != null) {
       food = match;
       priceMin = 0;
@@ -493,12 +551,28 @@ class FoodRecognitionLogic {
       imageBytes,
       trimmed,
     );
+    // No curated row matched the picked name - but Gemini's aliases may point
+    // at one exactly (e.g. picking "bubur ca ca" whose alias "Bubur Cha Cha"
+    // is curated), which keeps the picker linked instead of creating a
+    // duplicate.
+    final LocalFood? curated = analysis.food.aliases.isEmpty
+        ? null
+        : await _matchCatalogueWithAliases(
+            analysis.food.name,
+            analysis.food.aliases,
+          );
     return (
-      food: analysis.food,
-      priceMin: analysis.priceMin,
-      priceMax: analysis.priceMax,
-      fitsCatalogueCategory: fitsCatalogueCategory(analysis.foodType),
-      dietaryRestrictions: analysis.dietaryRestrictions,
+      food: curated ?? analysis.food,
+      priceMin: curated != null ? 0.0 : analysis.priceMin,
+      priceMax: curated != null ? 0.0 : analysis.priceMax,
+      fitsCatalogueCategory: curated != null
+          ? true
+          : fitsCatalogueCategory(analysis.foodType),
+      // Curated row => its own links are the authoritative tags (Gemini's are
+      // ignored - see [_dietaryTagsFor]).
+      dietaryRestrictions: curated != null
+          ? await _dietaryTagsFor(curated, const <String>[])
+          : analysis.dietaryRestrictions,
     );
   }
 
