@@ -1,6 +1,6 @@
 import 'dart:developer' as developer;
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected, visibleForTesting;
 
 import '../../core/json_model.dart';
 import '../../core/name_normalization.dart';
@@ -25,6 +25,46 @@ class RestaurantRepository {
 
   static const int _cataloguePageSize = 1000;
   static const int _restaurantIdBatchSize = 200;
+
+  // ---------------------------------------------------------------------------
+  // Catalogue cache
+  // ---------------------------------------------------------------------------
+  //
+  // `getRestaurants()` downloads the WHOLE restaurant table (12k+ rows, each
+  // with its nested `opening_hours`), paged 1000 at a time. Quick Mode ran it
+  // on every GPS fix and Matches on every open - the single biggest source of
+  // Supabase egress in the app. The catalogue is effectively static at
+  // runtime (writes are rare: moderation, closures, merges), so it is cached
+  // like `MapRepository`/`FoodKnowledgeRepository`, with a static copy shared
+  // by every facade instance.
+  //
+  // Static, and every write below calls [invalidate] so the cache never
+  // outlives its own edits.
+
+  static const Duration cacheTtl = Duration(minutes: 5);
+
+  static List<Restaurant>? _cachedRestaurants;
+  static DateTime? _cachedRestaurantsAt;
+  static Future<List<Restaurant>>? _restaurantsRequest;
+
+  /// Bumped by [invalidate] so an in-flight download that started BEFORE the
+  /// write can never repopulate the cache with pre-write rows (and stamp them
+  /// fresh) once it finally lands.
+  static int _cacheGeneration = 0;
+
+  /// Drops the cached restaurant catalogue. Call after anything that writes a
+  /// restaurant, a restaurant item or a restaurant's opening hours, or the
+  /// next read keeps showing the old answer for up to [cacheTtl].
+  ///
+  /// Also abandons any download already in flight: the write happened, so a
+  /// read that returns the pre-write request (or lets it fill the cache) is
+  /// wrong, and the very next read must start from Supabase again.
+  static void invalidate() {
+    _cacheGeneration++;
+    _cachedRestaurants = null;
+    _cachedRestaurantsAt = null;
+    _restaurantsRequest = null;
+  }
 
   static const String _summaryColumns = '''
     restaurant_id,
@@ -107,7 +147,56 @@ class RestaurantRepository {
     }
   }
 
-  Future<List<Restaurant>> getRestaurants() async {
+  Future<List<Restaurant>> getRestaurants() {
+    final List<Restaurant>? cached = _cachedRestaurants;
+    if (cached != null &&
+        _cachedRestaurantsAt != null &&
+        currentTime().difference(_cachedRestaurantsAt!) < cacheTtl) {
+      return Future<List<Restaurant>>.value(cached);
+    }
+    // Concurrent callers (Quick Mode + Matches load together) share one
+    // request instead of each downloading the whole catalogue.
+    final Future<List<Restaurant>>? inFlight = _restaurantsRequest;
+    if (inFlight != null) return inFlight;
+    final int generation = _cacheGeneration;
+    late final Future<List<Restaurant>> request;
+    request = fetchCatalogueRows()
+        .then((List<Restaurant> value) {
+          // A write may have invalidated the cache while this download was
+          // out. If so, drop the result: it predates the write and would
+          // otherwise resurrect stale rows under a fresh timestamp.
+          if (generation == _cacheGeneration) {
+            _cachedRestaurants = value;
+            _cachedRestaurantsAt = currentTime();
+          }
+          return value;
+        })
+        .whenComplete(() {
+          // Only clear the slot if it still holds THIS request - an
+          // invalidate (or a newer download) may have replaced it.
+          if (identical(_restaurantsRequest, request)) {
+            _restaurantsRequest = null;
+          }
+        });
+    _restaurantsRequest = request;
+    return request;
+  }
+
+  /// Test seam: lets a cache test advance the clock so the [cacheTtl] branch
+  /// can be exercised without waiting five real minutes. Production always
+  /// returns `DateTime.now()` (the same contract as the logic layer's
+  /// `currentTime()` seams).
+  @protected
+  DateTime currentTime() => DateTime.now();
+
+  /// Test seam: lets a cache test feed canned rows through the REAL cache
+  /// logic in [getRestaurants] (freshness check, single-flight request,
+  /// [invalidate]) without a network. Production pages the whole table down
+  /// through [_fetchRestaurants].
+  @protected
+  Future<List<Restaurant>> fetchCatalogueRows() => _fetchRestaurants();
+
+  Future<List<Restaurant>> _fetchRestaurants() async {
     try {
       final List<Restaurant> restaurants = <Restaurant>[];
       int rangeStart = 0;
@@ -300,9 +389,16 @@ class RestaurantRepository {
   /// submit flow then picks the one within ~100m of the landmark's location
   /// (see `LandmarkSubmissionLogic`), so two same-named restaurants in
   /// different towns are not confused with each other.
+  ///
+  /// This is the merge/exists check a submission runs - it must be FRESH (a
+  /// restaurant another device just added must be found so the submission
+  /// merges instead of duplicating), so the shared catalogue cache is dropped
+  /// first. Submissions are rare user actions; one fresh read is the right
+  /// price for a correct merge decision.
   Future<List<Restaurant>> findByNameList(String name) async {
     final String normalized = placeNameKey(name);
     if (normalized.isEmpty) return const <Restaurant>[];
+    invalidate();
     final List<Restaurant> restaurants = await getRestaurants();
     return <Restaurant>[
       for (final Restaurant restaurant in restaurants)
@@ -347,6 +443,7 @@ class RestaurantRepository {
       <String, Object?>{'report_count': 0, 'status': 'available'},
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
+    invalidate();
   }
 
   /// Increments `restaurant.report_count` by one after a report is recorded
@@ -376,6 +473,7 @@ class RestaurantRepository {
       <String, Object?>{'status': 'frozen'},
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
+    invalidate();
   }
 
   // ===========================================================================
@@ -422,6 +520,7 @@ class RestaurantRepository {
       <String, Object?>{'status': 'removed'},
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
+    invalidate();
   }
 
   /// 3 address: rewrites the restaurant's address to the reported value.
@@ -431,6 +530,7 @@ class RestaurantRepository {
       <String, Object?>{'address': address},
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
+    invalidate();
   }
 
   /// 4a closed permanently / 4b closed temporarily: freezes the restaurant.
@@ -448,6 +548,7 @@ class RestaurantRepository {
       },
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
+    invalidate();
   }
 
   /// 4b resume: clears a temporary closure that has expired - back to
@@ -458,6 +559,7 @@ class RestaurantRepository {
       <String, Object?>{'status': 'available', 'closed_until': null},
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
+    invalidate();
   }
 
   /// 1 operating hours: replaces ONE weekday's stored rows with the reported
@@ -475,8 +577,10 @@ class RestaurantRepository {
         'day': _dayName(day),
       },
     );
-    if (rows.isEmpty) return;
-    await _insertOpeningHours(restaurantId, rows);
+    if (rows.isNotEmpty) {
+      await _insertOpeningHours(restaurantId, rows);
+    }
+    invalidate();
   }
 
   Future<void> _insertOpeningHours(
