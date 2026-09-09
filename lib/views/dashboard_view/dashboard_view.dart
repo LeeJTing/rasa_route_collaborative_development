@@ -246,8 +246,8 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumRestaurantCount:
-                  viewModel.distribution.maximumRestaurantCount,
+              maximumPlaceCount:
+                  viewModel.distribution.maximumPlaceCount,
             ),
           ),
 
@@ -847,6 +847,64 @@ class _CustomCoordinatesDialogState extends State<_CustomCoordinatesDialog> {
 }
 
 /// M3, and the two "showing the whole country instead" explanations.
+/// REQ102_41 - how much of the viewport's answer is on screen.
+///
+/// Deliberately quiet: it reports a limit, it does not ask for anything. The
+/// optional [subtitle] carries the heatmap's own count for the state under the
+/// map, so the number of pins can be read against the state total rather than
+/// mistaken for it.
+class _PinCoverageChip extends StatelessWidget {
+  const _PinCoverageChip({required this.message, this.subtitle});
+
+  final String message;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    child: Material(
+      color: AppColors.surface,
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
+      elevation: 1,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xs,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(
+              Icons.place_outlined,
+              size: 14,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  message,
+                  style: AppTextStyles.labelSmall.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    style: AppTextStyles.labelSmall.copyWith(
+                      color: AppColors.textDisabled,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _NoticeBanner extends StatelessWidget {
   const _NoticeBanner({required this.message, required this.onDismiss});
 
