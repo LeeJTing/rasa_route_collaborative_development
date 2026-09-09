@@ -30,12 +30,12 @@ Color heatmapColourFor(double score) {
 /// parameters and callbacks - they never read a ViewModel themselves, and they
 /// style from the theme rather than raw values.
 class HeatmapLegend extends StatelessWidget {
-  const HeatmapLegend({super.key, required this.maximumRestaurantCount});
+  const HeatmapLegend({super.key, required this.maximumPlaceCount});
 
-  /// C1's denominator - how many restaurants the best-served state has.
+  /// C1's denominator - how many places the best-served state has.
   /// Printed as a caption so the scale means something concrete, and so the
   /// map says plainly when there is no data behind it yet.
-  final int maximumRestaurantCount;
+  final int maximumPlaceCount;
 
   @override
   Widget build(BuildContext context) {
@@ -78,9 +78,9 @@ class HeatmapLegend extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          maximumRestaurantCount == 0
-              ? 'No restaurants mapped yet'
-              : 'Best-served state: $maximumRestaurantCount restaurants',
+          maximumPlaceCount == 0
+              ? 'No places mapped yet'
+              : 'Best-served state: $maximumPlaceCount places',
           style: AppTextStyles.mapMicroLabel,
         ),
       ],

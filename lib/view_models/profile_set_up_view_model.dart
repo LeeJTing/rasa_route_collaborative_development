@@ -1,6 +1,9 @@
 import 'package:meta/meta.dart' show visibleForTesting;
 
+import '../app/routing/app_navigator.dart';
+import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
+import '../domain_model/auth_session.dart';
 import '../domain_model/dietary_restriction.dart';
 import '../domain_model/food_preference.dart';
 import '../model/business_logic/tourist_information_logic_facade.dart';
@@ -35,6 +38,19 @@ class ProfileSetUpViewModel extends BaseViewModel {
 
   /// True once [save] persisted both selections - the View navigates on this.
   bool get saved => _saved;
+
+  bool _skipped = false;
+
+  /// True once the tourist chose "Skip for now" - the View navigates on this
+  /// (the same pattern as [saved]).
+  bool get skipped => _skipped;
+
+  String _email = '';
+
+  /// The signed-in account this set-up is being performed for - shown at the
+  /// top of the screen so a tourist who signed up with the wrong account can
+  /// spot it and switch to another one before finishing.
+  String get email => _email;
 
   /// Every selectable taste, keeping the option list's order.
   List<FoodPreference> get tasteOptions => _foodPreferences
@@ -87,6 +103,10 @@ class ProfileSetUpViewModel extends BaseViewModel {
   /// Loads the selectable options from Supabase plus the tourist's current
   /// selection (so an abandoned first run resumes where they left off).
   Future<void> load() => runGuarded(() async {
+    // The account this set-up belongs to, resolved from the session (for the
+    // "wrong account?" header) - not from the profile rows.
+    final AuthSession? session = await touristLogic.getCurrentSession();
+    _email = session?.email ?? '';
     final List<FoodPreference> preferences = await touristLogic
         .foodPreferenceOptions();
     final List<DietaryRestriction> restrictions = await touristLogic
@@ -115,5 +135,24 @@ class ProfileSetUpViewModel extends BaseViewModel {
       _selectedRestrictionIds.toList(growable: false),
     );
     _saved = true;
+  });
+
+  /// "Skip for now": leaves the first-run set-up WITHOUT saving anything, so
+  /// the C3 gate routes the tourist back here on their next login until they
+  /// either complete set-up or skip again. No server/device state is written.
+  void skipForNow() {
+    _skipped = true;
+    safeNotifyListeners();
+  }
+
+  /// Fallback for when the tourist signed up with the wrong account (wrong
+  /// Google account / wrong email): signs out and returns to the Log In screen
+  /// so they can sign in with a different account instead of being stuck on
+  /// this first-run screen.
+  Future<void> switchAccount() => runGuarded(() async {
+    await touristLogic.signOut();
+    // Await the navigation: `resetTo` is async, so an unawaited failure here
+    // would surface as an unhandled error instead of a guarded one.
+    await AppNavigator.resetTo(AppRoutes.loginRegister);
   });
 }

@@ -104,8 +104,14 @@ class DiscoveryRepositoryFacade {
 
   Future<List<FoodOccurrence>> foodOccurrences() => map.foodOccurrences();
 
-  Future<Map<String, List<OpeningHour>>> openingHoursByPlace() =>
-      map.openingHours();
+  /// Opening hours keyed by place (`"restaurant:12"`).
+  ///
+  /// Pass [placeKeys] when only some places are being drawn - the table holds a
+  /// row per place per weekday, so reading all of it for a handful of pins is
+  /// the most expensive read on the map.
+  Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
+    Set<String>? placeKeys,
+  }) => map.openingHours(placeKeys: placeKeys);
 
   /// Flat reporting API for restaurant discovery logic. Business logic must
   /// not reach through this facade to concrete repositories.

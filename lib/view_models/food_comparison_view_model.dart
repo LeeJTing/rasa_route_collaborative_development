@@ -2,20 +2,9 @@ import '../app/routing/app_navigator.dart';
 import '../core/base_view_model.dart';
 import '../domain_model/food_comparison.dart';
 import '../domain_model/local_food.dart';
+import '../domain_model/pronunciation_playback_result.dart';
 import '../model/business_logic/food_logic_facade.dart';
 
-/// ViewModel for `FoodComparisonView`.
-///
-/// Side-by-side comparison of the selected dishes, plus the "quick switch"
-/// bar that swaps a dish in and out of either slot.
-///
-/// Rules this class follows (see `lib/core/base_view_model.dart`):
-///   * no `package:flutter/material.dart` import and no `BuildContext`;
-///   * it knows the logic facade(s) below and nothing else - never a
-///     repository, never a shared client, never Supabase or Gemini;
-///   * state goes in private fields with read-only getters; commands wrap their
-///     facade call in `runGuarded` so busy and error states behave the same on
-///     every screen.
 class FoodComparisonViewModel extends BaseViewModel {
   FoodComparisonViewModel();
 
@@ -28,6 +17,8 @@ class FoodComparisonViewModel extends BaseViewModel {
   FoodComparison? _comparison;
   ComparisonSide _replacementSide = ComparisonSide.left;
   bool _isSwitching = false;
+  int? _playingPronunciationFoodId;
+  String? _pronunciationMessage;
 
   /// Minimum dishes needed before a comparison can be built.
   int get minimumSelection => _minimumSelection;
@@ -44,11 +35,51 @@ class FoodComparisonViewModel extends BaseViewModel {
     return current == null ? null : foodLogic.bestDietaryMatch(current);
   }
 
-  /// Best-priced dish - no restaurant price data yet, so always `null` and
-  /// the UI shows "Not enough price data".
   LocalFood? get bestValueFood {
     final FoodComparison? current = _comparison;
     return current == null ? null : foodLogic.bestValueFood(current);
+  }
+
+  /// Whether a pronunciation is currently playing (mirrors the food detail
+  /// page's `isStartingPronunciation`).
+  bool get isStartingPronunciation => _playingPronunciationFoodId != null;
+
+  /// The food id currently playing pronunciation, so that row shows a spinner.
+  Set<int> get playingPronunciationFoodIds =>
+      _playingPronunciationFoodId == null
+      ? const <int>{}
+      : <int>{_playingPronunciationFoodId!};
+
+  /// The one-shot message from the last pronunciation attempt, or null when
+  /// there is nothing to show (curated audio played fine).
+  String? takePronunciationMessage() {
+    final String? message = _pronunciationMessage;
+    _pronunciationMessage = null;
+    return message;
+  }
+
+  /// Plays [food]'s pronunciation - the SAME flow as the food detail page:
+  /// one playback at a time guarded by [isStartingPronunciation], a plain
+  /// try/finally, and the result mapped to a message for the view.
+  Future<void> playPronunciation(LocalFood food) async {
+    if (isStartingPronunciation) return;
+    _playingPronunciationFoodId = food.id;
+    _pronunciationMessage = null;
+    safeNotifyListeners();
+    try {
+      final PronunciationPlaybackResult result = await foodLogic
+          .playPronunciation(food);
+      _pronunciationMessage = switch (result) {
+        PronunciationPlaybackResult.curatedAudio => null,
+        PronunciationPlaybackResult.deviceVoice =>
+          'Using your device voice for this pronunciation.',
+        PronunciationPlaybackResult.unavailable =>
+          'Pronunciation audio is unavailable on this device.',
+      };
+    } finally {
+      _playingPronunciationFoodId = null;
+      safeNotifyListeners();
+    }
   }
 
   /// The remaining selected dishes beyond the two side-by-side slots (A7.1) -

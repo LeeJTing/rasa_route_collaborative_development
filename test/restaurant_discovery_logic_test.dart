@@ -441,8 +441,8 @@ class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   Future<List<FoodOccurrence>> foodOccurrences() async => occurrences;
 
   @override
-  Future<Map<String, List<OpeningHour>>> openingHoursByPlace() async =>
-      placeOpeningHours;
+  // Future<Map<String, List<OpeningHour>>> openingHoursByPlace() async =>
+  //     placeOpeningHours;
 
   List<RestaurantItem> _itemsFor(int restaurantId) =>
       menuItemsByRestaurant[restaurantId] ??

@@ -1,13 +1,17 @@
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_pairing.dart';
+import '../../domain_model/food_preference.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/pronunciation_playback_result.dart';
+import 'auth_repository.dart';
 import 'dietary_restriction_repository.dart';
 import 'food_knowledge_repository.dart';
 import 'food_preference_repository.dart';
 import 'recommendation_repository.dart';
+import 'restaurant_repository.dart';
 import 'swipe_repository.dart';
+import 'tourist_profile_repository.dart';
 
 /// Everything about dishes: the catalogue, favourites, recommendation
 /// candidates, the swipe deck, and the food-domain reference data
@@ -29,6 +33,11 @@ class FoodRepositoryFacade {
   final FoodPreferenceRepository foodPreference = FoodPreferenceRepository();
   final DietaryRestrictionRepository dietaryRestriction =
       DietaryRestrictionRepository();
+  final AuthRepository auth = AuthRepository();
+  final TouristProfileRepository touristProfile = TouristProfileRepository();
+
+  /// Restaurant menu rows - used to compute a dish's listed price range.
+  final RestaurantRepository restaurant = RestaurantRepository();
 
   // =========================================================================
   // Flat API - a logic class calls these, never `facade.knowledge.xxx`.
@@ -94,6 +103,14 @@ class FoodRepositoryFacade {
   Future<List<DietaryRestriction>> touristDietaryRestrictions() =>
       dietaryRestriction.restrictionsForCurrentTourist();
 
+  Future<List<FoodPreference>> touristFoodPreferences() async {
+    final String? touristId = await auth.currentTouristId();
+    if (touristId == null || touristId.isEmpty) {
+      return const <FoodPreference>[];
+    }
+    return touristProfile.getFoodPreferences(touristId);
+  }
+
   /// The restrictions attached to one dish (`food_dietary_restriction`).
   Future<List<DietaryRestriction>> foodDietaryRestrictions(int foodId) =>
       dietaryRestriction.restrictionsForFood(foodId);
@@ -108,14 +125,22 @@ class FoodRepositoryFacade {
     List<LocalFood> catalogue, {
     List<int> touristDietaryRestrictionIds = const <int>[],
     Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
+    List<FoodPreference> touristPreferences = const <FoodPreference>[],
     int maximumResults = 5,
   }) => recommendation.getPairings(
     food,
     catalogue,
     touristDietaryRestrictionIds: touristDietaryRestrictionIds,
     foodDietaryRestrictionIds: foodDietaryRestrictionIds,
+    touristPreferences: touristPreferences,
     maximumResults: maximumResults,
   );
+
+  /// Lowest and highest listed price per dish, aggregated from every
+  /// `restaurant_item` menu row selling those dishes.
+  Future<Map<int, ({double min, double max})>> foodPriceRanges(
+    Set<int> foodIds,
+  ) => restaurant.restaurantPriceRangeByFood(foodIds);
 
   /// "If you liked X, try Y" - computed from shared attributes, no AI call.
   Future<List<FoodSimilarity>> getSimilar(

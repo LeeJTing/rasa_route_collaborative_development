@@ -7,6 +7,7 @@ import 'package:rasa_route_collaborative_development/app/routing/app_navigator.d
 import 'package:rasa_route_collaborative_development/app/routing/app_routes.dart';
 import 'package:rasa_route_collaborative_development/domain_model/food_recognition_result.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
+import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/food_recognition_logic.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/landmark_logic_facade.dart';
 import 'package:rasa_route_collaborative_development/view_models/food_recognition_view_model.dart';
@@ -103,6 +104,14 @@ XFile _image() => XFile.fromData(
   Uint8List.fromList(<int>[1, 2, 3]),
   mimeType: 'image/jpeg',
   name: 'test.jpg',
+);
+
+/// A known [TouristLocation] fix for the location-gate tests (A9).
+TouristLocation _fix(double latitude, double longitude) => TouristLocation(
+  latitude: latitude,
+  longitude: longitude,
+  accuracyMeters: 10,
+  capturedAt: DateTime.now(),
 );
 
 FoodRecognitionViewModel _buildViewModel(_FakeFoodRecognitionLogic logic) =>
@@ -238,6 +247,7 @@ void main() {
       // Warning present but non-blocking - the food is still addable.
       expect(vm.hasDietaryConflict, isTrue);
       expect(vm.dietaryConflicts, <String>['No Pork']);
+      vm.dispose();
     });
 
     test('does not warn when no user restriction matches the food', () async {
@@ -255,6 +265,7 @@ void main() {
 
       expect(vm.hasDietaryConflict, isFalse);
       expect(vm.dietaryConflicts, isEmpty);
+      vm.dispose();
     });
   });
 
@@ -511,6 +522,72 @@ void main() {
     });
   });
 
+  group('Add New Landmark blocked at sea / outside Malaysia (A9)', () {
+    test('a known fix at sea (Straits of Malacca) blocks adding', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Murtabak')],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.captureAndRecognize(_image());
+
+      // The "At sea" mock preset - recognised food is still shown, but the
+      // tourist must never be able to take it to the Add Landmark form.
+      vm.onCurrentLocationChanged(_fix(3.0, 100.2));
+
+      expect(vm.isAddLandmarkBlockedByLocation, isTrue);
+      expect(vm.addLandmarkLocationBlockMessage, isNotNull);
+      vm.proceedToAddLandmark();
+      expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
+    });
+
+    test('a known fix outside Malaysia (Singapore) blocks adding', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Murtabak')],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.captureAndRecognize(_image());
+
+      // The "Outside MY" mock preset.
+      vm.onCurrentLocationChanged(_fix(1.3521, 103.8198));
+
+      expect(vm.isAddLandmarkBlockedByLocation, isTrue);
+      vm.proceedToAddLandmark();
+      expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
+    });
+
+    test('a fix on Malaysian land (KL) does not block adding', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Murtabak')],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.captureAndRecognize(_image());
+
+      vm.onCurrentLocationChanged(_fix(3.1390, 101.6869));
+
+      expect(vm.isAddLandmarkBlockedByLocation, isFalse);
+      expect(vm.addLandmarkLocationBlockMessage, isNull);
+    });
+
+    test('no fix yet does not block adding (existing behaviour)', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Murtabak')],
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.captureAndRecognize(_image());
+
+      expect(vm.currentLocation.isKnown, isFalse);
+      expect(vm.isAddLandmarkBlockedByLocation, isFalse);
+    });
+  });
+
   group('LandmarkDetailViewModel', () {
     test('blocks add-landmark for a non-local food', () {
       final LandmarkDetailViewModel vm = LandmarkDetailViewModel();
@@ -535,6 +612,22 @@ void main() {
         expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
       },
     );
+
+    test('blocks add-landmark while the fix is at sea / outside Malaysia', () {
+      final LandmarkDetailViewModel vm = LandmarkDetailViewModel();
+      vm.setRecognizedFood(_food('Murtabak'));
+      vm.setIsLocalFood(true);
+      vm.setFitsCatalogueCategory(true);
+
+      // The "At sea" mock preset - a locally-recognised food, but the detail
+      // screen must not offer to add it as a landmark.
+      vm.onCurrentLocationChanged(_fix(3.0, 100.2));
+
+      expect(vm.isAddLandmarkBlockedByLocation, isTrue);
+      expect(vm.addLandmarkLocationBlockMessage, isNotNull);
+      expect(vm.proceedToAddLandmark, returnsNormally);
+      expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
+    });
 
     testWidgets('passes a local food onward to the hand-off', (tester) async {
       await tester.pumpWidget(

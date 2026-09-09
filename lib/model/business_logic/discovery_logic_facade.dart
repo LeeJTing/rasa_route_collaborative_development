@@ -233,7 +233,10 @@ class DiscoveryLogicFacade {
   /// @param localFoodId (swipe mode) - `LocalFood.id` of the dish in the
   ///        Target Frame; only places serving it are pinned. Null pins every
   ///        place serving anything that survives the filter.
-  Future<List<MapPin>> mapPins({
+  /// [zoom] sets how many pins may be drawn - see [pinLimitForZoom]. The
+  /// answer carries the number that matched but did not fit, so the map can say
+  /// so.
+  Future<MapPinPage> mapPins({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
     double? south,
@@ -242,6 +245,8 @@ class DiscoveryLogicFacade {
     double? east,
     double? fromLatitude,
     double? fromLongitude,
+    double zoom = detailedViewZoom,
+    int? limit,
   }) => mapExploration.pins(
     filter: filter,
     localFoodId: localFoodId,
@@ -251,6 +256,31 @@ class DiscoveryLogicFacade {
     east: east,
     fromLatitude: fromLatitude,
     fromLongitude: fromLongitude,
+    zoom: zoom,
+    limit: limit,
+  );
+
+  /// How many pins the detailed map may draw at [zoom]. Re-exposed because a
+  /// ViewModel may not name a logic class to read a constant off it.
+  static int pinLimitForZoom(double zoom) =>
+      MapExplorationLogic.pinLimitForZoom(zoom);
+
+  /// The zoom at which pins start being drawn at all.
+  static const double pinMinimumZoom = MapExplorationLogic.pinMinimumZoom;
+
+  /// The zoom at which pins already drawn are dropped again.
+  static const double pinHideZoom = MapExplorationLogic.pinHideZoom;
+
+  /// Whether pins belong on screen - see [MapExplorationLogic.pinsVisibleAtZoom]
+  /// for why a Target Frame dish is exempt.
+  static bool pinsVisibleAtZoom(
+    double zoom, {
+    int? localFoodId,
+    bool pinsAlreadyShown = false,
+  }) => MapExplorationLogic.pinsVisibleAtZoom(
+    zoom,
+    localFoodId: localFoodId,
+    pinsAlreadyShown: pinsAlreadyShown,
   );
 
   /// A8 - one keyword against locations and the local-food catalogue.

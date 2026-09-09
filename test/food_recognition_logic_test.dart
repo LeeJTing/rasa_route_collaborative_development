@@ -88,8 +88,7 @@ class _FakeFoodKnowledgeRepository extends FoodKnowledgeRepository {
   /// be exercised without a network call.
   Future<List<DietaryRestriction>> foodDietaryRestrictions(
     int localFoodId,
-  ) async =>
-      foodRestrictionLinks[localFoodId] ?? const <DietaryRestriction>[];
+  ) async => foodRestrictionLinks[localFoodId] ?? const <DietaryRestriction>[];
 }
 
 class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
@@ -137,9 +136,8 @@ class _FakeFoodRepositoryFacade extends FoodRepositoryFacade {
   ) async {}
 
   @override
-  Future<List<DietaryRestriction>> foodDietaryRestrictions(
-    int localFoodId,
-  ) => fakeKnowledge.foodDietaryRestrictions(localFoodId);
+  Future<List<DietaryRestriction>> foodDietaryRestrictions(int localFoodId) =>
+      fakeKnowledge.foodDietaryRestrictions(localFoodId);
 }
 
 LocalFood _food(String name) => LocalFood(
@@ -744,6 +742,79 @@ void main() {
         expect(result.dietaryRestrictions, <String>['No Coconut']);
       },
     );
+
+    test('a Gemini-reported alias resolves a non-canonical dish name to its '
+        'curated row instead of creating a duplicate (bubur ca ca)', () async {
+      final canonical = _food('Bubur Cha Cha');
+      knowledge.catalogue = <LocalFood>[canonical];
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'bubur ca ca', confidence: 0.4);
+      recognition.onAnalyzeFull = (List<int> _) async => (
+        food: _food('bubur ca ca').copyWith(
+          id: 0, // A fresh Gemini copy - not yet a catalogue row.
+          aliases: <String>['Bubur Cha Cha', 'Bubur Chacha'],
+        ),
+        priceMin: 3.5,
+        priceMax: 6.0,
+        isLocal: true,
+        confidence: 0.9,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 1.0,
+        observedFood: '',
+        foodType: 'Dessert',
+        dietaryRestrictions: const <String>[],
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      // Curated wins via the alias - the SAME row the data migration makes
+      // canonical, never an id-0 copy that would become a second row.
+      expect(result.candidates.single.id, canonical.id);
+      expect(result.candidates.single.name, 'Bubur Cha Cha');
+    });
+
+    test(
+      'an alias claimed by several catalogue rows is ambiguous and ignored',
+      () async {
+        // The live catalogue has this exact collision: 'Bubur Pulut Hitam'
+        // is Bee Koh Moy's synonym AND another row's food_name.
+        final beeKohMoy = _food(
+          'Bee Koh Moy',
+        ).copyWith(id: 362, synonyms: <String>['Bubur Pulut Hitam']);
+        final pulutHitam = _food('Bubur Pulut Hitam').copyWith(id: 237);
+        knowledge.catalogue = <LocalFood>[beeKohMoy, pulutHitam];
+        recognition.onIdentify = (_) async =>
+            _quickResponse(dish: 'unlisted spelling', confidence: 0.4);
+        recognition.onAnalyzeFull = (List<int> _) async => (
+          food: _food(
+            'unlisted spelling',
+          ).copyWith(id: 0, aliases: <String>['Bubur Pulut Hitam']),
+          priceMin: 0.0,
+          priceMax: 0.0,
+          isLocal: true,
+          confidence: 0.9,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
+          foodType: 'Dessert',
+          dietaryRestrictions: const <String>[],
+        );
+
+        final FoodRecognitionResult result = await logic.recognizeFood(<int>[
+          1,
+        ]);
+
+        // Ambiguous aliases must never pick an arbitrary winner.
+        expect(result.candidates.single.id, 0);
+        expect(result.candidates.single.name, 'unlisted spelling');
+      },
+    );
   });
 
   group('FoodRecognitionLogic.resolveByName (manual entry)', () {
@@ -986,6 +1057,68 @@ void main() {
 
       expect(result.food.id, murtabak.id);
       expect(result.dietaryRestrictions, <String>['No Pork']);
+    });
+
+    test('a verified typed alias resolves to the curated row via Gemini '
+        'aliases (bubur ca ca)', () async {
+      final canonical = _food('Bubur Cha Cha');
+      knowledge.catalogue = <LocalFood>[canonical];
+      recognition.onAnalyzeByName = (List<int> _, String name) async => (
+        food: _food(
+          'bubur ca ca',
+        ).copyWith(id: 0, aliases: <String>['Bubur Cha Cha', 'Bubur Chacha']),
+        priceMin: 3.5,
+        priceMax: 6.0,
+        isLocal: true,
+        confidence: 1.0,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 0.9,
+        observedFood: '',
+        foodType: 'Dessert',
+        dietaryRestrictions: const <String>[],
+      );
+
+      final result = await logic.resolveByName(<int>[1], 'bubur ca ca');
+
+      // Gemini confirms the photo shows "bubur ca ca" AND reports it is also
+      // known as "Bubur Cha Cha" - the curated row wins, so the item links to
+      // the existing local_food instead of creating a duplicate.
+      expect(result.nameMatchesPhoto, isTrue);
+      expect(result.food.id, canonical.id);
+      expect(result.food.name, 'Bubur Cha Cha');
+    });
+
+    test('Gemini aliases are ignored on a mismatch (they describe the '
+        'observed dish, not what was typed)', () async {
+      // The photo shows pizza, but Gemini happens to list "Bubur Cha Cha" as
+      // an alias of what it saw - it must not relabel the typed dish.
+      knowledge.catalogue = <LocalFood>[_food('Bubur Cha Cha')];
+      recognition.onAnalyzeByName = (List<int> _, String name) async => (
+        food: _food(name).copyWith(id: 0, aliases: <String>['Bubur Cha Cha']),
+        priceMin: 0.0,
+        priceMax: 0.0,
+        isLocal: false,
+        confidence: 1.0,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: false,
+        matchConfidence: 0.9,
+        observedFood: 'Pepperoni Pizza',
+        foodType: 'Food',
+        dietaryRestrictions: const <String>[],
+      );
+
+      final result = await logic.resolveByName(<int>[1], 'bubur ca ca');
+
+      expect(result.nameMatchesPhoto, isFalse);
+      // The typed dish stays name-only - never silently relabelled as the
+      // curated dish the OBSERVED food's aliases happen to mention.
+      expect(result.food.name, 'bubur ca ca');
+      expect(result.food.id, 0);
     });
   });
 

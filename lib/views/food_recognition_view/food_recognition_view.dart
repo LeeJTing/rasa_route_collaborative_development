@@ -56,6 +56,7 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   CameraController? _cameraController;
   bool _isCameraInitializing = true;
   String? _cameraError;
+  bool _cameraOpenInProgress = false;
 
   /// The cameras this device/browser exposes, from `availableCameras()` - kept
   /// so the tourist can flip between front/back when more than one exists
@@ -193,6 +194,8 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   /// Initialises [camera] into [_cameraController]. Shared by [_initCamera]
   /// and [_switchCamera] so flipping never duplicates the error handling.
   Future<void> _openCamera(CameraDescription camera) async {
+    if (_cameraOpenInProgress) return;
+    _cameraOpenInProgress = true;
     final CameraController controller = CameraController(
       camera,
       ResolutionPreset.high,
@@ -200,7 +203,10 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
     );
     try {
       await controller.initialize();
+      await controller.setFocusMode(FocusMode.auto);
     } on CameraException {
+      _cameraOpenInProgress = false;
+      await controller.dispose();
       if (mounted) {
         setState(() {
           _cameraError =
@@ -211,13 +217,16 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
       return;
     }
     if (!mounted) {
+      _cameraOpenInProgress = false;
       await controller.dispose();
       return;
     }
     setState(() {
       _cameraController = controller;
       _isCameraInitializing = false;
+      _cameraError = null;
     });
+    _cameraOpenInProgress = false;
   }
 
   /// Flips between the front/back cameras when the device exposes more than
@@ -257,14 +266,38 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   // v0.5.0) - the app is responsible for releasing/reacquiring the camera.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive) {
+      final CameraController? controller = _cameraController;
+      if (controller == null || !controller.value.isInitialized) return;
+      controller.dispose();
+      _cameraController = null;
+      if (mounted) {
+        setState(() {
+          _isCameraInitializing = true;
+        });
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (_cameras.isNotEmpty) {
+        _openCamera(_cameras[_activeCameraIndex]);
+      } else {
+        _initCamera();
+      }
+    }
+  }
+
+  Future<void> _focusCamera(Offset position, Size previewSize) async {
     final CameraController? controller = _cameraController;
     if (controller == null || !controller.value.isInitialized) return;
 
-    if (state == AppLifecycleState.inactive) {
-      controller.dispose();
-      _cameraController = null;
-    } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
+    final Offset point = Offset(
+      (position.dx / previewSize.width).clamp(0.0, 1.0),
+      (position.dy / previewSize.height).clamp(0.0, 1.0),
+    );
+    try {
+      await controller.setFocusMode(FocusMode.auto);
+      await controller.setFocusPoint(point);
+    } on CameraException {
+      // Some web cameras expose no manual focus point; auto focus remains set.
     }
   }
 
@@ -483,6 +516,14 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
 
     switch (viewModel.purpose) {
       case FoodRecognitionPurpose.food:
+        // At sea / outside Malaysia (A9) the recognised food is still shown
+        // (the tourist can keep recognising) but "Add New Landmark" is not
+        // offered - a new landmark may only be added on Malaysian land.
+        final bool canAddFood =
+            viewModel.isLocalFood && viewModel.fitsCatalogueCategory;
+        final String? locationBlock = canAddFood
+            ? viewModel.addLandmarkLocationBlockMessage
+            : null;
         return RecognitionResultCard(
           food: viewModel.recognizedFood!,
           capturedImage: viewModel.capturedImage,
@@ -495,21 +536,23 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           dietaryConflicts: viewModel.dietaryConflicts,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
           onViewDetails: viewModel.proceedToViewDetails,
-          // Non-addable (not local, or a Malaysian snack/package): details +
-          // "View Details" stay, but there is no "Add New Landmark".
-          onAddLandmark:
-              viewModel.isLocalFood && viewModel.fitsCatalogueCategory
+          // Non-addable (not local, a Malaysian snack/package, or the fix is
+          // at sea / outside Malaysia): details + "View Details" stay, but
+          // there is no "Add New Landmark".
+          onAddLandmark: canAddFood && locationBlock == null
               ? viewModel.proceedToAddLandmark
               : null,
           onEnterName: viewModel.enterFoodName,
           isProcessing: viewModel.isProcessing,
-          promptText: viewModel.isLocalFood && viewModel.fitsCatalogueCategory
-              ? 'Would you like to add this as a new landmark?'
-              : !viewModel.isLocalFood
-              ? "This doesn't appear to be Malaysian local food, so it "
-                    "can't be added as a landmark."
-              : 'This is a Malaysian product but it is a snack or packaged '
-                    "item, so it can't be added.",
+          promptText:
+              locationBlock ??
+              (canAddFood
+                  ? 'Would you like to add this as a new landmark?'
+                  : !viewModel.isLocalFood
+                  ? "This doesn't appear to be Malaysian local food, so it "
+                        "can't be added as a landmark."
+                  : 'This is a Malaysian product but it is a snack or packaged '
+                        "item, so it can't be added."),
         );
 
       case FoodRecognitionPurpose.additionalFood:
@@ -611,6 +654,11 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
                                   return GestureDetector(
                                     onScaleStart: _onZoomScaleStart,
                                     onScaleUpdate: _onZoomScaleUpdate,
+                                    onTapDown: (TapDownDetails details) =>
+                                        _focusCamera(
+                                          details.localPosition,
+                                          constraints.biggest,
+                                        ),
                                     onDoubleTap: _resetZoom,
                                     child: Stack(
                                       fit: StackFit.expand,
