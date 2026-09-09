@@ -1,3 +1,4 @@
+import '../../core/name_normalization.dart';
 import '../../domain_model/local_food.dart';
 
 /// Pure catalogue name-matching policy for dish names that come from Gemini.
@@ -86,10 +87,11 @@ class FoodNameMatcher {
     yield* food.synonyms;
   }
 
-  /// Normalises a dish name for matching: lowercase, everything that is not a
-  /// letter or digit becomes a space, and runs of whitespace collapse.
-  /// "Nasi Lemak (Ayam)!" -> "nasi lemak ayam".
-  static String normalize(String name) => name
+  /// Normalises a dish name for matching: Traditional → Simplified Chinese
+  /// folding, lowercase, everything that is not a letter or digit becomes a
+  /// space, and runs of whitespace collapse. "Nasi Lemak (Ayam)!" ->
+  /// "nasi lemak ayam"; "福建麵" -> "福建面".
+  static String normalize(String name) => toSimplifiedChinese(name)
       .trim()
       .toLowerCase()
       .replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ')

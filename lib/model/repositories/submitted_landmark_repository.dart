@@ -1,6 +1,7 @@
 import 'dart:developer' as developer;
 
 import '../../core/json_model.dart';
+import '../../core/name_normalization.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../shared_client/api_manager/api_manager.dart';
@@ -174,7 +175,7 @@ class SubmittedLandmarkRepository {
   /// submitted landmarks belong to the same place (~100m) and should be
   /// reactivated/cleared.
   Future<List<SubmittedLandmark>> findByName(String name) async {
-    final String normalized = name.trim().toLowerCase();
+    final String normalized = placeNameKey(name);
     if (normalized.isEmpty) return const <SubmittedLandmark>[];
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableSubmittedLandmark,
@@ -184,9 +185,9 @@ class SubmittedLandmarkRepository {
     );
     final List<SubmittedLandmark> matches = <SubmittedLandmark>[];
     for (final Map<String, dynamic> row in rows) {
-      final String rowName = (row['landmark_name'] as String? ?? '')
-          .trim()
-          .toLowerCase();
+      final String rowName = placeNameKey(
+        row['landmark_name'] as String? ?? '',
+      );
       if (rowName != normalized) continue;
       matches.add(
         SubmittedLandmark(

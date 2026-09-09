@@ -248,6 +248,7 @@ class RecognitionRepository {
         synonyms: response.variant.isEmpty
             ? const <String>[]
             : <String>[response.variant],
+        aliases: response.aliases,
       );
 
   /// Gemini's dish-type classification -> a valid catalogue `food_type`

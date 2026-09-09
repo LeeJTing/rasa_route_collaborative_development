@@ -19,6 +19,7 @@ class LocalFood {
     this.pronunciationText = '',
     this.audioGuideUrl,
     this.synonyms = const <String>[],
+    this.aliases = const <String>[],
     this.imageUrls = const <String>[],
     this.isFavourite = false,
   });
@@ -68,6 +69,15 @@ class LocalFood {
   /// Alternate names parsed from the `synonyms` text column.
   final List<String> synonyms;
 
+  /// Well-known alternative names for THIS dish reported by Gemini on the
+  /// recognition / manual-verification calls. TRANSIENT - used only to resolve
+  /// the dish against the curated catalogue (an alias can point a
+  /// non-canonical Gemini name at the right `local_food` row) while the food
+  /// is still a Gemini suggestion (id == 0). Never persisted: when a
+  /// brand-new dish is written to `local_food`, only [synonyms] goes to the
+  /// `synonyms` column, never this field.
+  final List<String> aliases;
+
   /// Ordered gallery from `local_food_image`.
   final List<String> imageUrls;
 
@@ -94,6 +104,7 @@ class LocalFood {
     String? pronunciationText,
     String? audioGuideUrl,
     List<String>? synonyms,
+    List<String>? aliases,
     List<String>? imageUrls,
     bool? isFavourite,
   }) => LocalFood(
@@ -112,6 +123,7 @@ class LocalFood {
     pronunciationText: pronunciationText ?? this.pronunciationText,
     audioGuideUrl: audioGuideUrl ?? this.audioGuideUrl,
     synonyms: synonyms ?? this.synonyms,
+    aliases: aliases ?? this.aliases,
     imageUrls: imageUrls ?? this.imageUrls,
     isFavourite: isFavourite ?? this.isFavourite,
   );
