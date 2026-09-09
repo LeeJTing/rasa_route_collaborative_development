@@ -54,7 +54,6 @@ class LoginRegisterViewModel extends BaseViewModel {
       'com.rasaroute.app://login-callback';
 
   String _email = '';
-  bool _otpSent = false;
   bool _googleFlowStarted = false;
   bool _googleSignInComplete = false;
   bool _checkingSession = true;
@@ -62,7 +61,6 @@ class LoginRegisterViewModel extends BaseViewModel {
   bool _needsProfileSetup = false;
 
   String get email => _email;
-  bool get otpSent => _otpSent;
 
   /// True while the entry session check is running - the View shows a splash
   /// instead of the form so an already-signed-in tourist never sees the
@@ -111,14 +109,6 @@ class LoginRegisterViewModel extends BaseViewModel {
   void setEmail(String value) {
     _email = value;
     safeNotifyListeners();
-  }
-
-  Future<void> sendEmailOtp() async {
-    _otpSent = false;
-    await runGuarded(() async {
-      await touristLogic.sendEmailOtp(_email);
-      _otpSent = true;
-    });
   }
 
   Future<void> signInWithGoogle() async {

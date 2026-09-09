@@ -30,11 +30,25 @@ class OtpView extends StatefulWidget {
 
 class _OtpViewState extends State<OtpView> {
   late final OtpViewModel _viewModel;
+  bool _initialised = false;
 
   @override
   void initState() {
     super.initState();
     _viewModel = OtpViewModel();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_initialised) return;
+    _initialised = true;
+    // Option B: the login screen only navigates here, passing the email as
+    // the route argument. This screen owns sending, so it must know the
+    // address even before a code exists (fall back to the pending email for
+    // deep-link/restart edge cases where no argument was supplied).
+    final Object? argument = ModalRoute.of(context)?.settings.arguments;
+    _viewModel.emailArgument = argument is String ? argument : '';
     _viewModel.onInit();
   }
 
@@ -119,6 +133,28 @@ class _OtpViewState extends State<OtpView> {
                         }
                       },
                     ),
+                    if (viewModel.isSendingCode) ...<Widget>[
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        'Sending your code…',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                    if (viewModel.reusingExistingCode) ...<Widget>[
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        'A code was already sent to this email — check your '
+                        'inbox, you can still use it below.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ],
                     if (viewModel.hasError) ...<Widget>[
                       const SizedBox(height: AppSpacing.sm),
                       Text(

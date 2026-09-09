@@ -15,6 +15,24 @@ class AuthenticateLogic {
 
   final TouristRepositoryFacade repository;
 
+  /// How many OTP emails one address may receive in [otpSendRateWindow] - the
+  /// Grab-style cap that keeps a tourist from hammering "Send OTP" (they can
+  /// cancel the OTP screen and request again from the login screen, but only
+  /// this many times per window).
+  static const int otpSendRateLimit = 3;
+
+  /// The rolling window for [otpSendRateLimit].
+  static const Duration otpSendRateWindow = Duration(minutes: 10);
+
+  /// Shown when the same email has already received [otpSendRateLimit] codes
+  /// inside [otpSendRateWindow].
+  static const String otpSendRateLimitMessage =
+      'Too many attempts, please try again later.';
+
+  /// Sends a passwordless OTP to [email], gated by the per-email rate limit.
+  ///
+  /// Only a *successful* send is recorded, so a mistyped / rejected address
+  /// never burns one of the three slots.
   Future<void> sendEmailOtp(String email) async {
     final String normalizedEmail = email.trim();
 
@@ -22,7 +40,18 @@ class AuthenticateLogic {
       throw ArgumentError('Email cannot be empty.');
     }
 
+    await _assertWithinOtpSendLimit(normalizedEmail);
     await repository.sendEmailOtp(normalizedEmail);
+    await repository.recordOtpSend(normalizedEmail);
+  }
+
+  Future<void> _assertWithinOtpSendLimit(String email) async {
+    final List<DateTime> sends = await repository.otpSendTimes(email);
+    final DateTime cutoff = DateTime.now().subtract(otpSendRateWindow);
+    final int recent = sends.where((DateTime t) => t.isAfter(cutoff)).length;
+    if (recent >= otpSendRateLimit) {
+      throw StateError(otpSendRateLimitMessage);
+    }
   }
 
   Future<AuthSession?> verifyEmailOtp({
@@ -73,6 +102,10 @@ class AuthenticateLogic {
       repository.getOrCreateTourist(session);
 
   String get pendingEmail => repository.pendingAuthEmail;
+
+  /// When the freshest code for the pending email was sent, or null when no
+  /// code is pending (see `AuthRepository`'s Option B pending-OTP marker).
+  DateTime? get pendingOtpSentAt => repository.pendingOtpSentAt;
 
   Future<bool> signInWithGoogle({required String redirectTo}) {
     return repository.signInWithGoogle(redirectTo: redirectTo);

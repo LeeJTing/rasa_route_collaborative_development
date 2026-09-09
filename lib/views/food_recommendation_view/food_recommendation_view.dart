@@ -7,6 +7,9 @@ import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../view_models/food_recommendation_view_model.dart';
 import '../common_widgets/food_pairing_card.dart';
+import '../common_widgets/food_section_card.dart';
+import '../common_widgets/similar_food_card.dart';
+import '../food_detail_view/widgets/food_notice_banner.dart';
 
 class FoodRecommendationView extends StatefulWidget {
   const FoodRecommendationView({super.key, this.foodId});
@@ -69,13 +72,48 @@ class _FoodRecommendationViewState extends State<FoodRecommendationView> {
   }
 
   Widget _content(BuildContext context, FoodRecommendationViewModel vm) {
-    if (vm.state == ViewState.busy && vm.selectedFood == null) {
+    // The two sections always render; each loading/error/empty state is shown
+    // INSIDE its section so the embedded widget never blanks out the page.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        FoodSectionCard(
+          title: 'Pairing Recommendations',
+          subtitle: 'Flavours that complement this dish',
+          child: _pairingSection(context, vm),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        FoodSectionCard(
+          title: 'Similar Food',
+          subtitle: 'Similar local favourites',
+          child: SimilarFoodCard(
+            foods: vm.similarFoods,
+            onTap: (food) => Navigator.pushNamed(
+              context,
+              AppRoutes.foodDetail,
+              arguments: food.id,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The Pairing Recommendations section body. The loading animation, retry,
+  /// empty and fallback-banner states live here - only this section's content
+  /// changes while the pairings load, never the whole page.
+  Widget _pairingSection(
+    BuildContext context,
+    FoodRecommendationViewModel vm,
+  ) {
+    // The selected dish is still being resolved - small inline spinner.
+    if (vm.selectedFood == null && vm.state == ViewState.busy) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    if (vm.state == ViewState.error && vm.selectedFood == null) {
+    if (vm.selectedFood == null && vm.state == ViewState.error) {
       return Center(
         child: ElevatedButton(
           onPressed: () => vm.load(vm.foodId),
@@ -112,29 +150,40 @@ class _FoodRecommendationViewState extends State<FoodRecommendationView> {
       );
     }
     if (vm.pairings.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
         child: Text(
           'No suitable food pairings were found for your dietary requirements.',
-          style: Theme.of(context).textTheme.bodyMedium,
         ),
       );
     }
+    final String? fallbackModel = vm.pairingFallbackModel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: vm.pairings
-          .map(
-            (pairing) => FoodPairingCard(
-              pairing: pairing,
-              pairedFood: vm.pairedFood(pairing.pairedLocalFoodId),
-              onTap: () => Navigator.pushNamed(
-                context,
-                AppRoutes.foodDetail,
-                arguments: pairing.pairedLocalFoodId,
-              ),
+      children: <Widget>[
+        if (fallbackModel != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.md),
+            child: FoodNoticeBanner(
+              message:
+                  'The main AI service is busy right now — these pairings '
+                  'were generated with a fallback model and may be less '
+                  'tailored than usual.',
+              type: FoodNoticeType.degraded,
             ),
-          )
-          .toList(growable: false),
+          ),
+        ...vm.pairings.map(
+          (pairing) => FoodPairingCard(
+            pairing: pairing,
+            pairedFood: vm.pairedFood(pairing.pairedLocalFoodId),
+            onTap: () => Navigator.pushNamed(
+              context,
+              AppRoutes.foodDetail,
+              arguments: pairing.pairedLocalFoodId,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

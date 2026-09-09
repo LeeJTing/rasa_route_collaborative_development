@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rasa_route_collaborative_development/core/view_state.dart';
 import 'package:rasa_route_collaborative_development/domain_model/auth_session.dart';
 import 'package:rasa_route_collaborative_development/domain_model/tourist.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/tourist_information_logic_facade.dart';
@@ -98,32 +97,6 @@ void main() {
       expect(viewModel.email, 'a@b.com');
     });
 
-    test('sendEmailOtp marks otpSent on success', () async {
-      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
-        touristLogic: _FakeTouristInformationLogicFacade(),
-      );
-      viewModel.setEmail('a@b.com');
-
-      await viewModel.sendEmailOtp();
-
-      expect(viewModel.otpSent, isTrue);
-      expect(viewModel.state, ViewState.ready);
-    });
-
-    test('sendEmailOtp surfaces an error without marking otpSent', () async {
-      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
-        touristLogic: _FakeTouristInformationLogicFacade(throwOnSendOtp: true),
-      );
-      viewModel.setEmail('a@b.com');
-
-      await viewModel.sendEmailOtp();
-
-      expect(viewModel.otpSent, isFalse);
-      expect(viewModel.hasError, isTrue);
-      // No technical prefix ("Bad state: ...") - just the plain message.
-      expect(viewModel.errorMessage, 'send OTP failed');
-    });
-
     test('signInWithGoogle records a started flow', () async {
       final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
         touristLogic: _FakeTouristInformationLogicFacade(),
@@ -219,7 +192,6 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
     this.googleStartResult = true,
     this.googleCompleteResult,
     this.nullResultsBeforeSuccess = 0,
-    this.throwOnSendOtp = false,
     this.session,
     this.needsProfileSetupResult = false,
   });
@@ -231,7 +203,6 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
   /// [googleCompleteResult] is returned - models the Supabase SDK still
   /// exchanging the PKCE code when the app resumes.
   final int nullResultsBeforeSuccess;
-  bool throwOnSendOtp;
   final AuthSession? session;
   final bool needsProfileSetupResult;
 
@@ -239,11 +210,6 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
 
   @override
   Future<AuthSession?> getCurrentSession() async => session;
-
-  @override
-  Future<void> sendEmailOtp(String email) async {
-    if (throwOnSendOtp) throw StateError('send OTP failed');
-  }
 
   @override
   Future<bool> signInWithGoogle({required String redirectTo}) async {
