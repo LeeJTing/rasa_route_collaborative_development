@@ -18,17 +18,26 @@ class FoodRecommendationViewModel extends BaseViewModel {
   int foodId;
   List<LocalFood> _catalogue = const <LocalFood>[];
   LocalFood? _selectedFood;
+  List<LocalFood> _similarFoods = const <LocalFood>[];
   List<FoodPairing> _pairings = const <FoodPairing>[];
   bool _pairingTimedOut = false;
   bool _loadingPairings = false;
   String? _pairingError;
+  String? _pairingFallbackModel;
 
   List<LocalFood> get catalogue => _catalogue;
   LocalFood? get selectedFood => _selectedFood;
+  List<LocalFood> get similarFoods => _similarFoods;
   List<FoodPairing> get pairings => _pairings;
   bool get pairingTimedOut => _pairingTimedOut;
   bool get loadingPairings => _loadingPairings;
   String? get pairingError => _pairingError;
+
+  /// The Gemini model that served the current pairings when the primary model
+  /// was unavailable (HTTP 429/5xx) and the request rotated to one of the
+  /// env-configured fallbacks (`GEMINI_FALLBACK_MODELS`). Null when the
+  /// primary model handled the request or no request ran yet.
+  String? get pairingFallbackModel => _pairingFallbackModel;
 
   LocalFood? pairedFood(int id) {
     for (final LocalFood food in _catalogue) {
@@ -43,6 +52,7 @@ class FoodRecommendationViewModel extends BaseViewModel {
   Future<void> load(int id) => runGuarded(() async {
     foodId = id;
     _pairingTimedOut = false;
+    _similarFoods = const <LocalFood>[];
     _catalogue = await foodLogic.getLocalFoods();
     LocalFood? selected;
     for (final LocalFood food in _catalogue) {
@@ -72,6 +82,7 @@ class FoodRecommendationViewModel extends BaseViewModel {
     if (selected == null) {
       _pairings = const <FoodPairing>[];
     } else {
+      _similarFoods = await foodLogic.getSimilarFoods(id);
       await _loadPairings();
     }
   });
@@ -82,10 +93,14 @@ class FoodRecommendationViewModel extends BaseViewModel {
     _loadingPairings = true;
     _pairingTimedOut = false;
     _pairingError = null;
+    _pairingFallbackModel = null;
     _pairings = const <FoodPairing>[];
     safeNotifyListeners();
     try {
-      _pairings = await foodLogic.getFoodPairingRecommendations(foodId);
+      _pairings = await foodLogic.getFoodPairingRecommendations(
+        foodId,
+        onFallbackModel: (String model) => _pairingFallbackModel = model,
+      );
       if (_pairings.isEmpty) {
         developer.log(
           'Pairings for food #$foodId came back empty.',

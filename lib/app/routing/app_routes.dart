@@ -50,7 +50,6 @@ abstract final class AppRoutes {
 
   static const String foodDetail = '/food-detail';
   static const String foodComparison = '/food-comparison';
-  static const String foodRecommendation = '/food-recommendation';
 
   // --- Restaurant ------------------------------------------------------------
 
@@ -94,7 +93,6 @@ abstract final class AppRoutes {
     editDietaryRestriction,
     foodDetail,
     foodComparison,
-    foodRecommendation,
     restaurantRecommendation,
     matchesRecommendation,
     restaurantDetail,
