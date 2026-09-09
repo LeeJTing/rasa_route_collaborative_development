@@ -451,6 +451,15 @@ $_catalogueFoodTypeRules
   3. Provide a brief description
   3b. List the main ingredients, comma-separated (e.g. "rice, coconut milk,
       sambal, peanuts, anchovies, egg")
+
+  3c. aliases: list up to 4 WELL-KNOWN alternative names of the dish you
+      identified - genuine other names/scripts/spellings of the SAME dish
+      (e.g. for bubur cha cha: "摩摩喳喳", "Bubur Chacha", "Bobochacha"; for
+      ais kacang: "ABC"; for pulut hitam: "Bee Koh Moy"). Rules: only real,
+      established names of the SAME dish - never a different dish, never a
+      description, an ingredient list or a made-up translation. Use [] when
+      you do not know reliable aliases.
+
   4. Identify the origin/region
   5. Identify the cooking style
   6. Identify the meal type (Breakfast/Lunch/Dinner/Snack)
@@ -530,6 +539,7 @@ $_catalogueFoodTypeRules
     "tasteTags": ["string"],
     "mainTaste": "string",
     "dietaryRestrictions": ["string"],
+    "aliases": ["string"],
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "suggestedPriceMin": 0.0,
@@ -580,6 +590,9 @@ $_catalogueFoodTypeRules
       priceMin: _asDouble(json['suggestedPriceMin']),
       priceMax: _asDouble(json['suggestedPriceMax']),
       confidence: ((json['confidence'] as num?) ?? 0).toDouble(),
+      aliases:
+          (json['aliases'] as List<dynamic>?)?.whereType<String>().toList() ??
+          const <String>[],
       foodCount: (json['foodCount'] as num?)?.toInt() ?? 1,
     );
   }
@@ -674,6 +687,11 @@ $_catalogueFoodTypeRules
       gluten-free dish is not tagged No Gluten)
     - a suggested selling price range in MYR (suggestedPriceMin and
       suggestedPriceMax)
+    - aliases: up to 4 well-known ALTERNATIVE names of the SAME dish (other
+      languages/scripts/spellings - e.g. "摩摩喳喳"/"Bubur Chacha" for bubur
+      cha cha, "ABC" for ais kacang, "Bee Koh Moy" for pulut hitam). Only
+      genuine established names of the SAME dish - never a different dish, a
+      description or a made-up translation. [] when unknown.
 
 $_catalogueFoodTypeRules
 
@@ -696,6 +714,7 @@ $_catalogueFoodTypeRules
     "tasteTags": ["string"],
     "mainTaste": "string",
     "dietaryRestrictions": ["string"],
+    "aliases": ["string"],
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "suggestedPriceMin": 0.0,
@@ -737,6 +756,9 @@ $_catalogueFoodTypeRules
       priceMin: _asDouble(json['suggestedPriceMin']),
       priceMax: _asDouble(json['suggestedPriceMax']),
       confidence: ((json['confidence'] as num?) ?? 0).toDouble(),
+      aliases:
+          (json['aliases'] as List<dynamic>?)?.whereType<String>().toList() ??
+          const <String>[],
       nameMatchesPhoto: (json['nameMatchesPhoto'] as bool?) ?? true,
       matchConfidence: ((json['matchConfidence'] as num?) ?? 0).toDouble(),
       observedFood: (json['observedFood'] as String?) ?? '',
