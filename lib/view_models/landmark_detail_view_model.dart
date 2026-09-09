@@ -3,7 +3,9 @@ import 'package:image_picker/image_picker.dart';
 import '../app/routing/app_navigator.dart';
 import '../core/base_view_model.dart';
 import '../domain_model/local_food.dart';
+import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
+import 'current_location_facade.dart';
 import 'food_recognition_view_model.dart'
     show AdditionalFoodCaptureResult, LandmarkDraftHandoff;
 
@@ -28,8 +30,36 @@ import 'food_recognition_view_model.dart'
 ///   * state goes in private fields with read-only getters; commands wrap their
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
-class LandmarkDetailViewModel extends BaseViewModel {
+class LandmarkDetailViewModel extends BaseViewModel
+    implements CurrentLocationListener {
   LandmarkDetailViewModel();
+
+  /// Inbound: `LocationMonitor` publishes here so this screen knows where the
+  /// tourist is - a new landmark may only be added on Malaysian land (A9), so
+  /// an at-sea / outside-Malaysia fix blocks the "Add New Landmark" action.
+  final CurrentLocationFacade locationFacade = CurrentLocationFacade();
+
+  TouristLocation _currentLocation = TouristLocation.unknown;
+
+  /// The most recent fix. [TouristLocation.unknown] until one arrives.
+  TouristLocation get currentLocation => _currentLocation;
+
+  @override
+  void onCurrentLocationChanged(TouristLocation location) {
+    _currentLocation = location;
+    safeNotifyListeners();
+  }
+
+  @override
+  Future<void> onInit() async {
+    locationFacade.register(this);
+  }
+
+  @override
+  void dispose() {
+    locationFacade.unregister(this);
+    super.dispose();
+  }
 
   final LandmarkLogicFacade landmarkLogic = LandmarkLogicFacade();
 
@@ -57,6 +87,10 @@ class LandmarkDetailViewModel extends BaseViewModel {
   /// new catalogue row.
   List<String> _dietaryRestrictions = const <String>[];
 
+  /// The signed-in tourist's restrictions this recognised food conflicts
+  /// with - shown as a warning on the card (adding is still allowed).
+  List<String> _dietaryConflicts = const <String>[];
+
   /// Whether the confirm button should return this food to the *existing*
   /// `AddLandmarkView` (additional-food flow) instead of pushing a fresh
   /// form (primary flow). Set from `LandmarkDraftHandoff` in the View's
@@ -72,6 +106,27 @@ class LandmarkDetailViewModel extends BaseViewModel {
   double get priceMin => _priceMin;
   double get priceMax => _priceMax;
   List<String> get dietaryRestrictions => _dietaryRestrictions;
+  List<String> get dietaryConflicts => _dietaryConflicts;
+
+  /// Whether the current fix makes adding a landmark impossible (A9) - a new
+  /// landmark may only be added on Malaysian land, so a fix at sea or outside
+  /// Malaysia blocks it. `false` when there is no fix yet (nothing to judge).
+  bool get isAddLandmarkBlockedByLocation =>
+      _currentLocation.isKnown &&
+      !landmarkLogic.isOnLand(
+        _currentLocation.latitude,
+        _currentLocation.longitude,
+      );
+
+  /// Why "Add New Landmark" is unavailable for the current spot - shown on
+  /// this screen in place of the add prompt. Null when the location allows
+  /// adding.
+  String? get addLandmarkLocationBlockMessage =>
+      isAddLandmarkBlockedByLocation ? _offLandAddMessage : null;
+
+  static const String _offLandAddMessage =
+      'New landmarks can only be added on Malaysian land - you are at sea or '
+      'outside Malaysia, so a landmark cannot be added here.';
 
   void setIsLocalFood(bool value) {
     _isLocalFood = value;
@@ -88,6 +143,10 @@ class LandmarkDetailViewModel extends BaseViewModel {
 
   void setDietaryRestrictions(List<String> dietaryRestrictions) {
     _dietaryRestrictions = dietaryRestrictions;
+  }
+
+  void setDietaryRestrictionConflicts(List<String> conflicts) {
+    _dietaryConflicts = conflicts;
   }
 
   void setReturnToFormAsAdditionalFood(bool value) {
@@ -137,6 +196,12 @@ class LandmarkDetailViewModel extends BaseViewModel {
       ));
       return;
     }
+    // A new landmark may only be added on Malaysian land (A9) - while the fix
+    // is at sea / outside Malaysia the UI hides the button and this guard is
+    // the second line of defence. (The additional-food return above is not
+    // gated: it hands food back to an already-open form, which enforces the
+    // same rule itself.)
+    if (isAddLandmarkBlockedByLocation) return;
     LandmarkDraftHandoff().pushAddLandmark(
       food,
       _capturedImage,
@@ -144,6 +209,7 @@ class LandmarkDetailViewModel extends BaseViewModel {
       priceMin: _priceMin,
       priceMax: _priceMax,
       dietaryRestrictions: _dietaryRestrictions,
+      dietaryConflicts: _dietaryConflicts,
     );
   }
 }

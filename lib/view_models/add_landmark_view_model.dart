@@ -153,11 +153,6 @@ class AddLandmarkViewModel extends BaseViewModel
     safeNotifyListeners();
   }
 
-  /// Presenter tool: when set (via [simulateLocation]) this overrides the
-  /// device GPS fix everywhere (map center, 100m range, submitted
-  /// coordinates) so a demo can "be" in a different place. Cleared by
-  /// [useDeviceLocation] to go back to the real device GPS.
-  TouristLocation _simulatedLocation = TouristLocation.unknown;
   String? _locationError;
 
   // --- FOOD STATE (auto-filled from recognition; price entered per food) ---
@@ -184,6 +179,11 @@ class AddLandmarkViewModel extends BaseViewModel
   /// `food_dietary_restriction` association table when it becomes a new
   /// catalogue row.
   List<String> _recognizedFoodDietaryRestrictions = const <String>[];
+
+  /// The signed-in tourist's restrictions the recognized primary dish
+  /// conflicts with - shown as a warning on its card (adding is still
+  /// allowed). Carried from `LandmarkDraftHandoff`.
+  List<String> _recognizedFoodDietaryConflicts = const <String>[];
   List<LandmarkFoodEntry> _additionalFoods = <LandmarkFoodEntry>[];
 
   /// Per-entry soft price guidance, keyed by the form-local
@@ -230,20 +230,49 @@ class AddLandmarkViewModel extends BaseViewModel
   bool _isSubmitting = false;
   String? _submitError;
 
+  /// True when the last submit MERGED the dishes into an existing place
+  /// (catalogue restaurant or submitted landmark, same name within ~100m)
+  /// instead of creating a new landmark - see `LandmarkSubmitResult`.
+  bool _submitMerged = false;
+  String? _submitTargetName;
+  List<String> _submitAddedDishNames = const <String>[];
+  List<String> _submitExistingDishNames = const <String>[];
+
   // --- GETTERS ---
-  TouristLocation get currentLocation =>
-      _simulatedLocation.isKnown ? _simulatedLocation : _currentLocation;
+  TouristLocation get currentLocation => _currentLocation;
   TouristLocation get adjustedLocation => _adjustedLocation;
   String? get locationError => _locationError;
 
-  /// True while a presenter-supplied demo location is overriding the device
-  /// GPS fix (see [simulateLocation]).
-  bool get isSimulatingLocation => _simulatedLocation.isKnown;
+  /// Whether the current fix makes adding a landmark impossible (A9) - a new
+  /// landmark may only be submitted on Malaysian land, so a fix at sea or
+  /// outside Malaysia blocks the form. `false` when there is no fix yet
+  /// (nothing to judge against).
+  bool get isAddLocationBlocked =>
+      _currentLocation.isKnown &&
+      !landmarkLogic.isOnLand(
+        _currentLocation.latitude,
+        _currentLocation.longitude,
+      );
+
+  /// Why the form is blocked for the current spot - shown on the Location
+  /// card and as the disabled-Submit reason. Null when the location allows
+  /// adding.
+  String? get addLocationBlockMessage =>
+      isAddLocationBlocked ? _offLandAddMessage : null;
+
+  static const String _offLandAddMessage =
+      'New landmarks can only be added on Malaysian land - you are at sea or '
+      'outside Malaysia, so no landmark can be submitted here.';
 
   LocalFood? get recognizedFood => _primaryFood?.food;
   XFile? get recognizedFoodImage => _recognizedFoodImage;
   double? get primaryFoodPrice => _primaryFood?.price;
   String? get primaryFoodPriceWarning => _primaryFoodPriceWarning;
+
+  /// The restrictions the recognized primary dish conflicts with - see
+  /// `_recognizedFoodDietaryConflicts`.
+  List<String> get primaryFoodDietaryConflicts =>
+      _recognizedFoodDietaryConflicts;
   String? additionalFoodPriceWarning(int entryId) =>
       _additionalFoodPriceWarnings[entryId];
   List<LandmarkFoodEntry> get additionalFoods =>
@@ -266,7 +295,57 @@ class AddLandmarkViewModel extends BaseViewModel
   bool get isSubmitting => _isSubmitting;
   String? get submitError => _submitError;
 
+  /// Whether the last successful submit merged into an existing place
+  /// instead of creating a new landmark.
+  bool get submitMerged => _submitMerged;
+
+  /// Confirmation copy for a MERGED submit (A13) - says which dishes were
+  /// added and which already existed on the target, so the tourist sees
+  /// "item exists" honestly. Null when a new landmark was created (the View
+  /// shows the default success message instead). Name lists are capped so an
+  /// open-ended number of dishes can never overflow the snackbar.
+  String? get submitConfirmation {
+    if (!_submitMerged) return null;
+    final String rawTarget =
+        (_submitTargetName == null || _submitTargetName!.isEmpty)
+        ? 'this place'
+        : '"${_truncate(_submitTargetName!)}"';
+    final List<String> added = _previewNames(_submitAddedDishNames);
+    final List<String> existing = _previewNames(_submitExistingDishNames);
+    final String head;
+    if (added.isNotEmpty && existing.isNotEmpty) {
+      head =
+          'Added ${added.join(', ')}. '
+          'Already exists: ${existing.join(', ')}.';
+    } else if (existing.isNotEmpty) {
+      head = '${existing.join(', ')} already exists - nothing new added.';
+    } else if (added.isNotEmpty) {
+      head = 'Added ${added.join(', ')}.';
+    } else {
+      head = 'Dishes added.';
+    }
+    return '$head ($rawTarget)'.replaceAll('  ', ' ');
+  }
+
+  /// Caps a dish-name list for the confirmation message - never more than
+  /// [_previewNameLimit] names, then a "+N more" tail.
+  static const int _previewNameLimit = 3;
+
+  static List<String> _previewNames(List<String> names) {
+    if (names.length <= _previewNameLimit) return names;
+    return <String>[
+      ...names.take(_previewNameLimit),
+      '+${names.length - _previewNameLimit} more',
+    ];
+  }
+
+  /// Truncates long target names so a very long restaurant/landmark name
+  /// cannot blow out the snackbar width.
+  static String _truncate(String value, {int max = 30}) =>
+      value.length <= max ? value : '${value.substring(0, max - 1)}…';
+
   bool get canSubmit =>
+      !isAddLocationBlocked &&
       _capturedImage != null &&
       _restaurantName.isNotEmpty &&
       _primaryFood != null &&
@@ -281,6 +360,11 @@ class AddLandmarkViewModel extends BaseViewModel
   /// disabled button is never a mystery - previously a greyed-out button
   /// gave no clue which field was actually missing.
   String? get canSubmitReason {
+    // At sea / outside Malaysia (A9) - the whole form is blocked no matter
+    // what has been filled in.
+    if (isAddLocationBlocked) {
+      return addLocationBlockMessage;
+    }
     if (_capturedImage == null) {
       return 'Please capture either signboard or stall image';
     }
@@ -312,9 +396,11 @@ class AddLandmarkViewModel extends BaseViewModel
     double priceMax = 0,
     double confidence = 0,
     List<String> dietaryRestrictions = const <String>[],
+    List<String> dietaryConflicts = const <String>[],
   }) {
     _recognizedFoodConfidence = confidence;
     _recognizedFoodDietaryRestrictions = dietaryRestrictions;
+    _recognizedFoodDietaryConflicts = dietaryConflicts;
     _primaryFood = _primaryFood == null
         ? LandmarkFoodEntry.newEntry(
             food: food,
@@ -385,33 +471,6 @@ class AddLandmarkViewModel extends BaseViewModel
       accuracyMeters: currentLocation.accuracyMeters,
       capturedAt: DateTime.now(),
     );
-    safeNotifyListeners();
-  }
-
-  /// Presenter tool - override the detected location with [latitude] /
-  /// [longitude] (dev/demo only). The map center, the 100m range and the
-  /// submitted coordinates all follow [currentLocation], which prefers this
-  /// over the real GPS fix. Resets the adjusted pin so the map recentres on
-  /// the new spot. Call [useDeviceLocation] to go back to the real device
-  /// GPS.
-  void simulateLocation(double latitude, double longitude) {
-    _simulatedLocation = TouristLocation(
-      latitude: latitude,
-      longitude: longitude,
-      accuracyMeters: 10,
-      capturedAt: DateTime.now(),
-    );
-    _adjustedLocation = TouristLocation.unknown;
-    _locationError = null;
-    safeNotifyListeners();
-  }
-
-  /// Presenter tool - stop simulating; read the real device GPS again (the
-  /// next fix from `LocationMonitor` takes over).
-  void useDeviceLocation() {
-    _simulatedLocation = TouristLocation.unknown;
-    _adjustedLocation = TouristLocation.unknown;
-    _locationError = null;
     safeNotifyListeners();
   }
 
@@ -783,6 +842,10 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Supabase (used while verifying the insert flow works).
   /// Errors: A13 (restaurant exists), A16 (price invalid), M6 (no image)
   Future<void> submitLandmark({bool isFake = false}) async {
+    _submitMerged = false;
+    _submitTargetName = null;
+    _submitAddedDishNames = const <String>[];
+    _submitExistingDishNames = const <String>[];
     if (!hasImageCaptured) {
       _submitError = 'Please capture either signboard or stall image';
       safeNotifyListeners();
@@ -837,13 +900,13 @@ class AddLandmarkViewModel extends BaseViewModel
     safeNotifyListeners();
 
     try {
-      // Tourist auth isn't implemented in-app yet, so `currentTouristId()`
-      // returns null - fall back to the test tourist (Elwin) created in
-      // Supabase so the submit flow can be tested end-to-end. Replace with
-      // the real id once sign-in exists.
-      final String touristId =
-          await landmarkLogic.currentTouristId() ??
-          '22222222-2222-4222-8222-222222222222';
+      // The signed-in tourist - null when nobody is signed in (the entry
+      // gate routes to sign-in first, so a signed-in tourist is expected
+      // here).
+      final String? touristId = await landmarkLogic.currentTouristId();
+      if (touristId == null || touristId.isEmpty) {
+        throw StateError('Sign in to submit a landmark.');
+      }
 
       // Upload the landmark's own signboard/stall photo FIRST - it is stored
       // on the `submitted_landmark` row (`image_url` / `image_id` /
@@ -870,7 +933,7 @@ class AddLandmarkViewModel extends BaseViewModel
       // their defaults, like reportedCount: 0 and status: available) is
       // LandmarkSubmissionLogic's job now, not this ViewModel's - see that
       // method's doc for why.
-      await landmarkLogic.submitLandmark(
+      final result = await landmarkLogic.submitLandmark(
         restaurantName: _restaurantName,
         latitude: location.isKnown ? location.latitude : null,
         longitude: location.isKnown ? location.longitude : null,
@@ -905,6 +968,10 @@ class AddLandmarkViewModel extends BaseViewModel
         ],
         operatingHours: _operatingHours,
       );
+      _submitMerged = result.merged;
+      _submitTargetName = result.targetName;
+      _submitAddedDishNames = List<String>.of(result.addedDishNames);
+      _submitExistingDishNames = List<String>.of(result.existingDishNames);
 
       _isSubmitting = false;
       safeNotifyListeners();

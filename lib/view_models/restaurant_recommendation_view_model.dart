@@ -1,4 +1,5 @@
 import '../core/base_view_model.dart';
+import '../domain_model/matches_recommendation.dart';
 import '../domain_model/restaurant.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
@@ -18,13 +19,21 @@ class RestaurantRecommendationViewModel extends BaseViewModel
 
   TouristLocation _location = TouristLocation.unknown;
   List<Restaurant> _restaurants = const <Restaurant>[];
+  List<SubmittedLandmarkRecommendation> _landmarks =
+      const <SubmittedLandmarkRecommendation>[];
   RestaurantSource _source = RestaurantSource.google;
-  final Set<int> _expandedIds = <int>{};
+  final Set<int> _expandedRestaurantIds = <int>{};
+  final Set<int> _expandedLandmarkIds = <int>{};
 
-  List<Restaurant> get restaurants =>
-      _source == RestaurantSource.google ? _restaurants : const <Restaurant>[];
+  List<Restaurant> get restaurants => _restaurants;
+  List<SubmittedLandmarkRecommendation> get landmarks => _landmarks;
   RestaurantSource get source => _source;
-  bool isExpanded(int id) => _expandedIds.contains(id);
+  bool get selectedSourceIsEmpty => switch (_source) {
+    RestaurantSource.google => _restaurants.isEmpty,
+    RestaurantSource.submitted => _landmarks.isEmpty,
+  };
+  bool isRestaurantExpanded(int id) => _expandedRestaurantIds.contains(id);
+  bool isLandmarkExpanded(int id) => _expandedLandmarkIds.contains(id);
 
   @override
   Future<void> onInit() async {
@@ -38,10 +47,18 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   }
 
   Future<void> loadNearbyRestaurants() => runGuarded(() async {
-    _restaurants = await discoveryLogic.getQuickModeRestaurants(
-      location: _location,
-      limit: _restaurantLimit,
-    );
+    final List<Object> results = await Future.wait(<Future<Object>>[
+      discoveryLogic.getQuickModeRestaurants(
+        location: _location,
+        limit: _restaurantLimit,
+      ),
+      discoveryLogic.getQuickModeLandmarks(
+        location: _location,
+        limit: _restaurantLimit,
+      ),
+    ]);
+    _restaurants = results[0] as List<Restaurant>;
+    _landmarks = results[1] as List<SubmittedLandmarkRecommendation>;
     _sort();
   });
 
@@ -50,8 +67,17 @@ class RestaurantRecommendationViewModel extends BaseViewModel
     safeNotifyListeners();
   }
 
-  void toggleExpanded(int id) {
-    _expandedIds.contains(id) ? _expandedIds.remove(id) : _expandedIds.add(id);
+  void toggleRestaurantExpanded(int id) {
+    _expandedRestaurantIds.contains(id)
+        ? _expandedRestaurantIds.remove(id)
+        : _expandedRestaurantIds.add(id);
+    safeNotifyListeners();
+  }
+
+  void toggleLandmarkExpanded(int id) {
+    _expandedLandmarkIds.contains(id)
+        ? _expandedLandmarkIds.remove(id)
+        : _expandedLandmarkIds.add(id);
     safeNotifyListeners();
   }
 
@@ -70,6 +96,13 @@ class RestaurantRecommendationViewModel extends BaseViewModel
         );
         return result;
       });
+    _landmarks = List<SubmittedLandmarkRecommendation>.of(_landmarks)
+      ..sort(
+        (
+          SubmittedLandmarkRecommendation a,
+          SubmittedLandmarkRecommendation b,
+        ) => a.distanceMetres.compareTo(b.distanceMetres),
+      );
   }
 
   @override
@@ -80,9 +113,10 @@ class RestaurantRecommendationViewModel extends BaseViewModel
 
   @override
   void onNearbyRestaurantsUpdated(List<Restaurant> restaurants) {
-    _restaurants = restaurants;
-    _sort();
-    safeNotifyListeners();
+    // A monitor notification means the source data changed. Re-run Quick
+    // Mode's radius, hours and dietary rules instead of accepting an
+    // unfiltered background list.
+    loadNearbyRestaurants();
   }
 
   @override

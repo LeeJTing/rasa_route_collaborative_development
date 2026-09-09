@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../app/routing/app_navigator.dart';
 import '../app/routing/app_routes.dart';
@@ -16,6 +16,7 @@ import '../domain_model/swipe_mode.dart';
 import '../domain_model/swipe_session.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
+import 'current_location_facade.dart';
 
 /// Which of the two dashboard maps is showing (REQ102_12, REQ102_13).
 enum DashboardMapMode { heatmap, detailed }
@@ -50,10 +51,12 @@ class MapSelectionHandoff {
 /// Regional Exploration Module, following UC300.
 
 class DashboardViewModel extends BaseViewModel {
-  DashboardViewModel({@visibleForTesting DiscoveryLogicFacade? discoveryLogic})
-    : discoveryLogic = discoveryLogic ?? DiscoveryLogicFacade() {
+  DashboardViewModel() {
     _live.add(this);
   }
+
+  @protected
+  DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
 
   // ===========================================================================
   // Where the tourist is - pushed in, never polled
@@ -106,6 +109,48 @@ class DashboardViewModel extends BaseViewModel {
     }
   }
 
+  /// Called by `UpdateRestaurantFacade.publishOwnMapDataChanged` when THIS
+  /// tourist changed the map themselves - e.g. a report they just submitted
+  /// froze the landmark/restaurant they were viewing. Unlike [onMapDataChanged]
+  /// there is no "update available" banner (it was their own action, not a
+  /// background change), so each live dashboard silently drops its map caches
+  /// and re-reads whatever view is showing - the frozen place's pin disappears.
+  static void onOwnMapDataChanged() {
+    for (final DashboardViewModel viewModel in Set<DashboardViewModel>.of(
+      _live,
+    )) {
+      viewModel._refreshAfterOwnChange();
+    }
+  }
+
+  Future<void> _refreshAfterOwnChange() async {
+    discoveryLogic.clearMapCache();
+    safeNotifyListeners();
+    await _reloadActiveView();
+    // The tourist's own change froze the place whose card they had open - it
+    // is no longer 'available', so its pin is gone and the open card must go
+    // with it instead of lingering over the refreshed map.
+    _dismissSelectedPinIfNoLongerPinned();
+  }
+
+  /// Closes the open pin card when the pin it points at is no longer in the
+  /// freshly loaded [pins] - e.g. after this tourist's report froze the place
+  /// and it stopped being 'available'. No-op when nothing is selected or the
+  /// pin is still there (a report below the freeze threshold changes nothing
+  /// on the map).
+  void _dismissSelectedPinIfNoLongerPinned() {
+    final MapPin? selected = _selectedPin;
+    if (selected == null) return;
+    final bool stillPinned = _pins.any(
+      (MapPin pin) =>
+          pin.kind == selected.kind && pin.referenceId == selected.referenceId,
+    );
+    if (!stillPinned) {
+      _selectedPin = null;
+      safeNotifyListeners();
+    }
+  }
+
   /// Whether the map on screen has fallen behind the database.
   bool get mapUpdateAvailable => _mapUpdatePending;
 
@@ -146,7 +191,7 @@ class DashboardViewModel extends BaseViewModel {
     }
   }
 
-  final DiscoveryLogicFacade discoveryLogic;
+  late final DiscoveryLogicFacade discoveryLogic = createDiscoveryLogic();
 
   // ===========================================================================
   // Map view + camera
@@ -629,6 +674,10 @@ class DashboardViewModel extends BaseViewModel {
           .currentLocation()
           .timeout(_locateTimeout, onTimeout: () => TouristLocation.unknown);
       _sharedLocation = fix;
+      // Quick Mode reads its origin from the inbound location facade. Publish
+      // this user-requested fix immediately so the destination screen cannot
+      // race the background monitor and search from an older position.
+      CurrentLocationFacade().publish(fix);
 
       if (!fix.isKnown) {
         // Say so. Silently falling back to the country view looks like the
@@ -884,7 +933,18 @@ class DashboardViewModel extends BaseViewModel {
     // A9 step 2 happens after the icon is selected. Do not rely on an old
     // background fix: permission or GPS may have changed since it arrived.
     await locateTourist();
-    if (!_locationPermissionGranted || !_sharedLocation.isKnown) return;
+    if (!_locationPermissionGranted) {
+      _notice = 'Location permission is required to use Quick Mode.';
+      safeNotifyListeners();
+      return;
+    }
+    if (!_sharedLocation.isKnown) {
+      _notice =
+          'Could not get your location. Check that GPS is switched on, '
+          'then try Quick Mode again.';
+      safeNotifyListeners();
+      return;
+    }
     if (!_locationInMalaysia) {
       _notice = notInMalaysiaMessage;
       safeNotifyListeners();

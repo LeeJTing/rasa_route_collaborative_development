@@ -1,11 +1,14 @@
 import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected, visibleForTesting;
 
 import '../../domain_model/dietary_restriction.dart';
+import '../../domain_model/food_distribution.dart';
+import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
+import '../../domain_model/restaurant_report_reason.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
 
@@ -14,17 +17,83 @@ import '../repositories/discovery_repository_facade.dart';
 /// A business-logic class knows exactly one thing below it: a repository
 /// facade. It never sees a repository, a shared client or Flutter.
 class RestaurantDiscoveryLogic {
-  RestaurantDiscoveryLogic({
-    @visibleForTesting DiscoveryRepositoryFacade? discoveryRepository,
-    @visibleForTesting DateTime Function()? now,
-  }) : repository = discoveryRepository ?? DiscoveryRepositoryFacade(),
-       _now = now ?? DateTime.now;
+  RestaurantDiscoveryLogic();
 
-  final DiscoveryRepositoryFacade repository;
-  final DateTime Function() _now;
+  @protected
+  DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
+
+  @protected
+  DateTime currentTime() => DateTime.now();
+
+  late final DiscoveryRepositoryFacade repository = createRepository();
 
   Future<Restaurant?> findById(int restaurantId) =>
       repository.getRestaurantById(restaurantId);
+
+  /// Records a tourist's report against a catalogue restaurant (the shared
+  /// `report` table) and applies the moderation rule: `report_count` is
+  /// incremented, and once it reaches [_reportFreezeAtReports] the
+  /// restaurant is frozen (`status` 'frozen') so the discovery/list filters
+  /// stop showing it. `frozePlace: true` tells the caller that THIS report
+  /// was the one that froze it - the UI leaves the page and refreshes the
+  /// map, dropping the now-hidden pin.
+  ///
+  /// Reporting is a signed-in feature: when no tourist is resolved (no auth
+  /// session) nothing is written and `requiresSignIn: true` is returned so
+  /// the UI can ask the user to sign in. When signed in, one tourist may
+  /// report a place only once - a duplicate is detected first and
+  /// `alreadyReported: true` is returned without touching the count.
+  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
+  submitRestaurantReport({
+    required int restaurantId,
+    required RestaurantReportReason reason,
+    String? touristId,
+  }) async {
+    final String? resolvedTouristId =
+        touristId ?? await repository.currentTouristId();
+    if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
+      return (requiresSignIn: true, alreadyReported: false, frozePlace: false);
+    }
+    final bool duplicate = await repository.report.alreadyReported(
+      kind: 'restaurant',
+      placeId: restaurantId,
+      touristId: resolvedTouristId,
+    );
+    if (duplicate) {
+      return (requiresSignIn: false, alreadyReported: true, frozePlace: false);
+    }
+    await repository.report.insertReport(
+      kind: 'restaurant',
+      placeId: restaurantId,
+      reason: reason.name,
+      touristId: resolvedTouristId,
+    );
+    final int count = await repository.restaurant.incrementReportCount(
+      restaurantId,
+    );
+    final bool frozePlace = shouldFreezeAfterReport(count);
+    if (frozePlace) {
+      await repository.restaurant.freeze(restaurantId);
+      // Frozen places are no longer 'available', so cached map pins must go:
+      // the next read (right after the UI leaves the page) has no pin for it.
+      repository.map.clearCache();
+    }
+    return (
+      requiresSignIn: false,
+      alreadyReported: false,
+      frozePlace: frozePlace,
+    );
+  }
+
+  /// Freeze once the reported count REACHES [_reportFreezeAtReports] (so the
+  /// 5th report freezes). Pure so the boundary is unit-testable without a
+  /// repository seam.
+  @visibleForTesting
+  static bool shouldFreezeAfterReport(int reportedCount) =>
+      reportedCount >= _reportFreezeAtReports;
+
+  /// A restaurant is frozen once its report count reaches this many reports.
+  static const int _reportFreezeAtReports = 5;
 
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
@@ -106,7 +175,9 @@ class RestaurantDiscoveryLogic {
   }) {
     final List<Restaurant> matches = measured.where((Restaurant restaurant) {
       final double? distance = restaurant.distanceMetres;
-      return distance == null || distance <= radiusKm * 1000;
+      // A place without coordinates cannot be "within" a GPS radius and must
+      // not consume one of the twenty nearest-result slots.
+      return distance != null && distance <= radiusKm * 1000;
     }).toList();
     matches.sort(
       (Restaurant a, Restaurant b) => (a.distanceMetres ?? double.infinity)
@@ -146,6 +217,120 @@ class RestaurantDiscoveryLogic {
     return _hydrateSelected(available);
   }
 
+  /// Submitted-landmark half of Quick Mode, using the same map occurrences
+  /// that feed dashboard pins. C21 keeps it separate from Google-sourced
+  /// restaurants while the radius, closed-place and dietary rules stay equal.
+  Future<List<SubmittedLandmarkRecommendation>>
+  nearbyLandmarksWithAutomaticExpansion({
+    required TouristLocation location,
+    required int limit,
+    double initialRadiusKm = 1,
+    double radiusStepKm = 1,
+    double maximumRadiusKm = 10,
+  }) async {
+    if (!location.isKnown) return const <SubmittedLandmarkRecommendation>[];
+
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      repository.foodOccurrences(),
+      repository.openingHoursByPlace(),
+      repository.getCurrentDietaryRestrictions(),
+      repository.getRestrictionIdsByFood(),
+    ]);
+    final List<FoodOccurrence> occurrences =
+        gathered[0] as List<FoodOccurrence>;
+    final Map<String, List<OpeningHour>> hoursByPlace =
+        gathered[1] as Map<String, List<OpeningHour>>;
+    final Set<int> activeRestrictionIds =
+        (gathered[2] as List<DietaryRestriction>)
+            .map((DietaryRestriction restriction) => restriction.id)
+            .toSet();
+    final Map<int, List<int>> restrictionIdsByFood =
+        gathered[3] as Map<int, List<int>>;
+
+    final Map<String, List<FoodOccurrence>> byLandmark =
+        <String, List<FoodOccurrence>>{};
+    for (final FoodOccurrence occurrence in occurrences) {
+      if (occurrence.source != FoodOccurrenceSource.submittedLandmark) {
+        continue;
+      }
+      if (!_occurrenceIsSafe(
+        occurrence,
+        activeRestrictionIds: activeRestrictionIds,
+        restrictionIdsByFood: restrictionIdsByFood,
+      )) {
+        continue;
+      }
+      byLandmark
+          .putIfAbsent(occurrence.sourceId, () => <FoodOccurrence>[])
+          .add(occurrence);
+    }
+
+    final DateTime malaysiaNow = currentTime().toUtc().add(
+      const Duration(hours: 8),
+    );
+    final List<SubmittedLandmarkRecommendation> measured =
+        <SubmittedLandmarkRecommendation>[];
+    for (final MapEntry<String, List<FoodOccurrence>> entry
+        in byLandmark.entries) {
+      if (entry.value.isEmpty ||
+          _isConfidentlyClosedHours(
+            hoursByPlace['submittedLandmark:${entry.key}'] ??
+                const <OpeningHour>[],
+            malaysiaNow,
+          )) {
+        continue;
+      }
+      final FoodOccurrence place = entry.value.first;
+      measured.add(
+        SubmittedLandmarkRecommendation(
+          id: int.tryParse(entry.key) ?? 0,
+          name: place.placeName,
+          category: place.placeCategory?.trim().isNotEmpty == true
+              ? place.placeCategory!.trim()
+              : 'Submitted Landmark',
+          distanceMetres: _distanceMetres(
+            location.latitude,
+            location.longitude,
+            place.latitude,
+            place.longitude,
+          ),
+          foodNames: entry.value
+              .map((FoodOccurrence item) => item.foodName.trim())
+              .where((String name) => name.isNotEmpty)
+              .toSet()
+              .toList(growable: false),
+          imageUrl: place.placeImageUrl,
+          price: entry.value
+              .map((FoodOccurrence item) => item.itemPrice)
+              .whereType<double>()
+              .fold<double?>(null, (double? lowest, double price) {
+                return lowest == null || price < lowest ? price : lowest;
+              }),
+        ),
+      );
+    }
+    measured.sort(
+      (SubmittedLandmarkRecommendation a, SubmittedLandmarkRecommendation b) =>
+          a.distanceMetres.compareTo(b.distanceMetres),
+    );
+
+    double radiusKm = initialRadiusKm;
+    List<SubmittedLandmarkRecommendation> available =
+        const <SubmittedLandmarkRecommendation>[];
+    while (radiusKm <= maximumRadiusKm) {
+      available = measured
+          .where(
+            (SubmittedLandmarkRecommendation landmark) =>
+                landmark.distanceMetres <= radiusKm * 1000,
+          )
+          .take(limit)
+          .toList(growable: false);
+      if (available.length >= limit) return available;
+      radiusKm += radiusStepKm;
+    }
+    return available;
+  }
+
   Future<List<Restaurant>> _hydrateSelected(List<Restaurant> selected) async {
     if (selected.isEmpty) return const <Restaurant>[];
     final List<Restaurant> detailed = await repository.getRestaurantsByIds(
@@ -176,18 +361,26 @@ class RestaurantDiscoveryLogic {
   }
 
   List<Restaurant> _availableSummaries(List<Restaurant> restaurants) {
-    final DateTime malaysiaNow = _now().toUtc().add(const Duration(hours: 8));
+    final DateTime malaysiaNow = currentTime().toUtc().add(
+      const Duration(hours: 8),
+    );
     return restaurants
         .where(
           (Restaurant restaurant) =>
-              restaurant.status?.trim().toLowerCase() != 'hidden' &&
+              restaurant.status?.trim().toLowerCase() == 'available' &&
               !_isConfidentlyClosed(restaurant, malaysiaNow),
         )
         .toList(growable: false);
   }
 
   bool _isConfidentlyClosed(Restaurant restaurant, DateTime malaysiaNow) {
-    final List<OpeningHour> hours = restaurant.openingHours;
+    return _isConfidentlyClosedHours(restaurant.openingHours, malaysiaNow);
+  }
+
+  bool _isConfidentlyClosedHours(
+    List<OpeningHour> hours,
+    DateTime malaysiaNow,
+  ) {
     if (hours.isEmpty) return false;
     final Weekday today = Weekday.values[malaysiaNow.weekday - 1];
     final Weekday previous =
@@ -262,12 +455,13 @@ class RestaurantDiscoveryLogic {
           ? items
           : items
                 .where(
-                  (RestaurantItem item) => !_conflictsWithRestrictions(
-                    item,
-                    restrictions: restrictions,
-                    activeRestrictionIds: activeRestrictionIds,
-                    restrictionIdsByFood: restrictionIdsByFood,
-                  ),
+                  (RestaurantItem item) =>
+                      item.localFoodId > 0 &&
+                      !_conflictsWithRestrictions(
+                        item,
+                        activeRestrictionIds: activeRestrictionIds,
+                        restrictionIdsByFood: restrictionIdsByFood,
+                      ),
                 )
                 .toList(growable: false);
       if (safeItems.isEmpty) continue;
@@ -284,111 +478,23 @@ class RestaurantDiscoveryLogic {
 
   bool _conflictsWithRestrictions(
     RestaurantItem item, {
-    required List<DietaryRestriction> restrictions,
+    required Set<int> activeRestrictionIds,
+    required Map<int, List<int>> restrictionIdsByFood,
+  }) => (restrictionIdsByFood[item.localFoodId] ?? const <int>[]).any(
+    activeRestrictionIds.contains,
+  );
+
+  bool _occurrenceIsSafe(
+    FoodOccurrence occurrence, {
     required Set<int> activeRestrictionIds,
     required Map<int, List<int>> restrictionIdsByFood,
   }) {
-    final List<int> linked =
-        restrictionIdsByFood[item.localFoodId] ?? const <int>[];
-    if (linked.any(activeRestrictionIds.contains)) return true;
-
-    final String itemText = _normaliseWords(
-      '${item.foodName} ${item.ingredients ?? ''}',
+    if (activeRestrictionIds.isEmpty) return true;
+    if (occurrence.localFoodId <= 0) return false;
+    return !(restrictionIdsByFood[occurrence.localFoodId] ?? const <int>[]).any(
+      activeRestrictionIds.contains,
     );
-    for (final DietaryRestriction restriction in restrictions) {
-      final String normalizedName = restriction.name.trim().toLowerCase();
-      final List<String> keywords =
-          _restrictionKeywords[normalizedName] ??
-          normalizedName
-              .replaceFirst(RegExp(r'^no\s+'), '')
-              .split('/')
-              .map((String value) => value.trim())
-              .where((String value) => value.isNotEmpty)
-              .toList(growable: false);
-      if (keywords.any(
-        (String keyword) =>
-            itemText.contains(' ${_normaliseWords(keyword).trim()} '),
-      )) {
-        return true;
-      }
-    }
-    return false;
   }
-
-  String _normaliseWords(String value) =>
-      ' ${value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim()} ';
-
-  static const Map<String, List<String>> _restrictionKeywords =
-      <String, List<String>>{
-        'no pork': <String>['pork', 'bacon', 'ham', 'lard', 'char siu'],
-        'no beef': <String>['beef'],
-        'no chicken': <String>['chicken'],
-        'no mutton': <String>['mutton', 'lamb'],
-        'no duck': <String>['duck'],
-        'no organ meat': <String>[
-          'liver',
-          'intestine',
-          'tripe',
-          'kidney',
-          'offal',
-        ],
-        'no fish': <String>[
-          'fish',
-          'anchovy',
-          'ikan',
-          'tuna',
-          'salmon',
-          'sardine',
-          'mackerel',
-        ],
-        'no shellfish': <String>[
-          'shellfish',
-          'prawn',
-          'shrimp',
-          'crab',
-          'lobster',
-          'clam',
-          'oyster',
-          'mussel',
-        ],
-        'no shrimp/prawn': <String>['shrimp', 'prawn'],
-        'no squid/octopus': <String>['squid', 'octopus', 'sotong'],
-        'no egg': <String>['egg', 'mayonnaise', 'mayo'],
-        'no dairy': <String>[
-          'milk',
-          'dairy',
-          'cheese',
-          'butter',
-          'cream',
-          'yoghurt',
-          'yogurt',
-          'ghee',
-        ],
-        'no peanuts': <String>['peanut'],
-        'no tree nuts': <String>[
-          'almond',
-          'cashew',
-          'walnut',
-          'hazelnut',
-          'pistachio',
-          'macadamia',
-          'pecan',
-        ],
-        'no sesame': <String>['sesame'],
-        'no soy': <String>['soy', 'soya', 'tofu', 'tempeh'],
-        'no wheat': <String>['wheat', 'flour'],
-        'no gluten': <String>['gluten', 'wheat', 'flour'],
-        'no coconut': <String>['coconut', 'santan'],
-        'no corn': <String>['corn', 'maize'],
-        'no mushrooms': <String>['mushroom'],
-        'no tomato': <String>['tomato'],
-        'no garlic': <String>['garlic'],
-        'no onion': <String>['onion', 'shallot'],
-        'no ginger': <String>['ginger'],
-        'no coriander/cilantro': <String>['coriander', 'cilantro'],
-        'no mayonnaise': <String>['mayonnaise', 'mayo'],
-        'no mustard': <String>['mustard'],
-      };
 
   double _distanceMetres(double lat1, double lon1, double lat2, double lon2) {
     const double earthRadius = 6371000;

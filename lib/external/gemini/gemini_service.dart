@@ -4,18 +4,7 @@ import 'dart:io';
 import '../../app/config/env.dart';
 import '../../domain_model/local_food.dart';
 
-/// Wrapper around the Google Gemini REST API.
-///
-/// Reached only through `APIManager`. A singleton, like every other shared
-/// client - `GeminiService()` always returns the same instance.
-///
-/// Uses `dart:io.HttpClient` rather than a package - the scaffold's only
-/// sanctioned new dependency is `provider` (see developer guideline).
-///
-/// Generic text/image methods live here. Feature prompts that need their own
-/// API key/quota tracking live in a dedicated service (e.g.
-/// `GeminiLandmarkService`); UC406's food-pairing prompt shares the shared key
-/// and is validated by the calling repository, so it lives here too.
+
 class GeminiService {
   factory GeminiService() => _instance;
 
@@ -190,67 +179,78 @@ class GeminiService {
   // UC406 food pairing
   // ---------------------------------------------------------------------------
 
-  /// Builds the food-pairing prompt from [selected] and [candidates], sends
-  /// it through [generateText], and returns Gemini's raw reply for the calling
+  /// Builds the food-pairing prompt from [selected], [candidates] and the
+  /// signed-in tourist's [touristPreferences] (taste/cuisine names), sends it
+  /// through [generateText], and returns Gemini's raw reply for the calling
   /// repository to validate and rank.
   ///
-  /// Only food data is sent (SELECTED FOOD + CANDIDATES). The caller has
-  /// already excluded dietary-conflicting candidates, so no tourist profile,
-  /// preferences or favourites are included.
+  /// The caller has already excluded dietary-conflicting candidates and
+  /// preference-ranked them, so [touristPreferences] are only a matching
+  /// signal for the model. Only food data plus preference names are sent - no
+  /// other tourist profile data.
   Future<String> generateFoodPairings({
     required LocalFood selected,
     required List<LocalFood> candidates,
+    List<String> touristPreferences = const <String>[],
   }) {
     final String prompt = <String>[
       _pairingInstructions,
-      _buildDataSection(selected: selected, candidates: candidates),
+      _buildDataSection(
+        selected: selected,
+        candidates: candidates,
+        touristPreferences: touristPreferences,
+      ),
     ].join('\n\n');
     return generateText(prompt);
   }
 
-  /// The Gemini system instructions for UC406 food pairing - a condensed,
-  /// single-source version of the UC406 prompt spec. Only food data is sent
-  /// (SELECTED FOOD + CANDIDATES); dietary conflicts are already removed
-  /// client-side, so the model picks the best pairings and flags only
-  /// incomplete-allergen warnings.
   static const String _pairingInstructions = '''
-You are a Malaysian local-food pairing assistant. From CANDIDATES, recommend the foods that pair best with SELECTED FOOD.
+You are a Malaysian local-food pairing assistant. Recommend the foods from CANDIDATES that Malaysians would most naturally order, serve and eat together with SELECTED FOOD.
 
-STRICT RULES
-1. Use ONLY the supplied data. Never invent or guess a food, food ID, ingredient, allergen, dietary label, flavour, texture, cooking style, cultural fact, or meal suitability. Never modify a food ID.
-2. Recommend only foods listed in CANDIDATES. Never recommend SELECTED FOOD. Do not repeat a candidate. Return fewer when there are not enough eligible candidates, and never more than maximumResults or 5.
-3. Every candidate has already been screened against the tourist's dietary restrictions, so do not exclude or re-evaluate conflicts. However, if a candidate's allergen, ingredient or preparation information is incomplete or uncertain, set dietaryStatus to "warning" and state exactly what to verify with the seller. Never claim an uncertain food is safe.
-4. Pairing: prefer foods that complement SELECTED FOOD (e.g. rich with light/refreshing, spicy with cooling/mildly sweet, savoury with a beverage or dessert, soft with crispy, a main with a side/kuih/drink). Do not credit an attribute that is missing from the input. Similarity alone is not a high score.
-5. matchPercentage: a whole integer 0-100 expressing recommendation strength, not probability or a safety score. Calibrate: 90-100 exceptional (strong evidence, clear complementarity, no concern); 80-89 very good; 70-79 good; 60-69 reasonable; below 60 weak (use only when very few options). Candidates with uncertain dietary information get at most 79.
-6. Rank by matchPercentage from highest to lowest. The first rank is 1 and ranks are consecutive. On a tie, keep CANDIDATES order.
+RECOGNISED MALAYSIAN ORDERING PATTERNS (strong hints - only return a food whose id is in CANDIDATES)
+- A kopitiam drink (Kopi O, Kopi, Teh Tarik, Milo, Cham) is classically ordered with the kopitiam's OWN staples - Kaya Toast, half-boiled eggs, Roti Bakar / Roti Kahwin. Kuih or cake is only an occasional secondary extra, and only if it is kuih that same kopitiam would serve. Never fill the list with several kuih just because it is a drink.
+- At a mamak, Roti Canai / Roti Telur / Mee Goreng Mamak is ordered with Teh Tarik or Kopi O.
+- A hawker savoury main (fried kway teow, fried carrot cake, oyster omelette) is usually paired with a hawker drink (iced tea, lime juice, cincau) from the same stall, not with another heavy main.
+- A dessert (ais kacang, bubur cha cha, cendol, pengat) is eaten on its own at a dessert/tea-time stall or with a light drink.
 
-REASON: one sentence under 35 words. State how the candidate pairs with SELECTED FOOD, naming a concrete factor (taste, texture, cooking style, meal type, or balancing effect). Describe complementarity, not similarity. No generic claims such as "great match". Do not repeat the warning.
-
-WARNING (only when dietaryStatus is "warning"): under 25 words. Name the missing, uncertain, or cross-contamination information and what to confirm with the seller. Do not claim the food is safe.
-
-OUTPUT: one valid JSON object only - standard JSON, straight double quotes, no markdown, no code fences, no commentary, no trailing commas, no extra fields.
+RULES
+1. Recommend only ids listed in CANDIDATES. Never recommend the SELECTED FOOD. Do not repeat a candidate. Return exactly 5 recommendations whenever CANDIDATES has 5 or more items; if CANDIDATES has fewer than 5, recommend every remaining candidate. Never under-fill the list just because a pairing seems weak - include the best remaining candidate with a lower matchPercentage and an honest reason.
+2. Compare all CANDIDATES with one another before ranking. Choose the combinations that best follow real Malaysian local dining habits, not combinations that are merely theoretically possible.
+3. Use this ranking priority in order:
+   a. Same venue: strongly prefer foods normally available at the same type of Malaysian venue as SELECTED FOOD, such as a kopitiam, mamak, hawker centre, food court, cafe, bakery or restaurant.
+   b. Same meal occasion: strongly prefer foods commonly eaten together during the same breakfast, lunch, dinner, tea-time, supper, snack or dessert occasion.
+   c. Local pairing style: prefer established Malaysian serving and ordering patterns, traditional accompaniments and combinations local diners would recognise as natural.
+   d. Flavour compatibility: use sweetness, spice, richness, freshness and texture only as a secondary factor after venue, occasion and local eating style.
+4. A candidate that shares the same venue and meal occasion with SELECTED FOOD MUST rank above a candidate that only provides flavour contrast. Do not recommend an item mainly because it is sweet, cooling, crispy or refreshing.
+5. For a selected drink, prioritise foods commonly ordered with that drink at the same local venue and time of day - its natural partners are the venue's OWN staples first (e.g. kaya toast, half-boiled eggs, roti bakar at a kopitiam), then a light snack or kuih from that same venue. Never pair it with other full rice or noodle mains, and never fill all five slots with kuih or desserts. For a selected main dish, prioritise its usual local sides, drinks, condiments or desserts from the same dining setting.
+6. Penalise pairings involving unrelated venue types, packaged standalone snacks, ceremonial or festive foods, and items normally eaten at a different meal occasion, unless the combination is genuinely common in Malaysian food culture.
+7. Use the supplied category, cooking style, meal type and main taste together with reliable knowledge of Malaysian food culture. Infer only a general venue type when needed; do not invent a specific restaurant or claim that every venue serves the item.
+8. TOURIST FOOD PREFERENCES (when present) lists tastes and cuisines/categories the tourist likes. It is a LOW-PRIORITY tie-break ONLY: judge same venue, same meal occasion and local pairing style FIRST, and never let preference matching push an unnatural pairing above a natural one. Do not fill all five slots with preference-matched foods just because they match the tourist's taste; at most one or two may be preference-only picks when nothing more natural is available. When the section is absent, rank only by pairing suitability.
+9. matchPercentage must be a whole number from 0-100 (90+ exceptionally common and natural, 80s very good, 70s good, 60s reasonable, below 60 weak or unusual). Rank highest first; ranks start at 1.
+10. reason must be one short sentence explaining the shared Malaysian venue, meal occasion or recognised local pairing style. Mention flavour only when it provides useful secondary support.
+11. Candidates are already dietary-safe for the tourist, so set dietaryStatus "compatible" and warning null.
+12. CANDIDATES is never empty. Return exactly 5 recommendations when at least 5 candidates exist; otherwise return every candidate. If fewer strong pairings exist, fill the remaining positions with the best available unused candidates using lower matchPercentage values and honest reasons. Never return an empty or under-filled recommendations array.
+13. Return ONLY JSON, no markdown, no extra text:
 {
   "recommendations": [
-    {
-      "foodId": <int from CANDIDATES>,
-      "rank": 1,
-      "matchPercentage": 85,
-      "reason": "Concise explanation supported by the supplied data.",
-      "dietaryStatus": "compatible",
-      "warning": null
-    }
+    {"foodId": <int from CANDIDATES>, "rank": 1, "matchPercentage": 85, "reason": "...", "dietaryStatus": "compatible", "warning": null}
   ],
   "message": null
 }
-When no candidate is suitable, return exactly:
-{"recommendations": [], "message": "No suitable food pairings were found for your dietary requirements."}
 ''';
 
   static String _buildDataSection({
     required LocalFood selected,
     required List<LocalFood> candidates,
+    List<String> touristPreferences = const <String>[],
   }) {
     final StringBuffer buffer = StringBuffer();
+
+    if (touristPreferences.isNotEmpty) {
+      buffer.writeln('TOURIST FOOD PREFERENCES');
+      buffer.writeln('- ${touristPreferences.join(', ')}');
+      buffer.writeln();
+    }
 
     buffer.writeln('SELECTED FOOD');
     buffer.writeln(_describeFood(selected));
@@ -264,16 +264,21 @@ When no candidate is suitable, return exactly:
   }
 
   static String _describeFood(LocalFood food) {
-    return '- id ${food.id}: ${food.name} | category: ${_value(food.category)}';
+    final List<String> attributes = <String>[
+      if (food.foodType.isNotEmpty) food.foodType,
+      if (food.category.isNotEmpty) food.category,
+      if (food.cookingStyle.isNotEmpty) food.cookingStyle,
+      if (food.mealType.isNotEmpty) food.mealType,
+      if (food.mainTaste.isNotEmpty) food.mainTaste,
+      ...food.tastes.where((String taste) => taste != food.mainTaste),
+    ];
+    final String detail = attributes.isEmpty
+        ? ''
+        : ' (${attributes.join(', ')})';
+    return '- id ${food.id}: ${food.name}$detail';
   }
-
-  static String _value(String value) =>
-      value.trim().isEmpty ? 'not provided' : value.trim();
 }
 
-/// A Gemini model that is temporarily unavailable (429/5xx) - the signal
-/// `GeminiService._generate` catches to move to the next model in the
-/// rotation instead of failing the request.
 final class _GeminiTransientException implements Exception {
   _GeminiTransientException(this.message);
 

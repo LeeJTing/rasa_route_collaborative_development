@@ -1,18 +1,10 @@
+import 'package:meta/meta.dart' show protected;
+
 import '../core/base_view_model.dart';
+import '../domain_model/landmark_report_reason.dart';
 import '../domain_model/submitted_landmark.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
-
-/// Why a tourist is reporting a submitted-landmark pin. Mirrors the
-/// catalogue's `RestaurantReportReason` (the report feature was first built
-/// for normal restaurant detail, and is now also offered on submitted
-/// landmark pins) - reasons phrased for a tourist-submitted restaurant.
-enum LandmarkReportReason {
-  noLongerExists,
-  incorrectName,
-  incorrectLocation,
-  incorrectOperatingHours,
-  incorrectInformation,
-}
+import 'update_restaurant_facade.dart';
 
 /// ViewModel for `LandmarkPlaceDetailView` - the full-detail page for a
 /// tourist-submitted landmark, opened from the dashboard map's "View
@@ -28,17 +20,50 @@ enum LandmarkReportReason {
 class LandmarkPlaceDetailViewModel extends BaseViewModel {
   LandmarkPlaceDetailViewModel();
 
-  final LandmarkLogicFacade landmarkLogic = LandmarkLogicFacade();
+  @protected
+  LandmarkLogicFacade createLandmarkLogic() => LandmarkLogicFacade();
+
+  late final LandmarkLogicFacade landmarkLogic = createLandmarkLogic();
+
+  /// Broadcasts "this tourist changed the map themselves" (a report just
+  /// froze the landmark they were viewing) so every live dashboard silently
+  /// drops its caches and re-reads - the frozen pin disappears without a
+  /// banner.
+  final UpdateRestaurantFacade mapRefresh = UpdateRestaurantFacade();
 
   int _landmarkId = 0;
   SubmittedLandmark? _landmark;
   bool _reportSubmitted = false;
+  bool _alreadyReported = false;
+  bool _reportFailed = false;
+  bool _requiresSignIn = false;
+  bool _reportFrozePlace = false;
 
   SubmittedLandmark? get landmark => _landmark;
 
-  /// True between a successful [submitReport] and [consumeReportSubmitted] -
-  /// lets the View show its confirmation after the sheet pops.
+  /// True between a successfully-recorded [submitReport] and
+  /// [consumeReportSubmitted] - lets the View show its confirmation after the
+  /// sheet pops. A duplicate report (same tourist, same landmark) records
+  /// [_alreadyReported] instead and does not flip this flag.
   bool get reportSubmitted => _reportSubmitted;
+
+  /// True when [submitReport] found this tourist already reported this pin -
+  /// the View thanks them without counting the report twice.
+  bool get alreadyReported => _alreadyReported;
+
+  /// True when [submitReport] could not reach the backend - the View shows a
+  /// retry message instead of pretending the report went through.
+  bool get reportFailed => _reportFailed;
+
+  /// True when [submitReport] was attempted while signed out - reporting is a
+  /// signed-in feature, so nothing was written and the View asks the tourist
+  /// to sign in.
+  bool get requiresSignIn => _requiresSignIn;
+
+  /// True when THIS report crossed the freeze threshold and froze the
+  /// landmark - the View leaves the page (back to the map) so the now-hidden
+  /// pin is no longer shown.
+  bool get reportFrozePlace => _reportFrozePlace;
 
   /// Set from `MapSelectionHandoff` in the View's `initState`, before
   /// `onInit()` - see that class's doc.
@@ -67,21 +92,51 @@ class LandmarkPlaceDetailViewModel extends BaseViewModel {
     _landmark = landmark;
   });
 
-  /// Records a report against this landmark pin. UI-only stub for now, the
-  /// same as `RestaurantDetailViewModel.submitReport` - a later repository
-  /// iteration will submit the reason through an authenticated RPC and
-  /// enforce the unique-user threshold that freezes a landmark after enough
-  /// reports. The button is only reachable in the ready state (a landmark is
-  /// loaded), so there is no `_landmark == null` guard here - that would also
-  /// block unit-testing the state transition without a loaded landmark.
+  /// Records a report against this landmark pin in the shared `report` table
+  /// (signed-in only; per-tourist dedupe, count bump, freeze once it passes
+  /// the threshold - see `LandmarkSubmissionLogic.submitLandmarkReport`). The
+  /// button is only reachable in the ready state, so there is no
+  /// `_landmark == null` guard here - that would also block unit-testing the
+  /// state transition without a loaded landmark. Failures are surfaced
+  /// through [reportFailed] rather than throwing into the sheet.
   Future<void> submitReport(LandmarkReportReason reason) async {
-    _reportSubmitted = true;
-    safeNotifyListeners();
+    if (_landmarkId <= 0) return;
+    try {
+      final ({bool requiresSignIn, bool alreadyReported, bool frozePlace})
+      outcome = await landmarkLogic.submitLandmarkReport(
+        landmarkId: _landmarkId,
+        reason: reason,
+      );
+      if (outcome.requiresSignIn) {
+        _requiresSignIn = true;
+      } else {
+        _alreadyReported = outcome.alreadyReported;
+        _reportSubmitted = !outcome.alreadyReported;
+        _reportFrozePlace = outcome.frozePlace;
+        if (outcome.frozePlace) {
+          mapRefresh.publishOwnMapDataChanged();
+        }
+      }
+    } catch (_) {
+      _reportFailed = true;
+    } finally {
+      safeNotifyListeners();
+    }
   }
 
   void consumeReportSubmitted() {
-    if (!_reportSubmitted) return;
+    if (!_reportSubmitted &&
+        !_alreadyReported &&
+        !_reportFailed &&
+        !_requiresSignIn &&
+        !_reportFrozePlace) {
+      return;
+    }
     _reportSubmitted = false;
+    _alreadyReported = false;
+    _reportFailed = false;
+    _requiresSignIn = false;
+    _reportFrozePlace = false;
     safeNotifyListeners();
   }
 }

@@ -1,4 +1,6 @@
+import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_pairing.dart';
+import '../../domain_model/food_preference.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
 import '../repositories/food_repository_facade.dart';
@@ -12,12 +14,14 @@ class FoodRecommendationLogic {
     List<LocalFood> catalogue, {
     List<int> touristDietaryRestrictionIds = const <int>[],
     Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
+    List<FoodPreference> touristPreferences = const <FoodPreference>[],
     int maximumResults = 5,
   }) => repository.getPairings(
     food,
     catalogue,
     touristDietaryRestrictionIds: touristDietaryRestrictionIds,
     foodDietaryRestrictionIds: foodDietaryRestrictionIds,
+    touristPreferences: touristPreferences,
     maximumResults: maximumResults,
   );
 
@@ -54,13 +58,67 @@ class FoodRecommendationLogic {
       return score;
     }
 
-    final List<FoodSimilarity> sorted = List<FoodSimilarity>.of(similarities)
-      ..sort(
-        (FoodSimilarity a, FoodSimilarity b) => rank(b).compareTo(rank(a)),
-      );
+    final List<FoodSimilarity> sorted = List<FoodSimilarity>.of(
+      similarities,
+    )..sort((FoodSimilarity a, FoodSimilarity b) => rank(b).compareTo(rank(a)));
     return sorted
         .map((FoodSimilarity s) => byId(s.similarLocalFoodId))
         .whereType<LocalFood>()
         .toList(growable: false);
+  }
+
+  Future<List<LocalFood>> getSimilarFoods(int foodId) async {
+    final List<LocalFood> catalogue = await repository.getFoods();
+    final LocalFood selected = catalogue.firstWhere(
+      (LocalFood food) => food.id == foodId,
+      orElse: () => throw Exception('Local food not found.'),
+    );
+    final List<FoodSimilarity> similarities = await similarTo(
+      selected,
+      catalogue,
+    );
+    final Set<int> favouriteIds = await repository.favouriteFoodIds();
+    final Set<String> preferredTastes = <String>{};
+    for (final LocalFood food in catalogue) {
+      if (favouriteIds.contains(food.id)) preferredTastes.addAll(food.tastes);
+    }
+    final List<LocalFood> ranked = prioritizeSimilar(
+      similarities: similarities,
+      catalogue: catalogue,
+      favouriteIds: favouriteIds,
+      preferredTastes: preferredTastes,
+    );
+    if (ranked.length >= 3) return ranked;
+    final Set<int> rankedIds = ranked.map((LocalFood food) => food.id).toSet();
+    return <LocalFood>[
+      ...ranked,
+      ...catalogue.where(
+        (LocalFood food) => food.id != foodId && !rankedIds.contains(food.id),
+      ),
+    ].take(3).toList(growable: false);
+  }
+
+  Future<List<FoodPairing>> getPairingRecommendations(int foodId) async {
+    final List<LocalFood> catalogue = await repository.getFoods();
+    final LocalFood selected = catalogue.firstWhere(
+      (LocalFood food) => food.id == foodId,
+      orElse: () => throw Exception('Local food not found.'),
+    );
+    final List<DietaryRestriction> restrictions = await repository
+        .touristDietaryRestrictions();
+    final Map<int, List<int>> restrictionIds = await repository
+        .foodDietaryRestrictionIds();
+
+    final List<FoodPreference> preferences = await repository
+        .touristFoodPreferences();
+    return pairingsFor(
+      selected,
+      catalogue,
+      touristDietaryRestrictionIds: restrictions
+          .map((DietaryRestriction restriction) => restriction.id)
+          .toList(growable: false),
+      foodDietaryRestrictionIds: restrictionIds,
+      touristPreferences: preferences,
+    );
   }
 }

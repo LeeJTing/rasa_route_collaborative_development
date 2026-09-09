@@ -235,7 +235,7 @@ class MapRepository {
               APIManager.tableRestaurant,
               columns:
                   'restaurant_id, restaurant_name, latitude, longitude, '
-                  'category, rating, restaurant_image_url',
+                  'category, rating, restaurant_image_url, status',
             ),
             api.selectAll(
               APIManager.tableRestaurantItem,
@@ -255,7 +255,8 @@ class MapRepository {
 
     final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
       for (final Map<String, dynamic> row in restaurants)
-        if (_asInt(row['restaurant_id']) != 0)
+        if (_asInt(row['restaurant_id']) != 0 &&
+            _asString(row['status']).trim().toLowerCase() == 'available')
           _asInt(row['restaurant_id']): row,
     };
 
@@ -315,12 +316,13 @@ class MapRepository {
       );
     }
 
-    // C26: a landmark that reached the report threshold is excluded from map
-    // pins, search results and recommendations.
+    // A landmark that reached the report threshold is frozen (`status`
+    // 'frozen') and excluded from map pins, search results and
+    // recommendations - only 'available' landmarks are shown.
     final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
       for (final Map<String, dynamic> row in landmarks)
         if (_asInt(row['landmark_id']) != 0 &&
-            _asString(row['status']).toLowerCase() != 'hidden')
+            _asString(row['status']).trim().toLowerCase() == 'available')
           _asInt(row['landmark_id']): row,
     };
 
@@ -385,7 +387,7 @@ class MapRepository {
       rows = await api.selectAll(
         APIManager.tableOpeningHours,
         columns:
-            'opening_hours_id, day, opening_time, closing_time, '
+            'opening_hours_id, day, status, opening_time, closing_time, '
             'landmark_id, restaurant_id',
       );
     } catch (_) {
@@ -408,10 +410,19 @@ class MapRepository {
       if (key.isEmpty) continue;
 
       final Weekday? day = _weekday(data.day);
-      if (day == null) continue;
+      final DayStatus? status = _dayStatus(data.status);
+      if (day == null || status == null) continue;
 
-      final int? opensAt = _minutesOfDay(data.openingTime);
-      final int? closesAt = _minutesOfDay(data.closingTime);
+      int? opensAt = _minutesOfDay(data.openingTime);
+      int? closesAt = _minutesOfDay(data.closingTime);
+      if (status == DayStatus.open && opensAt == null && closesAt == null) {
+        opensAt = 0;
+        closesAt = 1440;
+      } else if (status == DayStatus.open &&
+          opensAt == 0 &&
+          data.closingTime?.startsWith('23:59') == true) {
+        closesAt = 1440;
+      }
 
       byPlace
           .putIfAbsent(key, () => <OpeningHour>[])
@@ -419,15 +430,21 @@ class MapRepository {
             OpeningHour(
               id: data.openingHoursId,
               day: day,
-              status: opensAt == null || closesAt == null
-                  ? DayStatus.closed
-                  : DayStatus.open,
-              opensAt: opensAt,
-              closesAt: closesAt,
+              status: status,
+              opensAt: status == DayStatus.open ? opensAt : null,
+              closesAt: status == DayStatus.open ? closesAt : null,
             ),
           );
     }
     return byPlace;
+  }
+
+  DayStatus? _dayStatus(String value) {
+    final String name = value.trim().toLowerCase();
+    for (final DayStatus status in DayStatus.values) {
+      if (status.name == name) return status;
+    }
+    return null;
   }
 
   static Weekday? _weekday(String value) {

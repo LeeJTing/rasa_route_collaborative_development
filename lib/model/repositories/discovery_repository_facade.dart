@@ -2,6 +2,7 @@ import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/origin_verification.dart';
+import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
@@ -13,6 +14,7 @@ import 'food_knowledge_repository.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
 import 'recognition_repository.dart';
+import 'report_repository.dart';
 import 'restaurant_repository.dart';
 import 'swipe_repository.dart';
 
@@ -40,6 +42,9 @@ class DiscoveryRepositoryFacade {
   final AuthRepository auth = AuthRepository();
   final FoodKnowledgeRepository food = FoodKnowledgeRepository();
   final SwipeRepository swipe = SwipeRepository();
+
+  /// Shared tourist report table (kind + place_id + reason).
+  final ReportRepository report = ReportRepository();
 
   /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
   final MapRepository map = MapRepository();
@@ -76,6 +81,9 @@ class DiscoveryRepositoryFacade {
 
   Future<List<LocalFood>> getLocalFoods() => food.getFoods();
 
+  Future<List<LocalFood>> searchLocalFoods(String query) =>
+      food.searchFoods(query);
+
   Future<Set<int>> favouriteFoodIdsForTourist(String touristId) =>
       food.favouriteFoodIdsForTourist(touristId);
 
@@ -95,6 +103,9 @@ class DiscoveryRepositoryFacade {
   Future<List<Region>> malaysiaRegions() => map.malaysiaRegions();
 
   Future<List<FoodOccurrence>> foodOccurrences() => map.foodOccurrences();
+
+  Future<Map<String, List<OpeningHour>>> openingHoursByPlace() =>
+      map.openingHours();
 
   Future<String?> currentTouristId() => auth.currentTouristId();
 

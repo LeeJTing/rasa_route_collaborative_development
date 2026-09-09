@@ -15,7 +15,7 @@ void main() {
 
     setUp(() {
       repository = _FakeDiscoveryRepository();
-      logic = FoodDiscoveryLogic(repository: repository);
+      logic = _TestFoodDiscoveryLogic(repository);
     });
 
     test('localises, personalises, and places restricted food last', () async {
@@ -80,6 +80,15 @@ void main() {
       expect(updated.dislikedFoodIds, isEmpty);
     });
   });
+}
+
+class _TestFoodDiscoveryLogic extends FoodDiscoveryLogic {
+  _TestFoodDiscoveryLogic(this.repository);
+
+  final DiscoveryRepositoryFacade repository;
+
+  @override
+  DiscoveryRepositoryFacade createRepository() => repository;
 }
 
 class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {

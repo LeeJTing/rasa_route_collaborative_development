@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../domain_model/food_pairing.dart';
+import '../../domain_model/food_preference.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
 import '../../shared_client/api_manager/api_manager.dart';
@@ -17,6 +18,7 @@ class RecommendationRepository {
       List<LocalFood> catalogue, {
         List<int> touristDietaryRestrictionIds = const <int>[],
         Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
+        List<FoodPreference> touristPreferences = const <FoodPreference>[],
         int maximumResults = 5,
       }) async {
     final int maxResults = maximumResults < 1
@@ -26,7 +28,7 @@ class RecommendationRepository {
     // Confirmed dietary conflicts are excluded up front - dietary safety
     // outranks pairing quality and is never left to the model alone.
     final Set<int> touristRestrictionIds = touristDietaryRestrictionIds.toSet();
-    final List<LocalFood> candidates = catalogue
+    final List<LocalFood> filtered = catalogue
         .where((LocalFood c) => c.id != food.id)
         .where(
           (LocalFood c) => !_hasDietaryConflict(
@@ -35,20 +37,27 @@ class RecommendationRepository {
         touristRestrictionIds,
       ),
     )
-        .take(40)
         .toList(growable: false);
+        
+    final List<LocalFood> candidates = filtered.toList(growable: false);
     if (candidates.isEmpty) return const <FoodPairing>[];
 
     final String raw = await api.gemini.generateFoodPairings(
       selected: food,
       candidates: candidates,
+      touristPreferences: <String>[
+        for (final FoodPreference preference in touristPreferences)
+          preference.name,
+      ],
     );
-    return parsePairings(
+    final List<FoodPairing> parsed = parsePairings(
       raw,
       selected: food,
       candidates: candidates,
       maximumResults: maxResults,
     );
+
+    return parsed;
   }
 
   /// Whether [candidate]'s `food_dietary_restriction` ids intersect the

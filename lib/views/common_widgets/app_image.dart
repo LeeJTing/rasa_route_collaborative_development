@@ -21,7 +21,7 @@ class AppImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String value = source ?? '';
+    final String value = source?.trim() ?? '';
     final Widget effectiveFallback =
         fallback ??
         const ColoredBox(
@@ -30,6 +30,11 @@ class AppImage extends StatelessWidget {
             child: Icon(Icons.restaurant, color: AppColors.textSecondary),
           ),
         );
+    final Uri? networkUri = Uri.tryParse(value);
+    final bool isNetworkImage =
+        networkUri != null &&
+        (networkUri.scheme == 'http' || networkUri.scheme == 'https') &&
+        networkUri.host.isNotEmpty;
     final Widget image = value.isEmpty
         ? effectiveFallback
         : value.startsWith('assets/')
@@ -39,12 +44,16 @@ class AppImage extends StatelessWidget {
             semanticLabel: semanticLabel,
             errorBuilder: (_, _, _) => effectiveFallback,
           )
-        : Image.network(
+        : isNetworkImage
+        ? Image.network(
             value,
             fit: fit,
             semanticLabel: semanticLabel,
+            loadingBuilder: (_, Widget child, ImageChunkEvent? progress) =>
+                progress == null ? child : effectiveFallback,
             errorBuilder: (_, _, _) => effectiveFallback,
-          );
+          )
+        : effectiveFallback;
     return ClipRRect(borderRadius: borderRadius, child: image);
   }
 }

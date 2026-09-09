@@ -36,6 +36,16 @@ abstract final class AppRoutes {
   static const String profile = '/profile';
   static const String favouriteCollection = '/favourite-collection';
 
+  // --- Tourist profile (ChinShunYon) -----------------------------------------
+
+  /// Edit the tourist's taste / culture preferences.
+  static const String editFoodPreference = '/edit-food-preference';
+
+  /// Edit the tourist's dietary restrictions.
+  static const String editDietaryRestriction = '/edit-dietary-restriction';
+
+  // --- End of Tourist profile (ChinShunYon) ----------------------------------
+
   // --- Food ------------------------------------------------------------------
 
   static const String foodDetail = '/food-detail';
@@ -80,6 +90,8 @@ abstract final class AppRoutes {
     localFoodList,
     profile,
     favouriteCollection,
+    editFoodPreference,
+    editDietaryRestriction,
     foodDetail,
     foodComparison,
     foodRecommendation,

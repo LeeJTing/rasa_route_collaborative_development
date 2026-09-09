@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:rasa_route_collaborative_development/app/config/env.dart';
@@ -27,6 +28,15 @@ class SupabaseService {
     await Supabase.initialize(
       url: Env.supabaseUrl,
       publishableKey: Env.supabasePublishableKey,
+      // Google OAuth returns through the `com.rasaroute.app://login-callback`
+      // deep link; PKCE is the flow that pairs with a custom-scheme redirect
+      // on mobile (and the default here - this makes it explicit). Remember
+      // to whitelist that redirect URL in the Supabase project's auth
+      // settings, or the OAuth redirect is rejected before the app is
+      // reopened.
+      authOptions: const FlutterAuthClientOptions(
+        authFlowType: AuthFlowType.pkce,
+      ),
     );
     _isReady = true;
   }
@@ -166,4 +176,123 @@ class SupabaseService {
     }
     await query;
   }
+
+  // ---------------------------------------------------------------------------
+  // Authentication
+  // ---------------------------------------------------------------------------
+
+  /// Returns the current authentication session as a plain map.
+  ///
+  /// Supabase SDK objects remain inside the external layer.
+  Future<Map<String, dynamic>?> getCurrentAuthSession() async {
+    if (!_isReady) return null;
+
+    final Session? session = Supabase.instance.client.auth.currentSession;
+    final User? user = Supabase.instance.client.auth.currentUser;
+
+    if (session == null || user == null) return null;
+
+    return _authSessionToMap(session: session, user: user);
+  }
+
+  /// Sends an email OTP for passwordless sign-in.
+  ///
+  /// Depending on the Supabase project's auth configuration, a new user may
+  /// be created automatically when the email does not already exist.
+  Future<void> sendEmailOtp({required String email}) async {
+    try {
+      await _client.auth.signInWithOtp(email: email);
+    } on AuthException catch (error) {
+      // Keep the SDK's raw exception (message + statusCode + code) inside the
+      // external layer - an invalid/unknown address is a normal user error,
+      // not something to dump on the sign-in screen.
+      developer.log(
+        'Email OTP send rejected.',
+        name: 'SupabaseService',
+        error: error,
+      );
+      throw Exception(
+        'Unable to send the code. Check that your email address is correct '
+        'and try again.',
+      );
+    }
+  }
+
+  /// Verifies an email OTP and returns the resulting session as a plain map.
+  ///
+  /// Supabase SDK objects do not leave this external layer.
+  ///
+  /// A wrong or expired code arrives as an [AuthException] from the SDK; its
+  /// raw form ("message + statusCode + code") must never be shown to the
+  /// tourist, so it is translated here into a plain, user-facing [Exception]
+  /// before it can leave this layer.
+  Future<Map<String, dynamic>?> verifyEmailOtp({
+    required String email,
+    required String token,
+  }) async {
+    final AuthResponse response;
+    try {
+      response = await _client.auth.verifyOTP(
+        email: email,
+        token: token,
+        type: OtpType.email,
+      );
+    } on AuthException catch (error) {
+      developer.log(
+        'Email OTP verify rejected.',
+        name: 'SupabaseService',
+        error: error,
+      );
+      // Supabase reports both a wrong code and an expired code as
+      // `otp_expired` ("Token has expired or is invalid").
+      if (error.code == 'otp_expired') {
+        throw Exception(
+          'That verification code is invalid or has expired. '
+          'Please try again or request a new code.',
+        );
+      }
+      throw Exception('Unable to verify the code. Please try again.');
+    }
+
+    final Session? session = response.session;
+    final User? user = response.user;
+
+    if (session == null || user == null) return null;
+
+    return _authSessionToMap(session: session, user: user);
+  }
+
+  /// Starts Google OAuth sign-in.
+  ///
+  /// Returns true when Supabase successfully launches the OAuth flow.
+  Future<bool> signInWithGoogle({required String redirectTo}) async {
+    return _client.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: redirectTo,
+    );
+  }
+
+  /// Signs out the current Supabase user.
+  Future<void> signOut() async {
+    await _client.auth.signOut();
+  }
+
+  Map<String, dynamic> _authSessionToMap({
+    required Session session,
+    required User user,
+  }) {
+    return <String, dynamic>{
+      'access_token': session.accessToken,
+      'refresh_token': session.refreshToken,
+      'user_id': user.id,
+      'email': user.email,
+      'expires_at': session.expiresAt == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(
+              session.expiresAt! * 1000,
+              isUtc: true,
+            ).toIso8601String(),
+    };
+  }
+  //End of Authentication -------------------------------------------------------
 }

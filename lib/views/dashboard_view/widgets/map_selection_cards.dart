@@ -242,7 +242,7 @@ class _Header extends StatelessWidget {
                 ? AppColors.pinUserLandmark
                 : AppColors.pinSystemRestaurant,
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: AppSpacing.xs),
           Text(label, style: AppTextStyles.bodySmall),
         ],
       ),
@@ -270,14 +270,14 @@ class _MetaRow extends StatelessWidget {
             size: 12,
             color: AppColors.textSecondary,
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: AppSpacing.xs),
           Text(_distanceLabel(metres), style: AppTextStyles.bodySmall),
         ],
         if (metres != null && rating != null)
           const SizedBox(width: AppSpacing.sm),
         if (rating != null) ...<Widget>[
           const Icon(Icons.star, size: 12, color: AppColors.secondary),
-          const SizedBox(width: 4),
+          const SizedBox(width: AppSpacing.xs),
           Text(rating.toStringAsFixed(1), style: AppTextStyles.bodySmall),
         ],
       ],

@@ -79,6 +79,9 @@ abstract final class AppColors {
 
   static const Color transparent = Color(0x00000000);
 
+  /// Solid backdrop behind the live camera preview and capture controls.
+  static const Color cameraBackground = Color(0xFF000000);
+
   /// [Derived] Scrim behind modal bottom sheets and image overlays.
   static const Color scrim = Color(0x66000000);
 
@@ -124,6 +127,19 @@ abstract final class AppColors {
   static const Color tagNeutralBackground = Color(0xFFF5F5F5);
   static const Color tagNeutralBorder = Color(0xFFE0E0E0);
   static const Color tagNeutralText = Color(0xFF424242);
+
+  // ===========================================================================
+  // Tourist profile (ChinShunYon) - dietary-restriction chips
+  // ===========================================================================
+
+  /// [Figma] Dietary-restriction chip, Matches the mock-up's chip colours.
+  static const Color tagDietaryBackground = Color(0xFFEBF8FF);
+  static const Color tagDietaryBorder = Color(0xFFBEE3F8);
+  static const Color tagDietaryText = Color(0xFF3182CE);
+
+  // ===========================================================================
+  // End of Tourist profile (ChinShunYon)
+  // ===========================================================================
 
   // ---------------------------------------------------------------------------
   // Banners (Quick Mode notice, allergy warning, name-collision caution)

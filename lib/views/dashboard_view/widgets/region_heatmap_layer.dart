@@ -536,10 +536,9 @@ class _HeatmapPainter extends CustomPainter {
     final TextPainter painter = TextPainter(
       text: TextSpan(
         text: _shortNames[code] ?? availability.region.name,
-        style: AppTextStyles.labelSmall.copyWith(
+        style: AppTextStyles.mapMicroLabel.copyWith(
           // Smaller than the label scale's 11: thirteen state names have to
           // share a 155pt-wide peninsula.
-          fontSize: 9,
           color: AppColors.heatmapLabel,
           fontWeight: FontWeight.w700,
           shadows: const <Shadow>[
