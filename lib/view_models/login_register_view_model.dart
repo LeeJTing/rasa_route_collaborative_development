@@ -62,7 +62,17 @@ class LoginRegisterViewModel extends BaseViewModel {
 
   String get email => _email;
 
-  /// True while the entry session check is running - the View shows a splash
+  /// Why the typed address cannot proceed to OTP, or null when it is blank or
+  /// well-formed. Read live by the View so an invalid email blocks the
+  /// Send-OTP button with a reason under the field instead of silently
+  /// navigating to a code screen that can never verify.
+  String? get emailError {
+    final String value = _email.trim();
+    if (value.isEmpty) return null;
+    return touristLogic.emailError(value);
+  }
+
+  /// True once the entry session check is running - the View shows a splash
   /// instead of the form so an already-signed-in tourist never sees the
   /// sign-in screen flash.
   bool get checkingSession => _checkingSession;
@@ -104,7 +114,8 @@ class LoginRegisterViewModel extends BaseViewModel {
   /// the tourist row provisioned). The View navigates to the shell on this.
   bool get googleSignInComplete => _googleSignInComplete;
 
-  bool get canSendOtp => _email.trim().isNotEmpty && !isBusy;
+  bool get canSendOtp =>
+      _email.trim().isNotEmpty && emailError == null && !isBusy;
 
   void setEmail(String value) {
     _email = value;
