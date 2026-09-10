@@ -73,13 +73,12 @@ class APIManager {
   /// the 16 states for Malaysia, one state's districts when drilled into.
   static const String functionRegionDistribution = 'map_region_distribution';
 
-  /// REQ102_15 - the outlines painted for one level of the heatmap. Simplified
-  /// for display; assignment and counting always use the full boundary.
-  static const String functionRegionRings = 'map_region_rings';
-
   /// REQ102_12 - which area one point falls in, decided by the same real
   /// boundaries that assign a restaurant to a state.
   static const String functionRegionAt = 'map_region_at';
+
+  /// REQ102_18-20 - place-name search, scored in Postgres.
+  static const String functionPlaceSearch = 'map_place_search';
   static const String tableFoodDietaryRestriction = 'food_dietary_restriction';
   static const String tableUserDietaryRestriction = 'user_dietary_restriction';
 
@@ -246,6 +245,46 @@ class APIManager {
   /// Turns a Supabase Storage object name into a public HTTPS URL so the UI
   /// can `Image.network` it. Full URLs and bundled `assets/...` paths are
   /// passed through unchanged; empty values become `null`.
+  /// A smaller variant of [url] for a list or a map card, or [url] unchanged
+  /// when no smaller variant can be asked for.
+  ///
+  /// 12,624 of the 12,660 restaurant photos are Google-hosted and end in a size
+  /// suffix - `...=w426-h240-k-no`. Rewriting the two numbers asks Google for
+  /// exactly the pixels the frame needs instead of the 426x240 it serves by
+  /// default: for a 102pt card that is roughly a third of the bytes, on every
+  /// card, with no change to which photo is shown.
+  ///
+  /// Everything else is returned untouched. **Supabase Storage objects would
+  /// need the `/render/image/` endpoint, which is a paid image-transformation
+  /// feature** - if this project has it, the food-image bucket could be served
+  /// the same way; until somebody confirms that, guessing would turn every food
+  /// photo into a 400.
+  static String? thumbnailUrl(String? url, {required int width, int? height}) {
+    final String? trimmed = url?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+
+    // `=w<width>-h<height>` optionally followed by more flags (`-k-no`), at the
+    // very end of the URL. Anchored so a `w`/`h` pair inside the opaque photo
+    // id cannot be mistaken for the size.
+    final RegExp sized = RegExp(r'=w(\d+)-h(\d+)((?:-[a-z][a-z0-9]*)*)$');
+    final RegExpMatch? match = sized.firstMatch(trimmed);
+    if (match == null) return trimmed;
+
+    final int sourceWidth = int.parse(match.group(1)!);
+    final int sourceHeight = int.parse(match.group(2)!);
+    // Never upscale - asking for more pixels than the source has costs bytes
+    // and buys nothing.
+    if (sourceWidth <= width) return trimmed;
+
+    final int targetHeight =
+        height ?? ((sourceHeight * width) / sourceWidth).round();
+    return trimmed.replaceRange(
+      match.start,
+      match.end,
+      '=w$width-h$targetHeight${match.group(3)}',
+    );
+  }
+
   String? resolveImageUrl(String? name, {required String bucket}) {
     final String? trimmed = name?.trim();
     if (trimmed == null || trimmed.isEmpty) return null;

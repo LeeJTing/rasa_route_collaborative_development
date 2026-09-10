@@ -149,7 +149,8 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
   /// The area with the smaller footprint is always the more specific answer.
   RegionAvailability? _regionAt(Offset canvasPoint) {
     if (_size == Size.zero) return null;
-    final HeatmapProjection projection = _projection();
+    final StylisedMalaysiaProjection projection =
+        StylisedMalaysiaProjection.fit(_size);
 
     RegionAvailability? containing;
     double smallestBounds = double.infinity;
@@ -191,9 +192,6 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
 
   /// 12 logical pixels, squared - about half a fingertip.
   static const double _nearestTapRadiusSquared = 144 * 144;
-
-  /// The stylised two-landmass composition for Malaysia.
-  HeatmapProjection _projection() => StylisedMalaysiaProjection.fit(_size);
 
   /// Scales about the middle of the viewport - what the "+" / "-" buttons do
   /// (REQ102_3, REQ102_5).
@@ -263,38 +261,12 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
 // Projection
 // =============================================================================
 
-/// What the heatmap needs of a projection: a point, and a fillable outline.
-abstract class HeatmapProjection {
-  const HeatmapProjection();
-
-  Offset call(double latitude, double longitude);
-
-  /// Pixels per degree of longitude near [longitude].
-  double unitAt(double longitude);
-
-  /// Every part of [region] as one fillable path - Penang's island *and* its
-  /// mainland, all 46 pieces of Sabah.
-  Path pathFor(Region region) {
-    final Path path = Path();
-    for (final List<GeoPoint> ring in region.allRings) {
-      if (ring.length < 3) continue;
-      path.addPolygon(
-        ring
-            .map((GeoPoint point) => call(point.latitude, point.longitude))
-            .toList(growable: false),
-        true,
-      );
-    }
-    return path;
-  }
-}
-
 /// Peninsular Malaysia at full size, Borneo scaled down and moved in beside it.
 ///
 /// Uniform scale *within* each landmass, so neither is stretched - only the gap
 /// between them is fiction. Everything is derived from the widget size, so the
 /// composition fills whatever it is given.
-class StylisedMalaysiaProjection extends HeatmapProjection {
+class StylisedMalaysiaProjection {
   const StylisedMalaysiaProjection._({
     required this.unit,
     required this.peninsulaLeft,
@@ -386,7 +358,6 @@ class StylisedMalaysiaProjection extends HeatmapProjection {
     );
   }
 
-  @override
   Offset call(double latitude, double longitude) {
     if (longitude < splitLongitude) {
       return Offset(
@@ -402,9 +373,23 @@ class StylisedMalaysiaProjection extends HeatmapProjection {
 
   /// Scale in pixels per degree for whichever block [longitude] falls in -
   /// used to size the mottling blobs.
-  @override
   double unitAt(double longitude) =>
       longitude < splitLongitude ? unit : borneoUnit;
+
+  /// The outline of [region] as one fillable path.
+  Path pathFor(Region region) {
+    final Path path = Path();
+    for (int i = 0; i < region.boundary.length; i++) {
+      final GeoPoint point = region.boundary[i];
+      final Offset offset = call(point.latitude, point.longitude);
+      if (i == 0) {
+        path.moveTo(offset.dx, offset.dy);
+      } else {
+        path.lineTo(offset.dx, offset.dy);
+      }
+    }
+    return path..close();
+  }
 }
 
 // =============================================================================
@@ -467,7 +452,8 @@ class _HeatmapPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final HeatmapProjection projection = StylisedMalaysiaProjection.fit(size);
+    final StylisedMalaysiaProjection projection =
+        StylisedMalaysiaProjection.fit(size);
 
     // --- the fills ----------------------------------------------------------
     // Clipped to the coastline so nothing can paint outside Malaysia
@@ -532,7 +518,7 @@ class _HeatmapPainter extends CustomPainter {
   /// REQ102_7 - the tourist's own position. The overview is a stylised
   /// projection, so this dot is "which state you are in", not a survey fix -
   /// which is all it needs to be at country zoom.
-  void _paintTourist(Canvas canvas, HeatmapProjection projection) {
+  void _paintTourist(Canvas canvas, StylisedMalaysiaProjection projection) {
     final double? latitude = touristLatitude;
     final double? longitude = touristLongitude;
     if (latitude == null || longitude == null) return;
@@ -577,7 +563,7 @@ class _HeatmapPainter extends CustomPainter {
 
   /// One path covering every Malaysian landmass, or null before the outlines
   /// have loaded (in which case the fill simply goes unclipped).
-  Path? _coastPath(HeatmapProjection projection) {
+  Path? _coastPath(StylisedMalaysiaProjection projection) {
     if (outlines.isEmpty) return null;
     final Path path = Path();
     for (final CountryOutline outline in outlines) {
@@ -597,7 +583,7 @@ class _HeatmapPainter extends CustomPainter {
   void _paintLabel(
     Canvas canvas,
     Size size,
-    HeatmapProjection projection,
+    StylisedMalaysiaProjection projection,
     RegionAvailability availability,
   ) {
     final String code = availability.region.code;
