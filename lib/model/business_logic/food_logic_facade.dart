@@ -69,7 +69,4 @@ class FoodLogicFacade {
 
   LocalFood? bestDietaryMatch(FoodComparison result) =>
       comparison.bestDietaryMatch(result);
-
-  LocalFood? bestValueFood(FoodComparison result) =>
-      comparison.bestValueFood(result);
 }
