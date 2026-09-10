@@ -196,128 +196,177 @@ class MalaysiaOutlineDataModel implements JsonModel {
   // ===========================================================================
   //
   // [catalogue] traces the coastline tightly, which is what the painted
-  // overview clips to. Masking the *detailed* map with those same rings was
-  // wrong twice over: they are coarse, so they cut real Malaysian land, and
-  // they treated every island as its own cut-out - so the strait between
-  // Penang island and Butterworth came back as a cream stripe through the
-  // middle of George Town.
+  // overview clips its blur to. Using those same rings to mask the *detailed*
+  // map turned out to be wrong: they are coarse, so they cut real Malaysian
+  // land - Langkawi and Tioman vanished entirely, and river mouths and bays
+  // were shaved off.
   //
-  // These are **two continuous rings**, one per landmass. Each is the tight
-  // coastline plus its offshore islands (Langkawi, Penang, Pangkor, Redang and
-  // Perhentian, Tioman; Labuan on the Borneo side), pushed out 0.12 degrees
-  // (~13 km) and then morphologically closed, which bridges the water between
-  // an island and its mainland. The result: sail from Butterworth to George
-  // Town and the map stays continuous.
+  // These rings are the tight ones pushed out by 0.12 degrees (~13 km), plus
+  // the islands the coastline had erased. Erring outward is the right way to be
+  // wrong here: a strip of southern Thailand at the border is a much smaller
+  // problem than a missing Malaysian island.
   //
-  // West and East Malaysia are deliberately left as separate rings. The South
-  // China Sea between them is 5 degrees wide and genuinely is not Malaysia.
-  //
-  // Erring outward is the right way to be wrong here: a strip of southern
-  // Thailand at the border is a much smaller problem than a missing Malaysian
-  // island. Two neighbours cannot be masked at any buffer and stay visible on
-  // purpose - Singapore sits a kilometre across the causeway from Johor, and
-  // Brunei is enclaved inside Sarawak.
+  // Two neighbours cannot be masked at any buffer and are deliberately left
+  // visible: Singapore sits a kilometre across the causeway from Johor, and
+  // Brunei is enclaved inside Sarawak. Hiding either would mean cutting
+  // Malaysian land.
   static const List<MalaysiaOutlineDataModel> maskCatalogue =
       <MalaysiaOutlineDataModel>[
-        MalaysiaOutlineDataModel('Peninsular Malaysia and its islands', <List<double>>[
-          <double>[6.112, 99.462],
-          <double>[6.600, 99.491],
-          <double>[6.664, 99.869],
-          <double>[6.840, 100.117],
-          <double>[6.772, 100.429],
-          <double>[6.817, 100.677],
-          <double>[6.659, 101.000],
-          <double>[6.345, 101.173],
-          <double>[6.175, 101.393],
-          <double>[6.173, 101.536],
-          <double>[6.369, 102.111],
-          <double>[6.305, 102.357],
-          <double>[6.132, 102.575],
-          <double>[6.080, 103.209],
-          <double>[5.439, 103.224],
-          <double>[4.792, 103.539],
-          <double>[4.292, 103.570],
-          <double>[3.819, 103.460],
-          <double>[3.216, 103.558],
-          <double>[3.036, 103.768],
-          <double>[3.070, 104.304],
-          <double>[2.979, 104.416],
-          <double>[2.580, 104.413],
-          <double>[2.411, 104.196],
-          <double>[2.250, 104.130],
-          <double>[1.553, 104.390],
-          <double>[1.277, 104.186],
-          <double>[1.240, 104.096],
-          <double>[1.290, 103.794],
-          <double>[1.151, 103.560],
-          <double>[1.152, 103.459],
-          <double>[1.422, 103.263],
-          <double>[1.713, 102.857],
-          <double>[2.058, 102.137],
-          <double>[2.218, 102.002],
-          <double>[2.492, 101.578],
-          <double>[2.939, 101.217],
-          <double>[3.354, 101.097],
-          <double>[3.931, 100.666],
-          <double>[4.099, 100.392],
-          <double>[4.318, 100.382],
-          <double>[4.541, 100.470],
-          <double>[4.798, 100.456],
-          <double>[4.965, 100.351],
-          <double>[5.042, 100.089],
-          <double>[5.110, 100.027],
-          <double>[5.504, 100.020],
-          <double>[5.710, 100.076],
-          <double>[5.851, 100.041],
-          <double>[5.987, 99.891],
-          <double>[6.014, 99.551],
+        MalaysiaOutlineDataModel('Peninsular Malaysia', <List<double>>[
+          <double>[6.716, 99.990],
+          <double>[6.812, 100.033],
+          <double>[6.837, 100.135],
+          <double>[6.797, 100.325],
+          <double>[6.706, 100.439],
+          <double>[6.801, 100.584],
+          <double>[6.807, 100.704],
+          <double>[6.657, 101.004],
+          <double>[6.365, 101.153],
+          <double>[6.111, 101.379],
+          <double>[6.361, 102.055],
+          <double>[6.316, 102.329],
+          <double>[5.944, 102.630],
+          <double>[5.832, 102.838],
+          <double>[5.412, 103.228],
+          <double>[4.787, 103.540],
+          <double>[4.307, 103.570],
+          <double>[3.819, 103.453],
+          <double>[2.975, 103.568],
+          <double>[2.858, 103.607],
+          <double>[2.487, 103.946],
+          <double>[1.595, 104.381],
+          <double>[1.470, 104.359],
+          <double>[1.280, 104.189],
+          <double>[1.245, 104.066],
+          <double>[1.327, 103.786],
+          <double>[1.166, 103.585],
+          <double>[1.142, 103.486],
+          <double>[1.203, 103.405],
+          <double>[1.398, 103.298],
+          <double>[1.727, 102.838],
+          <double>[2.050, 102.152],
+          <double>[2.209, 102.034],
+          <double>[2.395, 101.675],
+          <double>[2.924, 101.227],
+          <double>[3.300, 101.138],
+          <double>[3.909, 100.683],
+          <double>[4.298, 100.492],
+          <double>[4.819, 100.461],
+          <double>[5.036, 100.358],
+          <double>[5.072, 100.176],
+          <double>[5.168, 100.082],
+          <double>[5.431, 100.082],
+          <double>[5.589, 100.256],
+          <double>[6.058, 100.185],
+          <double>[6.396, 100.000],
         ]),
-        MalaysiaOutlineDataModel('Borneo and Labuan', <List<double>>[
-          <double>[1.536, 109.501],
-          <double>[2.059, 109.520],
-          <double>[2.155, 109.582],
-          <double>[2.161, 109.684],
-          <double>[1.873, 110.350],
-          <double>[1.862, 110.799],
-          <double>[2.010, 111.125],
-          <double>[2.173, 111.304],
-          <double>[2.680, 111.554],
-          <double>[3.381, 113.057],
-          <double>[3.840, 113.597],
-          <double>[4.485, 113.899],
-          <double>[4.712, 114.143],
-          <double>[5.090, 114.925],
-          <double>[5.449, 115.116],
-          <double>[5.404, 115.490],
-          <double>[5.485, 115.672],
-          <double>[6.052, 115.974],
-          <double>[6.775, 116.588],
-          <double>[7.139, 116.731],
-          <double>[7.045, 117.093],
-          <double>[6.764, 117.231],
-          <double>[6.626, 117.513],
-          <double>[6.261, 117.692],
-          <double>[5.992, 118.127],
-          <double>[5.594, 118.572],
-          <double>[5.432, 119.192],
-          <double>[5.359, 119.263],
-          <double>[5.249, 119.246],
-          <double>[4.787, 118.796],
-          <double>[4.642, 118.769],
-          <double>[4.413, 118.840],
-          <double>[4.304, 118.750],
-          <double>[4.130, 117.957],
-          <double>[4.197, 117.301],
-          <double>[4.130, 116.696],
-          <double>[4.397, 115.941],
-          <double>[4.349, 115.717],
-          <double>[2.948, 114.876],
-          <double>[2.322, 114.371],
-          <double>[1.436, 113.137],
-          <double>[1.272, 112.540],
-          <double>[1.003, 111.905],
-          <double>[0.730, 110.696],
-          <double>[0.854, 110.029],
+        MalaysiaOutlineDataModel('Borneo', <List<double>>[
+          <double>[2.055, 109.520],
+          <double>[2.152, 109.576],
+          <double>[2.160, 109.688],
+          <double>[1.868, 110.349],
+          <double>[1.842, 110.758],
+          <double>[2.020, 111.151],
+          <double>[2.217, 111.348],
+          <double>[2.688, 111.568],
+          <double>[3.360, 113.033],
+          <double>[3.835, 113.603],
+          <double>[4.468, 113.890],
+          <double>[4.709, 114.139],
+          <double>[5.125, 114.992],
+          <double>[5.211, 115.460],
+          <double>[5.448, 115.679],
+          <double>[6.056, 115.977],
+          <double>[6.800, 116.608],
+          <double>[7.134, 116.720],
+          <double>[7.064, 117.058],
+          <double>[6.962, 117.139],
+          <double>[6.744, 117.161],
+          <double>[6.666, 117.451],
+          <double>[6.592, 117.532],
+          <double>[6.281, 117.648],
+          <double>[5.989, 118.130],
+          <double>[5.561, 118.607],
+          <double>[5.392, 119.246],
+          <double>[5.235, 119.235],
+          <double>[4.935, 118.935],
+          <double>[4.807, 118.566],
+          <double>[4.674, 118.727],
+          <double>[4.474, 118.827],
+          <double>[4.368, 118.828],
+          <double>[4.303, 118.746],
+          <double>[4.133, 117.976],
+          <double>[4.199, 117.301],
+          <double>[4.131, 116.714],
+          <double>[4.472, 115.682],
+          <double>[4.030, 115.548],
+          <double>[3.517, 115.182],
+          <double>[2.945, 114.873],
+          <double>[2.304, 114.352],
+          <double>[1.451, 113.168],
+          <double>[1.267, 112.520],
+          <double>[1.010, 111.928],
+          <double>[0.903, 111.307],
+          <double>[0.735, 110.734],
+          <double>[0.832, 110.080],
+          <double>[1.475, 109.526],
+        ]),
+        MalaysiaOutlineDataModel('Labuan', <List<double>>[
+          <double>[5.340, 115.055],
+          <double>[5.433, 115.093],
+          <double>[5.464, 115.188],
+          <double>[5.415, 115.354],
+          <double>[5.335, 115.385],
+          <double>[5.165, 115.355],
+          <double>[5.116, 115.194],
+          <double>[5.144, 115.102],
+        ]),
+        MalaysiaOutlineDataModel('Langkawi', <List<double>>[
+          <double>[6.520, 99.580],
+          <double>[6.520, 99.980],
+          <double>[6.130, 99.980],
+          <double>[6.130, 99.580],
+        ]),
+        MalaysiaOutlineDataModel('Tioman', <List<double>>[
+          <double>[2.950, 104.020],
+          <double>[2.950, 104.300],
+          <double>[2.620, 104.300],
+          <double>[2.620, 104.020],
+        ]),
+        MalaysiaOutlineDataModel('Redang and Perhentian', <List<double>>[
+          <double>[6.000, 102.620],
+          <double>[6.000, 103.120],
+          <double>[5.680, 103.120],
+          <double>[5.680, 102.620],
+        ]),
+      ];
+
+  /// The islands **no** boundary dataset contains - not the hand-drawn
+  /// coastline, and not the real geoBoundaries rings either.
+  ///
+  /// Kept apart from [maskCatalogue] because they are needed twice: appended to
+  /// the real outline that `map_country_rings` serves, and again to the
+  /// hand-drawn fallback when that outline cannot be fetched. Without them a
+  /// diver at Sipadan gets cream instead of a map, and is told they are not in
+  /// Malaysia.
+  static const List<MalaysiaOutlineDataModel> outlyingIslands =
+      <MalaysiaOutlineDataModel>[
+        // Sipadan, Mabul and Ligitan, off Semporna - 27 km outside the real
+        // ADM1 ring. The box stops well east of Sebatik, the nearest
+        // Indonesian land.
+        MalaysiaOutlineDataModel('Semporna islands', <List<double>>[
+          <double>[4.350, 118.500],
+          <double>[4.350, 118.750],
+          <double>[4.050, 118.750],
+          <double>[4.050, 118.500],
+        ]),
+        // Pulau Payar, the marine park south of Langkawi - 17 km outside.
+        // Sits below Langkawi's box and well south of Thai waters.
+        MalaysiaOutlineDataModel('Payar', <List<double>>[
+          <double>[6.150, 99.850],
+          <double>[6.150, 100.020],
+          <double>[5.980, 100.020],
+          <double>[5.980, 99.850],
         ]),
       ];
 }

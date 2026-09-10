@@ -243,74 +243,6 @@ class DashboardViewModel extends BaseViewModel {
   /// REQ102_12 - "the predefined zoom level", as a canvas scale factor.
   double get heatmapDetailScale => DiscoveryLogicFacade.heatmapDetailScale;
 
-  /// The state the heatmap has been drilled into, or null at country level.
-  String? _heatmapParentCode;
-  String? _heatmapParentName;
-
-  String? get heatmapParentCode => _heatmapParentCode;
-
-  /// "Selangor" while the heatmap is showing Selangor's districts - what the
-  /// View puts on the back control.
-  String? get heatmapParentName => _heatmapParentName;
-
-  bool get isDistrictLevel => _distribution.isDistrictLevel;
-
-  /// Guards the drill against being started twice by one pinch - see
-  /// [drillIntoRegion].
-  bool _drilling = false;
-
-  /// REQ102_12 - drop into the districts of one state.
-  ///
-  /// The whole heatmap is **recounted** for that state: the districts carry
-  /// their own numbers, and the colour ramp re-spreads across them, so a quiet
-  /// district of a busy state is grey rather than dark green. Falls through to
-  /// the detailed map when the state has no districts to show.
-  Future<void> drillIntoRegion(RegionAvailability availability) async {
-    if (isDetailedView) return;
-    if (_heatmapParentCode == availability.region.code) return;
-    // The canvas reports the threshold from both `onInteractionEnd` and the
-    // "+" button, and fetching the districts is a round trip. Without this a
-    // single pinch can start two drills, and the slower one lands on a heatmap
-    // the faster one has already replaced.
-    if (_drilling) return;
-    _drilling = true;
-
-    try {
-      final Region region = availability.region;
-      final List<Region> districts = await discoveryLogic.districtsOf(
-        region.code,
-      );
-      if (districts.isEmpty) {
-        openRegion(availability);
-        return;
-      }
-
-      _heatmapParentCode = region.code;
-      _heatmapParentName = region.name;
-      _selectedRegion = null;
-      // Back to the resting scale, so the districts arrive filling the screen
-      // rather than at the scale that triggered the drop.
-      _heatmapResetToken++;
-      _heatmapScale = 1;
-      safeNotifyListeners();
-      await _loadHeatmap();
-    } finally {
-      _drilling = false;
-    }
-  }
-
-  /// Back out of a state's districts to the country view.
-  Future<void> leaveDistrictLevel() async {
-    if (_heatmapParentCode == null) return;
-    _heatmapParentCode = null;
-    _heatmapParentName = null;
-    _selectedRegion = null;
-    _heatmapResetToken++;
-    _heatmapScale = 1;
-    safeNotifyListeners();
-    await _loadHeatmap();
-  }
-
   /// Reported by the canvas so the "+" / "-" buttons enable correctly.
   void onHeatmapScaleChanged(double scale) {
     if ((_heatmapScale - scale).abs() < 0.001) return;
@@ -557,6 +489,17 @@ class DashboardViewModel extends BaseViewModel {
 
   /// REQ102_9 - only once a fix inside Malaysia has been obtained.
   bool get showFindMeButton => _locationInMalaysia && _sharedLocation.isKnown;
+
+  /// REQ102_7 / A3 - whether to draw the tourist's own position at all.
+  ///
+  /// **A known fix is not enough; it has to be inside Malaysia.** Both surfaces
+  /// only cover this country - the overview is a stylised projection of it, and
+  /// the detailed map masks everything else out - so a fix in Singapore or
+  /// Jakarta gets drawn at whatever those coordinates map to *inside* the
+  /// frame, which is a position the tourist is not at. Showing nothing is the
+  /// honest answer, and A3 already explains why with a notice.
+  bool get showCurrentLocation =>
+      _sharedLocation.isKnown && _locationInMalaysia;
 
   bool _swipePanelExpanded = false;
 
@@ -979,10 +922,6 @@ class DashboardViewModel extends BaseViewModel {
       if (next == DashboardMapMode.heatmap) {
         _heatmapResetToken++;
         _heatmapScale = 1;
-        // Coming back from the detailed map lands on the country, not on
-        // whichever state's districts were open when it was left.
-        _heatmapParentCode = null;
-        _heatmapParentName = null;
         _leaveSwipeModeForHeatmap();
       }
       safeNotifyListeners();
@@ -1609,11 +1548,6 @@ class DashboardViewModel extends BaseViewModel {
     _distribution = await discoveryLogic.foodDistribution(
       filter: _filter,
       localFoodId: _selectedFood?.id,
-      level: _heatmapParentCode == null
-          ? Region.stateLevel
-          : Region.districtLevel,
-      parentCode: _heatmapParentCode,
-      parentName: _heatmapParentName,
     );
   }, silent: _distribution.regions.isNotEmpty);
 
@@ -1795,10 +1729,6 @@ class DashboardViewModel extends BaseViewModel {
       if (next == DashboardMapMode.heatmap) {
         _heatmapResetToken++;
         _heatmapScale = 1;
-        // Coming back from the detailed map lands on the country, not on
-        // whichever state's districts were open when it was left.
-        _heatmapParentCode = null;
-        _heatmapParentName = null;
         _leaveSwipeModeForHeatmap();
       }
     }

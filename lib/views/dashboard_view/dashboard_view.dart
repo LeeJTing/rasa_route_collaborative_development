@@ -231,28 +231,21 @@ class _DashboardViewState extends State<DashboardView> {
                   onScaleChanged: viewModel.onHeatmapScaleChanged,
                   detailScale: viewModel.heatmapDetailScale,
                   resetToken: viewModel.heatmapResetToken,
-                  touristLatitude: viewModel.location.isKnown
+                  // REQ102_7 / A3 - shown only when the fix is known *and*
+                  // inside Malaysia. This map covers one country; a dot for a
+                  // tourist in Singapore or Jakarta would be drawn at whatever
+                  // the stylised projection maps their coordinates to, which is
+                  // somewhere in Malaysia. Better to show nothing than to show
+                  // them somewhere they are not.
+                  touristLatitude: viewModel.showCurrentLocation
                       ? viewModel.location.latitude
                       : null,
-                  touristLongitude: viewModel.location.isKnown
+                  touristLongitude: viewModel.showCurrentLocation
                       ? viewModel.location.longitude
                       : null,
                 )
               : _map(viewModel),
         ),
-
-        // REQ102_12 - the way back up a level. Without it the only way out of
-        // a state's districts is to open the detailed map and come back, which
-        // loses the tourist's place.
-        if (viewModel.isHeatmapView && viewModel.heatmapParentName != null)
-          Positioned(
-            left: AppSpacing.lg,
-            top: AppSpacing.lg,
-            child: _HeatmapLevelChip(
-              label: viewModel.heatmapParentName!,
-              onBack: viewModel.leaveDistrictLevel,
-            ),
-          ),
 
         if (viewModel.isHeatmapView)
           Positioned(
@@ -585,8 +578,9 @@ class _DashboardViewState extends State<DashboardView> {
                 .toList(growable: false),
           ),
 
-          // The tourist's own position (REQ102_7).
-          if (viewModel.location.isKnown)
+          // The tourist's own position (REQ102_7), and only when that position
+          // is inside Malaysia (A3) - see `showCurrentLocation`.
+          if (viewModel.showCurrentLocation)
             MarkerLayer(
               markers: <Marker>[
                 Marker(
@@ -944,49 +938,6 @@ class _CustomCoordinatesDialogState extends State<_CustomCoordinatesDialog> {
 /// optional [subtitle] carries the heatmap's own count for the state under the
 /// map, so the number of pins can be read against the state total rather than
 /// mistaken for it.
-/// REQ102_12 - which state's districts are on screen, and the way back to the
-/// country view.
-class _HeatmapLevelChip extends StatelessWidget {
-  const _HeatmapLevelChip({required this.label, required this.onBack});
-
-  final String label;
-  final VoidCallback onBack;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: AppColors.surface,
-    borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
-    elevation: 1,
-    child: InkWell(
-      onTap: onBack,
-      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.xs,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(
-              Icons.arrow_back,
-              size: 14,
-              color: AppColors.textSecondary,
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Text(
-              label,
-              style: AppTextStyles.labelSmall.copyWith(
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
 class _PinCoverageChip extends StatelessWidget {
   const _PinCoverageChip({required this.message, this.subtitle});
 
