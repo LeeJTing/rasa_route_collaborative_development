@@ -52,9 +52,9 @@ class FoodKnowledgeRepository {
   // Catalogue cache
   // ---------------------------------------------------------------------------
   //
-  // `getFoods` is a wide nested select plus a favourites lookup, and the map
-  // called it on every pan. The catalogue itself is effectively static at
-  // runtime - only favourites move, and [toggleFavourite] clears this.
+  // The catalogue query is wide and the map can request it repeatedly. Public
+  // food data is effectively static at runtime, so only that portion is
+  // cached. Favourite ids are fetched and overlaid for the current tourist.
   //
   // Static so every screen shares one copy, however many facades exist.
 
@@ -64,8 +64,8 @@ class FoodKnowledgeRepository {
   static DateTime? _cachedFoodsAt;
   static Future<List<LocalFood>>? _foodsRequest;
 
-  /// Drops the cached catalogue. Called by [toggleFavourite]; call it too after
-  /// anything else that writes to `local_food`.
+  /// Drops only the public catalogue cache. Favourite state is deliberately
+  /// overlaid per request so it can never leak between signed-in tourists.
   static void invalidate() {
     _cachedFoods = null;
     _cachedFoodsAt = null;
@@ -100,7 +100,22 @@ class FoodKnowledgeRepository {
 
   /// The whole catalogue, cached for [cacheTtl]. Concurrent callers share one
   /// request instead of each firing their own.
-  Future<List<LocalFood>> getFoods() {
+  Future<List<LocalFood>> getFoods() async {
+    final List<Object> results = await Future.wait(<Future<Object>>[
+      _getCatalogueFoods(),
+      _getFavouriteFoodIdsSafely(),
+    ]);
+    final List<LocalFood> foods = results[0] as List<LocalFood>;
+    final Set<int> favouriteIds = results[1] as Set<int>;
+    return foods
+        .map(
+          (LocalFood food) =>
+              food.copyWith(isFavourite: favouriteIds.contains(food.id)),
+        )
+        .toList(growable: false);
+  }
+
+  Future<List<LocalFood>> _getCatalogueFoods() {
     final List<LocalFood>? cached = _cachedFoods;
     if (cached != null &&
         _cachedFoodsAt != null &&
@@ -118,28 +133,13 @@ class FoodKnowledgeRepository {
 
   Future<List<LocalFood>> _fetchFoods() async {
     try {
-      // Independent of each other, so they go together.
-      final List<Map<String, dynamic>> rows;
-      final Set<int> favouriteIds;
-      final List<Object> results = await Future.wait(<Future<Object>>[
-        api.selectAll(
-          APIManager.tableLocalFood,
-          columns: _selectColumns,
-          orderBy: 'food_name',
-        ),
-        _getFavouriteFoodIdsSafely(),
-      ]);
-      rows = results[0] as List<Map<String, dynamic>>;
-      favouriteIds = results[1] as Set<int>;
+      final List<Map<String, dynamic>> rows = await api.selectAll(
+        APIManager.tableLocalFood,
+        columns: _selectColumns,
+        orderBy: 'food_name',
+      );
       return rows
-          .map(
-            (Map<String, dynamic> row) => _toDomain(
-              row,
-              isFavourite: favouriteIds.contains(
-                JsonReader.asInt(row['local_food_id']),
-              ),
-            ),
-          )
+          .map((Map<String, dynamic> row) => _toDomain(row, isFavourite: false))
           .toList(growable: false);
     } catch (error, stackTrace) {
       developer.log(
@@ -302,14 +302,12 @@ class FoodKnowledgeRepository {
             'local_food_id': localFoodId,
           },
         );
-        invalidate();
         return false;
       } else {
         await api.insertRow(APIManager.tableFavouriteFood, <String, dynamic>{
           'tourist_id': touristId,
           'local_food_id': localFoodId,
         });
-        invalidate();
         return true;
       }
     } catch (_) {

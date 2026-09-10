@@ -1,4 +1,5 @@
 import 'dart:developer' as developer;
+import 'dart:math' as math;
 
 import 'package:meta/meta.dart' show protected, visibleForTesting;
 
@@ -226,10 +227,68 @@ class RestaurantRepository {
     }
   }
 
+  /// Loads only restaurant summaries inside a server-filtered coordinate box.
+  ///
+  /// The repository deliberately uses a bounding box rather than pretending
+  /// latitude/longitude degrees are an exact distance. Business logic applies
+  /// the precise Haversine radius after this inexpensive Supabase pre-filter.
+  Future<List<Restaurant>> getRestaurantsNear({
+    required double latitude,
+    required double longitude,
+    required double maximumDistanceKm,
+  }) async {
+    if (maximumDistanceKm <= 0) return const <Restaurant>[];
+    const double kilometresPerLatitudeDegree = 110.574;
+    const double kilometresPerLongitudeDegreeAtEquator = 111.320;
+    final double latitudeDelta =
+        maximumDistanceKm / kilometresPerLatitudeDegree;
+    final double longitudeScale = math.cos(latitude * math.pi / 180).abs();
+    final double longitudeDelta =
+        maximumDistanceKm /
+        (kilometresPerLongitudeDegreeAtEquator *
+            math.max(longitudeScale, 0.01));
+
+    try {
+      final List<Restaurant> restaurants = <Restaurant>[];
+      int rangeStart = 0;
+      while (true) {
+        final List<Map<String, dynamic>> rows = await api.selectAll(
+          APIManager.tableRestaurant,
+          columns: _summaryColumns,
+          gte: <String, num>{
+            'latitude': latitude - latitudeDelta,
+            'longitude': longitude - longitudeDelta,
+          },
+          lte: <String, num>{
+            'latitude': latitude + latitudeDelta,
+            'longitude': longitude + longitudeDelta,
+          },
+          orderBy: 'restaurant_id',
+          rangeStart: rangeStart,
+          rangeEnd: rangeStart + _cataloguePageSize - 1,
+        );
+        restaurants.addAll(rows.map(_toDomain));
+        if (rows.length < _cataloguePageSize) break;
+        rangeStart += _cataloguePageSize;
+      }
+      return List<Restaurant>.unmodifiable(restaurants);
+    } catch (error, stackTrace) {
+      developer.log(
+        'Nearby restaurant summary query failed.',
+        name: 'RestaurantRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load nearby restaurants. Check your connection and try again.',
+      );
+    }
+  }
+
   /// Loads menu details only for the restaurants Quick Mode will display.
   ///
-  /// Distance selection must consider the full catalogue, but downloading
-  /// every nested menu would make that first query unnecessarily large.
+  /// Distance selection uses nearby summaries, but downloading every nested
+  /// menu for those candidates would still make the first query too large.
   Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) async {
     if (restaurantIds.isEmpty) return const <Restaurant>[];
     try {

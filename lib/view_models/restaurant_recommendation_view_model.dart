@@ -21,11 +21,15 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   @protected
   DateTime currentTime() => DateTime.now();
 
-  late final DiscoveryLogicFacade discoveryLogic = createDiscoveryLogic();
-  final CurrentLocationFacade locationFacade = CurrentLocationFacade();
-  final UpdateRestaurantFacade restaurantFacade = UpdateRestaurantFacade();
+  @protected
+  CurrentLocationFacade createLocationFacade() => CurrentLocationFacade();
 
-  static const int _restaurantLimit = 20;
+  @protected
+  UpdateRestaurantFacade createRestaurantFacade() => UpdateRestaurantFacade();
+
+  late final DiscoveryLogicFacade discoveryLogic = createDiscoveryLogic();
+  late final CurrentLocationFacade locationFacade = createLocationFacade();
+  late final UpdateRestaurantFacade restaurantFacade = createRestaurantFacade();
 
   /// Minimum gap between BACKGROUND reloads (a GPS fix or a monitor
   /// notification). The location stream can emit a fix for every few metres of
@@ -43,6 +47,8 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   RestaurantSource _source = RestaurantSource.google;
   final Set<int> _expandedRestaurantIds = <int>{};
   final Set<int> _expandedLandmarkIds = <int>{};
+  bool _isLoadingNearby = false;
+  bool _reloadNearbyRequested = false;
 
   DateTime? _lastBackgroundReloadAt;
   bool _reloadInFlight = false;
@@ -69,21 +75,31 @@ class RestaurantRecommendationViewModel extends BaseViewModel
     await loadNearbyRestaurants();
   }
 
-  Future<void> loadNearbyRestaurants() => runGuarded(() async {
-    final List<Object> results = await Future.wait(<Future<Object>>[
-      discoveryLogic.getQuickModeRestaurants(
-        location: _location,
-        limit: _restaurantLimit,
-      ),
-      discoveryLogic.getQuickModeLandmarks(
-        location: _location,
-        limit: _restaurantLimit,
-      ),
-    ]);
-    _restaurants = results[0] as List<Restaurant>;
-    _landmarks = results[1] as List<SubmittedLandmarkRecommendation>;
-    _sort();
-  });
+  Future<void> loadNearbyRestaurants() async {
+    if (_isLoadingNearby) {
+      _reloadNearbyRequested = true;
+      return;
+    }
+    _isLoadingNearby = true;
+    try {
+      do {
+        _reloadNearbyRequested = false;
+        final TouristLocation requestedLocation = _location;
+        await runGuarded(() async {
+          final List<Object> results = await Future.wait(<Future<Object>>[
+            discoveryLogic.getQuickModeRestaurants(location: requestedLocation),
+            discoveryLogic.getQuickModeLandmarks(location: requestedLocation),
+          ]);
+          if (_reloadNearbyRequested || requestedLocation != _location) return;
+          _restaurants = results[0] as List<Restaurant>;
+          _landmarks = results[1] as List<SubmittedLandmarkRecommendation>;
+          _sort();
+        });
+      } while (_reloadNearbyRequested);
+    } finally {
+      _isLoadingNearby = false;
+    }
+  }
 
   /// Reload because a background event said the answer may have changed - a
   /// GPS fix, or the restaurant monitor noticing new data. These can arrive
@@ -94,15 +110,18 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   /// finishes, so the newest position is never dropped - only bursty requests
   /// are.
   void _reloadFromBackground() {
+    // Never discard a location or monitor change that arrives while the
+    // current request is still resolving. Queue one trailing refresh first;
+    // the cooldown only suppresses separate completed request bursts.
+    if (_reloadInFlight) {
+      _reloadQueued = true;
+      return;
+    }
     final DateTime now = currentTime();
     final DateTime? last = _lastBackgroundReloadAt;
     if (last != null && now.difference(last) < _backgroundReloadCooldown) {
       // Too soon after the last background reload - the fix is remembered
       // (we already stored _location) and the NEXT allowed reload will use it.
-      return;
-    }
-    if (_reloadInFlight) {
-      _reloadQueued = true;
       return;
     }
     _lastBackgroundReloadAt = now;

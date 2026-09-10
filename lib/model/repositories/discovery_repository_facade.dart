@@ -63,6 +63,16 @@ class DiscoveryRepositoryFacade {
 
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 
+  Future<List<Restaurant>> getRestaurantsNear({
+    required double latitude,
+    required double longitude,
+    required double maximumDistanceKm,
+  }) => restaurant.getRestaurantsNear(
+    latitude: latitude,
+    longitude: longitude,
+    maximumDistanceKm: maximumDistanceKm,
+  );
+
   Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) =>
       restaurant.getRestaurantsByIds(restaurantIds);
 
@@ -78,6 +88,9 @@ class DiscoveryRepositoryFacade {
 
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
       restaurant.getRestaurantById(restaurantId);
+
+  Future<void> reactivateRestaurantFromClosure(int restaurantId) =>
+      restaurant.reactivateRestaurantFromClosure(restaurantId);
 
   Future<List<LocalFood>> getLocalFoods() => food.getFoods();
 
@@ -112,6 +125,8 @@ class DiscoveryRepositoryFacade {
   Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
     Set<String>? placeKeys,
   }) => map.openingHours(placeKeys: placeKeys);
+
+  void clearMapCache() => map.clearCache();
 
   Future<String?> currentTouristId() => auth.currentTouristId();
 

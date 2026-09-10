@@ -31,7 +31,6 @@ class _FakeDiscoveryFacade extends DiscoveryLogicFacade {
   @override
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
-    required int limit,
   }) async {
     restaurantCalls++;
     observedLocations.add(location);
@@ -46,7 +45,6 @@ class _FakeDiscoveryFacade extends DiscoveryLogicFacade {
   @override
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
-    required int limit,
   }) async {
     landmarkCalls++;
     return const <SubmittedLandmarkRecommendation>[];
