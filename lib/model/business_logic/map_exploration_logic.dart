@@ -8,6 +8,7 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
+import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
 import 'dart:math' as math;
@@ -695,8 +696,22 @@ class MapExplorationLogic {
   }) async {
     final int? id = int.tryParse(pin.referenceId);
     if (id == null || id <= 0) return pin;
-    if (pin.kind != MapPinKind.restaurant) return pin;
 
+    if (pin.kind == MapPinKind.restaurant) {
+      return _restaurantPinDetail(pin, id, filter: filter, localFoodId: localFoodId);
+    } else if (pin.kind == MapPinKind.landmark) {
+      return _landmarkPinDetail(pin, id, filter: filter, localFoodId: localFoodId);
+    }
+
+    return pin;
+  }
+
+  Future<MapPin> _restaurantPinDetail(
+    MapPin pin,
+    int id, {
+    ExplorationFilter filter = ExplorationFilter.none,
+    int? localFoodId,
+  }) async {
     final Restaurant? restaurant;
     final List<RestaurantItem> items;
     final Map<String, List<OpeningHour>> hours;
@@ -762,7 +777,68 @@ class MapExplorationLogic {
             : served,
       ),
       priceRange: _priceRangeOf(prices),
-      openNow: _openNow(hours['restaurant:$id']),
+      openNow: openNow(hours['restaurant:$id']),
+      distanceMetres: pin.distanceMetres,
+    );
+  }
+
+  Future<MapPin> _landmarkPinDetail(
+    MapPin pin,
+    int id, {
+    ExplorationFilter filter = ExplorationFilter.none,
+    int? localFoodId,
+  }) async {
+    final SubmittedLandmark? landmark;
+    try {
+      landmark = await repository.getSubmittedLandmarkById(id);
+    } catch (_) {
+      return pin;
+    }
+    if (landmark == null) return pin;
+
+    // A landmark's items are already in its items list. Filter them the same
+    // way restaurant items are filtered.
+    final List<LocalFood> catalogue = await repository.getLocalFoods();
+    final Map<int, String> nameById = <int, String>{
+      for (final LocalFood food in catalogue) food.id: food.name,
+    };
+    final Set<int> wanted = <int>{
+      for (final LocalFood food in catalogue)
+        if ((localFoodId == null || food.id == localFoodId) &&
+            matchesFilter(food, filter))
+          food.id,
+    };
+    final bool narrowed = localFoodId != null || filter.selectionCount > 0;
+
+    final List<String> served = <String>[];
+    final List<double> prices = <double>[];
+    for (final LandmarkItem item in landmark.items) {
+      final bool matches = wanted.contains(item.localFoodId);
+      if (narrowed && !matches) continue;
+      final String name = (nameById[item.localFoodId] ?? item.dish).trim();
+      if (name.isNotEmpty && !served.contains(name)) served.add(name);
+      final double? price = item.price;
+      if (price != null && price > 0) prices.add(price);
+    }
+
+    return MapPin(
+      referenceId: pin.referenceId,
+      kind: pin.kind,
+      latitude: pin.latitude,
+      longitude: pin.longitude,
+      label: landmark.name.isEmpty ? pin.label : landmark.name,
+      weight: served.isEmpty ? pin.weight : served.length,
+      imageUrl: landmark.imageUrl ?? pin.imageUrl,
+      thumbnailUrl: pin.thumbnailUrl,
+      category: landmark.category.isEmpty ? null : landmark.category,
+      rating: pin.rating, // Landmarks don't have star ratings yet.
+      servedFoods: List<String>.unmodifiable(
+        served.length > maximumServedFoods
+            ? served.sublist(0, maximumServedFoods)
+            : served,
+      ),
+      priceRange: _priceRangeOf(prices),
+      openNow: openNow(landmark.openingHours),
       distanceMetres: pin.distanceMetres,
     );
   }
@@ -801,34 +877,56 @@ class MapExplorationLogic {
 
   /// Is the place open at this moment (UC300 C12)?
   ///
-  /// Returns **null when there is nothing on record** - the sheet says "Hours
-  /// unknown" rather than claiming the place is shut. A row whose times are
-  /// missing is a closed day; a range that ends before it starts has run past
-  /// midnight.
-  static bool? _openNow(List<OpeningHour>? hours) {
+  /// Returns:
+  /// * null - **Unknown** (no records today, or any record is `DayStatus.unknown`)
+  /// * true - **Opening** (at least one Open record covers the current local time)
+  /// * false - **Closed** (all Open records are outside current time, or status is `closed`)
+  static bool? openNow(List<OpeningHour>? hours) {
     if (hours == null || hours.isEmpty) return null;
 
     final DateTime now = DateTime.now();
     final Weekday today = Weekday.values[now.weekday - 1];
-    final List<OpeningHour> rows = hours
+    final int minutes = now.hour * 60 + now.minute;
+
+    // Check if a shift from yesterday is still running (past midnight).
+    final Weekday yesterday = Weekday.values[(now.weekday + 5) % 7];
+    final bool stillOpenFromYesterday = hours.any((OpeningHour h) {
+      return h.day == yesterday &&
+          h.status == DayStatus.open &&
+          h.opensAt != null &&
+          h.closesAt != null &&
+          h.closesAt! < h.opensAt! &&
+          minutes < h.closesAt!;
+    });
+    if (stillOpenFromYesterday) return true;
+
+    final List<OpeningHour> todayRows = hours
         .where((OpeningHour hour) => hour.day == today)
         .toList(growable: false);
-    if (rows.isEmpty) return null;
 
-    final int minutes = now.hour * 60 + now.minute;
-    for (final OpeningHour hour in rows) {
-      if (hour.status != DayStatus.open) continue;
-      final int? opensAt = hour.opensAt;
-      final int? closesAt = hour.closesAt;
-      if (opensAt == null || closesAt == null) continue;
-      final bool open = closesAt >= opensAt
-          ? minutes >= opensAt && minutes < closesAt
-          : minutes >= opensAt || minutes < closesAt;
-      if (open) return true;
+    // UNKNOWN: no usable records for today, or any record explicitly set to Unknown.
+    if (todayRows.isEmpty ||
+        todayRows.any((OpeningHour h) => h.status == DayStatus.unknown)) {
+      return null;
     }
-    return rows.any((OpeningHour hour) => hour.status == DayStatus.unknown)
-        ? null
-        : false;
+
+    for (final OpeningHour hour in todayRows) {
+      if (hour.status == DayStatus.open) {
+        final int? opensAt = hour.opensAt;
+        final int? closesAt = hour.closesAt;
+        if (opensAt == null || closesAt == null) continue;
+
+        // OPENING: inside ANY valid operating period.
+        // Also handles "starts today ends tomorrow" (closes < opens)
+        final bool open = closesAt >= opensAt
+            ? minutes >= opensAt && minutes < closesAt
+            : minutes >= opensAt || minutes < closesAt;
+        if (open) return true;
+      }
+    }
+
+    // CLOSED: has records but none are currently Open.
+    return false;
   }
 
   /// Great-circle distance in metres. Straight-line, not walking distance -

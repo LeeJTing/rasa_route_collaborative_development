@@ -1207,6 +1207,32 @@ class DashboardViewModel extends BaseViewModel {
   void openSearchPanel() {
     _searchPanelOpen = true;
     safeNotifyListeners();
+
+    // If the bar already has text (e.g. from a previous search), show the
+    // suggestions immediately rather than waiting for another keystroke.
+    if (_searchKeyword.trim().isNotEmpty &&
+        _searchResults.places.isEmpty &&
+        _searchResults.foods.isEmpty) {
+      updateSearchKeyword(_searchKeyword);
+    }
+  }
+
+  /// A8.1 - the user pressed Enter/Search on the keyboard.
+  void submitSearch(String keyword) {
+    _searchDebounce?.cancel();
+    _searchKeyword = keyword;
+
+    if (keyword.trim().isEmpty) {
+      clearSearch();
+      return;
+    }
+
+    _searchPanelOpen = true;
+    _searching = true;
+    safeNotifyListeners();
+
+    final int revision = ++_searchRevision;
+    _runSearch(keyword, revision);
   }
 
   /// A8-1 / A8-2 / A8-3 - one keyword, matched against locations and food.
@@ -1291,6 +1317,8 @@ class DashboardViewModel extends BaseViewModel {
     _searchKeyword = place.name;
     _searchResults = ExplorationSearchResults.empty;
     _searchMessage = null;
+
+    // Center the map on the selected result.
     _requestCamera(place.latitude, place.longitude, place.zoom);
 
     if (!place.isPlaceOnTheMap) {
