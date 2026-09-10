@@ -63,6 +63,16 @@ class DiscoveryRepositoryFacade {
 
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 
+  Future<List<Restaurant>> getRestaurantsNear({
+    required double latitude,
+    required double longitude,
+    required double maximumDistanceKm,
+  }) => restaurant.getRestaurantsNear(
+    latitude: latitude,
+    longitude: longitude,
+    maximumDistanceKm: maximumDistanceKm,
+  );
+
   Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) =>
       restaurant.getRestaurantsByIds(restaurantIds);
 

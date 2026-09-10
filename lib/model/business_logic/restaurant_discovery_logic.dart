@@ -103,9 +103,19 @@ class RestaurantDiscoveryLogic {
     required double radiusKm,
     required int limit,
   }) async {
+    if (!location.isKnown || radiusKm <= 0 || limit <= 0) {
+      return const <Restaurant>[];
+    }
     final List<Restaurant> candidates = _withinRadius(
       _availableSummaries(
-        _measure(await repository.getRestaurants(), location),
+        _measure(
+          await repository.getRestaurantsNear(
+            latitude: location.latitude,
+            longitude: location.longitude,
+            maximumDistanceKm: radiusKm,
+          ),
+          location,
+        ),
       ),
       radiusKm: radiusKm,
     );
@@ -194,8 +204,16 @@ class RestaurantDiscoveryLogic {
   Future<List<Restaurant>> nearbyWithAutomaticExpansion({
     required TouristLocation location,
   }) async {
+    if (!location.isKnown) return const <Restaurant>[];
     final List<Restaurant> measured = _availableSummaries(
-      _measure(await repository.getRestaurants(), location),
+      _measure(
+        await repository.getRestaurantsNear(
+          latitude: location.latitude,
+          longitude: location.longitude,
+          maximumDistanceKm: _quickModeMaximumRadiusKm,
+        ),
+        location,
+      ),
     );
     final List<Restaurant> eligible = await _eligibleRestaurants(
       _withinRadius(measured, radiusKm: _quickModeMaximumRadiusKm),

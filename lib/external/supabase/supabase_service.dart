@@ -92,6 +92,8 @@ class SupabaseService {
     String table, {
     String columns = '*',
     Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, num> gte = const <String, num>{},
+    Map<String, num> lte = const <String, num>{},
     Map<String, List<Object?>>? inFilter,
     String? orderBy,
     bool ascending = true,
@@ -102,6 +104,12 @@ class SupabaseService {
     dynamic query = _client.from(table).select(columns);
     for (final MapEntry<String, Object?> filter in eq.entries) {
       query = query.eq(filter.key, filter.value as Object);
+    }
+    for (final MapEntry<String, num> filter in gte.entries) {
+      query = query.gte(filter.key, filter.value);
+    }
+    for (final MapEntry<String, num> filter in lte.entries) {
+      query = query.lte(filter.key, filter.value);
     }
     final Map<String, List<Object?>> inValues =
         inFilter ?? const <String, List<Object?>>{};
