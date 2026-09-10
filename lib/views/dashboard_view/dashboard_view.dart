@@ -147,11 +147,11 @@ class _DashboardViewState extends State<DashboardView> {
         onChanged: viewModel.updateSearchKeyword,
         onClear: viewModel.clearSearch,
         onTap: viewModel.openSearchPanel,
-        // The filter panel drives the heatmap's availability scores, so it is
-        // offered on the heatmap view only.
-        onFilterTap: viewModel.isHeatmapView
-            ? viewModel.toggleFilterPanel
-            : null,
+        // Offered on both surfaces. The filter narrows the same food selection
+        // either way - the heatmap's scores on one, the pins on the other - and
+        // `_applyFilter` already reloads whichever view is showing, so gating
+        // it to the heatmap only hid a control that worked.
+        onFilterTap: viewModel.toggleFilterPanel,
         filterCount: viewModel.filter.selectionCount,
         filterPanelOpen: viewModel.filterPanelOpen,
       ),
@@ -379,7 +379,7 @@ class _DashboardViewState extends State<DashboardView> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
-              if (viewModel.filterPanelOpen && viewModel.isHeatmapView)
+              if (viewModel.filterPanelOpen)
                 MapFilterPanel(
                   labelFor: viewModel.labelFor,
                   optionsFor: viewModel.optionsFor,

@@ -1006,6 +1006,8 @@ class MapExplorationLogic {
             latitude: hit.latitude,
             longitude: hit.longitude,
             zoom: addressZoom,
+            referenceId: hit.referenceId,
+            isRestaurant: hit.isRestaurant,
           ),
         ),
       );

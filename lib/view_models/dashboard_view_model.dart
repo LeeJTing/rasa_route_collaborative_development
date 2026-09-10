@@ -1276,12 +1276,41 @@ class DashboardViewModel extends BaseViewModel {
   static const Duration _searchDebounceDelay = Duration(milliseconds: 250);
 
   /// A8-4 / REQ102_22 - centre and zoom on the chosen state, city or location.
+  ///
+  /// **A restaurant or landmark result opens itself.** Somebody who typed a
+  /// restaurant's name and picked it out of the list has already told the app
+  /// which place they mean; landing them on a map covered in pins and leaving
+  /// them to find it again is asking the same question twice. The camera goes
+  /// to it and its detail sheet opens, exactly as if the pin had been tapped.
+  ///
+  /// The sheet is opened from what the search result carries - name and
+  /// position - and `selectPin` fills in the rest by id, which is the same
+  /// two-stage load a tapped marker uses.
   void selectPlace(PlaceSuggestion place) {
     _searchPanelOpen = false;
     _searchKeyword = place.name;
     _searchResults = ExplorationSearchResults.empty;
     _searchMessage = null;
     _requestCamera(place.latitude, place.longitude, place.zoom);
+
+    if (!place.isPlaceOnTheMap) {
+      // A state, city, town or area: there is no single place to open.
+      dismissPin();
+      return;
+    }
+
+    selectPin(
+      MapPin(
+        referenceId: place.referenceId!,
+        kind: place.isRestaurant
+            ? MapPinKind.restaurant
+            : MapPinKind.landmark,
+        latitude: place.latitude,
+        longitude: place.longitude,
+        label: place.name,
+        weight: 1,
+      ),
+    );
   }
 
   /// A8.1 - the tourist picked a Local Food result. The heatmap is rebuilt

@@ -153,15 +153,10 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: <Widget>[
-                        CircleAvatar(
-                          radius: AppSizes.authAvatarRadius,
-                          backgroundColor: Theme.of(
-                            context,
-                          ).colorScheme.secondaryContainer,
-                          child: Text(
-                            '🍙',
-                            style: TextStyle(fontSize: AppSizes.authEmojiSize),
-                          ),
+                        Image.asset(
+                          'assets/images/logo/logo.webp',
+                          width: AppSizes.authAvatarRadius * 2,
+                          height: AppSizes.authAvatarRadius * 2,
                         ),
                         const SizedBox(height: AppSpacing.xxl),
                         Text(
@@ -275,20 +270,19 @@ class _SessionCheckSplash extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: <Widget>[
-        CircleAvatar(
-          radius: AppSizes.authAvatarRadius,
-          backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-          child: const Text(
-            '🍙',
-            style: TextStyle(fontSize: AppSizes.authEmojiSize),
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Image.asset(
+            'assets/images/logo/logo.webp',
+            width: AppSizes.authAvatarRadius * 2,
+            height: AppSizes.authAvatarRadius * 2,
           ),
-        ),
-        const SizedBox(height: AppSpacing.xl),
-        const CircularProgressIndicator(),
-      ],
+          const SizedBox(height: AppSpacing.xl),
+          const CircularProgressIndicator(),
+        ],
+      ),
     );
   }
 }
