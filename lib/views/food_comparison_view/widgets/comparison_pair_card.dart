@@ -7,6 +7,35 @@ import '../../../domain_model/local_food.dart';
 import '../../common_widgets/app_image.dart';
 import 'dietary_status_badge.dart';
 
+/// A multi-unit pack detected inside a menu-line name (e.g. "BOTOL 30").
+class _BulkPack {
+  const _BulkPack({required this.count, required this.unit});
+
+  final int count;
+  final String unit;
+}
+
+final RegExp _bulkPackPattern = RegExp(
+  r'(?:'
+  r'(\d+)\s*\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set)\b'
+  r'|\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set)\b\s*(\d+)'
+  r')',
+  caseSensitive: false,
+);
+
+/// Parses [name] as a bulk pack (count > 1) or returns null. A count of 1
+/// (e.g. "BOTOL 1") is a normal single serve, not a bulk pack.
+_BulkPack? _bulkPackFrom(String name) {
+  final RegExpMatch? match = _bulkPackPattern.firstMatch(name);
+  if (match == null) return null;
+  final String? count = match.group(1) ?? match.group(4);
+  final String? unit = match.group(2) ?? match.group(3);
+  final int? parsed = int.tryParse(count ?? '');
+  if (unit == null || parsed == null || parsed <= 1) return null;
+  return _BulkPack(count: parsed, unit: unit.toLowerCase());
+}
+
+
 class ComparisonPairCard extends StatelessWidget {
   const ComparisonPairCard({
     required this.comparison,
@@ -94,11 +123,15 @@ class ComparisonPairCard extends StatelessWidget {
               icon: Icons.schedule_rounded,
               left: _TimeAndPrice(
                 mealType: left.mealType,
-                priceRange: comparison.priceByFoodId[left.id],
+                menuItems:
+                    comparison.menuItemsByFoodId[left.id] ??
+                    const <({String name, double price})>[],
               ),
               right: _TimeAndPrice(
                 mealType: right.mealType,
-                priceRange: comparison.priceByFoodId[right.id],
+                menuItems:
+                    comparison.menuItemsByFoodId[right.id] ??
+                    const <({String name, double price})>[],
               ),
             ),
             _ComparisonSection(
@@ -363,19 +396,30 @@ class _LabeledText extends StatelessWidget {
   }
 }
 
-/// One side of the "Time and Price" comparison section - shows when the dish
-/// is best eaten and its restaurant price range.
+/// One side of the "Time and Price" comparison section. Prices are shown as
+/// ONE range: single-serving lines as-is, and bulk-pack lines normalised to a
+/// per-unit price (price / count), so a "BOTOL 30 = RM540" line counts as
+/// RM18 per botol instead of inflating the max.
 class _TimeAndPrice extends StatelessWidget {
-  const _TimeAndPrice({required this.mealType, this.priceRange});
+  const _TimeAndPrice({
+    required this.mealType,
+    this.menuItems = const <({String name, double price})>[],
+  });
 
   final String mealType;
 
-  /// The real lowest/highest listed price for this dish, or null when the
-  /// dish appears on no restaurant menu.
-  final ({double min, double max})? priceRange;
+  /// Every real menu line (name + price) for this dish.
+  final List<({String name, double price})> menuItems;
 
   @override
   Widget build(BuildContext context) {
+    final List<double> perServing = <double>[];
+    for (final ({String name, double price}) entry in menuItems) {
+      final _BulkPack? pack = _bulkPackFrom(entry.name);
+      // Bulk lines are folded into the same range at their per-unit price.
+      perServing.add(pack == null ? entry.price : entry.price / pack.count);
+    }
+    final String? range = _doublesRange(perServing);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -385,9 +429,9 @@ class _TimeAndPrice extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         _MiniFact(
-          label: 'Price per serving',
-          value: _priceLabel(priceRange),
-          valueColor: priceRange == null
+          label: 'Price',
+          value: range ?? 'Not listed at any restaurant yet',
+          valueColor: range == null
               ? AppColors.textSecondary
               : AppColors.accentRust,
         ),
@@ -395,13 +439,17 @@ class _TimeAndPrice extends StatelessWidget {
     );
   }
 
-  /// "RM 5.00 - RM 12.00" (or "RM 5.00" when every seller charges the same),
-  /// "Not listed yet" when the dish is on no restaurant menu.
-  static String _priceLabel(({double min, double max})? range) {
-    if (range == null) return 'Not listed yet';
-    final String min = range.min.toStringAsFixed(2);
-    final String max = range.max.toStringAsFixed(2);
-    return min == max ? 'RM $min' : 'RM $min - RM $max';
+  static String? _doublesRange(List<double> values) {
+    if (values.isEmpty) return null;
+    double min = values.first;
+    double max = min;
+    for (final double value in values) {
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+    final String lo = min.toStringAsFixed(2);
+    final String hi = max.toStringAsFixed(2);
+    return lo == hi ? 'RM $lo' : 'RM $lo - RM $hi';
   }
 }
 
