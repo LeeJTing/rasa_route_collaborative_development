@@ -74,11 +74,12 @@ class MapExplorationLogic {
   static const double malaysiaCentreLatitude = 4.10;
   static const double malaysiaCentreLongitude = 109.50;
 
-  /// 5.1, not 5.3: Malaysia's bounding box is 20.3 degrees of longitude wide,
+  ///
+  /// 4.7, not 5.3: Malaysia's bounding box is 20.3 degrees of longitude wide,
   /// and at 5.3 that does not fit a 390pt phone - Sabah fell off the right
-  /// edge. Measured, not guessed: 360 / (256 * 2^5.1) degrees per pixel puts
+  /// edge. Measured, not guessed: 360 / (256 * 2^4.7) degrees per pixel puts
   /// 21.1 degrees across 390pt.
-  static const double malaysiaOverviewZoom = 5.1;
+  static const double malaysiaOverviewZoom = 4.7;
 
   /// REQ102_12 / REQ102_13 - "the predefined zoom level". At or above this the
   /// dashboard is a detailed map view; below it, the heatmap.
@@ -90,9 +91,12 @@ class MapExplorationLogic {
   /// so "the predefined zoom level" is a canvas scale factor there, not a
   /// slippy-map zoom.
   ///
-  /// Crossing [heatmapDetailScale] now hands over to the detailed OpenStreetMap
-  /// view directly.
-  static const double heatmapDetailScale = 4.0;
+  /// Raised from 3x: the overview handed over so early that it could never be
+  /// zoomed in far enough to read, and the canvas allows 12x.
+  ///
+  /// Crossing it opens the real OpenStreetMap view, centred on the state under
+  /// the middle of the screen.
+  static const double heatmapDetailScale = 6;
 
   /// Where a city search result settles the map (REQ102_22).
   static const double cityZoom = 13;
@@ -314,10 +318,32 @@ class MapExplorationLogic {
   }
 
   /// REQ102_8 / REQ102_14 - is the tourist somewhere the dashboard can centre
-  /// on? Checked against the state outlines rather than the bounding box, so a
-  /// fix in the South China Sea is correctly "not in Malaysia".
-  Future<bool> isWithinMalaysia(double latitude, double longitude) async =>
-      await regionAt(latitude, longitude) != null;
+  /// on?
+  ///
+  /// **Checked against the country outlines, not the state ones, and never
+  /// against the network.** This used to ask [regionAt], which meant a tourist
+  /// on Pulau Redang was told they were not in Malaysia: the hand-drawn state
+  /// polygons contain no island except Labuan - not Redang, Perhentian,
+  /// Langkawi, Tioman, Kapas, Pangkor or Ketam - so the offline answer was
+  /// always "outside", and the online one depended on a round trip that an
+  /// island is the worst place to rely on. Every one of those islands is inside
+  /// the mask rings, which is why they are the right dataset for a question
+  /// about the country rather than about a state.
+  ///
+  /// It stays strict where it matters: Singapore, Jakarta, Hat Yai and Sumatra
+  /// are all outside these rings. Brunei is *inside* the Borneo ring, because
+  /// the mask deliberately leaves it visible - a tourist there sees their dot
+  /// on ground the map is actually drawing, which is a far smaller error than
+  /// hiding the dot from everyone on an island.
+  ///
+  /// Being local, it cannot fail, so a lost connection can no longer be
+  /// mistaken for being abroad.
+  Future<bool> isWithinMalaysia(double latitude, double longitude) async {
+    for (final CountryOutline outline in await maskOutlines()) {
+      if (_contains(outline.ring, latitude, longitude)) return true;
+    }
+    return false;
+  }
 
   // ===========================================================================
   // The heatmap (REQ102_15 - REQ102_17, REQ102_28, REQ102_29, REQ102_33)
@@ -337,9 +363,6 @@ class MapExplorationLogic {
   Future<FoodDistribution> distribution({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-    int level = Region.stateLevel,
-    String? parentCode,
-    String? parentName,
   }) async {
     // REQ102_12 - the counting happens in Postgres now, against the real
     // administrative boundaries in `region_boundary`.
@@ -359,11 +382,7 @@ class MapExplorationLogic {
     );
 
     final List<Object> gathered = await Future.wait(<Future<Object>>[
-      repository.map.regionDistribution(
-        level: level,
-        parentCode: parentCode,
-        foodIds: foodIds,
-      ),
+      repository.map.regionDistribution(foodIds: foodIds),
       repository.getLocalFoods(),
     ]);
     final List<RegionTally> tallies = gathered[0] as List<RegionTally>;
@@ -405,19 +424,8 @@ class MapExplorationLogic {
                 matchesFilter(food, filter),
           )
           .length,
-      level: level,
-      parentCode: parentCode,
-      parentName: parentName,
     );
   }
-
-  /// REQ102_12 - the districts of one state, for the level of the heatmap
-  /// below the country view.
-  ///
-  /// Returns an empty list when the state has no district outlines, which is
-  /// what the ViewModel checks before offering to drill in.
-  Future<List<Region>> districtsOf(String stateCode) =>
-      repository.map.districtsOf(stateCode);
 
   /// REQ102_41 - the markers drawn on the detailed map view.
   ///
@@ -624,6 +632,7 @@ class MapExplorationLogic {
         label: pin.label,
         weight: pin.weight,
         imageUrl: pin.imageUrl,
+        thumbnailUrl: pin.thumbnailUrl,
         category: pin.category,
         rating: pin.rating,
         servedFoods: pin.servedFoods,
@@ -741,6 +750,10 @@ class MapExplorationLogic {
       label: restaurant.name.isEmpty ? pin.label : restaurant.name,
       weight: served.isEmpty ? pin.weight : served.length,
       imageUrl: restaurant.imageUrl ?? pin.imageUrl,
+      // The marker's small variant, kept: it is the same place, the card behind
+      // the open sheet still wants it, and the sheet's own photo uses the
+      // full-size URL above.
+      thumbnailUrl: pin.thumbnailUrl,
       category: restaurant.category.isEmpty ? null : restaurant.category,
       rating: restaurant.rating ?? pin.rating,
       servedFoods: List<String>.unmodifiable(
@@ -762,6 +775,7 @@ class MapExplorationLogic {
     label: pin.label,
     weight: pin.weight,
     imageUrl: pin.imageUrl,
+    thumbnailUrl: pin.thumbnailUrl,
     category: pin.category,
     rating: pin.rating,
     servedFoods: pin.servedFoods,
@@ -886,18 +900,24 @@ class MapExplorationLogic {
     final String needle = keyword.trim().toLowerCase();
     if (needle.isEmpty) return ExplorationSearchResults.empty;
 
-    // States, the place table and the food catalogue are independent reads.
+    // States, the place table, the food catalogue and the place-name search are
+    // independent reads.
+    //
+    // The last of those used to be `repository.map.foodOccurrences()` - every
+    // restaurant in Malaysia, every menu row, every landmark and every landmark
+    // item, pulled down so that a keyword could be scored against some names.
+    // It is now `map_place_search`, which applies the same ladder in Postgres
+    // and answers with the twelve rows the list can show.
     final List<Object> gathered = await Future.wait(<Future<Object>>[
       regions(),
       repository.map.places(),
       repository.searchLocalFoods(keyword),
-      repository.map.foodOccurrences(),
+      repository.map.searchPlaceNames(needle, limit: maximumPlaceResults),
     ]);
     final List<Region> allRegions = gathered[0] as List<Region>;
     final List<MapPlace> catalogue = gathered[1] as List<MapPlace>;
     final List<LocalFood> foods = gathered[2] as List<LocalFood>;
-    final List<FoodOccurrence> occurrences =
-        gathered[3] as List<FoodOccurrence>;
+    final List<MapPlaceHit> hits = gathered[3] as List<MapPlaceHit>;
 
     final List<_ScoredPlace> scored = <_ScoredPlace>[];
 
@@ -970,28 +990,21 @@ class MapExplorationLogic {
     // Addresses: the places already on the map answer "where is X" too, and a
     // tourist searching a restaurant name expects to find it.
     //
-    // Scored against a prepared index rather than the raw occurrence list. The
-    // occurrences are one row per dish - 78,355 of them for 12,666 places - and
-    // the old loop scored every one, lower-casing and regex-splitting the same
-    // restaurant name six times over, on every keystroke. Every occurrence of a
-    // place carries the same name and position, so scoring the place once gives
-    // **the same result** and does a sixth of the work.
-    for (final _SearchablePlace place in _placeIndexFor(occurrences)) {
-      final int score = _scorePrepared(needle, place);
-      if (score == 0) continue;
+    // Already scored, already ordered and already capped by Postgres. The
+    // scores are the same numbers the Dart produced - 100 exact, 60 the name
+    // starts with the keyword, 40 a word in it does, 20 it contains it - and
+    // the same "one step below a named place" adjustment is applied here, so a
+    // restaurant called "Penang Village" still cannot outrank Penang.
+    for (final MapPlaceHit hit in hits) {
       scored.add(
         _ScoredPlace(
-          // One step below a named place: a restaurant called "Penang Village"
-          // must not outrank Penang.
-          score - 1,
+          hit.score - 1,
           PlaceSuggestion(
-            name: place.name,
-            subtitle: place.source == FoodOccurrenceSource.restaurant
-                ? 'Restaurant'
-                : 'Submitted landmark',
+            name: hit.name,
+            subtitle: hit.isRestaurant ? 'Restaurant' : 'Submitted landmark',
             kind: PlaceKind.address,
-            latitude: place.latitude,
-            longitude: place.longitude,
+            latitude: hit.latitude,
+            longitude: hit.longitude,
             zoom: addressZoom,
           ),
         ),
@@ -1025,46 +1038,9 @@ class MapExplorationLogic {
   /// Ranked rather than a flat `contains`, because with 148 places a bare
   /// substring match buries the obvious answer: typing "kl" should offer Kuala
   /// Lumpur and KLCC before Kluang and Kuala Selangor.
-  /// One searchable place, with the per-keystroke work already done.
-  ///
-  /// Built once per occurrence list and reused for every keystroke.
-  static List<_SearchablePlace> _placeIndexFor(
-    List<FoodOccurrence> occurrences,
-  ) {
-    // Occurrences are cached and replaced wholesale, so identity is a sound and
-    // very cheap staleness test.
-    if (identical(_indexedOccurrences, occurrences) && _placeIndex != null) {
-      return _placeIndex!;
-    }
-    final Set<String> seen = <String>{};
-    final List<_SearchablePlace> index = <_SearchablePlace>[];
-    for (final FoodOccurrence occurrence in occurrences) {
-      final String key = '${occurrence.source.name}:${occurrence.sourceId}';
-      if (!seen.add(key)) continue;
-      index.add(_SearchablePlace(occurrence));
-    }
-    _indexedOccurrences = occurrences;
-    _placeIndex = List<_SearchablePlace>.unmodifiable(index);
-    return _placeIndex!;
-  }
-
-  static List<FoodOccurrence>? _indexedOccurrences;
-  static List<_SearchablePlace>? _placeIndex;
-
-  /// [_score] for a place whose lower-cased name and word list are already in
-  /// hand. Same ladder, same numbers, same answer - just no re-work.
-  static int _scorePrepared(String needle, _SearchablePlace place) {
-    final String value = place.nameLower;
-    if (value.isEmpty) return 0;
-    if (value == needle) return _scoreExact;
-    if (value.startsWith(needle)) return _scorePrefix;
-    for (final String word in place.words) {
-      if (word.startsWith(needle)) return _scoreWord;
-    }
-    if (value.contains(needle)) return _scoreContains;
-    return 0;
-  }
-
+  /// The ladder [_score] applies is also the one `map_place_search` applies -
+  /// `_scoreExact` / `_scorePrefix` / `_scoreWord` / `_scoreContains` are the
+  /// 100 / 60 / 40 / 20 the function returns. If either changes, both have to.
   static int _score(String needle, List<String> candidates) {
     int best = 0;
     for (final String candidate in candidates) {
@@ -1131,56 +1107,6 @@ class MapExplorationLogic {
 
   /// Restaurant occurrences already carry a `local_food_id`. Submitted
   /// landmarks carry only free text, so their `dish` is matched against the
-  /// catalogue name and synonyms here; an unmatched dish keeps id 0 and is
-  /// therefore counted by no state, which is the honest outcome - the app
-  /// cannot claim a landmark serves a local food it cannot identify.
-  /// Restaurant occurrences already carry a `local_food_id`. Submitted
-  /// landmarks carry only free text, so their `dish` is matched against the
-  /// catalogue name and synonyms here; an unmatched dish keeps id 0 and is
-  /// therefore counted by no state, which is the honest outcome - the app
-  /// cannot claim a landmark serves a local food it cannot identify.
-  ///
-  /// Pure and synchronous: both inputs are already in hand, so this no longer
-  /// hides a repository call behind an await.
-  List<FoodOccurrence> _resolve(
-    List<FoodOccurrence> raw,
-    List<LocalFood> catalogue,
-  ) {
-    // Nothing to match against, so nothing to rewrite.
-    if (raw.every((FoodOccurrence o) => o.localFoodId != 0)) return raw;
-
-    final Map<String, int> idByName = <String, int>{};
-    for (final LocalFood food in catalogue) {
-      idByName[food.name.toLowerCase().trim()] = food.id;
-      for (final String synonym in food.synonyms) {
-        final String key = synonym.toLowerCase().trim();
-        if (key.isNotEmpty) idByName.putIfAbsent(key, () => food.id);
-      }
-    }
-
-    return raw
-        .map((FoodOccurrence occurrence) {
-          if (occurrence.localFoodId != 0) return occurrence;
-          final int resolved =
-              idByName[occurrence.foodName.toLowerCase().trim()] ?? 0;
-          if (resolved == 0) return occurrence;
-          return FoodOccurrence(
-            sourceId: occurrence.sourceId,
-            source: occurrence.source,
-            placeName: occurrence.placeName,
-            localFoodId: resolved,
-            foodName: occurrence.foodName,
-            latitude: occurrence.latitude,
-            longitude: occurrence.longitude,
-            placeImageUrl: occurrence.placeImageUrl,
-            placeCategory: occurrence.placeCategory,
-            placeRating: occurrence.placeRating,
-            itemPrice: occurrence.itemPrice,
-          );
-        })
-        .toList(growable: false);
-  }
-
   /// How far outside every outline a point may be and still be counted by the
   /// nearest state.
   ///
@@ -1334,28 +1260,6 @@ class MapExplorationLogic {
     }
     return inside;
   }
-}
-
-/// A place as the search sees it: the name already lower-cased and split into
-/// words, so a keystroke is a comparison rather than a string rebuild.
-class _SearchablePlace {
-  _SearchablePlace(FoodOccurrence occurrence)
-    : name = occurrence.placeName,
-      nameLower = occurrence.placeName.toLowerCase().trim(),
-      words = occurrence.placeName
-          .toLowerCase()
-          .trim()
-          .split(RegExp(r'[\s,./-]+')),
-      latitude = occurrence.latitude,
-      longitude = occurrence.longitude,
-      source = occurrence.source;
-
-  final String name;
-  final String nameLower;
-  final List<String> words;
-  final double latitude;
-  final double longitude;
-  final FoodOccurrenceSource source;
 }
 
 /// One search hit with the score that ordered it.
