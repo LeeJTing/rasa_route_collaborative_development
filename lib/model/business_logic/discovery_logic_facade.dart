@@ -98,18 +98,12 @@ class DiscoveryLogicFacade {
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
-    required int limit,
-  }) => restaurantDiscovery.nearbyWithAutomaticExpansion(
-    location: location,
-    limit: limit,
-  );
+  }) => restaurantDiscovery.nearbyWithAutomaticExpansion(location: location);
 
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
-    required int limit,
   }) => restaurantDiscovery.nearbyLandmarksWithAutomaticExpansion(
     location: location,
-    limit: limit,
   );
 
   /// Nearby restaurant data shared by discovery experiences such as Matches.

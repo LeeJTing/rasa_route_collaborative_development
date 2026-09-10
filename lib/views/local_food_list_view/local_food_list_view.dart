@@ -70,6 +70,8 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                           FoodSearchBar(
                             controller: _searchController,
                             onChanged: vm.updateSearch,
+                            maxLength:
+                                LocalFoodListViewModel.maximumSearchLength,
                           ),
                           const SizedBox(height: AppSpacing.md),
                           FoodFilterControls(

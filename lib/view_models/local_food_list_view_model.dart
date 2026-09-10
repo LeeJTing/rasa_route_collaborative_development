@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart' show protected;
+
 import '../core/base_view_model.dart';
 import '../domain_model/local_food.dart';
 import '../model/business_logic/food_logic_facade.dart';
@@ -10,7 +12,15 @@ enum FoodFilterGroup { category, mealType, taste, foodType }
 class LocalFoodListViewModel extends BaseViewModel {
   LocalFoodListViewModel();
 
-  final FoodLogicFacade foodLogic = FoodLogicFacade();
+  @protected
+  FoodLogicFacade createFoodLogic() => FoodLogicFacade();
+
+  late final FoodLogicFacade foodLogic = createFoodLogic();
+
+  /// Catalogue names are short. Capping hostile/pasted input keeps filtering
+  /// responsive and prevents a single-line search field from retaining an
+  /// effectively unbounded invisible tail.
+  static const int maximumSearchLength = 80;
 
   static const Map<FoodFilterGroup, List<String>> filterOptions =
       <FoodFilterGroup, List<String>>{
@@ -75,7 +85,9 @@ class LocalFoodListViewModel extends BaseViewModel {
           group: <String>{},
       };
   final Set<int> _selectedIds = <int>{};
+  final Set<int> _favouriteUpdates = <int>{};
   bool _isSelecting = false;
+  int _loadGeneration = 0;
 
   String get query => _query;
   FoodSortOrder get sortOrder => _sortOrder;
@@ -94,8 +106,7 @@ class LocalFoodListViewModel extends BaseViewModel {
   List<LocalFood> get displayedFoods {
     final String needle = _query.toLowerCase();
     final List<LocalFood> result = _foods.where((LocalFood food) {
-      final bool matchesSearch =
-          needle.isEmpty || food.name.toLowerCase().contains(needle);
+      final bool matchesSearch = needle.isEmpty || _matchesQuery(food, needle);
       return matchesSearch && _matchesFilters(food);
     }).toList();
     result.sort(
@@ -104,6 +115,13 @@ class LocalFoodListViewModel extends BaseViewModel {
           : b.name.compareTo(a.name),
     );
     return result;
+  }
+
+  bool _matchesQuery(LocalFood food, String needle) {
+    if (food.name.toLowerCase().contains(needle)) return true;
+    return food.synonyms.any(
+      (String synonym) => synonym.toLowerCase().contains(needle),
+    );
   }
 
   bool _matchesFilters(LocalFood food) {
@@ -133,12 +151,28 @@ class LocalFoodListViewModel extends BaseViewModel {
   @override
   Future<void> onInit() => loadFoods();
 
-  Future<void> loadFoods() => runGuarded(() async {
-    _foods = await foodLogic.getLocalFoods();
-  });
+  Future<void> loadFoods() async {
+    final int generation = ++_loadGeneration;
+    setBusy();
+    try {
+      final List<LocalFood> foods = await foodLogic.getLocalFoods();
+      if (generation != _loadGeneration) return;
+      _foods = foods;
+      final Set<int> availableIds = foods
+          .map((LocalFood food) => food.id)
+          .toSet();
+      _selectedIds.removeWhere((int id) => !availableIds.contains(id));
+      setReady();
+    } catch (error, stackTrace) {
+      if (generation == _loadGeneration) setError(error, stackTrace);
+    }
+  }
 
   void updateSearch(String value) {
-    _query = value.trim();
+    final String trimmed = value.trim();
+    _query = trimmed.runes.length <= maximumSearchLength
+        ? trimmed
+        : String.fromCharCodes(trimmed.runes.take(maximumSearchLength));
     safeNotifyListeners();
   }
 
@@ -181,12 +215,13 @@ class LocalFoodListViewModel extends BaseViewModel {
   }
 
   Future<String?> toggleFavourite(int id) async {
+    if (!_favouriteUpdates.add(id)) return null;
     try {
       final bool isFavourite = await foodLogic.toggleFavouriteFood(id);
       _foods = _foods
           .map(
             (LocalFood food) =>
-                food.id == id ? _withFavourite(food, isFavourite) : food,
+                food.id == id ? food.copyWith(isFavourite: isFavourite) : food,
           )
           .toList(growable: false);
       safeNotifyListeners();
@@ -196,6 +231,8 @@ class LocalFoodListViewModel extends BaseViewModel {
       return message.startsWith('Exception: ')
           ? message.substring('Exception: '.length)
           : message;
+    } finally {
+      _favouriteUpdates.remove(id);
     }
   }
 
@@ -209,24 +246,4 @@ class LocalFoodListViewModel extends BaseViewModel {
     _isSelecting = false;
     safeNotifyListeners();
   }
-
-  LocalFood _withFavourite(LocalFood food, bool isFavourite) => LocalFood(
-    id: food.id,
-    name: food.name,
-    description: food.description,
-    origin: food.origin,
-    culturalBackground: food.culturalBackground,
-    ingredients: food.ingredients,
-    category: food.category,
-    cookingStyle: food.cookingStyle,
-    mealType: food.mealType,
-    foodType: food.foodType,
-    tastes: food.tastes,
-    mainTaste: food.mainTaste,
-    pronunciationText: food.pronunciationText,
-    audioGuideUrl: food.audioGuideUrl,
-    synonyms: food.synonyms,
-    imageUrls: food.imageUrls,
-    isFavourite: isFavourite,
-  );
 }

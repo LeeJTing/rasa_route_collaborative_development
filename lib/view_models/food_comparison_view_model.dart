@@ -35,11 +35,6 @@ class FoodComparisonViewModel extends BaseViewModel {
     return current == null ? null : foodLogic.bestDietaryMatch(current);
   }
 
-  LocalFood? get bestValueFood {
-    final FoodComparison? current = _comparison;
-    return current == null ? null : foodLogic.bestValueFood(current);
-  }
-
   /// Whether a pronunciation is currently playing (mirrors the food detail
   /// page's `isStartingPronunciation`).
   bool get isStartingPronunciation => _playingPronunciationFoodId != null;

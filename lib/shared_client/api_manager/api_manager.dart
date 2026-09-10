@@ -121,6 +121,8 @@ class APIManager {
     String table, {
     String columns = '*',
     Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, num> gte = const <String, num>{},
+    Map<String, num> lte = const <String, num>{},
     Map<String, List<Object?>>? inFilter,
     String? orderBy,
     bool ascending = true,
@@ -131,6 +133,8 @@ class APIManager {
     table,
     columns: columns,
     eq: eq,
+    gte: gte,
+    lte: lte,
     inFilter: inFilter,
     orderBy: orderBy,
     ascending: ascending,
