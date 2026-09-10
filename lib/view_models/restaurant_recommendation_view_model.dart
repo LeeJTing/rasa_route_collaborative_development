@@ -3,6 +3,7 @@ import 'package:meta/meta.dart' show protected;
 import '../core/base_view_model.dart';
 import '../domain_model/matches_recommendation.dart';
 import '../domain_model/restaurant.dart';
+import '../domain_model/restaurant_item.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
 import 'current_location_facade.dart';
@@ -14,6 +15,14 @@ enum RestaurantSource { google, submitted }
 class RestaurantRecommendationViewModel extends BaseViewModel
     implements CurrentLocationListener, RestaurantUpdateListener {
   RestaurantRecommendationViewModel();
+
+  static const List<String> foodTypeOptions = <String>[
+    'Food',
+    'Beverage',
+    'Fruit',
+    'Dessert',
+    'Kuih',
+  ];
 
   @protected
   DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
@@ -45,6 +54,7 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   List<SubmittedLandmarkRecommendation> _landmarks =
       const <SubmittedLandmarkRecommendation>[];
   RestaurantSource _source = RestaurantSource.google;
+  String? _selectedFoodType;
   final Set<int> _expandedRestaurantIds = <int>{};
   final Set<int> _expandedLandmarkIds = <int>{};
   bool _isLoadingNearby = false;
@@ -55,10 +65,28 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   bool _reloadQueued = false;
 
   List<Restaurant> get restaurants => _restaurants;
+  String? get selectedFoodType => _selectedFoodType;
+  List<Restaurant> get visibleRestaurants {
+    final String? selected = _selectedFoodType?.trim().toLowerCase();
+    if (selected == null || selected.isEmpty) return _restaurants;
+    return _restaurants
+        .map((Restaurant restaurant) {
+          final List<RestaurantItem> matchingItems = restaurant.items
+              .where(
+                (RestaurantItem item) =>
+                    item.foodType.trim().toLowerCase() == selected,
+              )
+              .toList(growable: false);
+          return restaurant.copyWith(items: matchingItems);
+        })
+        .where((Restaurant restaurant) => restaurant.items.isNotEmpty)
+        .toList(growable: false);
+  }
+
   List<SubmittedLandmarkRecommendation> get landmarks => _landmarks;
   RestaurantSource get source => _source;
   bool get selectedSourceIsEmpty => switch (_source) {
-    RestaurantSource.google => _restaurants.isEmpty,
+    RestaurantSource.google => visibleRestaurants.isEmpty,
     RestaurantSource.submitted => _landmarks.isEmpty,
   };
   bool isRestaurantExpanded(int id) => _expandedRestaurantIds.contains(id);
@@ -144,6 +172,14 @@ class RestaurantRecommendationViewModel extends BaseViewModel
 
   void selectSource(RestaurantSource source) {
     _source = source;
+    safeNotifyListeners();
+  }
+
+  void selectFoodType(String? foodType) {
+    final String? normalized = foodType?.trim();
+    if (normalized != null && !foodTypeOptions.contains(normalized)) return;
+    if (_selectedFoodType == normalized) return;
+    _selectedFoodType = normalized;
     safeNotifyListeners();
   }
 
