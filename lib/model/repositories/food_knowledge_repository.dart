@@ -158,7 +158,13 @@ class FoodKnowledgeRepository {
     final String normalized = query.trim().toLowerCase();
     final List<LocalFood> foods = await getFoods();
     return foods
-        .where((LocalFood food) => food.name.toLowerCase().contains(normalized))
+        .where(
+          (LocalFood food) =>
+              food.name.toLowerCase().contains(normalized) ||
+              food.synonyms.any(
+                (String synonym) => synonym.toLowerCase().contains(normalized),
+              ),
+        )
         .toList(growable: false);
   }
 

@@ -56,14 +56,15 @@ class FoodComparisonLogic {
           .toSet();
     }
 
-    Map<int, ({double min, double max})> priceByFoodId =
-        const <int, ({double min, double max})>{};
+    Map<int, List<({String name, double price})>> menuItemsByFoodId =
+        const <int, List<({String name, double price})>>{};
     try {
-      priceByFoodId = await repository.foodPriceRanges(
+      menuItemsByFoodId = await repository.foodMenuItems(
         foods.map((LocalFood food) => food.id).toSet(),
       );
     } catch (_) {
-      priceByFoodId = const <int, ({double min, double max})>{};
+      menuItemsByFoodId =
+          const <int, List<({String name, double price})>>{};
     }
 
     return FoodComparison(
@@ -76,7 +77,7 @@ class FoodComparisonLogic {
       activeTouristRestrictions: touristRestrictions
           .map((DietaryRestriction r) => r.name)
           .toList(growable: false),
-      priceByFoodId: priceByFoodId,
+      menuItemsByFoodId: menuItemsByFoodId,
       leftDietaryAssessment: _assess(
         foodRestrictionIds: foodRestrictionIds[foods[0].id] ?? const <int>{},
         touristRestrictionIds: touristRestrictionIds,
@@ -103,24 +104,6 @@ class FoodComparisonLogic {
     if (leftOk) return foods[0];
     // Both dishes conflict - do not pretend one is a safe match.
     return null;
-  }
-
-
-  LocalFood? bestValueFood(FoodComparison comparison) {
-    final List<LocalFood> foods = comparison.foods;
-    if (foods.length < 2) return null;
-    LocalFood? best;
-    double? bestMin;
-    for (final LocalFood food in foods) {
-      final ({double min, double max})? range =
-          comparison.priceByFoodId[food.id];
-      if (range == null) continue;
-      if (bestMin == null || range.min < bestMin) {
-        best = food;
-        bestMin = range.min;
-      }
-    }
-    return best;
   }
 
   /// Flags a dish "not suitable" only when a restriction attached to it
