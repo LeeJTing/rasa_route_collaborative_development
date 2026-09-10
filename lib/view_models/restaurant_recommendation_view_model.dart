@@ -13,8 +13,13 @@ enum RestaurantSource { google, submitted }
 /// Quick Mode state: nearby restaurants, source tab and expanded menus.
 class RestaurantRecommendationViewModel extends BaseViewModel
     implements CurrentLocationListener, RestaurantUpdateListener {
+  RestaurantRecommendationViewModel();
+
   @protected
   DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
+
+  @protected
+  DateTime currentTime() => DateTime.now();
 
   @protected
   CurrentLocationFacade createLocationFacade() => CurrentLocationFacade();
@@ -26,6 +31,15 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   late final CurrentLocationFacade locationFacade = createLocationFacade();
   late final UpdateRestaurantFacade restaurantFacade = createRestaurantFacade();
 
+  /// Minimum gap between BACKGROUND reloads (a GPS fix or a monitor
+  /// notification). The location stream can emit a fix for every few metres of
+  /// movement - reloading on each one fired a fresh Supabase query burst
+  /// (restaurants + items + dietary rules) while walking or driving with Quick
+  /// Mode open. 30 s is far shorter than how long a "nearby" answer stays
+  /// useful, so results never look stale while the request volume drops to a
+  /// fraction.
+  static const Duration _backgroundReloadCooldown = Duration(seconds: 30);
+
   TouristLocation _location = TouristLocation.unknown;
   List<Restaurant> _restaurants = const <Restaurant>[];
   List<SubmittedLandmarkRecommendation> _landmarks =
@@ -35,6 +49,10 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   final Set<int> _expandedLandmarkIds = <int>{};
   bool _isLoadingNearby = false;
   bool _reloadNearbyRequested = false;
+
+  DateTime? _lastBackgroundReloadAt;
+  bool _reloadInFlight = false;
+  bool _reloadQueued = false;
 
   List<Restaurant> get restaurants => _restaurants;
   List<SubmittedLandmarkRecommendation> get landmarks => _landmarks;
@@ -80,6 +98,47 @@ class RestaurantRecommendationViewModel extends BaseViewModel
       } while (_reloadNearbyRequested);
     } finally {
       _isLoadingNearby = false;
+    }
+  }
+
+  /// Reload because a background event said the answer may have changed - a
+  /// GPS fix, or the restaurant monitor noticing new data. These can arrive
+  /// several times a minute (a fix per few metres of movement), so they are
+  /// throttled: at most one background reload per [_backgroundReloadCooldown],
+  /// and never one that stacks behind a reload already in flight. A change
+  /// that arrives mid-flight is remembered and applied once the current load
+  /// finishes, so the newest position is never dropped - only bursty requests
+  /// are.
+  void _reloadFromBackground() {
+    // Never discard a location or monitor change that arrives while the
+    // current request is still resolving. Queue one trailing refresh first;
+    // the cooldown only suppresses separate completed request bursts.
+    if (_reloadInFlight) {
+      _reloadQueued = true;
+      return;
+    }
+    final DateTime now = currentTime();
+    final DateTime? last = _lastBackgroundReloadAt;
+    if (last != null && now.difference(last) < _backgroundReloadCooldown) {
+      // Too soon after the last background reload - the fix is remembered
+      // (we already stored _location) and the NEXT allowed reload will use it.
+      return;
+    }
+    _lastBackgroundReloadAt = now;
+    _performReload();
+  }
+
+  Future<void> _performReload() async {
+    _reloadInFlight = true;
+    try {
+      await loadNearbyRestaurants();
+    } finally {
+      _reloadInFlight = false;
+      if (_reloadQueued) {
+        _reloadQueued = false;
+        _lastBackgroundReloadAt = currentTime();
+        _performReload();
+      }
     }
   }
 
@@ -129,7 +188,7 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   @override
   void onCurrentLocationChanged(TouristLocation location) {
     _location = location;
-    loadNearbyRestaurants();
+    _reloadFromBackground();
   }
 
   @override
@@ -137,7 +196,7 @@ class RestaurantRecommendationViewModel extends BaseViewModel
     // A monitor notification means the source data changed. Re-run Quick
     // Mode's radius, hours and dietary rules instead of accepting an
     // unfiltered background list.
-    loadNearbyRestaurants();
+    _reloadFromBackground();
   }
 
   @override

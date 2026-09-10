@@ -26,6 +26,38 @@ class AuthRepository {
   static String _pendingEmail = '';
 
   // ==========================================================================
+  // Pending OTP tracking (Auth - ChinShunYon) - powers the Option B flow.
+  //
+  // The OTP screen owns "send a new code or not". When the tourist lands on
+  // it (login now only navigates), it asks whether a code was already sent to
+  // this email and is still reusable (not consumed). That decision needs the
+  // time the freshest code was sent plus a "consumed" flag, which is why this
+  // marker lives apart from the rate-limit history in `otp_send_history`
+  // (that list must survive verification so the 3-per-10 gate keeps counting).
+  // ==========================================================================
+  static DateTime? _pendingOtpSentAt;
+
+  /// When the freshest code for the pending email was sent, or null when no
+  /// code is currently pending. Cleared once that code is verified.
+  DateTime? get pendingOtpSentAt => _pendingOtpSentAt;
+
+  /// Marks the pending email's freshest code as sent at [sentAt]. Called by
+  /// [sendEmailOtp] after the server accepts the send.
+  void recordPendingOtpSentAt(DateTime sentAt) {
+    _pendingOtpSentAt = sentAt;
+  }
+
+  /// Forgets the pending email and its code - called once a code is verified
+  /// so a later sign-in with the same email must request a fresh code.
+  void clearPendingOtp() {
+    _pendingEmail = '';
+    _pendingOtpSentAt = null;
+  }
+  // ==========================================================================
+  // End of pending OTP tracking (Auth - ChinShunYon)
+  // ==========================================================================
+
+  // ==========================================================================
   // Account provisioning.
   //
   // The UX has no separate "register" screen: a tourist picks an auth method
@@ -84,10 +116,56 @@ class AuthRepository {
     final String normalizedEmail = email.trim();
     await api.sendEmailOtp(email: normalizedEmail);
     _pendingEmail = normalizedEmail;
+    recordPendingOtpSentAt(DateTime.now());
   }
 
   /// The email address currently awaiting OTP verification.
   String get pendingEmail => _pendingEmail;
+
+  // ==========================================================================
+  // OTP send history (Auth - ChinShunYon) - powers the 3-per-10-min gate.
+  //
+  // Only successful sends are recorded (recorded after `sendEmailOtp`
+  // returns), so an address that keeps getting rejected never burns its quota.
+  // ==========================================================================
+
+  static const String _otpSendHistoryKey = 'otp_send_history';
+
+  /// Every recorded OTP send timestamp for [email], oldest first.
+  Future<List<DateTime>> otpSendTimes(String email) async {
+    final Map<String, dynamic>? history = storage.readJson(_otpSendHistoryKey);
+    if (history == null) return const <DateTime>[];
+    final Object? raw = history[email.trim().toLowerCase()];
+    if (raw is! List) return const <DateTime>[];
+    return raw
+        .whereType<String>()
+        .map(DateTime.tryParse)
+        .whereType<DateTime>()
+        .toList(growable: false);
+  }
+
+  /// Appends a successful send for [email]. Old entries (past 1 day) are
+  /// pruned so the stored list never grows without bound.
+  Future<void> recordOtpSend(String email) async {
+    final String key = email.trim().toLowerCase();
+    final Map<String, dynamic> history =
+        storage.readJson(_otpSendHistoryKey) ?? <String, dynamic>{};
+    // `otpSendTimes` returns an unmodifiable list - copy it so a send can be
+    // appended (adding in place used to throw and made every send look like a
+    // failure, which broke the 3-per-10 gate and the resend countdown).
+    final List<DateTime> times = List<DateTime>.of(await otpSendTimes(email));
+    times.add(DateTime.now());
+    final DateTime cutoff = DateTime.now().subtract(const Duration(days: 1));
+    final List<String> iso = times
+        .where((DateTime t) => t.isAfter(cutoff))
+        .map((DateTime t) => t.toIso8601String())
+        .toList(growable: false);
+    history[key] = iso;
+    await storage.writeJson(_otpSendHistoryKey, history);
+  }
+  // ==========================================================================
+  // End of OTP send history (Auth - ChinShunYon)
+  // ==========================================================================
 
   /// Verifies an email OTP and returns the authenticated domain session.
   ///
@@ -108,6 +186,10 @@ class AuthRepository {
     final AuthSessionDataModel data = AuthSessionDataModel.fromJson(row);
     final AuthSession session = _toDomain(data);
     await _saveSession(session);
+
+    // The pending code has been consumed - a later sign-in for the same
+    // address must request a brand-new code rather than reusing this one.
+    clearPendingOtp();
 
     return session;
   }

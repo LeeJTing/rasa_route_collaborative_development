@@ -1,15 +1,19 @@
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/place_closure_rules.dart';
 import '../../domain_model/region.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../../shared_client/local_storage_manager/local_storage_manager.dart';
+import '../../domain_model/map.dart';
 import '../../domain_model/map_data_stamp.dart';
 import '../../domain_model/map_place.dart';
 import '../data_models/malaysia_outline_data_model.dart';
 import '../data_models/malaysia_region_data_model.dart';
 import '../data_models/map_data_model.dart';
+import '../data_models/map_marker_row_data_model.dart';
 import '../data_models/opening_hours_data_model.dart';
 import '../data_models/place_data_model.dart';
+import '../data_models/region_tally_data_model.dart';
 
 /// The exploration map: the Malaysian regions it is drawn from, the food
 /// occurrences plotted on it, and the viewport the tourist left it at.
@@ -44,6 +48,241 @@ class MapRepository {
     return _regions ??= MalaysiaRegionDataModel.catalogue
         .map((MalaysiaRegionDataModel data) => data.toDomain())
         .toList(growable: false);
+  }
+
+  /// One entry per level+parent+filter the heatmap has already asked for.
+  ///
+  /// Keyed rather than single-valued because the tourist moves between levels -
+  /// Malaysia, into Selangor, back out - and going back should not cost a round
+  /// trip. Cleared by [clearMapCache] along with everything else.
+  static final Map<String, List<RegionTallyDataModel>> _tallyCache =
+      <String, List<RegionTallyDataModel>>{};
+
+  /// REQ102_15 - the counts behind one level of the heatmap, worked out by
+  /// Postgres against the real administrative boundaries in `region_boundary`.
+  ///
+  /// [level] 1 with a null [parentCode] is the whole country; [level] 2 with a
+  /// state's code is that state's districts. [foodIds] narrows the tally to
+  /// those catalogue entries; null counts every food.
+  ///
+  /// Returns an empty list rather than throwing when the function is missing,
+  /// so a database that has not had the migration applied yet degrades to an
+  /// empty heatmap instead of a broken dashboard.
+  Future<List<RegionTally>> regionDistribution({
+    int level = Region.stateLevel,
+    String? parentCode,
+    List<int>? foodIds,
+  }) async {
+    final List<Region> areas =
+        level == Region.districtLevel && parentCode != null
+        ? await districtsOf(parentCode)
+        : await malaysiaRegions();
+
+    // An empty id list means "no catalogue food survived the filter", which is
+    // a real answer - every area scores zero - not a reason to query.
+    if (foodIds != null && foodIds.isEmpty) {
+      return areas
+          .map(
+            (Region region) => RegionTally(
+              region: region,
+              placeCount: 0,
+              foodCount: 0,
+              restaurantCount: 0,
+              landmarkCount: 0,
+            ),
+          )
+          .toList(growable: false);
+    }
+
+    final String key = _tallyKey(level, parentCode, foodIds);
+    List<RegionTallyDataModel>? rows = _tallyCache[key];
+    if (rows == null) {
+      final List<Map<String, dynamic>> raw = await api.callFunction(
+        APIManager.functionRegionDistribution,
+        params: <String, Object?>{
+          'p_level': level,
+          'p_parent_code': parentCode,
+          'p_food_ids': foodIds,
+        },
+      );
+      rows = raw.map(RegionTallyDataModel.fromJson).toList(growable: false);
+      if (_tallyCache.length >= tallyCacheEntries) _tallyCache.clear();
+      _tallyCache[key] = rows;
+    }
+
+    final Map<String, RegionTallyDataModel> byCode =
+        <String, RegionTallyDataModel>{
+          for (final RegionTallyDataModel row in rows) row.code: row,
+        };
+
+    // Driven by the outlines rather than by the rows: an area with nothing in
+    // it is still drawn, in grey (REQ102_16), and a row for an area the app has
+    // no outline for is not something it can paint.
+    return areas.map((Region region) {
+      final RegionTallyDataModel? row = byCode[region.code];
+      return RegionTally(
+        region: region,
+        placeCount: row?.placeCount ?? 0,
+        foodCount: row?.foodCount ?? 0,
+        restaurantCount: row?.restaurantCount ?? 0,
+        landmarkCount: row?.landmarkCount ?? 0,
+      );
+    }).toList(growable: false);
+  }
+
+  /// Levels x parents x filter selections worth keeping. Small: the tourist
+  /// moves between a handful of states with a handful of filter sets.
+  static const int tallyCacheEntries = 64;
+
+  /// Answers to [regionAt], keyed to about a kilometre.
+  static final Map<String, Region?> _regionAtCache = <String, Region?>{};
+
+  /// REQ102_12 - the state containing one point, decided by the real boundary
+  /// rather than by a hand-drawn outline.
+  ///
+  /// Rounded to two decimal places - roughly a kilometre - before it is asked
+  /// or cached, so panning across a city is one request, not one per frame.
+  ///
+  /// Throws nothing: an unreachable database returns null and the caller falls
+  /// back to the offline outlines.
+  Future<Region?> regionAt(double latitude, double longitude) async {
+    final String key =
+        '${latitude.toStringAsFixed(2)},${longitude.toStringAsFixed(2)}';
+    if (_regionAtCache.containsKey(key)) return _regionAtCache[key];
+
+    final List<Map<String, dynamic>> rows = await api.callFunction(
+      APIManager.functionRegionAt,
+      params: <String, Object?>{
+        'p_latitude': latitude,
+        'p_longitude': longitude,
+        'p_level': Region.stateLevel,
+      },
+    );
+    if (rows.isEmpty) {
+      if (_regionAtCache.length >= regionAtCacheEntries) {
+        _regionAtCache.clear();
+      }
+      _regionAtCache[key] = null;
+      return null;
+    }
+
+    final String code = '${rows.first['code'] ?? ''}';
+    final List<Region> catalogue = await malaysiaRegions();
+    Region? match;
+    for (final Region region in catalogue) {
+      if (region.code == code) {
+        match = region;
+        break;
+      }
+    }
+
+    if (_regionAtCache.length >= regionAtCacheEntries) _regionAtCache.clear();
+    _regionAtCache[key] = match;
+    return match;
+  }
+
+  static const int regionAtCacheEntries = 256;
+
+  static String _tallyKey(int level, String? parentCode, List<int>? foodIds) {
+    final String foods = foodIds == null
+        ? 'all'
+        : (List<int>.of(foodIds)..sort()).join(',');
+    return '$level|${parentCode ?? ''}|$foods';
+  }
+
+  /// Cached per state - a district outline never changes, and the tourist
+  /// drills into the same few states repeatedly.
+  static final Map<String, List<Region>> _districtCache =
+      <String, List<Region>>{};
+
+  /// REQ102_12 - the districts of one state, with the outlines they are
+  /// painted from.
+  ///
+  /// The rings are simplified server-side to about 300 m, which is well under
+  /// one screen pixel at the scale the heatmap paints them: 17 kB for
+  /// Selangor's nine districts, 92 kB for Sarawak's forty. The **full**
+  /// boundaries never leave Postgres - they are what assigns a restaurant to an
+  /// area, and simplifying those would move places across state lines.
+  Future<List<Region>> districtsOf(String stateCode) async {
+    final List<Region>? cached = _districtCache[stateCode];
+    if (cached != null) return cached;
+
+    final List<Map<String, dynamic>> rows = await api.callFunction(
+      APIManager.functionRegionRings,
+      params: <String, Object?>{
+        'p_level': Region.districtLevel,
+        'p_parent_code': stateCode,
+      },
+    );
+
+    final List<Region> districts = rows
+        .map(RegionRingDataModel.fromJson)
+        .map(_toDistrict)
+        .whereType<Region>()
+        .toList(growable: false);
+    _districtCache[stateCode] = districts;
+    return districts;
+  }
+
+  /// Builds the painted outline of one district.
+  ///
+  /// The centre is the centroid of the largest part rather than of all of them:
+  /// for a district with offshore islands, the average of every part lands in
+  /// the sea, and that is where the label would be drawn.
+  static Region? _toDistrict(RegionRingDataModel row) {
+    if (row.parts.isEmpty) return null;
+
+    final List<List<GeoPoint>> rings = row.parts
+        .map(
+          (List<List<double>> part) => part
+              .map((List<double> pair) => GeoPoint(pair[1], pair[0]))
+              .toList(growable: false),
+        )
+        .toList(growable: false);
+
+    List<GeoPoint> largest = rings.first;
+    for (final List<GeoPoint> ring in rings) {
+      if (ring.length > largest.length) largest = ring;
+    }
+
+    double minLatitude = double.infinity;
+    double minLongitude = double.infinity;
+    double maxLatitude = -double.infinity;
+    double maxLongitude = -double.infinity;
+    for (final List<GeoPoint> ring in rings) {
+      for (final GeoPoint point in ring) {
+        if (point.latitude < minLatitude) minLatitude = point.latitude;
+        if (point.latitude > maxLatitude) maxLatitude = point.latitude;
+        if (point.longitude < minLongitude) minLongitude = point.longitude;
+        if (point.longitude > maxLongitude) maxLongitude = point.longitude;
+      }
+    }
+
+    double latitudeSum = 0;
+    double longitudeSum = 0;
+    for (final GeoPoint point in largest) {
+      latitudeSum += point.latitude;
+      longitudeSum += point.longitude;
+    }
+
+    return Region(
+      code: row.code,
+      name: row.name,
+      centreLatitude: latitudeSum / largest.length,
+      centreLongitude: longitudeSum / largest.length,
+      // A district fills the screen at roughly a city's zoom; the detailed map
+      // opens there when one is picked.
+      defaultZoom: 11,
+      boundary: largest,
+      places: const <RegionPlace>[],
+      level: Region.districtLevel,
+      parentCode: row.parentCode,
+      rings: rings,
+      minLatitude: minLatitude,
+      minLongitude: minLongitude,
+      maxLatitude: maxLatitude,
+      maxLongitude: maxLongitude,
+    );
   }
 
   List<CountryOutline>? _outlines;
@@ -95,6 +334,16 @@ class MapRepository {
   static DateTime? _cachedHoursAt;
   static Future<Map<String, List<OpeningHour>>>? _hoursRequest;
 
+  // Viewport marker answers, keyed by the request that produced them. Panning
+  // back to somewhere already visited - or swiping Nasi Lemak -> Laksa -> Nasi
+  // Lemak - is then free. Short-lived and small: the map is a live view, not an
+  // archive.
+  static const Duration markerCacheTtl = Duration(minutes: 2);
+  static const int markerCacheEntries = 48;
+
+  static final Map<String, _CachedMarkers> _markerCache =
+      <String, _CachedMarkers>{};
+
   static bool _isFresh(DateTime? at) =>
       at != null && DateTime.now().difference(at) < cacheTtl;
 
@@ -108,12 +357,238 @@ class MapRepository {
     _cachedHoursAt = null;
     _cachedPlaces = null;
     _cachedPlacesAt = null;
+    _markerCache.clear();
+    _tallyCache.clear();
+    _regionAtCache.clear();
+    // District outlines are not invalidated: they are administrative
+    // boundaries, not data a tourist can change. Their *counts* live in
+    // _tallyCache, which is.
   }
 
   /// Drops the cached map data from an instance. Same as [invalidate]; exists
   /// because a business-logic class holds a repository, not the class itself,
   /// and Dart will not let it reach a static through the instance.
   void clearCache() => invalidate();
+
+  // ---------------------------------------------------------------------------
+  // Viewport markers (REQ102_41)
+  // ---------------------------------------------------------------------------
+
+  /// The markers for one viewport, filtered and grouped **in Postgres**.
+  ///
+  /// This is the read that replaced downloading the country. `map_food_markers`
+  /// takes the bounding box, the zoom and an optional set of `local_food_id`s,
+  /// and answers with one row per grid cell - about a screenful, whatever the
+  /// zoom. A GiST index on `restaurant.geom` makes the box test an index scan.
+  ///
+  /// A cell holding one place comes back as that place, with its real id; a cell
+  /// holding several comes back as a count. So the answer normally contains both
+  /// pins and clusters, and zooming in turns clusters into pins as the cells
+  /// shrink past the point where markers would overlap.
+  ///
+  /// Only marker fields are selected - id, name, position, rating, photo. A
+  /// menu, opening hours and a description are fetched by id when a pin is
+  /// tapped, never for everything on screen.
+  ///
+  /// [foodIds] null means no food filter at all, and Postgres skips the menu
+  /// lookup entirely. An **empty** list means "a filter is active and nothing
+  /// matches it", which is a legitimate empty map rather than a reason to query.
+  Future<MapMarkerSet> mapMarkers({
+    required double southLatitude,
+    required double westLongitude,
+    required double northLatitude,
+    required double eastLongitude,
+    required double zoom,
+    List<int>? foodIds,
+    int limit = 400,
+  }) async {
+    if (foodIds != null && foodIds.isEmpty) return MapMarkerSet.empty;
+
+    final String key = _markerKey(
+      south: southLatitude,
+      west: westLongitude,
+      north: northLatitude,
+      east: eastLongitude,
+      zoom: zoom,
+      foodIds: foodIds,
+      limit: limit,
+    );
+    final _CachedMarkers? cached = _markerCache[key];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < markerCacheTtl) {
+      return cached.markers;
+    }
+
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await api.callFunction(
+        APIManager.functionMapMarkers,
+        params: <String, Object?>{
+          'p_min_lat': southLatitude,
+          'p_min_lng': westLongitude,
+          'p_max_lat': northLatitude,
+          'p_max_lng': eastLongitude,
+          'p_zoom': zoom,
+          'p_food_ids': foodIds,
+          'p_limit': limit,
+        },
+      );
+    } catch (_) {
+      throw Exception(
+        'Unable to load the map for this area. '
+        'Check your connection and try again.',
+      );
+    }
+
+    final List<MapCluster> clusters = <MapCluster>[];
+    final List<MapPin> pins = <MapPin>[];
+    for (final Map<String, dynamic> row in rows) {
+      final MapMarkerRowDataModel data = MapMarkerRowDataModel.fromJson(
+        row,
+      );
+      if (data.isCluster) {
+        clusters.add(
+          MapCluster(
+            latitude: data.latitude,
+            longitude: data.longitude,
+            count: data.pointCount,
+          ),
+        );
+        continue;
+      }
+      // Deliberately bare. Everything the "Click Map Pin" sheet shows beyond
+      // this arrives from [MapExplorationLogic.pinDetail] when the pin is
+      // tapped - carrying it on every marker is what made the old read enormous.
+      final MapPin? pin = _toPin(row);
+      if (pin != null) pins.add(pin);
+    }
+
+    final MapMarkerSet markers = MapMarkerSet(
+      clusters: List<MapCluster>.unmodifiable(clusters),
+      pins: List<MapPin>.unmodifiable(pins),
+    );
+
+    // Cheapest possible eviction: the whole map is a two-minute view anyway, so
+    // dropping it wholesale beats tracking access order.
+    if (_markerCache.length >= markerCacheEntries) _markerCache.clear();
+    _markerCache[key] = _CachedMarkers(markers, DateTime.now());
+    return markers;
+  }
+
+  /// REQ102_41 - where a tap on the cluster at [latitude]/[longitude] should
+  /// zoom to, and how many places it holds.
+  ///
+  /// The cell arithmetic lives in `map_cluster_split_zoom` and is the same as
+  /// `map_food_markers`, so the cluster probed is exactly the cluster drawn.
+  /// A null zoom back means it never separates: its members share coordinates.
+  Future<({double? splitZoom, int memberCount})> clusterSplitZoom({
+    required double latitude,
+    required double longitude,
+    required double zoom,
+    required double maximumZoom,
+    List<int>? foodIds,
+  }) async {
+    if (foodIds != null && foodIds.isEmpty) {
+      return (splitZoom: null, memberCount: 0);
+    }
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await api.callFunction(
+        APIManager.functionClusterSplitZoom,
+        params: <String, Object?>{
+          'p_lat': latitude,
+          'p_lng': longitude,
+          'p_zoom': zoom,
+          'p_food_ids': foodIds,
+          'p_max_zoom': maximumZoom,
+        },
+      );
+    } catch (_) {
+      // A failed probe must not swallow the tap - the caller falls back to a
+      // plain zoom step.
+      return (splitZoom: null, memberCount: 0);
+    }
+    if (rows.isEmpty) return (splitZoom: null, memberCount: 0);
+    final Map<String, dynamic> row = rows.first;
+    return (
+      splitZoom: _asDoubleOrNull(row['split_zoom']),
+      memberCount: _asInt(row['member_count']),
+    );
+  }
+
+  /// Every place inside one cluster, individually.
+  ///
+  /// Only asked for when [clusterSplitZoom] says the cluster never separates,
+  /// so the map can draw its members rather than a badge that cannot be opened.
+  Future<List<MapPin>> clusterMembers({
+    required double latitude,
+    required double longitude,
+    required double zoom,
+    List<int>? foodIds,
+    int limit = 200,
+  }) async {
+    if (foodIds != null && foodIds.isEmpty) return const <MapPin>[];
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await api.callFunction(
+        APIManager.functionClusterMembers,
+        params: <String, Object?>{
+          'p_lat': latitude,
+          'p_lng': longitude,
+          'p_zoom': zoom,
+          'p_food_ids': foodIds,
+          'p_limit': limit,
+        },
+      );
+    } catch (_) {
+      return const <MapPin>[];
+    }
+    return List<MapPin>.unmodifiable(rows.map(_toPin).whereType<MapPin>());
+  }
+
+  /// One marker row from any of the three map functions.
+  static MapPin? _toPin(Map<String, dynamic> row) {
+    final MapMarkerRowDataModel data = MapMarkerRowDataModel.fromJson(row);
+    final int? id = data.referenceId;
+    if (data.isCluster || id == null) return null;
+    final bool isRestaurant = data.source == 'restaurant';
+    return MapPin(
+      referenceId: '$id',
+      kind: isRestaurant ? MapPinKind.restaurant : MapPinKind.landmark,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      label: data.name,
+      weight: 1,
+      imageUrl: isRestaurant
+          ? data.imageUrl
+          : _normalizeLandmarkImageUrl(data.imageUrl),
+      rating: data.rating,
+    );
+  }
+
+  /// The cache key: the request, rounded.
+  ///
+  /// Bounds are rounded to about 100 m so that the pixel-level jitter a finger
+  /// leaves on the map does not miss the cache. The zoom is **not** rounded into
+  /// buckets: it sets the grid cell size, so half a level really is a different
+  /// answer.
+  static String _markerKey({
+    required double south,
+    required double west,
+    required double north,
+    required double east,
+    required double zoom,
+    required List<int>? foodIds,
+    required int limit,
+  }) {
+    final String box =
+        '${south.toStringAsFixed(3)},${west.toStringAsFixed(3)},'
+        '${north.toStringAsFixed(3)},${east.toStringAsFixed(3)}';
+    final String foods = foodIds == null
+        ? 'all'
+        : (List<int>.of(foodIds)..sort()).join('.');
+    return '$box|${zoom.toStringAsFixed(1)}|$foods|$limit';
+  }
 
   /// How much map data exists right now - polled by `RestaurantMonitor` to
   /// notice that another tourist has added a landmark.
@@ -226,26 +701,27 @@ class MapRepository {
     final List<Map<String, dynamic>> items;
     try {
       // Neither select depends on the other.
-      final List<List<Map<String, dynamic>>> rows =
-          await Future.wait(<Future<List<Map<String, dynamic>>>>[
-            // Paged, not `selectAll`: both tables are far past PostgREST's
-            // 1000-row ceiling, and a truncated read here is what makes a
-            // fully seeded database look like an almost empty map.
-            api.selectEvery(
-              APIManager.tableRestaurant,
-              orderBy: 'restaurant_id',
-              columns:
-                  'restaurant_id, restaurant_name, latitude, longitude, '
-                  'category, rating, restaurant_image_url, status',
-            ),
-            api.selectEvery(
-              APIManager.tableRestaurantItem,
-              orderBy: 'restaurant_item_id',
-              columns:
-                  'restaurant_id, local_food_id, restaurant_item_name, '
-                  'restaurant_item_price',
-            ),
-          ]);
+      final List<List<Map<String, dynamic>>> rows = await Future.wait(
+        <Future<List<Map<String, dynamic>>>>[
+          // Paged, not `selectAll`: both tables are far past PostgREST's
+          // 1000-row ceiling, and a truncated read here is what makes a
+          // fully seeded database look like an almost empty map.
+          api.selectEvery(
+            APIManager.tableRestaurant,
+            orderBy: 'restaurant_id',
+            columns:
+                'restaurant_id, restaurant_name, latitude, longitude, '
+                'category, rating, restaurant_image_url, status, closed_until',
+          ),
+          api.selectEvery(
+            APIManager.tableRestaurantItem,
+            orderBy: 'restaurant_item_id',
+            columns:
+                'restaurant_id, local_food_id, restaurant_item_name, '
+                'restaurant_item_price',
+          ),
+        ],
+      );
       restaurants = rows[0];
       items = rows[1];
     } catch (_) {
@@ -263,11 +739,34 @@ class MapRepository {
     // status is not evidence that the place is shut; it is a column nobody
     // filled in. Anything genuinely withdrawn carries a different value and is
     // still excluded.
-    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
-      for (final Map<String, dynamic> row in restaurants)
-        if (_asInt(row['restaurant_id']) != 0 && _isVisible(row['status']))
-          _asInt(row['restaurant_id']): row,
-    };
+    //
+    // A place frozen by a TEMPORARY closure (status 'frozen' with a
+    // `closed_until` in the past) is available again - it stays on the map
+    // (see `PlaceClosureRules`) and is auto-reactivated on read so the DB
+    // catches up (status -> 'available', closed_until cleared).
+    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{};
+    final List<int> reactivateIds = <int>[];
+    final DateTime now = DateTime.now();
+    for (final Map<String, dynamic> row in restaurants) {
+      final int restaurantId = _asInt(row['restaurant_id']);
+      if (restaurantId == 0) continue;
+      if (_isVisible(row['status']) ||
+          PlaceClosureRules.isEffectivelyAvailable(
+            status: _asStringOrNull(row['status']),
+            closedUntil: _asDateTimeOrNull(row['closed_until']),
+            now: now,
+          )) {
+        byId[restaurantId] = row;
+      }
+      if (PlaceClosureRules.needsReactivation(
+        status: _asStringOrNull(row['status']),
+        closedUntil: _asDateTimeOrNull(row['closed_until']),
+        now: now,
+      )) {
+        reactivateIds.add(restaurantId);
+      }
+    }
+    await _reactivateExpiredRestaurants(reactivateIds);
 
     final List<FoodOccurrence> out = <FoodOccurrence>[];
     for (final Map<String, dynamic> item in items) {
@@ -308,7 +807,7 @@ class MapRepository {
               orderBy: 'landmark_id',
               columns:
                   'landmark_id, landmark_name, latitude, longitude, status, '
-                  'image_url, category',
+                  'image_url, category, closed_until',
             ),
             api.selectEvery(
               APIManager.tableLandmarkItem,
@@ -329,13 +828,32 @@ class MapRepository {
 
     // A landmark that reached the report threshold is frozen (`status`
     // 'frozen') and excluded from map pins, search results and
-    // recommendations - only 'available' landmarks are shown.
-    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
-      for (final Map<String, dynamic> row in landmarks)
-        if (_asInt(row['landmark_id']) != 0 &&
-            _asString(row['status']).trim().toLowerCase() == 'available')
-          _asInt(row['landmark_id']): row,
-    };
+    // recommendations - only 'available' landmarks are shown. A landmark
+    // frozen by a TEMPORARY closure whose `closed_until` has passed is
+    // available again (see `PlaceClosureRules`) - it comes back on the map
+    // and is auto-reactivated on read so the DB catches up.
+    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{};
+    final List<int> reactivateIds = <int>[];
+    final DateTime now = DateTime.now();
+    for (final Map<String, dynamic> row in landmarks) {
+      final int landmarkId = _asInt(row['landmark_id']);
+      if (landmarkId == 0) continue;
+      if (PlaceClosureRules.isEffectivelyAvailable(
+        status: _asStringOrNull(row['status']),
+        closedUntil: _asDateTimeOrNull(row['closed_until']),
+        now: now,
+      )) {
+        byId[landmarkId] = row;
+      }
+      if (PlaceClosureRules.needsReactivation(
+        status: _asStringOrNull(row['status']),
+        closedUntil: _asDateTimeOrNull(row['closed_until']),
+        now: now,
+      )) {
+        reactivateIds.add(landmarkId);
+      }
+    }
+    await _reactivateExpiredLandmarks(reactivateIds);
 
     final List<FoodOccurrence> out = <FoodOccurrence>[];
     for (final Map<String, dynamic> item in items) {
@@ -548,9 +1066,7 @@ class MapRepository {
           APIManager.tableOpeningHours,
           orderBy: 'opening_hours_id',
           columns: _openingHoursColumns,
-          inFilter: <String, List<Object?>>{
-            column: ids.sublist(start, end),
-          },
+          inFilter: <String, List<Object?>>{column: ids.sublist(start, end)},
         ),
       );
     }
@@ -631,6 +1147,48 @@ class MapRepository {
     return text.isEmpty ? null : text;
   }
 
+  /// Parses a `closed_until` timestamptz value (may arrive as ISO-8601 text
+  /// or already a [DateTime]).
+  static DateTime? _asDateTimeOrNull(Object? value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    return DateTime.tryParse('$value');
+  }
+
+  /// Read-time auto-reactivation: a restaurant frozen by a temporary closure
+  /// whose `closed_until` has passed is written back to 'available' with
+  /// `closed_until` cleared, so the DB catches up with what the read just
+  /// decided. Best-effort - a failed write must never take the map read down
+  /// (the place is already treated as available for this read regardless).
+  Future<void> _reactivateExpiredRestaurants(List<int> restaurantIds) async {
+    for (final int restaurantId in restaurantIds) {
+      try {
+        await api.updateRow(
+          APIManager.tableRestaurant,
+          <String, Object?>{'status': 'available', 'closed_until': null},
+          eq: <String, Object?>{'restaurant_id': restaurantId},
+        );
+      } catch (_) {
+        // Best-effort - see method doc.
+      }
+    }
+  }
+
+  /// Landmark half of [_reactivateExpiredRestaurants] - see that method.
+  Future<void> _reactivateExpiredLandmarks(List<int> landmarkIds) async {
+    for (final int landmarkId in landmarkIds) {
+      try {
+        await api.updateRow(
+          APIManager.tableSubmittedLandmark,
+          <String, Object?>{'status': 'available', 'closed_until': null},
+          eq: <String, Object?>{'landmark_id': landmarkId},
+        );
+      } catch (_) {
+        // Best-effort - see _reactivateExpiredRestaurants.
+      }
+    }
+  }
+
   /// Legacy landmark image URLs (written before the bucket-prefix guard in
   /// `SubmittedLandmarkRepository.uploadImage` existed) double the bucket
   /// segment: ".../object/public/landmark-images/landmark-images/photo/...".
@@ -642,4 +1200,12 @@ class MapRepository {
     if (trimmed == null || trimmed.isEmpty) return null;
     return trimmed.replaceAll(RegExp(r'(/object/public/[^/]+/)\1'), r'$1');
   }
+}
+
+/// One cached viewport answer and when it arrived.
+class _CachedMarkers {
+  const _CachedMarkers(this.markers, this.at);
+
+  final MapMarkerSet markers;
+  final DateTime at;
 }

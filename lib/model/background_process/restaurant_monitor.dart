@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../app/config/env.dart';
 import '../../domain_model/map_data_stamp.dart';
 import '../../view_models/current_location_facade.dart';
 import '../../view_models/update_restaurant_facade.dart';
@@ -33,8 +34,12 @@ class RestaurantMonitor {
   // worse than being a minute out of date.
 
   /// How often to check. Long, on purpose: landmarks are submitted in ones and
-  /// twos, and this runs for as long as the app is open.
-  static const Duration pollInterval = Duration(minutes: 2);
+  /// twos, and this runs for as long as the app is open. Driven by the
+  /// `RESTAURANT_SYNC_MINUTES` config (default 15 minutes, see `Env`) rather
+  /// than a hard-coded cadence - each tick costs Supabase a couple of COUNT
+  /// requests, and it runs for the whole time the app is open, so the rate
+  /// should be the operator's choice, not a source of background egress.
+  static Duration get pollInterval => Env.restaurantSyncInterval;
 
   Timer? _poll;
   MapDataStamp _lastSeen = MapDataStamp.empty;

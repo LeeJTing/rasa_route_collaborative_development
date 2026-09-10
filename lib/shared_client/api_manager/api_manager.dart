@@ -53,6 +53,33 @@ class APIManager {
   /// Searchable geography for the dashboard: cities, towns, areas and notable
   /// locations (REQ102_19). Read-only - seeded by migration.
   static const String tablePlace = 'place';
+
+  // ---------------------------------------------------------------------------
+  // Postgres functions - the only place a function name is spelled out.
+  // ---------------------------------------------------------------------------
+
+  /// Everything the map draws for one viewport (REQ102_41): one row per grid
+  /// cell, which is a single place when the cell holds one and a count when it
+  /// holds several.
+  static const String functionMapMarkers = 'map_food_markers';
+
+  /// The zoom a cluster tap should jump to, and how many places it holds.
+  static const String functionClusterSplitZoom = 'map_cluster_split_zoom';
+
+  /// Every place inside one cluster, for the case where no zoom separates them.
+  static const String functionClusterMembers = 'map_cluster_members';
+
+  /// REQ102_15 - one row per area for the level of heatmap being viewed:
+  /// the 16 states for Malaysia, one state's districts when drilled into.
+  static const String functionRegionDistribution = 'map_region_distribution';
+
+  /// REQ102_15 - the outlines painted for one level of the heatmap. Simplified
+  /// for display; assignment and counting always use the full boundary.
+  static const String functionRegionRings = 'map_region_rings';
+
+  /// REQ102_12 - which area one point falls in, decided by the same real
+  /// boundaries that assign a restaurant to a state.
+  static const String functionRegionAt = 'map_region_at';
   static const String tableFoodDietaryRestriction = 'food_dietary_restriction';
   static const String tableUserDietaryRestriction = 'user_dietary_restriction';
 
@@ -139,6 +166,12 @@ class APIManager {
 
   /// How many rows a table holds, without downloading them.
   Future<int> countRows(String table) => _supabase.countRows(table);
+
+  /// Calls a Postgres function - see [functionMapMarkers].
+  Future<List<Map<String, dynamic>>> callFunction(
+    String name, {
+    Map<String, Object?> params = const <String, Object?>{},
+  }) => _supabase.callFunction(name, params: params);
 
   Future<Map<String, dynamic>?> selectOne(
     String table, {

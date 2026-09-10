@@ -50,7 +50,6 @@ abstract final class AppRoutes {
 
   static const String foodDetail = '/food-detail';
   static const String foodComparison = '/food-comparison';
-  static const String foodRecommendation = '/food-recommendation';
 
   // --- Restaurant ------------------------------------------------------------
 
@@ -78,6 +77,11 @@ abstract final class AppRoutes {
   /// `LandmarkItemHandoff`, no network fetch.
   static const String landmarkItemDetail = '/landmark-item-detail';
 
+  /// Full-screen report flow shared by catalogue restaurants and submitted
+  /// landmarks - reached from both detail screens' "Report" buttons. Carries
+  /// the place via `ReportPlaceHandoff` (kind + id + name).
+  static const String reportPlace = '/report-place';
+
   /// Every registered name - used by tests to assert the route table is
   /// complete.
   static const List<String> all = <String>[
@@ -94,7 +98,6 @@ abstract final class AppRoutes {
     editDietaryRestriction,
     foodDetail,
     foodComparison,
-    foodRecommendation,
     restaurantRecommendation,
     matchesRecommendation,
     restaurantDetail,
@@ -105,5 +108,6 @@ abstract final class AppRoutes {
     landmarkDetail,
     landmarkPlaceDetail,
     landmarkItemDetail,
+    reportPlace,
   ];
 }

@@ -139,8 +139,9 @@ class _PronunciationTile extends StatelessWidget {
         Expanded(
           child: Text(
             food.pronunciationText.isEmpty ? food.name : food.pronunciationText,
-            // Same body style as the ingredients / description rows.
-            style: Theme.of(context).textTheme.bodyMedium,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: AppColors.accentBrown,
+            ),
           ),
         ),
         if (play != null)

@@ -28,12 +28,24 @@ class TouristRepositoryFacade {
 
   Future<void> sendEmailOtp(String email) => auth.sendEmailOtp(email);
 
+  /// Every recorded OTP send timestamp for [email] (see `AuthenticateLogic`'s
+  /// 3-per-10-minute gate).
+  Future<List<DateTime>> otpSendTimes(String email) =>
+      auth.otpSendTimes(email);
+
+  /// Records a successful OTP send for [email].
+  Future<void> recordOtpSend(String email) => auth.recordOtpSend(email);
+
   Future<AuthSession?> verifyEmailOtp({
     required String email,
     required String token,
   }) => auth.verifyEmailOtp(email: email, token: token);
 
   String get pendingAuthEmail => auth.pendingEmail;
+
+  /// When the freshest code for the pending email was sent, or null when no
+  /// code is pending (see `AuthRepository`'s Option B pending-OTP marker).
+  DateTime? get pendingOtpSentAt => auth.pendingOtpSentAt;
 
   Future<bool> signInWithGoogle({required String redirectTo}) =>
       auth.signInWithGoogle(redirectTo: redirectTo);

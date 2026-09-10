@@ -216,6 +216,25 @@ class SupabaseService {
   Future<int> countRows(String table) async =>
       await _client.from(table).count(CountOption.exact);
 
+  // ---------------------------------------------------------------------------
+  // Postgres functions (RPC)
+  // ---------------------------------------------------------------------------
+
+  /// Calls a Postgres function and returns the rows it produced.
+  ///
+  /// This is how the map asks Postgres to do the work instead of doing it here:
+  /// `map_food_clusters` and `map_food_pins` take the viewport and answer with
+  /// the handful of markers actually drawn, rather than the app downloading a
+  /// hundred thousand rows and filtering them on the phone.
+  Future<List<Map<String, dynamic>>> callFunction(
+    String name, {
+    Map<String, Object?> params = const <String, Object?>{},
+  }) async {
+    final dynamic rows = await _client.rpc(name, params: params);
+    if (rows == null) return const <Map<String, dynamic>>[];
+    return (rows as List<dynamic>).cast<Map<String, dynamic>>();
+  }
+
   /// `select` returning at most one row, or `null` when there isn't one.
   Future<Map<String, dynamic>?> selectOne(
     String table, {
@@ -305,9 +324,23 @@ class SupabaseService {
         name: 'SupabaseService',
         error: error,
       );
+      // A 429 / "rate limit" rejection means a code was emailed very recently
+      // (Supabase enforces its own send-frequency cap on top of the app's
+      // 3-per-10 gate). Telling the tourist their email is wrong would be
+      // misleading, so translate that case separately.
+      final String message = error.message.toLowerCase();
+      final String status = (error.statusCode ?? '').toLowerCase();
+      final String code = (error.code ?? '').toLowerCase();
+      final bool rateLimited =
+          status == '429' ||
+          code.contains('rate_limit') ||
+          message.contains('rate limit') ||
+          message.contains('too many');
       throw Exception(
-        'Unable to send the code. Check that your email address is correct '
-        'and try again.',
+        rateLimited
+            ? 'Too many attempts, please try again later.'
+            : 'Unable to send the code. Check that your email address is '
+                  'correct and try again.',
       );
     }
   }
