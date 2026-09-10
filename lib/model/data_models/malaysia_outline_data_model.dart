@@ -339,18 +339,29 @@ class MalaysiaOutlineDataModel implements JsonModel {
           <double>[5.680, 103.120],
           <double>[5.680, 102.620],
         ]),
-        // Sipadan, Mabul and Ligitan, off Semporna. Far enough offshore that
-        // neither the coastline nor the real ADM1 boundary reaches them, so
-        // without this a diver there gets no map and no position marker. The
-        // box stops well east of Sebatik, the nearest Indonesian land.
+      ];
+
+  /// The islands **no** boundary dataset contains - not the hand-drawn
+  /// coastline, and not the real geoBoundaries rings either.
+  ///
+  /// Kept apart from [maskCatalogue] because they are needed twice: appended to
+  /// the real outline that `map_country_rings` serves, and again to the
+  /// hand-drawn fallback when that outline cannot be fetched. Without them a
+  /// diver at Sipadan gets cream instead of a map, and is told they are not in
+  /// Malaysia.
+  static const List<MalaysiaOutlineDataModel> outlyingIslands =
+      <MalaysiaOutlineDataModel>[
+        // Sipadan, Mabul and Ligitan, off Semporna - 27 km outside the real
+        // ADM1 ring. The box stops well east of Sebatik, the nearest
+        // Indonesian land.
         MalaysiaOutlineDataModel('Semporna islands', <List<double>>[
           <double>[4.350, 118.500],
           <double>[4.350, 118.750],
           <double>[4.050, 118.750],
           <double>[4.050, 118.500],
         ]),
-        // Pulau Payar, the marine park south of Langkawi. Sits below
-        // Langkawi's box and well south of Thai waters.
+        // Pulau Payar, the marine park south of Langkawi - 17 km outside.
+        // Sits below Langkawi's box and well south of Thai waters.
         MalaysiaOutlineDataModel('Payar', <List<double>>[
           <double>[6.150, 99.850],
           <double>[6.150, 100.020],

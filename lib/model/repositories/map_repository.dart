@@ -241,12 +241,84 @@ class MapRepository {
 
   List<CountryOutline>? _maskOutlines;
 
-  /// REQ102_1 - the rings the detailed map cuts out of its mask. Deliberately
-  /// more generous than [malaysiaOutlines]; see `MalaysiaOutlineDataModel`.
+  /// REQ102_1 - the rings the detailed map cuts its "not Malaysia" mask from.
+  ///
+  /// **The real coastline, from `map_country_rings`.** The hand-drawn
+  /// `maskCatalogue` it replaced was three rings of about fifty vertices, so
+  /// its edges were straight lines tens of kilometres long: measured against
+  /// the real boundaries it buried **26,014 km² of Malaysian land** under the
+  /// mask - 7.9% of the country, most of it Sabah's and Sarawak's coast and
+  /// islands and the whole east-coast archipelago - while revealing 70,138 km²
+  /// of sea. The real outline buries none.
+  ///
+  /// 27 rings, 2,466 vertices, 72 kB, fetched once per process. The union and
+  /// buffer behind them cost ~700 ms to compute, and the boundaries never
+  /// change, so Postgres stores the result in `country_ring` and this is a
+  /// plain read - 41 ms. **If `region_boundary` is ever reloaded, run
+  /// `select rebuild_country_rings();`** or the mask will be a version behind.
+  ///
+  /// Simplified to ~300 m and buffered ~2 km outward. The buffer matters: a
+  /// mask drawn exactly on the coastline clips the coast itself, and the seam
+  /// eats beaches, harbours and river mouths. It is small enough that
+  /// Singapore - a kilometre across the causeway - stays outside.
+  ///
+  /// The hand-drawn catalogue remains the offline fallback: a map with a
+  /// slightly wrong mask beats a map with no mask, and `isWithinMalaysia` must
+  /// keep working with no connection.
+  ///
+  /// [MalaysiaOutlineDataModel.outlyingIslands] is appended either way - those
+  /// are the islands no boundary dataset has.
   Future<List<CountryOutline>> malaysiaMaskOutlines() async {
-    return _maskOutlines ??= MalaysiaOutlineDataModel.maskCatalogue
+    final List<CountryOutline>? cached = _maskOutlines;
+    if (cached != null) return cached;
+
+    final List<CountryOutline> islands = MalaysiaOutlineDataModel
+        .outlyingIslands
         .map((MalaysiaOutlineDataModel data) => data.toDomain())
         .toList(growable: false);
+
+    List<CountryOutline> rings;
+    try {
+      final List<Map<String, dynamic>> rows = await api.callFunction(
+        APIManager.functionCountryRings,
+      );
+      rings = rows
+          .map(_toCountryRing)
+          .whereType<CountryOutline>()
+          .toList(growable: false);
+    } catch (_) {
+      rings = const <CountryOutline>[];
+    }
+
+    if (rings.isEmpty) {
+      rings = MalaysiaOutlineDataModel.maskCatalogue
+          .map((MalaysiaOutlineDataModel data) => data.toDomain())
+          .toList(growable: false);
+    }
+
+    return _maskOutlines = List<CountryOutline>.unmodifiable(<CountryOutline>[
+      ...rings,
+      ...islands,
+    ]);
+  }
+
+  /// One `map_country_rings` row: `[[longitude, latitude], ...]`.
+  static CountryOutline? _toCountryRing(Map<String, dynamic> row) {
+    final Object? ring = row['ring'];
+    if (ring is! List) return null;
+    final List<GeoPoint> points = <GeoPoint>[];
+    for (final Object? pair in ring) {
+      if (pair is! List || pair.length < 2) continue;
+      final double? longitude = _asDoubleOrNull(pair[0]);
+      final double? latitude = _asDoubleOrNull(pair[1]);
+      if (longitude == null || latitude == null) continue;
+      points.add(GeoPoint(latitude, longitude));
+    }
+    if (points.length < 3) return null;
+    return CountryOutline(
+      name: 'Malaysia ${row['part'] ?? ''}'.trim(),
+      ring: List<GeoPoint>.unmodifiable(points),
+    );
   }
 
   // ---------------------------------------------------------------------------

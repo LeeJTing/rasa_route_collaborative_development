@@ -155,43 +155,30 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
     RegionAvailability? containing;
     double smallestBounds = double.infinity;
 
-    RegionAvailability? nearest;
-    double nearestDistance = double.infinity;
-
     for (final RegionAvailability availability in widget.regions) {
       final Path path = projection.pathFor(availability.region);
-      if (path.contains(canvasPoint)) {
-        final Rect bounds = path.getBounds();
-        final double area = bounds.width * bounds.height;
-        if (area < smallestBounds) {
-          smallestBounds = area;
-          containing = availability;
-        }
-      }
-
-      final Offset centre = projection(
-        availability.region.centreLatitude,
-        availability.region.centreLongitude,
-      );
-      final double distance = (centre - canvasPoint).distanceSquared;
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearest = availability;
+      if (!path.contains(canvasPoint)) continue;
+      final Rect bounds = path.getBounds();
+      final double area = bounds.width * bounds.height;
+      if (area < smallestBounds) {
+        smallestBounds = area;
+        containing = availability;
       }
     }
 
-    if (containing != null) return containing;
-
-    // Missed the land but landed near it - treat it as the closest area rather
-    // than doing nothing, which reads as an unresponsive map. The radius is
-    // generous on purpose: Kuala Lumpur, Putrajaya and Labuan are a couple of
-    // pixels across at country scale, and a tap that lands a finger's width off
-    // one of them means it.
-    return nearestDistance < _nearestTapRadiusSquared ? nearest : null;
+    // **Inside a state or nothing.** There used to be a fallback here that
+    // picked the nearest state when the tap missed every outline, so that a tap
+    // a fingertip off two-pixel Kuala Lumpur still meant it. Two things were
+    // wrong with that. It made the *sea* selectable - tapping open water
+    // selected whichever coast happened to be closest, which is a guess
+    // presented as an answer. And the radius was wrong by an order of
+    // magnitude: the comment said twelve pixels but the constant was
+    // `144 * 144`, and since the value it was compared against is a *squared*
+    // distance that is a 144-pixel reach - a third of the way across a phone.
+    //
+    // Small states stay reachable by zooming; the canvas goes to 12x.
+    return containing;
   }
-
-  /// 12 logical pixels, squared - about half a fingertip.
-  static const double _nearestTapRadiusSquared = 144 * 144;
 
   /// Scales about the middle of the viewport - what the "+" / "-" buttons do
   /// (REQ102_3, REQ102_5).

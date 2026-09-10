@@ -79,6 +79,9 @@ class APIManager {
 
   /// REQ102_18-20 - place-name search, scored in Postgres.
   static const String functionPlaceSearch = 'map_place_search';
+
+  /// REQ102_1 - the real outline of Malaysia, for the detailed map's mask.
+  static const String functionCountryRings = 'map_country_rings';
   static const String tableFoodDietaryRestriction = 'food_dietary_restriction';
   static const String tableUserDietaryRestriction = 'user_dietary_restriction';
 
