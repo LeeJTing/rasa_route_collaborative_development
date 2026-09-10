@@ -26,6 +26,7 @@ class FoodAnalysisResponse implements JsonModel {
     this.tasteTags = const <String>[],
     this.mainTaste = '',
     this.dietaryRestrictions = const <String>[],
+    this.aliases = const <String>[],
     this.foodCount = 1,
     this.candidates = const <FoodCandidate>[],
     this.priceMin = 0,
@@ -140,6 +141,13 @@ class FoodAnalysisResponse implements JsonModel {
   /// empty when none apply.
   final List<String> dietaryRestrictions;
 
+  /// Well-known alternative names for the identified dish - other
+  /// languages/scripts/spellings of the SAME dish (e.g. "摩摩喳喳" for
+  /// Bubur Cha Cha, "ABC" for ais kacang). Populated by the full analysis
+  /// calls; empty when none are known. Used ONLY to match the dish against
+  /// the curated catalogue (never written to `local_food`).
+  final List<String> aliases;
+
   /// How many SEPARATE, distinct food items/dishes are clearly visible in the
   /// image. A single dish/plate/portion counts as one. > 1 means the tourist
   /// should re-capture with only one food in frame. Only populated by the
@@ -185,6 +193,7 @@ class FoodAnalysisResponse implements JsonModel {
     'tasteTags': tasteTags,
     'mainTaste': mainTaste,
     'dietaryRestrictions': dietaryRestrictions,
+    'aliases': aliases,
     'foodCount': foodCount,
     'candidates': candidates.map((FoodCandidate c) => c.toJson()).toList(),
     'priceMin': priceMin,
@@ -216,6 +225,7 @@ class FoodAnalysisResponse implements JsonModel {
     List<String>? tasteTags,
     String? mainTaste,
     List<String>? dietaryRestrictions,
+    List<String>? aliases,
     int? foodCount,
     List<FoodCandidate>? candidates,
     double? priceMin,
@@ -245,6 +255,7 @@ class FoodAnalysisResponse implements JsonModel {
     tasteTags: tasteTags ?? this.tasteTags,
     mainTaste: mainTaste ?? this.mainTaste,
     dietaryRestrictions: dietaryRestrictions ?? this.dietaryRestrictions,
+    aliases: aliases ?? this.aliases,
     foodCount: foodCount ?? this.foodCount,
     candidates: candidates ?? this.candidates,
     priceMin: priceMin ?? this.priceMin,

@@ -20,18 +20,23 @@ void main() {
             _restaurant(index, distanceKm: 2 + (index - 5) * 0.04),
           _restaurant(20, distanceKm: 11),
         ];
+        final _FakeDiscoveryRepositoryFacade repository =
+            _FakeDiscoveryRepositoryFacade(restaurants);
         final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
-          _FakeDiscoveryRepositoryFacade(restaurants),
+          repository,
         );
 
         final List<Restaurant> results = await logic
-            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+            .nearbyWithAutomaticExpansion(location: _testLocation);
 
         expect(results, hasLength(20));
         expect(
           results.map((Restaurant item) => item.id),
           orderedEquals(<int>[for (int index = 0; index < 20; index++) index]),
         );
+        expect(repository.allRestaurantQueryCount, 0);
+        expect(repository.nearbyRestaurantQueryCount, 1);
+        expect(repository.requestedMaximumDistanceKm, 10);
       },
     );
 
@@ -49,7 +54,7 @@ void main() {
         );
 
         final List<Restaurant> results = await logic
-            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+            .nearbyWithAutomaticExpansion(location: _testLocation);
 
         expect(
           results.map((Restaurant item) => item.id),
@@ -77,7 +82,7 @@ void main() {
         );
 
         final List<Restaurant> results = await logic
-            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+            .nearbyWithAutomaticExpansion(location: _testLocation);
 
         expect(
           results.map((Restaurant item) => item.id),
@@ -121,7 +126,6 @@ void main() {
 
         final results = await logic.nearbyLandmarksWithAutomaticExpansion(
           location: _testLocation,
-          limit: 20,
         );
 
         expect(results.map((item) => item.id), orderedEquals(<int>[1]));
@@ -195,7 +199,6 @@ void main() {
 
       final List<Restaurant> results = await logic.nearbyWithAutomaticExpansion(
         location: _testLocation,
-        limit: 20,
       );
 
       expect(
@@ -219,7 +222,6 @@ void main() {
 
       final List<Restaurant> results = await logic.nearbyWithAutomaticExpansion(
         location: _testLocation,
-        limit: 20,
       );
 
       expect(results, hasLength(1));
@@ -279,7 +281,7 @@ void main() {
         );
 
         final List<Restaurant> results = await logic
-            .nearbyWithAutomaticExpansion(location: _testLocation, limit: 20);
+            .nearbyWithAutomaticExpansion(location: _testLocation);
 
         expect(
           results.map((Restaurant item) => item.id),
@@ -320,7 +322,6 @@ void main() {
 
       final List<Restaurant> results = await logic.nearbyWithAutomaticExpansion(
         location: _testLocation,
-        limit: 20,
       );
 
       expect(results, hasLength(1));
@@ -399,9 +400,26 @@ class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   final List<FoodOccurrence> occurrences;
   final Map<String, List<OpeningHour>> placeOpeningHours;
   List<int> requestedRestaurantIds = const <int>[];
+  int allRestaurantQueryCount = 0;
+  int nearbyRestaurantQueryCount = 0;
+  double? requestedMaximumDistanceKm;
 
   @override
-  Future<List<Restaurant>> getRestaurants() async => restaurants;
+  Future<List<Restaurant>> getRestaurants() async {
+    allRestaurantQueryCount++;
+    return restaurants;
+  }
+
+  @override
+  Future<List<Restaurant>> getRestaurantsNear({
+    required double latitude,
+    required double longitude,
+    required double maximumDistanceKm,
+  }) async {
+    nearbyRestaurantQueryCount++;
+    requestedMaximumDistanceKm = maximumDistanceKm;
+    return restaurants;
+  }
 
   @override
   Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) async {
@@ -445,8 +463,9 @@ class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   Future<List<FoodOccurrence>> foodOccurrences() async => occurrences;
 
   @override
-  Future<Map<String, List<OpeningHour>>> openingHoursByPlace() async =>
-      placeOpeningHours;
+  Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
+    Set<String>? placeKeys,
+  }) async => placeOpeningHours;
 
   List<RestaurantItem> _itemsFor(int restaurantId) =>
       menuItemsByRestaurant[restaurantId] ??

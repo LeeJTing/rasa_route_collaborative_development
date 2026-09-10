@@ -454,6 +454,13 @@ class _FoodImage extends StatelessWidget {
     return Image.network(
       imageUrl,
       fit: BoxFit.cover,
+      // The card is 163pt wide. These are full-size bucket images, so without
+      // this every dish in the queue is decoded at its source resolution and
+      // held in the image cache at that size.
+      cacheWidth:
+          (AppSizes.discoveryQueueCardWidth *
+                  MediaQuery.devicePixelRatioOf(context))
+              .round(),
       errorBuilder: (_, _, _) => _fallback(),
     );
   }

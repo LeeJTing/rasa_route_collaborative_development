@@ -92,6 +92,8 @@ class SupabaseService {
     String table, {
     String columns = '*',
     Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, num> gte = const <String, num>{},
+    Map<String, num> lte = const <String, num>{},
     Map<String, List<Object?>>? inFilter,
     String? orderBy,
     bool ascending = true,
@@ -102,6 +104,12 @@ class SupabaseService {
     dynamic query = _client.from(table).select(columns);
     for (final MapEntry<String, Object?> filter in eq.entries) {
       query = query.eq(filter.key, filter.value as Object);
+    }
+    for (final MapEntry<String, num> filter in gte.entries) {
+      query = query.gte(filter.key, filter.value);
+    }
+    for (final MapEntry<String, num> filter in lte.entries) {
+      query = query.lte(filter.key, filter.value);
     }
     final Map<String, List<Object?>> inValues =
         inFilter ?? const <String, List<Object?>>{};
@@ -120,6 +128,111 @@ class SupabaseService {
     }
     final List<dynamic> rows = await query as List<dynamic>;
     return rows.cast<Map<String, dynamic>>();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Paging
+  // ---------------------------------------------------------------------------
+  //
+  // PostgREST will not stream a whole table. A select with no `Range` header is
+  // answered with at most `max-rows` rows - 1000 on a Supabase project - and
+  // **says nothing about it**: no error, no flag, just a short array. A table
+  // that outgrows that ceiling therefore looks to the app as though most of its
+  // rows had been deleted. Every read of a table that can pass 1000 rows has to
+  // page, which is what [selectEvery] does.
+
+  /// Rows per request. Must not exceed the project's `max-rows` setting, or
+  /// every request silently loses the tail of its page.
+  static const int selectPageSize = 1000;
+
+  /// Hard stop on the paging loop. 400 pages is 400k rows - far past anything
+  /// this app reads - so reaching it means something is wrong, and returning
+  /// what we have beats looping forever.
+  static const int selectMaxPages = 400;
+
+  /// Pages requested at once. Paging one page after another turns a 78k-row
+  /// table into 79 sequential round trips, which on mobile latency alone is
+  /// slower than the query will ever be; asking for a wave of pages together
+  /// collapses that to a handful of waits. Kept small so a phone is not opening
+  /// a burst of sockets.
+  static const int selectPagesInFlight = 8;
+
+  /// `select` returning **every** matching row, page by page.
+  ///
+  /// [orderBy] is required and must be unique (the primary key): `range` paging
+  /// is only stable if the server sorts the same way for every page. Ordering
+  /// by a non-unique column lets rows move between pages, which duplicates some
+  /// and skips others.
+  Future<List<Map<String, dynamic>>> selectEvery(
+    String table, {
+    required String orderBy,
+    String columns = '*',
+    Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, List<Object?>>? inFilter,
+    bool ascending = true,
+    int pageSize = selectPageSize,
+  }) async {
+    final List<Map<String, dynamic>> all = <Map<String, dynamic>>[];
+    int page = 0;
+    while (page < selectMaxPages) {
+      final List<Future<List<Map<String, dynamic>>>> wave =
+          <Future<List<Map<String, dynamic>>>>[];
+      final int remaining = selectMaxPages - page;
+      final int pagesThisWave = selectPagesInFlight < remaining
+          ? selectPagesInFlight
+          : remaining;
+      for (int i = 0; i < pagesThisWave; i++) {
+        final int start = (page + i) * pageSize;
+        wave.add(
+          selectAll(
+            table,
+            columns: columns,
+            eq: eq,
+            inFilter: inFilter,
+            orderBy: orderBy,
+            ascending: ascending,
+            rangeStart: start,
+            rangeEnd: start + pageSize - 1,
+          ),
+        );
+      }
+
+      final List<List<Map<String, dynamic>>> pages = await Future.wait(wave);
+      bool reachedEnd = false;
+      for (final List<Map<String, dynamic>> rows in pages) {
+        all.addAll(rows);
+        // Only the last page can be short, and everything after it is empty -
+        // so a short page anywhere in the wave means the table is exhausted.
+        if (rows.length < pageSize) reachedEnd = true;
+      }
+      if (reachedEnd) break;
+      page += wave.length;
+    }
+    return all;
+  }
+
+  /// How many rows a table holds, without downloading any of them - a `HEAD`
+  /// request answered by the `Content-Range` header.
+  Future<int> countRows(String table) async =>
+      await _client.from(table).count(CountOption.exact);
+
+  // ---------------------------------------------------------------------------
+  // Postgres functions (RPC)
+  // ---------------------------------------------------------------------------
+
+  /// Calls a Postgres function and returns the rows it produced.
+  ///
+  /// This is how the map asks Postgres to do the work instead of doing it here:
+  /// `map_food_clusters` and `map_food_pins` take the viewport and answer with
+  /// the handful of markers actually drawn, rather than the app downloading a
+  /// hundred thousand rows and filtering them on the phone.
+  Future<List<Map<String, dynamic>>> callFunction(
+    String name, {
+    Map<String, Object?> params = const <String, Object?>{},
+  }) async {
+    final dynamic rows = await _client.rpc(name, params: params);
+    if (rows == null) return const <Map<String, dynamic>>[];
+    return (rows as List<dynamic>).cast<Map<String, dynamic>>();
   }
 
   /// `select` returning at most one row, or `null` when there isn't one.
@@ -211,9 +324,23 @@ class SupabaseService {
         name: 'SupabaseService',
         error: error,
       );
+      // A 429 / "rate limit" rejection means a code was emailed very recently
+      // (Supabase enforces its own send-frequency cap on top of the app's
+      // 3-per-10 gate). Telling the tourist their email is wrong would be
+      // misleading, so translate that case separately.
+      final String message = error.message.toLowerCase();
+      final String status = (error.statusCode ?? '').toLowerCase();
+      final String code = (error.code ?? '').toLowerCase();
+      final bool rateLimited =
+          status == '429' ||
+          code.contains('rate_limit') ||
+          message.contains('rate limit') ||
+          message.contains('too many');
       throw Exception(
-        'Unable to send the code. Check that your email address is correct '
-        'and try again.',
+        rateLimited
+            ? 'Too many attempts, please try again later.'
+            : 'Unable to send the code. Check that your email address is '
+                  'correct and try again.',
       );
     }
   }

@@ -11,6 +11,7 @@ class RestaurantItemDataModel implements JsonModel {
     this.foodImgUrl,
     this.foodCategory,
     this.restaurantItemPrice,
+    this.isRemoved = false,
   });
 
   final int restaurantItemId;
@@ -21,6 +22,10 @@ class RestaurantItemDataModel implements JsonModel {
   final String? foodImgUrl;
   final String? foodCategory;
   final double? restaurantItemPrice;
+
+  /// Soft-removal flag (`restaurant_item.is_removed`) - set when enough
+  /// tourists reported this item does not exist.
+  final bool isRemoved;
 
   factory RestaurantItemDataModel.fromJson(Map<String, dynamic> json) =>
       RestaurantItemDataModel(
@@ -34,6 +39,7 @@ class RestaurantItemDataModel implements JsonModel {
         restaurantItemPrice: JsonReader.asDoubleOrNull(
           json['restaurant_item_price'],
         ),
+        isRemoved: JsonReader.asBool(json['is_removed']),
       );
 
   @override
@@ -46,5 +52,6 @@ class RestaurantItemDataModel implements JsonModel {
     'food_img_url': foodImgUrl,
     'food_category': foodCategory,
     'restaurant_item_price': restaurantItemPrice,
+    'is_removed': isRemoved,
   };
 }

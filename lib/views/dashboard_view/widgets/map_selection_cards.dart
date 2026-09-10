@@ -35,8 +35,8 @@ class RegionScoreCard extends StatelessWidget {
     final int percent = (availability.score * 100).round();
     return DashboardMapCard(
       title: availability.region.name,
-      subtitle: availability.maximumRestaurantCount == 0
-          ? 'No restaurants mapped in Malaysia yet'
+      subtitle: availability.maximumPlaceCount == 0
+          ? 'No places mapped in Malaysia yet'
           : 'Availability score $percent% of the best-served state',
       onDismiss: onDismiss,
       leading: Container(
@@ -48,14 +48,14 @@ class RegionScoreCard extends StatelessWidget {
         ),
         alignment: Alignment.center,
         child: Text(
-          '${availability.restaurantCount}',
+          '${availability.placeCount}',
           style: AppTextStyles.titleMedium.copyWith(color: AppColors.onPrimary),
         ),
       ),
       facts: <String>[
-        '${availability.restaurantCount} restaurant'
-            '${availability.restaurantCount == 1 ? '' : 's'} and submitted '
-            'landmark${availability.restaurantCount == 1 ? '' : 's'} here',
+        '${availability.placeCount} place'
+            '${availability.placeCount == 1 ? '' : 's'} (restaurants and '
+            'submitted landmarks) here',
         '${availability.foodCount} distinct local food'
             '${availability.foodCount == 1 ? '' : 's'} between them',
       ],
@@ -217,7 +217,9 @@ class _Header extends StatelessWidget {
   /// to load ("Couldn't load" - almost always the storage bucket not being
   /// public), so a blank card says WHY instead of failing silently.
   Widget _photo() {
-    final String? url = pin.imageUrl;
+    // The card-sized variant, falling back to the full one for the photos no
+    // smaller variant can be asked for.
+    final String? url = pin.thumbnailUrl ?? pin.imageUrl;
     if (url == null || url.isEmpty) {
       return _photoPlaceholder('No photo');
     }
@@ -225,6 +227,7 @@ class _Header extends StatelessWidget {
       source: url,
       borderRadius: AppRadius.cardRadius,
       semanticLabel: pin.label,
+      decodeWidth: AppSizes.pinSheetImage.round(),
       fallback: _photoPlaceholder('Couldn’t load'),
     );
   }

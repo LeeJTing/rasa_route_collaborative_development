@@ -16,6 +16,7 @@ class FoodRecommendationLogic {
     Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
     List<FoodPreference> touristPreferences = const <FoodPreference>[],
     int maximumResults = 5,
+    void Function(String model)? onFallbackModel,
   }) => repository.getPairings(
     food,
     catalogue,
@@ -23,6 +24,7 @@ class FoodRecommendationLogic {
     foodDietaryRestrictionIds: foodDietaryRestrictionIds,
     touristPreferences: touristPreferences,
     maximumResults: maximumResults,
+    onFallbackModel: onFallbackModel,
   );
 
   /// "You might also like" - dishes similar to [food] by shared attributes.
@@ -98,7 +100,10 @@ class FoodRecommendationLogic {
     ].take(3).toList(growable: false);
   }
 
-  Future<List<FoodPairing>> getPairingRecommendations(int foodId) async {
+  Future<List<FoodPairing>> getPairingRecommendations(
+    int foodId, {
+    void Function(String model)? onFallbackModel,
+  }) async {
     final List<LocalFood> catalogue = await repository.getFoods();
     final LocalFood selected = catalogue.firstWhere(
       (LocalFood food) => food.id == foodId,
@@ -119,6 +124,7 @@ class FoodRecommendationLogic {
           .toList(growable: false),
       foodDietaryRestrictionIds: restrictionIds,
       touristPreferences: preferences,
+      onFallbackModel: onFallbackModel,
     );
   }
 }

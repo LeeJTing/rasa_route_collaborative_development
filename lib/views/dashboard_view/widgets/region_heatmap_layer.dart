@@ -67,7 +67,8 @@ class RegionHeatmapCanvas extends StatefulWidget {
   /// Reported so the "+" / "-" buttons can be enabled and disabled correctly.
   final ValueChanged<double> onScaleChanged;
 
-  /// The predefined zoom level, expressed as a canvas scale factor.
+  /// The predefined zoom level, expressed as a canvas scale factor. Crossing
+  /// it hands over to the detailed map.
   final double detailScale;
 
   /// Bumped by the ViewModel when the dashboard returns to the heatmap, so the
@@ -85,6 +86,8 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
   Size _size = Size.zero;
   double _scale = 1;
 
+  /// The overview now transitions directly to the detailed map, so the maximum
+  /// scale doesn't need to be very high.
   static const double _maximumScale = 8;
 
   @override
@@ -115,8 +118,8 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
     widget.onScaleChanged(next);
   }
 
-  /// REQ102_12 - crossing the predefined level opens the detailed map view on
-  /// whichever state is under the middle of the screen.
+  /// REQ102_12 - crossing the predefined level hands over to the detailed
+  /// OpenStreetMap view.
   void _checkDetailThreshold() {
     if (_scale < widget.detailScale) return;
     final RegionAvailability? region = _regionAtViewportCentre();
@@ -138,32 +141,43 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
   RegionAvailability? _regionAtViewportCentre() =>
       _regionAt(_toCanvas(Offset(_size.width / 2, _size.height / 2)));
 
+  /// **The smallest area containing the point wins, not the first one found.**
+  ///
+  /// This is why Kuala Lumpur could not be selected. Selangor encloses it, and
+  /// Selangor comes first in the catalogue, so the first-match loop handed back
+  /// Selangor for every tap inside Kuala Lumpur - and the same for Putrajaya.
+  /// The area with the smaller footprint is always the more specific answer.
   RegionAvailability? _regionAt(Offset canvasPoint) {
     if (_size == Size.zero) return null;
     final StylisedMalaysiaProjection projection =
         StylisedMalaysiaProjection.fit(_size);
 
-    RegionAvailability? nearest;
-    double nearestDistance = double.infinity;
+    RegionAvailability? containing;
+    double smallestBounds = double.infinity;
 
     for (final RegionAvailability availability in widget.regions) {
       final Path path = projection.pathFor(availability.region);
-      if (path.contains(canvasPoint)) return availability;
-
-      final Offset centre = projection(
-        availability.region.centreLatitude,
-        availability.region.centreLongitude,
-      );
-      final double distance = (centre - canvasPoint).distanceSquared;
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearest = availability;
+      if (!path.contains(canvasPoint)) continue;
+      final Rect bounds = path.getBounds();
+      final double area = bounds.width * bounds.height;
+      if (area < smallestBounds) {
+        smallestBounds = area;
+        containing = availability;
       }
     }
 
-    // Missed the land but landed near it - treat it as the closest state
-    // rather than doing nothing, which reads as an unresponsive map.
-    return nearestDistance < 6400 ? nearest : null;
+    // **Inside a state or nothing.** There used to be a fallback here that
+    // picked the nearest state when the tap missed every outline, so that a tap
+    // a fingertip off two-pixel Kuala Lumpur still meant it. Two things were
+    // wrong with that. It made the *sea* selectable - tapping open water
+    // selected whichever coast happened to be closest, which is a guess
+    // presented as an answer. And the radius was wrong by an order of
+    // magnitude: the comment said twelve pixels but the constant was
+    // `144 * 144`, and since the value it was compared against is a *squared*
+    // distance that is a 144-pixel reach - a third of the way across a phone.
+    //
+    // Small states stay reachable by zooming; the canvas goes to 12x.
+    return containing;
   }
 
   /// Scales about the middle of the viewport - what the "+" / "-" buttons do
@@ -216,9 +230,9 @@ class RegionHeatmapCanvasState extends State<RegionHeatmapCanvas> {
                 painter: _HeatmapPainter(
                   regions: widget.regions,
                   outlines: widget.outlines,
+                  selectedRegionCode: widget.selectedRegionCode,
                   touristLatitude: widget.touristLatitude,
                   touristLongitude: widget.touristLongitude,
-                  selectedRegionCode: widget.selectedRegionCode,
                   scale: _scale,
                 ),
               ),
@@ -287,7 +301,9 @@ class StylisedMalaysiaProjection {
   /// landmasses, so they stay consistent with each other.
   static const double verticalStretch = 1.22;
 
-  static const double marginFraction = 0.035;
+  /// Increased zoom means the map fills more of the available space. Margin
+  /// is removed to allow maximum growth.
+  static const double marginFraction = 0;
 
   final double unit;
   final double peninsulaLeft;
@@ -347,6 +363,7 @@ class StylisedMalaysiaProjection {
   double unitAt(double longitude) =>
       longitude < splitLongitude ? unit : borneoUnit;
 
+  /// The outline of [region] as one fillable path.
   Path pathFor(Region region) {
     final Path path = Path();
     for (int i = 0; i < region.boundary.length; i++) {
@@ -371,9 +388,9 @@ class _HeatmapPainter extends CustomPainter {
     required this.regions,
     required this.outlines,
     required this.selectedRegionCode,
-    required this.scale,
     required this.touristLatitude,
     required this.touristLongitude,
+    required this.scale,
   });
 
   final List<RegionAvailability> regions;
@@ -413,8 +430,12 @@ class _HeatmapPainter extends CustomPainter {
     'NSN': 'N. Sembilan',
   };
 
-  /// Too small to label until the tourist zooms in.
+  /// Too small to label until the tourist zooms in. The threshold is lower
+  /// than it was - the composition gives every state more room now, so these
+  /// three become legible sooner.
   static const Set<String> _labelOnlyWhenZoomed = <String>{'KUL', 'PJY', 'LBN'};
+
+  static const double _smallStateLabelScale = 1.5;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -423,7 +444,7 @@ class _HeatmapPainter extends CustomPainter {
 
     // --- the fills ----------------------------------------------------------
     // Clipped to the coastline so nothing can paint outside Malaysia
-    // (REQ102_1), then one solid fill per state.
+    // (REQ102_1), then one solid fill per area.
     final Path? coast = _coastPath(projection);
     if (coast != null) {
       canvas.save();
@@ -450,7 +471,7 @@ class _HeatmapPainter extends CustomPainter {
       // outline round them reads as a stray box, not a state.
       if (!selected &&
           _labelOnlyWhenZoomed.contains(availability.region.code) &&
-          scale < 2) {
+          scale < _smallStateLabelScale) {
         continue;
       }
       canvas.drawPath(
@@ -490,14 +511,39 @@ class _HeatmapPainter extends CustomPainter {
     if (latitude == null || longitude == null) return;
 
     final Offset centre = projection(latitude, longitude);
+
+    // **A ring, not a disc, and it does not grow with the canvas.**
+    //
+    // Filled, at country scale, this marker covered Kuala Lumpur and Putrajaya
+    // completely - the tourist could neither see their score nor tap them,
+    // because the thing showing where they are was larger than where they were.
+    // An outline leaves the fill underneath legible, and dividing by the canvas
+    // scale keeps it the same size on screen however far in the tourist has
+    // pinched, so it never blocks more of the map than it does at rest.
+    //
+    // Reduced to 8pt diameter to keep small territories clear.
+    final double radius = (8 / 2) / scale;
     canvas.drawCircle(
       centre,
-      AppSizes.currentLocationDot / 2 + 3,
-      Paint()..color = AppColors.surface,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2 / scale
+        ..color = AppColors.surface,
     );
     canvas.drawCircle(
       centre,
-      AppSizes.currentLocationDot / 2,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1 / scale
+        ..color = AppColors.currentLocationMarker,
+    );
+    // A small solid centre, so it still reads as a position fix rather than as
+    // a circle drawn on the map.
+    canvas.drawCircle(
+      centre,
+      0.8 / scale,
       Paint()..color = AppColors.currentLocationMarker,
     );
   }
@@ -528,7 +574,9 @@ class _HeatmapPainter extends CustomPainter {
     RegionAvailability availability,
   ) {
     final String code = availability.region.code;
-    if (_labelOnlyWhenZoomed.contains(code) && scale < 2) return;
+    if (_labelOnlyWhenZoomed.contains(code) && scale < _smallStateLabelScale) {
+      return;
+    }
 
     final _LabelPlacement placement =
         _placements[code] ?? const _LabelPlacement(0, 0);

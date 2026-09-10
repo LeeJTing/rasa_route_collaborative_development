@@ -53,6 +53,35 @@ class APIManager {
   /// Searchable geography for the dashboard: cities, towns, areas and notable
   /// locations (REQ102_19). Read-only - seeded by migration.
   static const String tablePlace = 'place';
+
+  // ---------------------------------------------------------------------------
+  // Postgres functions - the only place a function name is spelled out.
+  // ---------------------------------------------------------------------------
+
+  /// Everything the map draws for one viewport (REQ102_41): one row per grid
+  /// cell, which is a single place when the cell holds one and a count when it
+  /// holds several.
+  static const String functionMapMarkers = 'map_food_markers';
+
+  /// The zoom a cluster tap should jump to, and how many places it holds.
+  static const String functionClusterSplitZoom = 'map_cluster_split_zoom';
+
+  /// Every place inside one cluster, for the case where no zoom separates them.
+  static const String functionClusterMembers = 'map_cluster_members';
+
+  /// REQ102_15 - one row per area for the level of heatmap being viewed:
+  /// the 16 states for Malaysia, one state's districts when drilled into.
+  static const String functionRegionDistribution = 'map_region_distribution';
+
+  /// REQ102_12 - which area one point falls in, decided by the same real
+  /// boundaries that assign a restaurant to a state.
+  static const String functionRegionAt = 'map_region_at';
+
+  /// REQ102_18-20 - place-name search, scored in Postgres.
+  static const String functionPlaceSearch = 'map_place_search';
+
+  /// REQ102_1 - the real outline of Malaysia, for the detailed map's mask.
+  static const String functionCountryRings = 'map_country_rings';
   static const String tableFoodDietaryRestriction = 'food_dietary_restriction';
   static const String tableUserDietaryRestriction = 'user_dietary_restriction';
 
@@ -92,6 +121,8 @@ class APIManager {
     String table, {
     String columns = '*',
     Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, num> gte = const <String, num>{},
+    Map<String, num> lte = const <String, num>{},
     Map<String, List<Object?>>? inFilter,
     String? orderBy,
     bool ascending = true,
@@ -102,6 +133,8 @@ class APIManager {
     table,
     columns: columns,
     eq: eq,
+    gte: gte,
+    lte: lte,
     inFilter: inFilter,
     orderBy: orderBy,
     ascending: ascending,
@@ -109,6 +142,38 @@ class APIManager {
     rangeStart: rangeStart,
     rangeEnd: rangeEnd,
   );
+
+  /// `select` returning **every** matching row rather than the first page.
+  ///
+  /// [selectAll] is answered by PostgREST with at most 1000 rows and no
+  /// indication that it stopped there, so any table that can grow past that -
+  /// `restaurant`, `restaurant_item`, `opening_hours` - must be read through
+  /// this instead. [orderBy] must be a unique column (the primary key), or the
+  /// paging is not stable.
+  Future<List<Map<String, dynamic>>> selectEvery(
+    String table, {
+    required String orderBy,
+    String columns = '*',
+    Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, List<Object?>>? inFilter,
+    bool ascending = true,
+  }) => _supabase.selectEvery(
+    table,
+    orderBy: orderBy,
+    columns: columns,
+    eq: eq,
+    inFilter: inFilter,
+    ascending: ascending,
+  );
+
+  /// How many rows a table holds, without downloading them.
+  Future<int> countRows(String table) => _supabase.countRows(table);
+
+  /// Calls a Postgres function - see [functionMapMarkers].
+  Future<List<Map<String, dynamic>>> callFunction(
+    String name, {
+    Map<String, Object?> params = const <String, Object?>{},
+  }) => _supabase.callFunction(name, params: params);
 
   Future<Map<String, dynamic>?> selectOne(
     String table, {
@@ -187,6 +252,46 @@ class APIManager {
   /// Turns a Supabase Storage object name into a public HTTPS URL so the UI
   /// can `Image.network` it. Full URLs and bundled `assets/...` paths are
   /// passed through unchanged; empty values become `null`.
+  /// A smaller variant of [url] for a list or a map card, or [url] unchanged
+  /// when no smaller variant can be asked for.
+  ///
+  /// 12,624 of the 12,660 restaurant photos are Google-hosted and end in a size
+  /// suffix - `...=w426-h240-k-no`. Rewriting the two numbers asks Google for
+  /// exactly the pixels the frame needs instead of the 426x240 it serves by
+  /// default: for a 102pt card that is roughly a third of the bytes, on every
+  /// card, with no change to which photo is shown.
+  ///
+  /// Everything else is returned untouched. **Supabase Storage objects would
+  /// need the `/render/image/` endpoint, which is a paid image-transformation
+  /// feature** - if this project has it, the food-image bucket could be served
+  /// the same way; until somebody confirms that, guessing would turn every food
+  /// photo into a 400.
+  static String? thumbnailUrl(String? url, {required int width, int? height}) {
+    final String? trimmed = url?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+
+    // `=w<width>-h<height>` optionally followed by more flags (`-k-no`), at the
+    // very end of the URL. Anchored so a `w`/`h` pair inside the opaque photo
+    // id cannot be mistaken for the size.
+    final RegExp sized = RegExp(r'=w(\d+)-h(\d+)((?:-[a-z][a-z0-9]*)*)$');
+    final RegExpMatch? match = sized.firstMatch(trimmed);
+    if (match == null) return trimmed;
+
+    final int sourceWidth = int.parse(match.group(1)!);
+    final int sourceHeight = int.parse(match.group(2)!);
+    // Never upscale - asking for more pixels than the source has costs bytes
+    // and buys nothing.
+    if (sourceWidth <= width) return trimmed;
+
+    final int targetHeight =
+        height ?? ((sourceHeight * width) / sourceWidth).round();
+    return trimmed.replaceRange(
+      match.start,
+      match.end,
+      '=w$width-h$targetHeight${match.group(3)}',
+    );
+  }
+
   String? resolveImageUrl(String? name, {required String bucket}) {
     final String? trimmed = name?.trim();
     if (trimmed == null || trimmed.isEmpty) return null;

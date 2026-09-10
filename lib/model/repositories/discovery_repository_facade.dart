@@ -63,6 +63,16 @@ class DiscoveryRepositoryFacade {
 
   Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
 
+  Future<List<Restaurant>> getRestaurantsNear({
+    required double latitude,
+    required double longitude,
+    required double maximumDistanceKm,
+  }) => restaurant.getRestaurantsNear(
+    latitude: latitude,
+    longitude: longitude,
+    maximumDistanceKm: maximumDistanceKm,
+  );
+
   Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) =>
       restaurant.getRestaurantsByIds(restaurantIds);
 
@@ -78,6 +88,9 @@ class DiscoveryRepositoryFacade {
 
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
       restaurant.getRestaurantById(restaurantId);
+
+  Future<void> reactivateRestaurantFromClosure(int restaurantId) =>
+      restaurant.reactivateRestaurantFromClosure(restaurantId);
 
   Future<List<LocalFood>> getLocalFoods() => food.getFoods();
 
@@ -104,8 +117,16 @@ class DiscoveryRepositoryFacade {
 
   Future<List<FoodOccurrence>> foodOccurrences() => map.foodOccurrences();
 
-  Future<Map<String, List<OpeningHour>>> openingHoursByPlace() =>
-      map.openingHours();
+  /// Opening hours keyed by place (`"restaurant:12"`).
+  ///
+  /// Pass [placeKeys] when only some places are being drawn - the table holds a
+  /// row per place per weekday, so reading all of it for a handful of pins is
+  /// the most expensive read on the map.
+  Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
+    Set<String>? placeKeys,
+  }) => map.openingHours(placeKeys: placeKeys);
+
+  void clearMapCache() => map.clearCache();
 
   Future<String?> currentTouristId() => auth.currentTouristId();
 

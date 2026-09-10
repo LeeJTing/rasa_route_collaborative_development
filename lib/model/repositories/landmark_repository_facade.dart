@@ -1,4 +1,5 @@
 import 'auth_repository.dart';
+import 'link_check_repository.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
 import 'recognition_repository.dart';
@@ -34,4 +35,7 @@ class LandmarkRepositoryFacade {
 
   /// Shared tourist report table (kind + place_id + reason).
   final ReportRepository report = ReportRepository();
+
+  /// Website reachability checks for the Add-Landmark website field.
+  final LinkCheckRepository links = LinkCheckRepository();
 }

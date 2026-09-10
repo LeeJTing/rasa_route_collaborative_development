@@ -45,14 +45,19 @@ class FoodLogicFacade {
   Future<LocalFood?> detectNameCollision(int foodId) =>
       knowledge.detectNameCollision(foodId);
 
-  Future<List<String>> dietaryWarnings(int foodId) =>
-      knowledge.dietaryWarnings(foodId);
+  Future<String?> dietaryWarning(int foodId) =>
+      knowledge.dietaryWarning(foodId);
 
   Future<List<LocalFood>> getSimilarFoods(int foodId) =>
       recommendation.getSimilarFoods(foodId);
 
-  Future<List<FoodPairing>> getFoodPairingRecommendations(int foodId) =>
-      recommendation.getPairingRecommendations(foodId);
+  Future<List<FoodPairing>> getFoodPairingRecommendations(
+    int foodId, {
+    void Function(String model)? onFallbackModel,
+  }) => recommendation.getPairingRecommendations(
+    foodId,
+    onFallbackModel: onFallbackModel,
+  );
 
   Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) =>
       knowledge.playPronunciation(food);
@@ -64,7 +69,4 @@ class FoodLogicFacade {
 
   LocalFood? bestDietaryMatch(FoodComparison result) =>
       comparison.bestDietaryMatch(result);
-
-  LocalFood? bestValueFood(FoodComparison result) =>
-      comparison.bestValueFood(result);
 }

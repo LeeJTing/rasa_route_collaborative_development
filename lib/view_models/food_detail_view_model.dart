@@ -1,29 +1,27 @@
 import 'package:meta/meta.dart' show protected;
 
 import '../core/base_view_model.dart';
-import '../domain_model/food_pairing.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/pronunciation_playback_result.dart';
 import '../model/business_logic/food_logic_facade.dart';
 
 /// Presentation state for one local-food detail page.
+///
+/// Pairing & similar-food recommendations are rendered by the embedded
+/// `FoodRecommendationView` (its own ViewModel), not owned here.
 class FoodDetailViewModel extends BaseViewModel {
-  FoodDetailViewModel({this.foodId = 1});
+  FoodDetailViewModel();
 
   @protected
   FoodLogicFacade createFoodLogic() => FoodLogicFacade();
 
   late final FoodLogicFacade foodLogic = createFoodLogic();
 
-  int foodId;
+  int foodId = 0;
+  int _loadGeneration = 0;
   LocalFood? _food;
   bool _isLiked = false;
-  List<LocalFood> _similarFoods = const <LocalFood>[];
-  List<LocalFood> _catalogue = const <LocalFood>[];
-  List<FoodPairing> _pairings = const <FoodPairing>[];
-  bool _loadingPairings = false;
-  String? _pairingError;
-  List<String> _allergyWarnings = const <String>[];
+  String? _allergyWarning;
   LocalFood? _collidedFood;
   bool _isFoodInformationExpanded = false;
   bool _isStartingPronunciation = false;
@@ -32,11 +30,7 @@ class FoodDetailViewModel extends BaseViewModel {
 
   LocalFood? get food => _food;
   bool get isLiked => _isLiked;
-  List<LocalFood> get similarFoods => _similarFoods;
-  List<FoodPairing> get pairings => _pairings;
-  bool get loadingPairings => _loadingPairings;
-  String? get pairingError => _pairingError;
-  List<String> get allergyWarnings => _allergyWarnings;
+  String? get allergyWarning => _allergyWarning;
   LocalFood? get collidedFood => _collidedFood;
   bool get isFoodInformationExpanded => _isFoodInformationExpanded;
   bool get isStartingPronunciation => _isStartingPronunciation;
@@ -47,60 +41,81 @@ class FoodDetailViewModel extends BaseViewModel {
   Future<void> onInit() => loadFood(foodId);
 
   Future<void> loadFood(int id) async {
-    await runGuarded(() async {
-      foodId = id;
-      _isFoodInformationExpanded = false;
-      _pairings = const <FoodPairing>[];
-      _pairingError = null;
-      _food = await foodLogic.getFoodDetails(id);
-      _isLiked = await foodLogic.isFoodInFavourites(id);
-      _collidedFood = await foodLogic.detectNameCollision(id);
-      _allergyWarnings = await foodLogic.dietaryWarnings(id);
-      _similarFoods = await foodLogic.getSimilarFoods(id);
-      _catalogue = await foodLogic.getLocalFoods();
-    });
-    if (_food != null && foodId == id) await loadPairings();
-  }
-
-  Future<void> loadPairings() async {
-    if (_loadingPairings || _food == null) return;
-    _loadingPairings = true;
-    _pairingError = null;
-    safeNotifyListeners();
+    final int generation = ++_loadGeneration;
+    foodId = id;
+    _food = null;
+    _isLiked = false;
+    _collidedFood = null;
+    _allergyWarning = null;
+    _isFoodInformationExpanded = false;
+    _isStartingPronunciation = false;
+    _isUpdatingFavourite = false;
+    _pronunciationMessage = null;
+    setBusy();
     try {
-      _pairings = await foodLogic.getFoodPairingRecommendations(foodId);
-    } catch (error) {
-      _pairings = const <FoodPairing>[];
-      _pairingError = error.toString().replaceFirst('Exception: ', '');
-    } finally {
-      _loadingPairings = false;
-      safeNotifyListeners();
+      final LocalFood food = await foodLogic.getFoodDetails(id);
+      final List<Object?> related = await Future.wait<Object?>(
+        <Future<Object?>>[
+          _orDefault<bool>(foodLogic.isFoodInFavourites(id), food.isFavourite),
+          _orDefault<LocalFood?>(foodLogic.detectNameCollision(id), null),
+          _dietaryWarningOrCaution(id),
+        ],
+      );
+      if (generation != _loadGeneration) return;
+
+      _isLiked = related[0] as bool;
+      _food = food.copyWith(isFavourite: _isLiked);
+      _collidedFood = related[1] as LocalFood?;
+      _allergyWarning = related[2] as String?;
+      setReady();
+    } catch (error, stackTrace) {
+      if (generation == _loadGeneration) setError(error, stackTrace);
     }
   }
 
-  LocalFood? pairedFood(int id) {
-    for (final LocalFood food in _catalogue) {
-      if (food.id == id) return food;
+  Future<T> _orDefault<T>(Future<T> request, T fallback) async {
+    try {
+      return await request;
+    } catch (_) {
+      return fallback;
     }
-    return null;
+  }
+
+  Future<String?> _dietaryWarningOrCaution(int id) async {
+    try {
+      return await foodLogic.dietaryWarning(id);
+    } catch (_) {
+      return 'Dietary information is unavailable. Check with the restaurant '
+          'before ordering.';
+    }
   }
 
   Future<String?> toggleLike() async {
     if (_isUpdatingFavourite) return null;
+    final int requestedFoodId = foodId;
+    final int generation = _loadGeneration;
     _isUpdatingFavourite = true;
     safeNotifyListeners();
     try {
-      _isLiked = await foodLogic.toggleFavouriteFood(foodId);
-      _food = _food?.copyWith(isFavourite: _isLiked);
+      final bool isLiked = await foodLogic.toggleFavouriteFood(requestedFoodId);
+      if (generation != _loadGeneration ||
+          (_food != null && _food!.id != requestedFoodId)) {
+        return null;
+      }
+      _isLiked = isLiked;
+      _food = _food?.copyWith(isFavourite: isLiked);
       return null;
     } catch (error) {
+      if (generation != _loadGeneration) return null;
       final String message = error.toString();
       return message.startsWith('Exception: ')
           ? message.substring('Exception: '.length)
           : message;
     } finally {
-      _isUpdatingFavourite = false;
-      safeNotifyListeners();
+      if (generation == _loadGeneration) {
+        _isUpdatingFavourite = false;
+        safeNotifyListeners();
+      }
     }
   }
 
@@ -112,12 +127,14 @@ class FoodDetailViewModel extends BaseViewModel {
   Future<void> playPronunciation() async {
     final LocalFood? currentFood = _food;
     if (currentFood == null || _isStartingPronunciation) return;
+    final int generation = _loadGeneration;
     _isStartingPronunciation = true;
     _pronunciationMessage = null;
     safeNotifyListeners();
     try {
       final PronunciationPlaybackResult result = await foodLogic
           .playPronunciation(currentFood);
+      if (generation != _loadGeneration || _food?.id != currentFood.id) return;
       _pronunciationMessage = switch (result) {
         PronunciationPlaybackResult.curatedAudio => null,
         PronunciationPlaybackResult.deviceVoice =>
@@ -126,8 +143,10 @@ class FoodDetailViewModel extends BaseViewModel {
           'Pronunciation audio is unavailable on this device.',
       };
     } finally {
-      _isStartingPronunciation = false;
-      safeNotifyListeners();
+      if (generation == _loadGeneration) {
+        _isStartingPronunciation = false;
+        safeNotifyListeners();
+      }
     }
   }
 

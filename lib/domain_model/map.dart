@@ -26,15 +26,151 @@ class ExplorationMap {
   final List<MapPin> pins;
 }
 
+/// A group of nearby places drawn as one marker with a count on it.
+///
+/// Produced by `map_food_markers` in Postgres, not by the app: at a
+/// Malaysia-wide view there are twelve thousand restaurants, and the point of
+/// clustering is that the phone never receives them.
+///
+/// The grid cell is about 56 screen pixels at whatever the current zoom is, so
+/// clustering never stops - it just gets finer. A cell holding one place comes
+/// back as a real [MapPin] instead, which is why clusters and pins arrive
+/// together and both are drawn.
+class MapCluster {
+  const MapCluster({
+    required this.latitude,
+    required this.longitude,
+    required this.count,
+  });
+
+  final double latitude;
+  final double longitude;
+
+  /// How many places this marker stands for. Always at least 1.
+  final int count;
+
+  /// Stable enough to key a widget by, and to compare two loads for equality.
+  String get key =>
+      '${latitude.toStringAsFixed(4)}:${longitude.toStringAsFixed(4)}';
+}
+
+/// The answer to "what happens if I tap this cluster".
+///
+/// Tapping used to zoom a fixed amount, which for a dense metro was not enough
+/// to break the grid cell up - the same count came back and the tap looked like
+/// it had done nothing. Postgres now works out where to go:
+///
+///  * [splitZoom] set - jump straight there, and the cluster visibly breaks up;
+///  * [splitZoom] null - the members share coordinates and no zoom will ever
+///    separate them, so [members] carries them all to be drawn individually.
+class ClusterExpansion {
+  const ClusterExpansion({
+    required this.splitZoom,
+    required this.memberCount,
+    this.members = const <MapPin>[],
+  });
+
+  static const ClusterExpansion none = ClusterExpansion(
+    splitZoom: null,
+    memberCount: 0,
+  );
+
+  /// The first zoom at which this cluster becomes two or more markers, or null
+  /// when it never does within the map's maximum zoom.
+  final double? splitZoom;
+
+  /// How many places are inside the cluster.
+  final int memberCount;
+
+  /// Every member, individually - populated only when [splitZoom] is null,
+  /// because that is the only time the app has to draw them itself.
+  final List<MapPin> members;
+
+  bool get splits => splitZoom != null;
+}
+
+/// What one viewport query returned. Clusters and pins arrive **together**: the
+/// aggregate-or-not decision is made per grid cell, not once for the whole map,
+/// so a screen normally holds some of each.
+class MapMarkerSet {
+  const MapMarkerSet({
+    this.clusters = const <MapCluster>[],
+    this.pins = const <MapPin>[],
+  });
+
+  static const MapMarkerSet empty = MapMarkerSet();
+
+  final List<MapCluster> clusters;
+  final List<MapPin> pins;
+}
+
+/// One screenful of map pins: what is drawn, and how much of the truth that is.
+///
+/// The detailed map cannot draw every restaurant in a viewport - at state zoom
+/// that is thousands of markers, which is unreadable and slow. Rather than
+/// dropping the surplus, Postgres folds each grid cell into one marker: a place
+/// when the cell held one, a count when it held several. [limit] is a safety
+/// net on the number of *markers*, which the cell grid already bounds to about
+/// a screenful.
+///
+/// [totalInView] is the number of markers the query produced; [placesRepresented]
+/// is how many real places stand behind them.
+class MapPinPage {
+  const MapPinPage({
+    required this.pins,
+    required this.totalInView,
+    required this.limit,
+    this.clusters = const <MapCluster>[],
+  });
+
+  static const MapPinPage empty = MapPinPage(
+    pins: <MapPin>[],
+    totalInView: 0,
+    limit: 0,
+  );
+
+  /// The pins actually drawn - the [limit] closest to the centre of the
+  /// viewport.
+  final List<MapPin> pins;
+
+  /// Every place inside the viewport that survived the filter, drawn or not.
+  final int totalInView;
+
+  /// The cap that was applied, from the zoom level.
+  final int limit;
+
+  /// Aggregated markers - the cells that held more than one place. Drawn
+  /// alongside [pins], which are the cells that held exactly one.
+  final List<MapCluster> clusters;
+
+  /// Whether any marker on screen stands for more than one place.
+  bool get isClustered => clusters.isNotEmpty;
+
+  /// Places behind the markers on screen - every pin plus everything inside
+  /// every cluster. The honest "how many are here", whatever shape the markers
+  /// took.
+  int get placesRepresented =>
+      pins.length +
+      clusters.fold<int>(0, (int sum, MapCluster c) => sum + c.count);
+
+  /// Places in view that did not fit on the map.
+  int get hiddenCount {
+    final int hidden = totalInView - pins.length;
+    return hidden > 0 ? hidden : 0;
+  }
+
+  bool get hasMore => hiddenCount > 0;
+}
+
 enum MapPinKind { restaurant, landmark, food, tourist }
 
 /// A single marker on the map, carrying everything the "Click Map Pin" sheet
 /// shows (REQ102_32, UC300 A11).
 ///
 /// The detail travels with the pin rather than being fetched when one is
-/// tapped: the sheet then opens instantly, and the fields all come from rows
-/// the pin query already had to read. Pin counts are bounded by
-/// `MapExplorationLogic.pins(limit:)`, so this stays cheap.
+/// tapped: the sheet then opens instantly. Map markers carry only what they
+/// draw - id, name, position, rating, photo - and the rest is filled in by
+/// `MapExplorationLogic.pinDetail` on tap, so carrying them stays cheap.
 ///
 /// Domain models are plain data types. They carry no JSON - serialisation is
 /// the data model's job in `lib/model/data_models/`, and the repository is what
@@ -48,6 +184,7 @@ class MapPin {
     required this.label,
     required this.weight,
     this.imageUrl,
+    this.thumbnailUrl,
     this.category,
     this.rating,
     this.servedFoods = const <String>[],
@@ -68,7 +205,19 @@ class MapPin {
   final int weight;
 
   /// Photo of the place, if the source had one.
+  /// The full-size photo, for the detail sheet.
   final String? imageUrl;
+
+  /// The same photo asked for at card size.
+  ///
+  /// A marker carries both because the pin sheet opens on what the marker
+  /// already has and only then fetches the rest: the card wants the small one
+  /// and the detail wants the large one, and deriving the small one is a string
+  /// rewrite, so neither costs an extra request.
+  ///
+  /// Null when no smaller variant can be asked for - the caller falls back to
+  /// [imageUrl].
+  final String? thumbnailUrl;
 
   /// Cuisine or category line - "Authentic Malaysian Cuisine" in the mock-up.
   final String? category;

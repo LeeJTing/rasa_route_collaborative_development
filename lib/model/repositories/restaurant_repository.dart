@@ -1,8 +1,10 @@
 import 'dart:developer' as developer;
+import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected, visibleForTesting;
 
 import '../../core/json_model.dart';
+import '../../core/name_normalization.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
@@ -25,6 +27,46 @@ class RestaurantRepository {
   static const int _cataloguePageSize = 1000;
   static const int _restaurantIdBatchSize = 200;
 
+  // ---------------------------------------------------------------------------
+  // Catalogue cache
+  // ---------------------------------------------------------------------------
+  //
+  // `getRestaurants()` downloads the WHOLE restaurant table (12k+ rows, each
+  // with its nested `opening_hours`), paged 1000 at a time. Quick Mode ran it
+  // on every GPS fix and Matches on every open - the single biggest source of
+  // Supabase egress in the app. The catalogue is effectively static at
+  // runtime (writes are rare: moderation, closures, merges), so it is cached
+  // like `MapRepository`/`FoodKnowledgeRepository`, with a static copy shared
+  // by every facade instance.
+  //
+  // Static, and every write below calls [invalidate] so the cache never
+  // outlives its own edits.
+
+  static const Duration cacheTtl = Duration(minutes: 5);
+
+  static List<Restaurant>? _cachedRestaurants;
+  static DateTime? _cachedRestaurantsAt;
+  static Future<List<Restaurant>>? _restaurantsRequest;
+
+  /// Bumped by [invalidate] so an in-flight download that started BEFORE the
+  /// write can never repopulate the cache with pre-write rows (and stamp them
+  /// fresh) once it finally lands.
+  static int _cacheGeneration = 0;
+
+  /// Drops the cached restaurant catalogue. Call after anything that writes a
+  /// restaurant, a restaurant item or a restaurant's opening hours, or the
+  /// next read keeps showing the old answer for up to [cacheTtl].
+  ///
+  /// Also abandons any download already in flight: the write happened, so a
+  /// read that returns the pre-write request (or lets it fill the cache) is
+  /// wrong, and the very next read must start from Supabase again.
+  static void invalidate() {
+    _cacheGeneration++;
+    _cachedRestaurants = null;
+    _cachedRestaurantsAt = null;
+    _restaurantsRequest = null;
+  }
+
   static const String _summaryColumns = '''
     restaurant_id,
     restaurant_name,
@@ -38,6 +80,7 @@ class RestaurantRepository {
     restaurant_image_id,
     restaurant_image_url,
     status,
+    closed_until,
     restaurant_opening_hours:opening_hours!opening_hours_restaurant_id_fkey(
       opening_hours_id,
       day,
@@ -57,7 +100,8 @@ class RestaurantRepository {
     ingredients,
     food_img_url,
     food_category,
-    restaurant_item_price
+    restaurant_item_price,
+    is_removed
   ''';
 
   static const String _detailColumns =
@@ -72,6 +116,7 @@ class RestaurantRepository {
       food_img_url,
       food_category,
       restaurant_item_price,
+      is_removed,
       local_food(
         local_food_id,
         food_name,
@@ -81,6 +126,25 @@ class RestaurantRepository {
       )
     )
   ''';
+
+  /// range (see [restaurantPriceRangeByFood]).
+  static final RegExp _bulkPackPattern = RegExp(
+    r'(?:'
+    r'(\d+)\s*\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set)\b'
+    r'|\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set)\b\s*(\d+)'
+    r')',
+    caseSensitive: false,
+  );
+
+  static bool _isBulkPack(String itemName) {
+    final RegExpMatch? match = _bulkPackPattern.firstMatch(itemName);
+    if (match == null) return false;
+    // The count is captured in group 1 ("30 botol") or group 4 ("BOTOL 30").
+    final String? count = match.group(1) ?? match.group(4);
+    final int? parsed = count == null ? null : int.tryParse(count);
+    // A single unit (e.g. "BOTOL 1") is a normal single-serve price.
+    return parsed != null && parsed > 1;
+  }
 
   Future<Restaurant?> getRestaurantById(int restaurantId) async {
     try {
@@ -103,7 +167,56 @@ class RestaurantRepository {
     }
   }
 
-  Future<List<Restaurant>> getRestaurants() async {
+  Future<List<Restaurant>> getRestaurants() {
+    final List<Restaurant>? cached = _cachedRestaurants;
+    if (cached != null &&
+        _cachedRestaurantsAt != null &&
+        currentTime().difference(_cachedRestaurantsAt!) < cacheTtl) {
+      return Future<List<Restaurant>>.value(cached);
+    }
+    // Concurrent callers (Quick Mode + Matches load together) share one
+    // request instead of each downloading the whole catalogue.
+    final Future<List<Restaurant>>? inFlight = _restaurantsRequest;
+    if (inFlight != null) return inFlight;
+    final int generation = _cacheGeneration;
+    late final Future<List<Restaurant>> request;
+    request = fetchCatalogueRows()
+        .then((List<Restaurant> value) {
+          // A write may have invalidated the cache while this download was
+          // out. If so, drop the result: it predates the write and would
+          // otherwise resurrect stale rows under a fresh timestamp.
+          if (generation == _cacheGeneration) {
+            _cachedRestaurants = value;
+            _cachedRestaurantsAt = currentTime();
+          }
+          return value;
+        })
+        .whenComplete(() {
+          // Only clear the slot if it still holds THIS request - an
+          // invalidate (or a newer download) may have replaced it.
+          if (identical(_restaurantsRequest, request)) {
+            _restaurantsRequest = null;
+          }
+        });
+    _restaurantsRequest = request;
+    return request;
+  }
+
+  /// Test seam: lets a cache test advance the clock so the [cacheTtl] branch
+  /// can be exercised without waiting five real minutes. Production always
+  /// returns `DateTime.now()` (the same contract as the logic layer's
+  /// `currentTime()` seams).
+  @protected
+  DateTime currentTime() => DateTime.now();
+
+  /// Test seam: lets a cache test feed canned rows through the REAL cache
+  /// logic in [getRestaurants] (freshness check, single-flight request,
+  /// [invalidate]) without a network. Production pages the whole table down
+  /// through [_fetchRestaurants].
+  @protected
+  Future<List<Restaurant>> fetchCatalogueRows() => _fetchRestaurants();
+
+  Future<List<Restaurant>> _fetchRestaurants() async {
     try {
       final List<Restaurant> restaurants = <Restaurant>[];
       int rangeStart = 0;
@@ -133,10 +246,68 @@ class RestaurantRepository {
     }
   }
 
+  /// Loads only restaurant summaries inside a server-filtered coordinate box.
+  ///
+  /// The repository deliberately uses a bounding box rather than pretending
+  /// latitude/longitude degrees are an exact distance. Business logic applies
+  /// the precise Haversine radius after this inexpensive Supabase pre-filter.
+  Future<List<Restaurant>> getRestaurantsNear({
+    required double latitude,
+    required double longitude,
+    required double maximumDistanceKm,
+  }) async {
+    if (maximumDistanceKm <= 0) return const <Restaurant>[];
+    const double kilometresPerLatitudeDegree = 110.574;
+    const double kilometresPerLongitudeDegreeAtEquator = 111.320;
+    final double latitudeDelta =
+        maximumDistanceKm / kilometresPerLatitudeDegree;
+    final double longitudeScale = math.cos(latitude * math.pi / 180).abs();
+    final double longitudeDelta =
+        maximumDistanceKm /
+        (kilometresPerLongitudeDegreeAtEquator *
+            math.max(longitudeScale, 0.01));
+
+    try {
+      final List<Restaurant> restaurants = <Restaurant>[];
+      int rangeStart = 0;
+      while (true) {
+        final List<Map<String, dynamic>> rows = await api.selectAll(
+          APIManager.tableRestaurant,
+          columns: _summaryColumns,
+          gte: <String, num>{
+            'latitude': latitude - latitudeDelta,
+            'longitude': longitude - longitudeDelta,
+          },
+          lte: <String, num>{
+            'latitude': latitude + latitudeDelta,
+            'longitude': longitude + longitudeDelta,
+          },
+          orderBy: 'restaurant_id',
+          rangeStart: rangeStart,
+          rangeEnd: rangeStart + _cataloguePageSize - 1,
+        );
+        restaurants.addAll(rows.map(_toDomain));
+        if (rows.length < _cataloguePageSize) break;
+        rangeStart += _cataloguePageSize;
+      }
+      return List<Restaurant>.unmodifiable(restaurants);
+    } catch (error, stackTrace) {
+      developer.log(
+        'Nearby restaurant summary query failed.',
+        name: 'RestaurantRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load nearby restaurants. Check your connection and try again.',
+      );
+    }
+  }
+
   /// Loads menu details only for the restaurants Quick Mode will display.
   ///
-  /// Distance selection must consider the full catalogue, but downloading
-  /// every nested menu would make that first query unnecessarily large.
+  /// Distance selection uses nearby summaries, but downloading every nested
+  /// menu for those candidates would still make the first query too large.
   Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) async {
     if (restaurantIds.isEmpty) return const <Restaurant>[];
     try {
@@ -160,6 +331,27 @@ class RestaurantRepository {
         'Unable to load restaurant menus. Check your connection and try again.',
       );
     }
+  }
+
+  /// The restaurant's CURRENT menu items for the report page's item picker -
+  /// lightweight rows (id + name + price), excluding items already
+  /// soft-removed by earlier reports. A tourist can only report a price /
+  /// existence of a dish the place is still showing.
+  Future<List<RestaurantItem>> getReportableItems(int restaurantId) async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableRestaurantItem,
+      columns:
+          'restaurant_item_id, restaurant_id, local_food_id, '
+          'restaurant_item_name, restaurant_item_price',
+      eq: <String, Object?>{'restaurant_id': restaurantId, 'is_removed': false},
+      orderBy: 'restaurant_item_id',
+    );
+    return List<RestaurantItem>.unmodifiable(
+      rows.map(
+        (Map<String, dynamic> row) =>
+            _itemDataToDomain(RestaurantItemDataModel.fromJson(row)),
+      ),
+    );
   }
 
   /// Loads the menu facts needed to decide Quick Mode eligibility without
@@ -226,7 +418,7 @@ class RestaurantRepository {
     try {
       final List<Map<String, dynamic>> rows = await api.selectAll(
         APIManager.tableRestaurantItem,
-        columns: 'local_food_id, restaurant_item_price',
+        columns: 'local_food_id, restaurant_item_name, restaurant_item_price',
         inFilter: <String, List<Object?>>{
           'local_food_id': localFoodIds.cast<Object?>().toList(),
         },
@@ -238,7 +430,16 @@ class RestaurantRepository {
         final double? price = JsonReader.asDoubleOrNull(
           row['restaurant_item_price'],
         );
-        if (foodId == null || price == null || price <= 0) continue;
+        // A bulk/wholesale line (e.g. "Air Katira (30 botol) RM540") prices a
+        // multi-unit pack, not a single serve - it would inflate the range the
+        // comparison shows, so it is excluded from the min/max aggregation.
+        final String itemName = JsonReader.asString(row['restaurant_item_name']);
+        if (foodId == null ||
+            price == null ||
+            price <= 0 ||
+            _isBulkPack(itemName)) {
+          continue;
+        }
         final double currentMin = minByFood[foodId] ?? price;
         final double currentMax = maxByFood[foodId] ?? price;
         minByFood[foodId] = price < currentMin ? price : currentMin;
@@ -264,6 +465,61 @@ class RestaurantRepository {
     }
   }
 
+  /// Every real menu line (name + price) per dish, unfiltered - the source for
+  /// the comparison's "Time and Price" list. Kept verbatim (no min/max, no
+  /// bulk filtering) so a pack line like "BOTOL 30" keeps its unit text and
+  /// is shown to the tourist as-is.
+  Future<Map<int, List<({String name, double price})>>> restaurantMenuItemsByFood(
+    Set<int> localFoodIds,
+  ) async {
+    if (localFoodIds.isEmpty) {
+      return const <int, List<({String name, double price})>>{};
+    }
+    try {
+      final List<Map<String, dynamic>> rows = await api.selectAll(
+        APIManager.tableRestaurantItem,
+        columns: 'local_food_id, restaurant_item_name, restaurant_item_price',
+        inFilter: <String, List<Object?>>{
+          'local_food_id': localFoodIds.cast<Object?>().toList(),
+        },
+      );
+      final Map<int, List<({String name, double price})>> byFood =
+          <int, List<({String name, double price})>>{};
+      for (final Map<String, dynamic> row in rows) {
+        final int? foodId = JsonReader.asIntOrNull(row['local_food_id']);
+        final double? price = JsonReader.asDoubleOrNull(
+          row['restaurant_item_price'],
+        );
+        final String name = JsonReader.asString(
+          row['restaurant_item_name'],
+        ).trim();
+        if (foodId == null || price == null || price <= 0 || name.isEmpty) {
+          continue;
+        }
+        byFood.putIfAbsent(
+          foodId,
+          () => <({String name, double price})>[],
+        ).add((name: name, price: price));
+      }
+      for (final List<({String name, double price})> entries in byFood.values) {
+        entries.sort(
+          (a, b) => a.price.compareTo(b.price),
+        );
+      }
+      return byFood;
+    } catch (error, stackTrace) {
+      developer.log(
+        'Restaurant menu listing query failed.',
+        name: 'RestaurantRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load restaurant prices. Check your connection and try again.',
+      );
+    }
+  }
+
   /// UC500's "Restaurant Already Exists" check.
   Future<Restaurant?> findByName(String name) async {
     final List<Restaurant> matches = await findByNameList(name);
@@ -275,13 +531,20 @@ class RestaurantRepository {
   /// submit flow then picks the one within ~100m of the landmark's location
   /// (see `LandmarkSubmissionLogic`), so two same-named restaurants in
   /// different towns are not confused with each other.
+  ///
+  /// This is the merge/exists check a submission runs - it must be FRESH (a
+  /// restaurant another device just added must be found so the submission
+  /// merges instead of duplicating), so the shared catalogue cache is dropped
+  /// first. Submissions are rare user actions; one fresh read is the right
+  /// price for a correct merge decision.
   Future<List<Restaurant>> findByNameList(String name) async {
-    final String normalized = name.trim().toLowerCase();
+    final String normalized = placeNameKey(name);
     if (normalized.isEmpty) return const <Restaurant>[];
+    invalidate();
     final List<Restaurant> restaurants = await getRestaurants();
     return <Restaurant>[
       for (final Restaurant restaurant in restaurants)
-        if (restaurant.name.trim().toLowerCase() == normalized) restaurant,
+        if (placeNameKey(restaurant.name) == normalized) restaurant,
     ];
   }
 
@@ -322,6 +585,7 @@ class RestaurantRepository {
       <String, Object?>{'report_count': 0, 'status': 'available'},
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
+    invalidate();
   }
 
   /// Increments `restaurant.report_count` by one after a report is recorded
@@ -351,6 +615,165 @@ class RestaurantRepository {
       <String, Object?>{'status': 'frozen'},
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
+    invalidate();
+  }
+
+  // ===========================================================================
+  // Report auto-apply writes (REPORT_REDESIGN_PLAN.md) - called when a claim
+  // reaches its threshold. Each is a single targeted UPDATE.
+  // ===========================================================================
+
+  /// 2a item_price: rewrites one menu item's price to the reported value.
+  Future<void> updateRestaurantItemPrice(int itemId, double price) async {
+    await api.updateRow(
+      APIManager.tableRestaurantItem,
+      <String, Object?>{'restaurant_item_price': price},
+      eq: <String, Object?>{'restaurant_item_id': itemId},
+    );
+  }
+
+  /// 2b item_not_exist: soft-removes one menu item (`is_removed`), hiding it
+  /// from the place's menu/discovery without deleting the row.
+  Future<void> softRemoveRestaurantItem(int itemId) async {
+    await api.updateRow(
+      APIManager.tableRestaurantItem,
+      <String, Object?>{'is_removed': true},
+      eq: <String, Object?>{'restaurant_item_id': itemId},
+    );
+  }
+
+  /// 2b: how many of [restaurantId]'s items are still shown (not removed) -
+  /// used to decide whether the whole place should be hidden when every item
+  /// was reported not-exist.
+  Future<int> countVisibleRestaurantItems(int restaurantId) async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableRestaurantItem,
+      columns: 'restaurant_item_id',
+      eq: <String, Object?>{'restaurant_id': restaurantId, 'is_removed': false},
+    );
+    return rows.length;
+  }
+
+  /// 2b: hides a restaurant whose every item was reported not-exist
+  /// (`status` -> 'removed' - distinct from report-freeze 'frozen').
+  Future<void> removeRestaurant(int restaurantId) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'status': 'removed'},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    invalidate();
+  }
+
+  /// 3 address: rewrites the restaurant's address to the reported value.
+  Future<void> updateRestaurantAddress(int restaurantId, String address) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'address': address},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    invalidate();
+  }
+
+  /// 4a closed permanently / 4b closed temporarily: freezes the restaurant.
+  /// For a TEMPORARY closure the caller sets [closedUntil] so the place can
+  /// auto-reactivate once that time passes (see [reactivateFromClosure]).
+  Future<void> freezeRestaurant(
+    int restaurantId, {
+    DateTime? closedUntil,
+  }) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{
+        'status': 'frozen',
+        if (closedUntil != null) 'closed_until': closedUntil.toUtc(),
+      },
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    invalidate();
+  }
+
+  /// 4b resume: clears a temporary closure that has expired - back to
+  /// 'available' with no `closed_until`.
+  Future<void> reactivateRestaurantFromClosure(int restaurantId) async {
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      <String, Object?>{'status': 'available', 'closed_until': null},
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    invalidate();
+  }
+
+  /// 1 operating hours: replaces ONE weekday's stored rows with the reported
+  /// proposal (delete that day's rows, insert the proposed rows). Used when a
+  /// day's hours claim reaches its threshold - only that day is touched.
+  Future<void> replaceRestaurantOpeningHourDay(
+    int restaurantId,
+    Weekday day,
+    List<OpeningHour> rows,
+  ) async {
+    await api.deleteRows(
+      APIManager.tableOpeningHours,
+      eq: <String, Object?>{
+        'restaurant_id': restaurantId,
+        'day': _dayName(day),
+      },
+    );
+    if (rows.isNotEmpty) {
+      await _insertOpeningHours(restaurantId, rows);
+    }
+    invalidate();
+  }
+
+  Future<void> _insertOpeningHours(
+    int restaurantId,
+    List<OpeningHour> hours,
+  ) async {
+    int nextId = await _nextOpeningHoursId();
+    for (final OpeningHour hour in hours) {
+      final bool isOpen = hour.status == DayStatus.open;
+      await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
+        'opening_hours_id': nextId++,
+        'day': _dayName(hour.day),
+        'status': hour.status.name,
+        'opening_time': isOpen && hour.opensAt != null
+            ? _formatTime(hour.opensAt!)
+            : null,
+        'closing_time': isOpen && hour.closesAt != null
+            ? _formatTime(hour.closesAt!)
+            : null,
+        'landmark_id': null,
+        'restaurant_id': restaurantId,
+      });
+    }
+  }
+
+  Future<int> _nextOpeningHoursId() async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableOpeningHours,
+      columns: 'opening_hours_id',
+      orderBy: 'opening_hours_id',
+      ascending: false,
+      limit: 1,
+    );
+    if (rows.isEmpty) return 1;
+    return ((rows.first['opening_hours_id'] as num?)?.toInt() ?? 0) + 1;
+  }
+
+  static String _dayName(Weekday day) => switch (day) {
+    Weekday.monday => 'Monday',
+    Weekday.tuesday => 'Tuesday',
+    Weekday.wednesday => 'Wednesday',
+    Weekday.thursday => 'Thursday',
+    Weekday.friday => 'Friday',
+    Weekday.saturday => 'Saturday',
+    Weekday.sunday => 'Sunday',
+  };
+
+  static String _formatTime(int minutes) {
+    final int h = minutes ~/ 60;
+    final int m = minutes % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:00';
   }
 
   Restaurant _toDomain(Map<String, dynamic> row) {
@@ -382,6 +805,7 @@ class RestaurantRepository {
       imageUrl: data.restaurantImageUrl,
       openingHours: openingHours,
       status: data.status,
+      closedUntil: data.closedUntil,
       items: _deduplicateRestaurantItems(items),
     );
   }
@@ -462,6 +886,7 @@ class RestaurantRepository {
         price: data.restaurantItemPrice,
         currency: 'RM',
         foodCategory: data.foodCategory ?? '',
+        isRemoved: data.isRemoved,
       );
 
   RestaurantItem _itemToDomain(Map<String, dynamic> row) {
@@ -504,6 +929,7 @@ class RestaurantRepository {
       price: data.restaurantItemPrice,
       currency: 'RM',
       foodCategory: data.foodCategory ?? '',
+      isRemoved: data.isRemoved,
     );
   }
 

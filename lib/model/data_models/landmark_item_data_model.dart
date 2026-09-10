@@ -22,6 +22,7 @@ class LandmarkItemDataModel implements JsonModel {
     this.seasonal,
     this.cookingStyle,
     this.mealType,
+    this.isRemoved = false,
   });
 
   /// `landmark_item.landmark_item_id` (bigint identity, PK).
@@ -64,6 +65,10 @@ class LandmarkItemDataModel implements JsonModel {
   final String? cookingStyle;
   final String? mealType;
 
+  /// Soft-removal flag (`landmark_item.is_removed`) - set when enough
+  /// tourists reported this dish does not exist.
+  final bool isRemoved;
+
   factory LandmarkItemDataModel.fromJson(Map<String, dynamic> json) {
     return LandmarkItemDataModel(
       landmarkItemId: JsonReader.asInt(json['landmark_item_id']),
@@ -86,6 +91,7 @@ class LandmarkItemDataModel implements JsonModel {
       seasonal: JsonReader.asStringOrNull(json['seasonal']),
       cookingStyle: JsonReader.asStringOrNull(json['cooking_style']),
       mealType: JsonReader.asStringOrNull(json['meal_type']),
+      isRemoved: JsonReader.asBool(json['is_removed']),
     );
   }
 
@@ -109,5 +115,6 @@ class LandmarkItemDataModel implements JsonModel {
     'seasonal': seasonal,
     'cooking_style': cookingStyle,
     'meal_type': mealType,
+    'is_removed': isRemoved,
   };
 }

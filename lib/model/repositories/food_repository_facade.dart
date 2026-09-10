@@ -127,6 +127,7 @@ class FoodRepositoryFacade {
     Map<int, List<int>> foodDietaryRestrictionIds = const <int, List<int>>{},
     List<FoodPreference> touristPreferences = const <FoodPreference>[],
     int maximumResults = 5,
+    void Function(String model)? onFallbackModel,
   }) => recommendation.getPairings(
     food,
     catalogue,
@@ -134,6 +135,7 @@ class FoodRepositoryFacade {
     foodDietaryRestrictionIds: foodDietaryRestrictionIds,
     touristPreferences: touristPreferences,
     maximumResults: maximumResults,
+    onFallbackModel: onFallbackModel,
   );
 
   /// Lowest and highest listed price per dish, aggregated from every
@@ -141,6 +143,10 @@ class FoodRepositoryFacade {
   Future<Map<int, ({double min, double max})>> foodPriceRanges(
     Set<int> foodIds,
   ) => restaurant.restaurantPriceRangeByFood(foodIds);
+
+  Future<Map<int, List<({String name, double price})>>> foodMenuItems(
+    Set<int> foodIds,
+  ) => restaurant.restaurantMenuItemsByFood(foodIds);
 
   /// "If you liked X, try Y" - computed from shared attributes, no AI call.
   Future<List<FoodSimilarity>> getSimilar(
