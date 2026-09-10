@@ -28,7 +28,7 @@ class FoodSearchBar extends StatelessWidget {
         maxLines: 1,
         textInputAction: TextInputAction.search,
         decoration: const InputDecoration(
-          hintText: 'Search local food...',
+          hintText: 'Search local food by name',
           prefixIcon: Icon(Icons.search),
         ),
       ),

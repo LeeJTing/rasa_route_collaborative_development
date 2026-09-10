@@ -106,8 +106,7 @@ class LocalFoodListViewModel extends BaseViewModel {
   List<LocalFood> get displayedFoods {
     final String needle = _query.toLowerCase();
     final List<LocalFood> result = _foods.where((LocalFood food) {
-      final bool matchesSearch =
-          needle.isEmpty || food.name.toLowerCase().contains(needle);
+      final bool matchesSearch = needle.isEmpty || _matchesQuery(food, needle);
       return matchesSearch && _matchesFilters(food);
     }).toList();
     result.sort(
@@ -116,6 +115,13 @@ class LocalFoodListViewModel extends BaseViewModel {
           : b.name.compareTo(a.name),
     );
     return result;
+  }
+
+  bool _matchesQuery(LocalFood food, String needle) {
+    if (food.name.toLowerCase().contains(needle)) return true;
+    return food.synonyms.any(
+      (String synonym) => synonym.toLowerCase().contains(needle),
+    );
   }
 
   bool _matchesFilters(LocalFood food) {
