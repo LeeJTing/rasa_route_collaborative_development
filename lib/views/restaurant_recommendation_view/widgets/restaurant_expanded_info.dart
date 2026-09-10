@@ -72,14 +72,23 @@ class RestaurantExpandedInfo extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   item.foodName,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.titleSmall,
                                 ),
                               ),
                               if (item.price != null)
-                                Text(
-                                  '${item.currency} ${item.price!.toStringAsFixed(2)}',
-                                  style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(color: AppColors.accentRust),
+                                Flexible(
+                                  child: Text(
+                                    '${item.currency} ${item.price!.toStringAsFixed(2)}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.end,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(color: AppColors.accentRust),
+                                  ),
                                 ),
                             ],
                           ),
@@ -87,6 +96,8 @@ class RestaurantExpandedInfo extends StatelessWidget {
                             const SizedBox(height: AppSpacing.xs),
                             Text(
                               item.ingredients!,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],

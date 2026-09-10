@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
@@ -10,11 +9,11 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
 import '../../domain_model/local_food.dart';
-import '../../domain_model/opening_hour.dart';
 import '../../view_models/add_landmark_view_model.dart';
 import '../../view_models/food_recognition_view_model.dart'
     show LandmarkDraftHandoff;
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/operating_hours_editor.dart';
 import '../common_widgets/recognised_food_card.dart';
 import 'widgets/location_picker_field.dart';
 
@@ -43,6 +42,12 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
   // both right without fighting the tourist's own typing.
   late final TextEditingController _restaurantNameController;
   final FocusNode _restaurantNameFocusNode = FocusNode();
+
+  /// Optional contact/address fields - simple controllers, no auto-fill, so
+  /// they only need a plain value read (no focus-guarded sync like the name).
+  late final TextEditingController _phoneController;
+  late final TextEditingController _websiteController;
+  late final TextEditingController _addressController;
 
   /// Last signboard-extraction version applied to `_restaurantNameController`
   /// (see the force-sync in `build` - a fresh extraction must overwrite the
@@ -75,6 +80,13 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
     _restaurantNameController = TextEditingController(
       text: _viewModel.restaurantName,
     );
+    _phoneController = TextEditingController(text: _viewModel.restaurantPhone);
+    _websiteController = TextEditingController(
+      text: _viewModel.restaurantWebsite,
+    );
+    _addressController = TextEditingController(
+      text: _viewModel.restaurantAddress,
+    );
     _appliedRestaurantNameVersion = _viewModel.extractedRestaurantNameVersion;
     _viewModel.onInit();
   }
@@ -83,6 +95,9 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
   void dispose() {
     _restaurantNameController.dispose();
     _restaurantNameFocusNode.dispose();
+    _phoneController.dispose();
+    _websiteController.dispose();
+    _addressController.dispose();
     _viewModel.dispose();
     super.dispose();
   }
@@ -185,7 +200,33 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                             _RestaurantNameField(
                               controller: _restaurantNameController,
                               focusNode: _restaurantNameFocusNode,
+                              maxLength: viewModel.restaurantNameMaxLength,
+                              error: viewModel.restaurantName.isEmpty
+                                  ? null
+                                  : viewModel.restaurantNameError,
+                              warning: viewModel.restaurantNameWarning,
                               onChanged: viewModel.setRestaurantName,
+                            ),
+                            const SizedBox(height: AppSpacing.lg),
+                            _ContactDetailsSection(
+                              phoneController: _phoneController,
+                              websiteController: _websiteController,
+                              phoneMaxLength: viewModel.phoneMaxLength,
+                              websiteMaxLength: viewModel.websiteMaxLength,
+                              phoneError: viewModel.restaurantPhoneError,
+                              websiteError: viewModel.restaurantWebsiteError,
+                              websiteWarning:
+                                  viewModel.restaurantWebsiteWarning,
+                              onPhoneChanged: viewModel.setRestaurantPhone,
+                              onWebsiteChanged: viewModel.setRestaurantWebsite,
+                            ),
+                            const SizedBox(height: AppSpacing.lg),
+                            _RestaurantAddressSection(
+                              controller: _addressController,
+                              maxLength: viewModel.addressMaxLength,
+                              error: viewModel.restaurantAddressError,
+                              warning: viewModel.restaurantAddressWarning,
+                              onChanged: viewModel.setRestaurantAddress,
                             ),
                             const SizedBox(height: AppSpacing.lg),
                             const Text(
@@ -209,7 +250,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView> {
                               onMove: viewModel.adjustLandmarkLocation,
                             ),
                             const SizedBox(height: AppSpacing.lg),
-                            _OperatingHoursSection(
+                            OperatingHoursEditor(
                               operatingHours: viewModel.operatingHours,
                               onStatusChanged: viewModel.setDayStatus,
                               onRangeTimeChanged: viewModel.setRangeTime,
@@ -375,9 +416,13 @@ class _PrimaryFoodSection extends StatelessWidget {
   }
 }
 
-/// A single price entry field (A16: rejects nothing itself - the ViewModel
-/// validates the 0.01-1000 MYR range and surfaces the error).
-class _PriceField extends StatelessWidget {
+/// A single price entry field. STRICTLY capped + formatted so a pasted blob
+/// can never overflow: max 7 characters, digits and one dot only, at most 4
+/// integer digits and 2 decimals (the 0.01-1000 MYR rule). Shows a precise
+/// inline error under the field when the value is unparsable or outside the
+/// allowed range; Gemini's soft price warning only shows while the value is
+/// otherwise valid.
+class _PriceField extends StatefulWidget {
   const _PriceField({
     required this.label,
     required this.initialValue,
@@ -394,28 +439,107 @@ class _PriceField extends StatelessWidget {
   final String? warning;
 
   @override
+  State<_PriceField> createState() => _PriceFieldState();
+}
+
+class _PriceFieldState extends State<_PriceField> {
+  /// '1000.00' is the widest allowed value (0.01-1000 MYR, 2 decimals).
+  static const int _maxLength = 7;
+
+  late final TextEditingController _controller;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: widget.initialValue?.toStringAsFixed(2) ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String raw) {
+    final String value = raw.trim();
+    String? error;
+    double? parsed;
+    if (value.isNotEmpty) {
+      final bool wellFormed = RegExp(r'^\d{1,4}(\.\d{1,2})?$').hasMatch(value);
+      parsed = wellFormed ? double.tryParse(value) : null;
+      if (parsed == null) {
+        error = 'Use numbers only, up to 2 decimals (e.g. 12.50).';
+      } else if (parsed <= 0 || parsed > 1000) {
+        error = 'Price must be between 0.01 and 1000 MYR.';
+      }
+    }
+    if (error != _error) setState(() => _error = error);
+    if (parsed != null) widget.onChanged(parsed);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        TextFormField(
-          initialValue: initialValue?.toStringAsFixed(2) ?? '',
+        TextField(
+          controller: _controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(labelText: label, prefixText: 'RM '),
-          onChanged: (String value) {
-            final double? parsed = double.tryParse(value);
-            if (parsed != null) onChanged(parsed);
-          },
+          maxLength: _maxLength,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+          inputFormatters: <TextInputFormatter>[
+            const _DecimalInputFormatter(
+              maxIntegralDigits: 4,
+              maxFractionDigits: 2,
+            ),
+          ],
+          onChanged: _onChanged,
+          decoration: InputDecoration(
+            labelText: widget.label,
+            prefixText: 'RM ',
+            counterText: '',
+            errorText: _error,
+            errorMaxLines: 2,
+          ),
         ),
-        if (warning != null) ...<Widget>[
+        if (widget.warning != null && _error == null) ...<Widget>[
           const SizedBox(height: AppSpacing.xs),
           Text(
-            warning!,
+            widget.warning!,
             style: AppTextStyles.bodySmall.copyWith(color: AppColors.warning),
           ),
         ],
       ],
     );
+  }
+}
+
+/// Keeps a decimal price well-formed while typing: at most
+/// [maxIntegralDigits] digits before the dot, at most [maxFractionDigits]
+/// after it, and never more than one dot.
+class _DecimalInputFormatter extends TextInputFormatter {
+  const _DecimalInputFormatter({
+    required this.maxIntegralDigits,
+    required this.maxFractionDigits,
+  });
+
+  final int maxIntegralDigits;
+  final int maxFractionDigits;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final String text = newValue.text;
+    if (text.isEmpty) return newValue;
+    final RegExp pattern = RegExp(
+      '^(\\d{0,$maxIntegralDigits})(\\.(\\d{0,$maxFractionDigits})?)?\$',
+    );
+    return pattern.hasMatch(text) ? newValue : oldValue;
   }
 }
 
@@ -429,11 +553,24 @@ class _RestaurantNameField extends StatelessWidget {
   const _RestaurantNameField({
     required this.controller,
     required this.focusNode,
+    required this.maxLength,
+    required this.error,
+    this.warning,
     required this.onChanged,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
+  final int maxLength;
+
+  /// Inline error shown under the field (null when the name is fine). The
+  /// "required" error is deliberately NOT shown inline while the field is
+  /// empty - the submit bar's reason covers that without nagging.
+  final String? error;
+
+  /// Amber warning shown while the name is in the 31-40 warn zone - typing
+  /// is allowed up to [maxLength] but submission is blocked by the VM.
+  final String? warning;
   final ValueChanged<String> onChanged;
 
   @override
@@ -449,7 +586,11 @@ class _RestaurantNameField extends StatelessWidget {
             vertical: AppSpacing.sm,
           ),
           decoration: BoxDecoration(
-            border: Border.all(color: AppColors.outline),
+            border: Border.all(
+              color: error != null
+                  ? AppColors.error
+                  : (warning != null ? AppColors.warning : AppColors.outline),
+            ),
             borderRadius: AppRadius.cardRadius,
           ),
           child: Row(
@@ -463,10 +604,18 @@ class _RestaurantNameField extends StatelessWidget {
                 child: TextField(
                   controller: controller,
                   focusNode: focusNode,
+                  maxLength: maxLength,
+                  maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                  inputFormatters: <TextInputFormatter>[
+                    FilteringTextInputFormatter.deny(
+                      RegExp(r'[\x00-\x1F\x7F]'),
+                    ),
+                  ],
                   onChanged: onChanged,
                   decoration: const InputDecoration(
                     border: InputBorder.none,
                     isDense: true,
+                    counterText: '',
                     hintText: 'Enter restaurant name',
                   ),
                 ),
@@ -474,9 +623,218 @@ class _RestaurantNameField extends StatelessWidget {
             ],
           ),
         ),
+        if (error != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            error!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
+          ),
+        ],
+        if (error == null && warning != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            warning!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.warning),
+          ),
+        ],
       ],
     );
   }
+}
+
+/// A labelled, icon-bordered text input reused by the optional contact and
+/// address fields - visually consistent with `_RestaurantNameField`. Enforces
+/// [maxLength] while typing (counter hidden) and blocks control characters /
+/// newlines from pasted input; field-level [error] text renders below.
+class _FormTextField extends StatelessWidget {
+  const _FormTextField({
+    required this.label,
+    required this.icon,
+    required this.hint,
+    required this.controller,
+    required this.maxLength,
+    required this.onChanged,
+    required this.error,
+    this.warning,
+    this.keyboardType = TextInputType.text,
+    this.maxLines = 1,
+  });
+
+  final String label;
+  final IconData icon;
+  final String hint;
+  final TextEditingController controller;
+  final int maxLength;
+  final ValueChanged<String> onChanged;
+  final String? error;
+
+  /// Amber warning shown while the value is in its warn zone (e.g. website
+  /// 76-79 chars) - typing continues to [maxLength] but submission is
+  /// blocked by the ViewModel.
+  final String? warning;
+  final TextInputType keyboardType;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(label, style: AppTextStyles.titleSmall),
+        const SizedBox(height: AppSpacing.sm),
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: error != null
+                  ? AppColors.error
+                  : (warning != null ? AppColors.warning : AppColors.outline),
+            ),
+            borderRadius: AppRadius.cardRadius,
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(icon, color: AppColors.textSecondary),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  keyboardType: keyboardType,
+                  maxLines: maxLines,
+                  maxLength: maxLength,
+                  maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                  inputFormatters: <TextInputFormatter>[
+                    // Blocks newlines and all control bytes from pasted text.
+                    FilteringTextInputFormatter.deny(
+                      RegExp(r'[\x00-\x1F\x7F]'),
+                    ),
+                  ],
+                  onChanged: onChanged,
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    counterText: '',
+                    hintText: hint,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (error != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            error!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
+          ),
+        ],
+        if (error == null && warning != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            warning!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.warning),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Optional phone + website fields under the restaurant name. Both optional;
+/// when the tourist types anything the ViewModel validates it (Malaysian
+/// phone format; http(s) URL format - reachability is checked at submit).
+class _ContactDetailsSection extends StatelessWidget {
+  const _ContactDetailsSection({
+    required this.phoneController,
+    required this.websiteController,
+    required this.phoneMaxLength,
+    required this.websiteMaxLength,
+    required this.phoneError,
+    required this.websiteError,
+    required this.websiteWarning,
+    required this.onPhoneChanged,
+    required this.onWebsiteChanged,
+  });
+
+  final TextEditingController phoneController;
+  final TextEditingController websiteController;
+  final int phoneMaxLength;
+  final int websiteMaxLength;
+  final String? phoneError;
+  final String? websiteError;
+
+  /// Amber warning while the website is in its 76-79 warn zone.
+  final String? websiteWarning;
+  final ValueChanged<String> onPhoneChanged;
+  final ValueChanged<String> onWebsiteChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      const Text('Contact Details (Optional)', style: AppTextStyles.titleSmall),
+      const SizedBox(height: AppSpacing.sm),
+      _FormTextField(
+        label: 'Phone Number',
+        icon: Icons.phone_outlined,
+        hint: '+60 12-345 6789',
+        controller: phoneController,
+        maxLength: phoneMaxLength,
+        keyboardType: TextInputType.phone,
+        onChanged: onPhoneChanged,
+        error: phoneError,
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      _FormTextField(
+        label: 'Website',
+        icon: Icons.language_outlined,
+        hint: 'https://example.com',
+        controller: websiteController,
+        maxLength: websiteMaxLength,
+        keyboardType: TextInputType.url,
+        onChanged: onWebsiteChanged,
+        error: websiteError,
+        warning: websiteWarning,
+      ),
+    ],
+  );
+}
+
+/// Optional restaurant address field. When the tourist types anything it must
+/// be at least 5 characters, use only letters/digits/spaces/common address
+/// punctuation, and respect [maxLength].
+class _RestaurantAddressSection extends StatelessWidget {
+  const _RestaurantAddressSection({
+    required this.controller,
+    required this.maxLength,
+    required this.error,
+    this.warning,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final int maxLength;
+  final String? error;
+
+  /// Amber warning while the address is close to its cap (see ViewModel).
+  final String? warning;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) => _FormTextField(
+    label: 'Restaurant Address (Optional)',
+    icon: Icons.place_outlined,
+    hint: 'e.g. 12, Jalan Bukit Bintang, Kuala Lumpur',
+    controller: controller,
+    maxLength: maxLength,
+    maxLines: 2,
+    onChanged: onChanged,
+    error: error,
+    warning: warning,
+  );
 }
 
 /// The two mandatory-one-of-two capture buttons (BF-16, A17), before a photo
@@ -622,414 +980,6 @@ class _ImageCaptureRow extends StatelessWidget {
           ],
         ),
       ],
-    );
-  }
-}
-
-/// Operating hours, one row per day (BF-19..23, A14, A15). Every day has a
-/// three-way [DayStatus] (Open / Unknown / Closed) - see `OpeningHour`'s doc
-/// for why "Unknown" is a real answer, not just a UI decoration. Only Open
-/// gets editable time dropdowns - Unknown has no time to show, so it's
-/// rendered dimmed with no interaction, same as Closed.
-///
-/// A day can have more than one `OpeningHour` row when Open (e.g. a midday
-/// closure: "12:00-14:00" then "15:00-20:00") - this directly mirrors the
-/// real `OpeningHours` table, where each row independently carries its own
-/// `(day, status, opening_time, closing_time)`, rather than a day-level
-/// object wrapping a list. Each row gets its own line; the "+" at the end
-/// of the last one adds another.
-class _OperatingHoursSection extends StatelessWidget {
-  const _OperatingHoursSection({
-    required this.operatingHours,
-    required this.onStatusChanged,
-    required this.onRangeTimeChanged,
-    required this.onAddRange,
-    required this.onRemoveRange,
-    required this.onCopyMondayToAll,
-  });
-
-  final Map<Weekday, List<OpeningHour>> operatingHours;
-  final void Function(Weekday day, DayStatus status) onStatusChanged;
-  final void Function(
-    Weekday day,
-    int rangeIndex,
-    bool isOpeningTime,
-    int minutes,
-  )
-  onRangeTimeChanged;
-  final void Function(Weekday day) onAddRange;
-  final void Function(Weekday day, int rangeIndex) onRemoveRange;
-  final VoidCallback onCopyMondayToAll;
-
-  static const Map<Weekday, String> _dayLabels = <Weekday, String>{
-    Weekday.monday: 'Mon',
-    Weekday.tuesday: 'Tue',
-    Weekday.wednesday: 'Wed',
-    Weekday.thursday: 'Thu',
-    Weekday.friday: 'Fri',
-    Weekday.saturday: 'Sat',
-    Weekday.sunday: 'Sun',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: AppSpacing.cardPadding,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                const Expanded(
-                  child: Text(
-                    'Operating Hours',
-                    style: AppTextStyles.titleSmall,
-                  ),
-                ),
-                // Flexible + ellipsis so the long button label never
-                // overflows the card's right edge on narrow screens.
-                Flexible(
-                  child: TextButton(
-                    onPressed: onCopyMondayToAll,
-                    style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                    child: Text(
-                      'Copy Monday to All Weekdays',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodySmall.copyWith(
-                        decoration: TextDecoration.underline,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            // Column headers, precisely aligned with the actual
-            // opening/closing dropdowns on each day row below - both share
-            // the exact same widths (AppSizes.timeDropdownWidth for each
-            // dropdown, an invisible dash the same width as the real "-"
-            // separator), so this isn't just an approximate lineup.
-            Row(
-              children: <Widget>[
-                const SizedBox(
-                  width:
-                      AppSizes.shortDayLabelWidth +
-                      AppSizes.compactCheckboxSize +
-                      AppSpacing.sm +
-                      AppSizes.openLabelSlotWidth,
-                ),
-                SizedBox(
-                  width: AppSizes.timeDropdownWidth,
-                  child: Text('Opening', style: AppTextStyles.detailLabel),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                SizedBox(
-                  width: AppSizes.timeDropdownWidth,
-                  child: Text('Closing', style: AppTextStyles.detailLabel),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            for (final Weekday day in Weekday.values)
-              _DayRow(
-                label: _dayLabels[day]!,
-                rows: operatingHours[day] ?? const <OpeningHour>[],
-                onStatusChanged: (DayStatus status) =>
-                    onStatusChanged(day, status),
-                onRangeTimeChanged:
-                    (int rangeIndex, bool isOpeningTime, int minutes) =>
-                        onRangeTimeChanged(
-                          day,
-                          rangeIndex,
-                          isOpeningTime,
-                          minutes,
-                        ),
-                onAddRange: () => onAddRange(day),
-                onRemoveRange: (int rangeIndex) =>
-                    onRemoveRange(day, rangeIndex),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DayRow extends StatelessWidget {
-  const _DayRow({
-    required this.label,
-    required this.rows,
-    required this.onStatusChanged,
-    required this.onRangeTimeChanged,
-    required this.onAddRange,
-    required this.onRemoveRange,
-  });
-
-  final String label;
-
-  /// This day's `OpeningHour` rows - always at least one (a Closed/Unknown
-  /// day has exactly one, with null times; an Open day can have more).
-  final List<OpeningHour> rows;
-  final ValueChanged<DayStatus> onStatusChanged;
-  final void Function(int rangeIndex, bool isOpeningTime, int minutes)
-  onRangeTimeChanged;
-  final VoidCallback onAddRange;
-  final ValueChanged<int> onRemoveRange;
-
-  /// Cycles Closed -> Unknown -> Open -> Closed - one tap on the toggle
-  /// advances to the next state.
-  static DayStatus _nextStatus(DayStatus current) {
-    switch (current) {
-      case DayStatus.closed:
-        return DayStatus.unknown;
-      case DayStatus.unknown:
-        return DayStatus.open;
-      case DayStatus.open:
-        return DayStatus.closed;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Every row shares the same status (the ViewModel keeps it that way),
-    // so the first row's status stands for the whole day - there's no
-    // separate day-level status field to read now that OpeningHour rows
-    // mirror the real table directly.
-    final DayStatus status = rows.isNotEmpty
-        ? rows.first.status
-        : DayStatus.closed;
-
-    // One compact toggle (dash/?/check) instead of three separate
-    // checkboxes - tapping it cycles Closed -> Unknown -> Open. That frees
-    // up the row to also hold the opening/closing time dropdowns directly
-    // alongside the day label. Each row gets its own line; "+" trails the
-    // last one to add another, "x" removes one once there's more than one.
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SizedBox(
-            width: AppSizes.shortDayLabelWidth,
-            child: Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.xs),
-              child: Text(label, style: AppTextStyles.operatingHoursLabel),
-            ),
-          ),
-          _DayStatusToggle(
-            status: status,
-            onTap: () => onStatusChanged(_nextStatus(status)),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: status == DayStatus.open
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      for (int i = 0; i < rows.length; i++)
-                        Padding(
-                          padding: EdgeInsets.only(
-                            bottom: i < rows.length - 1 ? AppSpacing.xs : 0,
-                          ),
-                          // Every row uses the same fixed column widths, so a
-                          // newly added row lines up exactly with the rows
-                          // above it, and the Opening/Closing boxes sit under
-                          // their header titles.
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: <Widget>[
-                              // "Open" label - fixed slot, only on the first
-                              // row (empty on later rows keeps columns stable).
-                              SizedBox(
-                                width: AppSizes.openLabelSlotWidth,
-                                child: i == 0
-                                    ? Text(
-                                        'Open',
-                                        style: AppTextStyles.bodySmall,
-                                      )
-                                    : null,
-                              ),
-                              _TimeDropdown(
-                                minutes: rows[i].opensAt,
-                                onChanged: (int m) =>
-                                    onRangeTimeChanged(i, true, m),
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              _TimeDropdown(
-                                minutes: rows[i].closesAt,
-                                onChanged: (int m) =>
-                                    onRangeTimeChanged(i, false, m),
-                              ),
-                              // Action: "+" on the first row (add another
-                              // range), "x" on the rest (remove). Right-aligned
-                              // in a flexible slot so it always lines up and
-                              // never overflows.
-                              Expanded(
-                                child: Align(
-                                  alignment: Alignment.centerRight,
-                                  child: i == 0
-                                      ? InkWell(
-                                          onTap: onAddRange,
-                                          child: const Icon(
-                                            Icons.add_circle_outline,
-                                            size: AppSizes.addRangeIconSize,
-                                            color: AppColors.primary,
-                                          ),
-                                        )
-                                      : InkWell(
-                                          onTap: () => onRemoveRange(i),
-                                          child: const Icon(
-                                            Icons.close,
-                                            size: AppSizes.addRangeIconSize,
-                                            color: AppColors.textSecondary,
-                                          ),
-                                        ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  )
-                : Padding(
-                    padding: const EdgeInsets.only(top: AppSpacing.xs),
-                    child: Text(
-                      status == DayStatus.unknown
-                          ? 'Hours not known'
-                          : 'Closed',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Opening/closing time selector - a dropdown list of every 15-minute mark
-/// from "00:00" through "24:00" inclusive ("24:00" is its own distinct
-/// option, meaning "open until midnight," not the same slot as "00:00").
-/// Replaces the old wheel-style `showTimePicker` dialog - the tourist picks
-/// straight from the fixed list instead.
-class _TimeDropdown extends StatelessWidget {
-  const _TimeDropdown({required this.minutes, required this.onChanged});
-
-  /// Minutes since midnight (0-1440). 1440 itself is the "24:00" option.
-  final int? minutes;
-  final ValueChanged<int> onChanged;
-
-  static const int _stepMinutes = 15;
-  static const int _maxMinutes = 24 * 60; // 1440 = "24:00"
-
-  static String _label(int totalMinutes) {
-    if (totalMinutes >= _maxMinutes) return '24:00';
-    final int hour = totalMinutes ~/ 60;
-    final int minute = totalMinutes % 60;
-    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
-  }
-
-  /// Rounds to the nearest valid dropdown entry - guards against a stored
-  /// value that doesn't land exactly on a 15-minute mark (DropdownButton
-  /// throws if its value doesn't match one of its items exactly).
-  static int? _snap(int? value) {
-    if (value == null) return null;
-    final int snapped = ((value / _stepMinutes).round()) * _stepMinutes;
-    return snapped.clamp(0, _maxMinutes);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Fixed-width box so it never resizes when the selected time changes
-    // ("00:00" vs "24:00" etc.) - the DropdownButton fills it via isExpanded.
-    return Container(
-      width: AppSizes.timeDropdownWidth,
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xs,
-      ),
-      decoration: BoxDecoration(
-        color: AppColors.timeChipBackground,
-        border: Border.all(color: AppColors.textPrimary, width: 0.5),
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          value: _snap(minutes),
-          isDense: true,
-          isExpanded: true, // Fills the fixed-width container above instead
-          // of sizing to its own content, so the arrow
-          // sits at the container's true right edge.
-          iconSize: AppSizes.compactCheckboxIconSize,
-          style: AppTextStyles.bodySmall,
-          hint: Text('--:--', style: AppTextStyles.bodySmall),
-          items: <DropdownMenuItem<int>>[
-            for (int m = 0; m <= _maxMinutes; m += _stepMinutes)
-              DropdownMenuItem<int>(value: m, child: Text(_label(m))),
-          ],
-          onChanged: (int? value) {
-            if (value != null) onChanged(value);
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// A single compact toggle standing in for the day's status - a dash for
-/// Closed (default), a question mark for Unknown, a checkmark for Open.
-/// Tapping cycles through all three (see `_DayRow._nextStatus`) rather than
-/// showing three separate checkboxes side by side, so the row has room left
-/// for the opening/closing time fields next to it.
-class _DayStatusToggle extends StatelessWidget {
-  const _DayStatusToggle({required this.status, required this.onTap});
-
-  final DayStatus status;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    late final Widget glyph;
-    switch (status) {
-      case DayStatus.open:
-        glyph = const Icon(
-          Icons.check,
-          size: AppSizes.compactCheckboxIconSize,
-          color: AppColors.textPrimary,
-        );
-      case DayStatus.unknown:
-        glyph = Text(
-          '?',
-          style: AppTextStyles.operatingHoursLabel.copyWith(
-            color: AppColors.textPrimary,
-          ),
-        );
-      case DayStatus.closed:
-        glyph = const Icon(
-          Icons.remove,
-          size: AppSizes.compactCheckboxIconSize,
-          color: AppColors.textSecondary,
-        );
-    }
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.xs),
-      child: Container(
-        width: AppSizes.compactCheckboxSize,
-        height: AppSizes.compactCheckboxSize,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: AppColors.cardBorderWarm,
-          borderRadius: BorderRadius.circular(AppRadius.xs),
-        ),
-        child: glyph,
-      ),
     );
   }
 }

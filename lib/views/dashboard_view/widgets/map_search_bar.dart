@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
@@ -86,6 +87,9 @@ class MapSearchBar extends StatelessWidget {
               onTap: onTap,
               textInputAction: TextInputAction.search,
               style: AppTextStyles.bodyMedium,
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(30), // Sets the limit to 10 characters
+              ],
               decoration: InputDecoration(
                 isDense: true,
                 border: InputBorder.none,

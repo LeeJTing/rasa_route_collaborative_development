@@ -10,9 +10,7 @@ import '../test_support/fake_discovery_logic_facade.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('shows restaurant details and completes the report UI flow', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('shows restaurant details', (WidgetTester tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
@@ -30,23 +28,11 @@ void main() {
       scrollable: find.byType(Scrollable).last,
     );
     expect(find.text('Local Foods Served'), findsOneWidget);
-    await tester.tap(find.text('Report Restaurant'));
-    await tester.pumpAndSettle();
 
-    expect(find.text('Incorrect Location'), findsOneWidget);
-    expect(find.text('Submit Report'), findsOneWidget);
-
-    await tester.tap(find.text('Incorrect Location'));
-    await tester.pump();
-    await tester.tap(find.text('Submit Report'));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.text(
-        'Report received. Thank you for helping keep the map accurate.',
-      ),
-      findsOneWidget,
-    );
+    // Reporting now lives on a separate full-screen page that this button
+    // opens (AppRoutes.reportPlace / ReportPlaceView). The button simply
+    // needs to be present here.
+    expect(find.text('Report Restaurant'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

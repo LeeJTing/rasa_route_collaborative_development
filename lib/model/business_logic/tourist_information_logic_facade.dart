@@ -18,6 +18,10 @@ class TouristInformationLogicFacade {
 
   Future<void> sendEmailOtp(String email) => authenticate.sendEmailOtp(email);
 
+  /// Why [email] is not a deliverable address, or null when it is one. Pure
+  /// rule - the login screen reads it live to gate the Send-OTP button.
+  String? emailError(String email) => authenticate.emailError(email);
+
   Future<AuthSession?> verifyEmailOtp({
     required String email,
     required String token,
@@ -27,6 +31,10 @@ class TouristInformationLogicFacade {
       authenticate.signInWithGoogle(redirectTo: redirectTo);
 
   String get pendingAuthEmail => authenticate.pendingEmail;
+
+  /// When the freshest code for the pending email was sent, or null when no
+  /// code is pending (see `AuthRepository`'s Option B pending-OTP marker).
+  DateTime? get pendingOtpSentAt => authenticate.pendingOtpSentAt;
 
   /// Completes a Google OAuth sign-in after the browser returns - picks up
   /// the session and auto-creates the tourist row on first sign-in.

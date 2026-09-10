@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/routing/app_navigator.dart';
+import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
+import '../../domain_model/report_category.dart';
 import '../../domain_model/restaurant.dart';
+import '../../view_models/report_place_view_model.dart';
 import '../../view_models/restaurant_detail_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
-import 'widgets/report_restaurant_sheet.dart';
 import 'widgets/restaurant_detail_header.dart';
 import 'widgets/restaurant_information_section.dart';
 import 'widgets/restaurant_menu_preview.dart';
@@ -125,7 +128,7 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
         RestaurantMenuPreview(items: restaurant.items),
         const SizedBox(height: AppSpacing.lg),
         OutlinedButton.icon(
-          onPressed: () => _showReportSheet(restaurant, viewModel),
+          onPressed: () => _openReport(restaurant),
           icon: const Icon(Icons.flag_outlined, color: AppColors.error),
           label: const Text('Report Restaurant'),
         ),
@@ -133,45 +136,18 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
     );
   }
 
-  Future<void> _showReportSheet(
-    Restaurant restaurant,
-    RestaurantDetailViewModel viewModel,
-  ) async {
-    final bool? submitted = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
-      builder: (BuildContext sheetContext) => ReportRestaurantSheet(
-        restaurantName: restaurant.name,
-        onSubmit: viewModel.submitReport,
-      ),
-    );
-    if (!mounted || submitted != true) return;
-    final String message;
-    if (viewModel.requiresSignIn) {
-      message =
-          'Sign in to report this place. Please sign in from the profile page and try again.';
-    } else if (viewModel.reportFailed) {
-      message = 'Sorry, your report could not be sent. Please try again.';
-    } else if (viewModel.alreadyReported) {
-      message = 'You have already reported this restaurant. Thanks for looking out!';
-    } else if (viewModel.reportSubmitted) {
-      message =
-          'Report received. Thank you for helping keep the map accurate.';
-    } else {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-    final bool leavePage = viewModel.reportFrozePlace;
-    viewModel.consumeReportSubmitted();
-    // A report that froze the restaurant hides it - leave the page (back to
-    // the map) so the now-hidden pin is no longer shown. The ViewModel already
-    // asked every live dashboard to drop its caches and re-read, so the map
-    // underneath is current by the time the tourist lands on it.
-    if (leavePage && mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
+  /// Opens the full-screen report page (shared by restaurants and landmarks).
+  /// The place rides [ReportPlaceHandoff] - routes pass no arguments (see
+  /// `AppNavigator` / the codebase's handoff convention). If the report froze
+  /// or removed the place, the page pops `true` and this screen leaves too so
+  /// the now-hidden pin is no longer shown.
+  Future<void> _openReport(Restaurant restaurant) async {
+    ReportPlaceHandoff()
+      ..pendingKind = ReportPlaceKind.restaurant
+      ..pendingPlaceId = restaurant.id
+      ..pendingName = restaurant.name;
+    final bool? hidPlace = await AppNavigator.push<bool>(AppRoutes.reportPlace);
+    if (!mounted || hidPlace != true) return;
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
   }
 }

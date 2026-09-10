@@ -1,13 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 
-/// Reusable piece of `OtpView`. Placeholder.
+/// Six single-digit lookalike boxes driven by ONE hidden text field.
+///
+/// The six visible boxes are pure decoration; a single invisible `TextField`
+/// underneath owns the keyboard and the whole code string, so editing behaves
+/// exactly like one input field:
+///   * typing appends a digit and the boxes fill left-to-right;
+///   * backspace removes the previous digit and keeps going back through every
+///     box (no need to tap each box to clear a mistake);
+///   * pasting a full code fills all boxes at once;
+///   * the slot the next digit lands in is highlighted while focused.
 ///
 /// Widgets in a `widgets/` folder are driven entirely by constructor
 /// parameters and callbacks - they never read a ViewModel themselves, and they
-/// style from the theme rather than raw values. Promote one to
-/// `lib/views/common_widgets/` once a second screen needs it.
+/// style from the theme rather than raw values.
 class OtpCodeField extends StatefulWidget {
   const OtpCodeField({
     super.key,
@@ -26,94 +36,128 @@ class OtpCodeField extends StatefulWidget {
 }
 
 class _OtpCodeFieldState extends State<OtpCodeField> {
-  late final List<TextEditingController> _controllers;
-  late final List<FocusNode> _focusNodes;
+  late final TextEditingController _controller;
+  final FocusNode _focusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    _controllers = List<TextEditingController>.generate(
-      widget.codeLength,
-      (_) => TextEditingController(),
-    );
-    _focusNodes = List<FocusNode>.generate(
-      widget.codeLength,
-      (_) => FocusNode(),
-    );
-
-    // The mock-up highlights the first box on entry (autofocus) so the user
-    // can start typing straight away.
+    _controller = TextEditingController();
+    _focusNode.addListener(_onFocusChanged);
+    // The mock-up opens straight into the first box on entry (autofocus) so
+    // the tourist can start typing right away.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNodes.first.requestFocus();
+      if (mounted) _focusNode.requestFocus();
     });
   }
 
   @override
   void dispose() {
-    for (final TextEditingController controller in _controllers) {
-      controller.dispose();
-    }
-    for (final FocusNode focusNode in _focusNodes) {
-      focusNode.dispose();
-    }
+    _focusNode.removeListener(_onFocusChanged);
+    _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
-  void _onDigitChanged(int index, String value) {
-    if (value.length > 1) {
-      final String digits = value.replaceAll(RegExp(r'\D'), '');
-      for (
-        int i = index;
-        i < widget.codeLength && i - index < digits.length;
-        i++
-      ) {
-        _controllers[i].text = digits[i - index];
-      }
-    }
-    final String code = _controllers
-        .map((TextEditingController controller) => controller.text)
-        .join();
-    widget.onChanged(code);
-    if (value.isNotEmpty && index < widget.codeLength - 1) {
-      _focusNodes[index + 1].requestFocus();
-    }
+  void _onFocusChanged() {
+    // Single-input caret semantics: whenever focus returns (initial autofocus,
+    // a tap on the field), put the caret at the end so the next digit appends
+    // and backspace removes the last digit rather than editing mid-string.
+    if (_focusNode.hasFocus && mounted) _moveCaretToEnd();
+    if (mounted) setState(() {});
+  }
+
+  void _moveCaretToEnd() {
+    _controller.selection = TextSelection.collapsed(
+      offset: _controller.text.length,
+    );
+  }
+
+  void _onCodeChanged(String value) {
+    if (!mounted) return;
+    setState(() {});
+    widget.onChanged(value);
   }
 
   @override
   Widget build(BuildContext context) {
-    // A bold, large-enough digit per box so the code is easy to read and the
-    // text stays vertically centred inside each box.
+    final String code = _controller.text;
     final TextStyle? digitStyle = Theme.of(
       context,
     ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700);
+    final bool focused = _focusNode.hasFocus;
+    // The slot the next digit will land in; when full, keep the last box as
+    // the highlighted anchor so there is always a visible active slot.
+    final int activeIndex = code.length < widget.codeLength
+        ? code.length
+        : widget.codeLength - 1;
+
     return SizedBox(
       height: AppSizes.fieldHeight,
-      child: Row(
-        children: List<Widget>.generate(widget.codeLength, (int index) {
-          return Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(
-                right: index == widget.codeLength - 1 ? 0 : AppSpacing.sm,
-              ),
+      child: Stack(
+        children: <Widget>[
+          // Visible six boxes - never interactive themselves, taps pass
+          // through to the hidden TextField layered on top.
+          Row(
+            children: List<Widget>.generate(widget.codeLength, (int index) {
+              final bool isActive =
+                  focused && widget.codeLength > 0 && index == activeIndex;
+              return Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    right: index == widget.codeLength - 1 ? 0 : AppSpacing.sm,
+                  ),
+                  child: Container(
+                    height: AppSizes.fieldHeight,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: AppRadius.cardRadius,
+                      border: Border.all(
+                        color: isActive ? AppColors.primary : AppColors.outline,
+                        width: isActive ? 1.5 : 1,
+                      ),
+                    ),
+                    child: index < code.length
+                        ? Text(
+                            code[index],
+                            style: digitStyle,
+                            textAlign: TextAlign.center,
+                          )
+                        : null,
+                  ),
+                ),
+              );
+            }),
+          ),
+          // The actual input: invisible, but it owns the focus + keyboard, so
+          // typing/backspace/paste all behave like a single text field.
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0,
               child: TextField(
-                controller: _controllers[index],
-                focusNode: _focusNodes[index],
-                textAlign: TextAlign.center,
+                controller: _controller,
+                focusNode: _focusNode,
                 keyboardType: TextInputType.number,
-                textInputAction: index == widget.codeLength - 1
-                    ? TextInputAction.done
-                    : TextInputAction.next,
-                maxLength: 1,
+                textInputAction: TextInputAction.done,
+                maxLength: widget.codeLength,
                 style: digitStyle,
-                onChanged: (String value) => _onDigitChanged(index, value),
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(widget.codeLength),
+                ],
+                onChanged: _onCodeChanged,
+                onTap: _moveCaretToEnd,
                 decoration: const InputDecoration(
                   counterText: '',
-                  contentPadding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
                 ),
               ),
             ),
-          );
-        }),
+          ),
+        ],
       ),
     );
   }
