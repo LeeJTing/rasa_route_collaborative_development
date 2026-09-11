@@ -120,6 +120,7 @@ class RestaurantRepository {
       local_food(
         local_food_id,
         food_name,
+        food_type,
         synonyms,
         description,
         local_food_image(local_food_image_id, img_name, local_food_id)
@@ -929,6 +930,7 @@ class RestaurantRepository {
       price: data.restaurantItemPrice,
       currency: 'RM',
       foodCategory: data.foodCategory ?? '',
+      foodType: localFood?.foodType ?? '',
       isRemoved: data.isRemoved,
     );
   }

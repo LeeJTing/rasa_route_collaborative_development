@@ -13,6 +13,7 @@ import '../common_widgets/app_image.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
 import 'widgets/restaurant_card.dart';
+import 'widgets/restaurant_food_type_filter.dart';
 
 class RestaurantRecommendationView extends StatefulWidget {
   const RestaurantRecommendationView({super.key});
@@ -77,6 +78,13 @@ class _RestaurantRecommendationViewState
                   children: <Widget>[
                     const _NearbyBanner(),
                     _SourceTabs(source: vm.source, onChanged: vm.selectSource),
+                    if (vm.source == RestaurantSource.google)
+                      RestaurantFoodTypeFilter(
+                        options:
+                            RestaurantRecommendationViewModel.foodTypeOptions,
+                        selected: vm.selectedFoodType,
+                        onSelected: vm.selectFoodType,
+                      ),
                     Expanded(
                       child: vm.selectedSourceIsEmpty
                           ? _EmptySource(source: vm.source)
@@ -85,13 +93,14 @@ class _RestaurantRecommendationViewState
                                 bottom: AppSpacing.xl,
                               ),
                               itemCount: vm.source == RestaurantSource.google
-                                  ? vm.restaurants.length
+                                  ? vm.visibleRestaurants.length
                                   : vm.landmarks.length,
                               separatorBuilder: (_, _) =>
                                   const SizedBox(height: AppSpacing.md),
                               itemBuilder: (BuildContext context, int index) {
                                 if (vm.source == RestaurantSource.google) {
-                                  final restaurant = vm.restaurants[index];
+                                  final restaurant =
+                                      vm.visibleRestaurants[index];
                                   return RestaurantCard(
                                     restaurant: restaurant,
                                     distanceLabel: vm.distanceLabel(restaurant),
