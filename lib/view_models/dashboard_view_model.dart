@@ -147,6 +147,7 @@ class DashboardViewModel extends BaseViewModel {
     );
     if (!stillPinned) {
       _selectedPin = null;
+      _rebuildVisibleMarkers();
       safeNotifyListeners();
     }
   }
@@ -285,9 +286,28 @@ class DashboardViewModel extends BaseViewModel {
 
   void _rebuildVisibleMarkers() {
     final MapCluster? expanded = _expandedCluster;
-    _visiblePins = _expandedPins.isEmpty
+    final List<MapPin> drawn = _expandedPins.isEmpty
         ? _pins
-        : List<MapPin>.unmodifiable(<MapPin>[..._pins, ..._expandedPins]);
+        : <MapPin>[..._pins, ..._expandedPins];
+
+    // **The open place always has a marker.** The pins come from the viewport
+    // query, which answers the current filter and zoom cap - so a restaurant
+    // reached by searching for it by name could have its detail sheet open
+    // over a map with nothing at the centre, because the query that filled the
+    // map was never asked about it. Whatever is selected is drawn, whether or
+    // not the query returned it.
+    final MapPin? selected = _selectedPin;
+    final bool alreadyDrawn =
+        selected == null ||
+        drawn.any(
+          (MapPin pin) =>
+              pin.referenceId == selected.referenceId &&
+              pin.kind == selected.kind,
+        );
+
+    _visiblePins = List<MapPin>.unmodifiable(
+      alreadyDrawn ? drawn : <MapPin>[...drawn, selected],
+    );
     _visibleClusters = expanded == null
         ? _clusters
         : List<MapCluster>.unmodifiable(
@@ -360,8 +380,7 @@ class DashboardViewModel extends BaseViewModel {
     if (availability == null || !isDetailedView) return null;
     final int count = availability.placeCount;
     if (count == 0) return null;
-    final bool narrowed =
-        _filter.selectionCount > 0 || _activePinFoodId != null;
+    final bool narrowed = _filter.selectionCount > 0 || _activePinFoodId != null;
     return '${availability.region.name} - $count '
         '${narrowed ? 'matching ' : ''}'
         '${count == 1 ? 'place' : 'places'} in this state';
@@ -397,8 +416,19 @@ class DashboardViewModel extends BaseViewModel {
   // Filters (REQ102_23 - REQ102_29)
   // ===========================================================================
 
+  /// What the map is drawing right now - the applied filter.
   ExplorationFilter _filter = ExplorationFilter.none;
   ExplorationFilter get filter => _filter;
+
+  /// What the open panel is showing, which is not yet what the map is drawing.
+  ///
+  /// Every chip used to reload the map on the tap: four chips meant four round
+  /// trips, three of them for a filter the tourist was still in the middle of
+  /// describing. The panel now edits this copy and [applyFilter] promotes it in
+  /// one go, so a visit to the filter costs one request however many chips it
+  /// takes. Leaving without applying drops the draft and the active filter
+  /// stands (A7-5).
+  ExplorationFilter _draftFilter = ExplorationFilter.none;
 
   bool _filterPanelOpen = false;
   bool get filterPanelOpen => _filterPanelOpen;
@@ -411,13 +441,18 @@ class DashboardViewModel extends BaseViewModel {
   List<String> optionsFor(ExplorationFilterGroup group) =>
       discoveryLogic.filterOptions(group);
 
-  /// The one option chosen in [group], or null for "All".
-  String? selectionFor(ExplorationFilterGroup group) => switch (group) {
-    ExplorationFilterGroup.meal => _filter.meal,
-    ExplorationFilterGroup.category => _filter.category,
-    ExplorationFilterGroup.taste => _filter.taste,
-    ExplorationFilterGroup.type => _filter.type,
-  };
+  /// The options ticked in [group], empty for "All".
+  ///
+  /// The *draft*, because this is what the panel draws its chips from: a tick
+  /// has to look ticked long before it reaches the map.
+  Set<String> selectionFor(ExplorationFilterGroup group) =>
+      _draftFilter.selectionFor(group);
+
+  /// How many chips are ticked in the panel - the count on its Apply button.
+  int get draftSelectionCount => _draftFilter.selectionCount;
+
+  /// Does the panel hold anything the map has not been told about yet?
+  bool get filterDraftChanged => !_sameFilter(_draftFilter, _filter);
 
   /// The pill that opens each filter row in the dropdown panel.
   String labelFor(ExplorationFilterGroup group) =>
@@ -461,7 +496,6 @@ class DashboardViewModel extends BaseViewModel {
   LocalFood? _selectedFood;
   LocalFood? get selectedFood => _selectedFood;
   bool _targetFrameOwnsSelection = false;
-  int _foodFocusRevision = 0;
 
   // ===========================================================================
   // Location (REQ102_6 - REQ102_9, REQ102_14)
@@ -673,9 +707,7 @@ class DashboardViewModel extends BaseViewModel {
 
   // The map widget needs the same limits the ViewModel clamps against. It
   // reads them from here, so no widget imports a facade or a logic class.
-  double get minimumZoom => _swipePanelExpanded
-      ? DiscoveryLogicFacade.detailedViewZoom
-      : DiscoveryLogicFacade.minimumZoom;
+  double get minimumZoom => DiscoveryLogicFacade.minimumZoom;
   double get maximumZoom => DiscoveryLogicFacade.maximumZoom;
   double get malaysiaSouth => DiscoveryLogicFacade.malaysiaSouth;
   double get malaysiaWest => DiscoveryLogicFacade.malaysiaWest;
@@ -686,8 +718,9 @@ class DashboardViewModel extends BaseViewModel {
       ? _heatmapScale < 8
       : _zoom < DiscoveryLogicFacade.maximumZoom;
 
-  bool get canZoomOut =>
-      isHeatmapView ? _heatmapScale > 1.01 : _zoom > minimumZoom;
+  bool get canZoomOut => isHeatmapView
+      ? _heatmapScale > 1.01
+      : _zoom > DiscoveryLogicFacade.minimumZoom;
 
   /// Title line under the search bar in the detailed view.
   String get contextLabel {
@@ -922,6 +955,7 @@ class DashboardViewModel extends BaseViewModel {
       _mode = next;
       _selectedRegion = null;
       _selectedPin = null;
+      _rebuildVisibleMarkers();
       if (next == DashboardMapMode.heatmap) {
         _heatmapResetToken++;
         _heatmapScale = 1;
@@ -956,14 +990,11 @@ class DashboardViewModel extends BaseViewModel {
   /// fetch, fired shortly after the map settles.
   void _schedulePinRefresh() {
     _pinRefreshTimer?.cancel();
-    _pinRefreshTimer = Timer(_pinRefreshDelay, () async {
+    _pinRefreshTimer = Timer(_pinRefreshDelay, () {
       if (_mode != DashboardMapMode.detailed) return;
-      // Panning changes the viewport, not the active Swipe deck. Re-localising
-      // here used to discard the running session whenever the centre crossed a
-      // state boundary and reopen that state's Continue/New prompt.
-      if (!_swipePanelExpanded) await _refreshSwipeModeRegion();
-      if (_mode != DashboardMapMode.detailed) return;
-      await _loadPins();
+      _refreshSwipeModeRegion();
+      if (!_viewportChangedSinceLastPinLoad()) return;
+      _loadPins();
     });
   }
 
@@ -1005,6 +1036,9 @@ class DashboardViewModel extends BaseViewModel {
     final int revision = ++_pinDetailRevision;
     _selectedPin = pin;
     _pinDetailLoading = true;
+    // The selected place is drawn whether or not the viewport query returned
+    // it, so the marker list has to be rebuilt when the selection changes.
+    _rebuildVisibleMarkers();
     safeNotifyListeners();
     _loadPinDetail(pin, revision);
   }
@@ -1094,6 +1128,8 @@ class DashboardViewModel extends BaseViewModel {
     _pinDetailRevision++;
     _pinDetailLoading = false;
     _selectedPin = null;
+    // Drops the marker again if it was only on the map because it was open.
+    _rebuildVisibleMarkers();
     safeNotifyListeners();
   }
 
@@ -1164,7 +1200,14 @@ class DashboardViewModel extends BaseViewModel {
   // ===========================================================================
 
   void toggleFilterPanel() {
-    _filterPanelOpen = !_filterPanelOpen;
+    // The Filter pill closes the panel it opened, and that is a way out without
+    // applying - so it cancels, exactly as the Cancel button does.
+    if (_filterPanelOpen) {
+      cancelFilter();
+      return;
+    }
+    _draftFilter = _filter;
+    _filterPanelOpen = true;
     safeNotifyListeners();
   }
 
@@ -1173,38 +1216,68 @@ class DashboardViewModel extends BaseViewModel {
     safeNotifyListeners();
   }
 
-  /// A7-3 - tick or untick one option, then recalculate (REQ102_28) and
-  /// redraw (REQ102_29).
-  /// A7-3 - choose one option in a group, then recalculate (REQ102_28) and
-  /// redraw (REQ102_29).
+  /// A7-3 - tick or untick one option. A group holds as many as are ticked.
   ///
-  /// One option per group: picking a different one replaces what was there,
-  /// and picking the one already chosen clears the group back to "All".
+  /// Draft only. Nothing is recalculated (REQ102_28) or redrawn (REQ102_29)
+  /// until [applyFilter]; the chip just changes colour.
   void toggleFilterOption(ExplorationFilterGroup group, String option) {
-    final String? current = selectionFor(group);
-    _applyFilter(group, current == option ? null : option);
+    final Set<String> chosen = <String>{..._draftFilter.selectionFor(group)};
+    if (!chosen.remove(option)) chosen.add(option);
+    _setDraftGroup(group, chosen);
   }
 
-  /// The "All" chip at the head of a filter row.
+  /// The "All" chip at the head of a filter row - untick the whole group.
   void clearFilterGroup(ExplorationFilterGroup group) {
-    if (selectionFor(group) == null) return;
-    _applyFilter(group, null);
+    if (_draftFilter.selectionFor(group).isEmpty) return;
+    _setDraftGroup(group, const <String>{});
   }
 
-  void _applyFilter(ExplorationFilterGroup group, String? option) {
+  void _setDraftGroup(ExplorationFilterGroup group, Set<String> options) {
+    final Set<String> chosen = Set<String>.unmodifiable(options);
     // Built field by field rather than through a copyWith, because copyWith
-    // cannot tell "leave this alone" from "clear this to null".
-    _filter = ExplorationFilter(
-      meal: group == ExplorationFilterGroup.meal ? option : _filter.meal,
-      category: group == ExplorationFilterGroup.category
-          ? option
-          : _filter.category,
-      taste: group == ExplorationFilterGroup.taste ? option : _filter.taste,
-      type: group == ExplorationFilterGroup.type ? option : _filter.type,
+    // cannot tell "leave this alone" from "clear this group".
+    _draftFilter = ExplorationFilter(
+      meals: group == ExplorationFilterGroup.meal ? chosen : _draftFilter.meals,
+      categories: group == ExplorationFilterGroup.category
+          ? chosen
+          : _draftFilter.categories,
+      tastes: group == ExplorationFilterGroup.taste
+          ? chosen
+          : _draftFilter.tastes,
+      types: group == ExplorationFilterGroup.type ? chosen : _draftFilter.types,
     );
     safeNotifyListeners();
-    _reloadActiveView();
   }
+
+  /// A7-4 - Apply. The one place a filter change reaches the map.
+  ///
+  /// One reload for however many chips were ticked, and none at all when the
+  /// panel is closed exactly as it was opened - Apply on an untouched panel is
+  /// a question the map has already answered.
+  void applyFilter() {
+    final bool changed = filterDraftChanged;
+    _filter = _draftFilter;
+    _filterPanelOpen = false;
+    safeNotifyListeners();
+    if (changed) _reloadActiveView();
+  }
+
+  /// A7-5 - Cancel, or any other way out of the panel: the chips ticked since
+  /// it opened are dropped and the active filter stands, untouched.
+  void cancelFilter() {
+    _draftFilter = _filter;
+    _filterPanelOpen = false;
+    safeNotifyListeners();
+  }
+
+  /// Set equality, four groups of it. `==` on two `Set`s is identity, so the
+  /// draft would always read as changed without this.
+  static bool _sameFilter(ExplorationFilter a, ExplorationFilter b) =>
+      ExplorationFilterGroup.values.every((ExplorationFilterGroup group) {
+        final Set<String> left = a.selectionFor(group);
+        final Set<String> right = b.selectionFor(group);
+        return left.length == right.length && left.containsAll(right);
+      });
 
   // ===========================================================================
   // Search (A8)
@@ -1214,31 +1287,45 @@ class DashboardViewModel extends BaseViewModel {
     _searchPanelOpen = true;
     safeNotifyListeners();
 
-    // If the bar already has text (e.g. from a previous search), show the
-    // suggestions immediately rather than waiting for another keystroke.
-    if (_searchKeyword.trim().isNotEmpty &&
-        _searchResults.places.isEmpty &&
-        _searchResults.foods.isEmpty) {
-      updateSearchKeyword(_searchKeyword);
+    // **Pointing at a field that still holds a keyword brings its suggestions
+    // back.** Picking a result clears the result list but leaves the text, so
+    // tapping the field again used to open an empty panel and sit there until
+    // another character was typed. Nothing here re-runs a search that already
+    // has an answer - including "no matches", which is an answer.
+    if (_searchKeyword.trim().isEmpty) return;
+    if (_searching || _searchMessage != null) return;
+    if (_searchResults.places.isNotEmpty || _searchResults.foods.isNotEmpty) {
+      return;
     }
+    submitSearch(_searchKeyword);
   }
 
-  /// A8.1 - the user pressed Enter/Search on the keyboard.
+  /// The keyboard's Search key (A8-1).
+  ///
+  /// Runs the search **now**, with whatever the field already holds. The field
+  /// asked for that key with `TextInputAction.search` but had nothing wired to
+  /// it, so pressing it did nothing: the only way to get results out of text
+  /// already in the box was to type another character and wait out the
+  /// debounce. Submitting is an explicit request, so it skips the debounce
+  /// rather than arming it.
+  ///
+  /// An empty field takes the same path as the clear button - close the panel
+  /// and put the map back - which is the existing answer to "no keyword", and
+  /// is visible, rather than firing a query for an empty string.
   void submitSearch(String keyword) {
     _searchDebounce?.cancel();
-    _searchKeyword = keyword;
 
     if (keyword.trim().isEmpty) {
       clearSearch();
       return;
     }
 
+    _searchKeyword = keyword;
+    _searchMessage = null;
     _searchPanelOpen = true;
     _searching = true;
     safeNotifyListeners();
-
-    final int revision = ++_searchRevision;
-    _runSearch(keyword, revision);
+    _runSearch(keyword, ++_searchRevision);
   }
 
   /// A8-1 / A8-2 / A8-3 - one keyword, matched against locations and food.
@@ -1323,8 +1410,6 @@ class DashboardViewModel extends BaseViewModel {
     _searchKeyword = place.name;
     _searchResults = ExplorationSearchResults.empty;
     _searchMessage = null;
-
-    // Center the map on the selected result.
     _requestCamera(place.latitude, place.longitude, place.zoom);
 
     if (!place.isPlaceOnTheMap) {
@@ -1396,42 +1481,7 @@ class DashboardViewModel extends BaseViewModel {
     if (_selectedFood?.id == food?.id) return;
     _selectedFood = food;
     safeNotifyListeners();
-    if (food == null) {
-      _foodFocusRevision++;
-      _reloadActiveView();
-      return;
-    }
-    _clearPinResults(invalidateRequests: true);
-    _focusMapForSwipeFood(food);
-  }
-
-  Future<void> _focusMapForSwipeFood(LocalFood food) async {
-    final int revision = ++_foodFocusRevision;
-    final double anchorLatitude = _centreLatitude;
-    final double anchorLongitude = _centreLongitude;
-
-    final GeoPoint? location = await discoveryLogic.nearestFoodLocation(
-      localFoodId: food.id,
-      fromLatitude: anchorLatitude,
-      fromLongitude: anchorLongitude,
-    );
-    if (revision != _foodFocusRevision ||
-        !_swipePanelExpanded ||
-        _selectedFood?.id != food.id) {
-      return;
-    }
-    if (location == null) {
-      _notice = 'No mapped locations currently serve ${food.name}.';
-      safeNotifyListeners();
-      await _loadPins(clearFirst: true);
-      return;
-    }
-
-    _requestCamera(
-      location.latitude,
-      location.longitude,
-      DiscoveryLogicFacade.swipeFoodFocusZoom,
-    );
+    _reloadActiveView();
   }
 
   /// A8.3 - clear the keyword and put the map back the way it was.
@@ -1463,10 +1513,9 @@ class DashboardViewModel extends BaseViewModel {
   /// detailed view to dismiss whatever is open (A11.1).
   Future<void> onMapTapped(double latitude, double longitude) async {
     if (_searchPanelOpen) closeSearchPanel();
-    if (_filterPanelOpen) {
-      _filterPanelOpen = false;
-      safeNotifyListeners();
-    }
+    // Tapping the map is a way out of the filter panel, and a way out without
+    // applying keeps the filter the map already has.
+    if (_filterPanelOpen) cancelFilter();
 
     if (isDetailedView) {
       dismissPin();
@@ -1495,69 +1544,11 @@ class DashboardViewModel extends BaseViewModel {
       MatchesRecommendationRequest(
         stateCode: _swipePreparation?.stateCode ?? '',
         stateName: _swipePreparation?.stateName ?? '',
-        origin: _sharedLocation,
+        origin: TouristLocation(
+          latitude: _centreLatitude,
+          longitude: _centreLongitude,
+        ),
       );
-
-  /// Matches edits the same device-local Swipe session. Reload it when that
-  /// page closes so this in-memory Dashboard copy cannot overwrite a removed
-  /// like the next time the tourist moves or likes a card.
-  Future<void> refreshSwipeSessionAfterMatches() async {
-    final SwipeModePreparation? preparation = _swipePreparation;
-    if (preparation == null) return;
-    await _runSwipeCommand(() async {
-      final SwipeSession? refreshed = await discoveryLogic.reloadSwipeSession(
-        preparation,
-      );
-      if (refreshed != null) _swipeSession = refreshed;
-      _showSwipeResumePrompt = false;
-      _swipeLikeRevision++;
-    }, showLoading: false);
-  }
-
-  /// Opens Profile and applies any saved discovery-setting changes when the
-  /// tourist returns to this still-live Dashboard.
-  Future<void> openProfile() async {
-    await AppNavigator.push(AppRoutes.profile);
-    await refreshSwipeQueueAfterProfileChange();
-  }
-
-  /// Re-reads profile preferences and restrictions after the Profile route
-  /// closes, then re-ranks only the unvisited part of the active Swipe deck.
-  /// The current card and the device-local like/dislike history are preserved.
-  Future<void> refreshSwipeQueueAfterProfileChange() async {
-    if (!isDetailedView || _swipePreparation == null) return;
-
-    final bool wasShowingResumePrompt = _showSwipeResumePrompt;
-    final int? previousFoodId = currentSwipeFood?.id;
-    await _runSwipeCommand(() async {
-      final SwipeModePreparation refreshed = await discoveryLogic
-          .refreshSwipeModeAfterProfileChange(
-            latitude: _centreLatitude,
-            longitude: _centreLongitude,
-            distanceOrigin: _sharedLocation,
-          );
-      _swipePreparation = refreshed;
-
-      if (wasShowingResumePrompt) {
-        _swipeSession = null;
-        _showSwipeResumePrompt = refreshed.savedSession != null;
-        if (!_showSwipeResumePrompt) {
-          _swipeSession = await discoveryLogic.startNewSwipeSession(refreshed);
-        }
-      } else {
-        _swipeSession = refreshed.savedSession;
-        _showSwipeResumePrompt = false;
-        _swipeSession ??= await discoveryLogic.startNewSwipeSession(refreshed);
-      }
-
-      if (_swipePanelExpanded && !_showSwipeResumePrompt) {
-        final LocalFood? refreshedFood = currentSwipeFood;
-        if (refreshedFood?.id != previousFoodId) {
-          showFoodInTargetFrame(refreshedFood);
-        }
-      }
-    });
-  }
 
   // ===========================================================================
   // Retry
@@ -1577,6 +1568,10 @@ class DashboardViewModel extends BaseViewModel {
   double? _viewportNorth;
   double? _viewportEast;
 
+  double? _lastPinLatitude;
+  double? _lastPinLongitude;
+  double? _lastPinZoom;
+
   Timer? _pinRefreshTimer;
 
   /// Ceiling on one Find Me attempt, a little above the device layer's own so
@@ -1586,6 +1581,13 @@ class DashboardViewModel extends BaseViewModel {
   /// How long the map has to sit still before the pins are refetched. Short
   /// enough to feel immediate, long enough that one pinch is one query.
   static const Duration _pinRefreshDelay = Duration(milliseconds: 350);
+
+  /// Degrees of travel that justify refetching the pins for a new viewport.
+  static const double _pinRefreshDelta = 0.05;
+
+  /// Zoom change that justifies the same. A tenth of a level is below what
+  /// anyone can pinch deliberately, so in practice any real zoom refetches.
+  static const double _pinRefreshZoomDelta = 0.1;
 
   /// What a filter change or a food search triggers: the previous answer is
   /// stale, so the pins go before the new query runs.
@@ -1612,7 +1614,6 @@ class DashboardViewModel extends BaseViewModel {
           .prepareSwipeMode(
             latitude: _centreLatitude,
             longitude: _centreLongitude,
-            distanceOrigin: _sharedLocation,
           );
       if (revision != _swipePrepareRevision || !isDetailedView) return;
       _swipePreparation = preparation;
@@ -1709,7 +1710,22 @@ class DashboardViewModel extends BaseViewModel {
     final int revision = ++_pinLoadRevision;
     final int? requestedFoodId = _activePinFoodId;
 
-    if (clearFirst) _clearPinResults();
+    if (clearFirst && (_pins.isNotEmpty || _clusters.isNotEmpty)) {
+      _pins = const <MapPin>[];
+      _clusters = const <MapCluster>[];
+      // A new filter or dish is a different question; an opened cluster from
+      // the old one no longer belongs on the map.
+      _collapseExpandedCluster();
+      _rebuildVisibleMarkers();
+      _pinsInView = 0;
+      _pinLimit = 0;
+      _paintedSignature = _markerSignature();
+      safeNotifyListeners();
+    }
+
+    _lastPinLatitude = _centreLatitude;
+    _lastPinLongitude = _centreLongitude;
+    _lastPinZoom = _zoom;
     // The viewport and the food go to Postgres; what comes back is what is
     // drawn. The zoom decides both the shape of the answer - cluster counts or
     // individual pins - and how many of them.
@@ -1723,9 +1739,6 @@ class DashboardViewModel extends BaseViewModel {
       fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
       fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
       zoom: _zoom,
-      limit: requestedFoodId == null
-          ? null
-          : DiscoveryLogicFacade.swipeFoodMarkerLimit,
     );
     // REQ103 - the race guard. Swiping Nasi Lemak -> Laksa -> Satay fires
     // three loads; the first two must not land on top of the third. The
@@ -1808,17 +1821,18 @@ class DashboardViewModel extends BaseViewModel {
       ? null
       : _selectedFood?.id;
 
-  void _clearPinResults({bool invalidateRequests = false}) {
-    if (invalidateRequests) _pinLoadRevision++;
-    if (_pins.isEmpty && _clusters.isEmpty && _expandedPins.isEmpty) return;
-    _pins = const <MapPin>[];
-    _clusters = const <MapCluster>[];
-    _collapseExpandedCluster();
-    _rebuildVisibleMarkers();
-    _pinsInView = 0;
-    _pinLimit = 0;
-    _paintedSignature = _markerSignature();
-    safeNotifyListeners();
+  /// Has the viewport moved or scaled enough that the pins on screen could
+  /// differ from the ones already fetched?
+  bool _viewportChangedSinceLastPinLoad() {
+    final double? lastLatitude = _lastPinLatitude;
+    final double? lastLongitude = _lastPinLongitude;
+    final double? lastZoom = _lastPinZoom;
+    if (lastLatitude == null || lastLongitude == null || lastZoom == null) {
+      return true;
+    }
+    return (lastLatitude - _centreLatitude).abs() > _pinRefreshDelta ||
+        (lastLongitude - _centreLongitude).abs() > _pinRefreshDelta ||
+        (lastZoom - _zoom).abs() > _pinRefreshZoomDelta;
   }
 
   /// REQ102_14 - the whole-country fallback.
@@ -1857,6 +1871,7 @@ class DashboardViewModel extends BaseViewModel {
     if (changed) {
       _selectedRegion = null;
       _selectedPin = null;
+      _rebuildVisibleMarkers();
       // Put the illustration back to its resting scale, so returning to the
       // overview never lands on a half-pinched canvas.
       if (next == DashboardMapMode.heatmap) {
