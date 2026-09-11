@@ -33,6 +33,9 @@ class SubmittedLandmarkRecommendation {
   final int id;
   final String name;
   final String category;
+
+  /// Straight-line distance from the tourist's device location. Infinite when
+  /// a GPS fix is unavailable; the exploration map centre is never substituted.
   final double distanceMetres;
   final List<String> foodNames;
   final String? imageUrl;

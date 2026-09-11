@@ -26,20 +26,35 @@ class OpeningHoursTable extends StatelessWidget {
       );
     }
 
+    final Map<Weekday, List<OpeningHour>> byDay =
+        <Weekday, List<OpeningHour>>{};
+    for (final OpeningHour hours in openingHours) {
+      byDay.putIfAbsent(hours.day, () => <OpeningHour>[]).add(hours);
+    }
+
     return Column(
-      children: openingHours
-          .map(
-            (OpeningHour hours) => Padding(
+      children: <Widget>[
+        for (final Weekday day in Weekday.values)
+          if (byDay[day] case final List<OpeningHour> ranges)
+            Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.sm),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Expanded(child: Text(_dayLabel(hours.day))),
-                  Text(_hoursLabel(hours)),
+                  Expanded(child: Text(_dayLabel(day))),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: <Widget>[
+                        for (final OpeningHour range in ranges)
+                          Text(_hoursLabel(range), textAlign: TextAlign.end),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-          )
-          .toList(growable: false),
+      ],
     );
   }
 
@@ -54,11 +69,16 @@ class OpeningHoursTable extends StatelessWidget {
   };
 
   String _hoursLabel(OpeningHour hours) {
-    if (hours.opensAt == null || hours.closesAt == null) return 'Closed';
+    if (hours.status == DayStatus.closed) return 'Closed';
+    if (hours.status == DayStatus.unknown) return 'Hours not known';
+    if (hours.opensAt == null || hours.closesAt == null) {
+      return 'Hours unavailable';
+    }
     return '${_timeLabel(hours.opensAt!)} - ${_timeLabel(hours.closesAt!)}';
   }
 
   String _timeLabel(int minutes) {
+    if (minutes >= 1440) return '12:00 AM';
     final int hour = minutes ~/ 60;
     final int minute = minutes % 60;
     final String period = hour >= 12 ? 'PM' : 'AM';

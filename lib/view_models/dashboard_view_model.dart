@@ -360,7 +360,8 @@ class DashboardViewModel extends BaseViewModel {
     if (availability == null || !isDetailedView) return null;
     final int count = availability.placeCount;
     if (count == 0) return null;
-    final bool narrowed = _filter.selectionCount > 0 || _activePinFoodId != null;
+    final bool narrowed =
+        _filter.selectionCount > 0 || _activePinFoodId != null;
     return '${availability.region.name} - $count '
         '${narrowed ? 'matching ' : ''}'
         '${count == 1 ? 'place' : 'places'} in this state';
@@ -460,6 +461,7 @@ class DashboardViewModel extends BaseViewModel {
   LocalFood? _selectedFood;
   LocalFood? get selectedFood => _selectedFood;
   bool _targetFrameOwnsSelection = false;
+  int _foodFocusRevision = 0;
 
   // ===========================================================================
   // Location (REQ102_6 - REQ102_9, REQ102_14)
@@ -671,7 +673,9 @@ class DashboardViewModel extends BaseViewModel {
 
   // The map widget needs the same limits the ViewModel clamps against. It
   // reads them from here, so no widget imports a facade or a logic class.
-  double get minimumZoom => DiscoveryLogicFacade.minimumZoom;
+  double get minimumZoom => _swipePanelExpanded
+      ? DiscoveryLogicFacade.detailedViewZoom
+      : DiscoveryLogicFacade.minimumZoom;
   double get maximumZoom => DiscoveryLogicFacade.maximumZoom;
   double get malaysiaSouth => DiscoveryLogicFacade.malaysiaSouth;
   double get malaysiaWest => DiscoveryLogicFacade.malaysiaWest;
@@ -682,9 +686,8 @@ class DashboardViewModel extends BaseViewModel {
       ? _heatmapScale < 8
       : _zoom < DiscoveryLogicFacade.maximumZoom;
 
-  bool get canZoomOut => isHeatmapView
-      ? _heatmapScale > 1.01
-      : _zoom > DiscoveryLogicFacade.minimumZoom;
+  bool get canZoomOut =>
+      isHeatmapView ? _heatmapScale > 1.01 : _zoom > minimumZoom;
 
   /// Title line under the search bar in the detailed view.
   String get contextLabel {
@@ -953,11 +956,14 @@ class DashboardViewModel extends BaseViewModel {
   /// fetch, fired shortly after the map settles.
   void _schedulePinRefresh() {
     _pinRefreshTimer?.cancel();
-    _pinRefreshTimer = Timer(_pinRefreshDelay, () {
+    _pinRefreshTimer = Timer(_pinRefreshDelay, () async {
       if (_mode != DashboardMapMode.detailed) return;
-      _refreshSwipeModeRegion();
-      if (!_viewportChangedSinceLastPinLoad()) return;
-      _loadPins();
+      // Panning changes the viewport, not the active Swipe deck. Re-localising
+      // here used to discard the running session whenever the centre crossed a
+      // state boundary and reopen that state's Continue/New prompt.
+      if (!_swipePanelExpanded) await _refreshSwipeModeRegion();
+      if (_mode != DashboardMapMode.detailed) return;
+      await _loadPins();
     });
   }
 
@@ -1390,7 +1396,42 @@ class DashboardViewModel extends BaseViewModel {
     if (_selectedFood?.id == food?.id) return;
     _selectedFood = food;
     safeNotifyListeners();
-    _reloadActiveView();
+    if (food == null) {
+      _foodFocusRevision++;
+      _reloadActiveView();
+      return;
+    }
+    _clearPinResults(invalidateRequests: true);
+    _focusMapForSwipeFood(food);
+  }
+
+  Future<void> _focusMapForSwipeFood(LocalFood food) async {
+    final int revision = ++_foodFocusRevision;
+    final double anchorLatitude = _centreLatitude;
+    final double anchorLongitude = _centreLongitude;
+
+    final GeoPoint? location = await discoveryLogic.nearestFoodLocation(
+      localFoodId: food.id,
+      fromLatitude: anchorLatitude,
+      fromLongitude: anchorLongitude,
+    );
+    if (revision != _foodFocusRevision ||
+        !_swipePanelExpanded ||
+        _selectedFood?.id != food.id) {
+      return;
+    }
+    if (location == null) {
+      _notice = 'No mapped locations currently serve ${food.name}.';
+      safeNotifyListeners();
+      await _loadPins(clearFirst: true);
+      return;
+    }
+
+    _requestCamera(
+      location.latitude,
+      location.longitude,
+      DiscoveryLogicFacade.swipeFoodFocusZoom,
+    );
   }
 
   /// A8.3 - clear the keyword and put the map back the way it was.
@@ -1454,11 +1495,69 @@ class DashboardViewModel extends BaseViewModel {
       MatchesRecommendationRequest(
         stateCode: _swipePreparation?.stateCode ?? '',
         stateName: _swipePreparation?.stateName ?? '',
-        origin: TouristLocation(
-          latitude: _centreLatitude,
-          longitude: _centreLongitude,
-        ),
+        origin: _sharedLocation,
       );
+
+  /// Matches edits the same device-local Swipe session. Reload it when that
+  /// page closes so this in-memory Dashboard copy cannot overwrite a removed
+  /// like the next time the tourist moves or likes a card.
+  Future<void> refreshSwipeSessionAfterMatches() async {
+    final SwipeModePreparation? preparation = _swipePreparation;
+    if (preparation == null) return;
+    await _runSwipeCommand(() async {
+      final SwipeSession? refreshed = await discoveryLogic.reloadSwipeSession(
+        preparation,
+      );
+      if (refreshed != null) _swipeSession = refreshed;
+      _showSwipeResumePrompt = false;
+      _swipeLikeRevision++;
+    }, showLoading: false);
+  }
+
+  /// Opens Profile and applies any saved discovery-setting changes when the
+  /// tourist returns to this still-live Dashboard.
+  Future<void> openProfile() async {
+    await AppNavigator.push(AppRoutes.profile);
+    await refreshSwipeQueueAfterProfileChange();
+  }
+
+  /// Re-reads profile preferences and restrictions after the Profile route
+  /// closes, then re-ranks only the unvisited part of the active Swipe deck.
+  /// The current card and the device-local like/dislike history are preserved.
+  Future<void> refreshSwipeQueueAfterProfileChange() async {
+    if (!isDetailedView || _swipePreparation == null) return;
+
+    final bool wasShowingResumePrompt = _showSwipeResumePrompt;
+    final int? previousFoodId = currentSwipeFood?.id;
+    await _runSwipeCommand(() async {
+      final SwipeModePreparation refreshed = await discoveryLogic
+          .refreshSwipeModeAfterProfileChange(
+            latitude: _centreLatitude,
+            longitude: _centreLongitude,
+            distanceOrigin: _sharedLocation,
+          );
+      _swipePreparation = refreshed;
+
+      if (wasShowingResumePrompt) {
+        _swipeSession = null;
+        _showSwipeResumePrompt = refreshed.savedSession != null;
+        if (!_showSwipeResumePrompt) {
+          _swipeSession = await discoveryLogic.startNewSwipeSession(refreshed);
+        }
+      } else {
+        _swipeSession = refreshed.savedSession;
+        _showSwipeResumePrompt = false;
+        _swipeSession ??= await discoveryLogic.startNewSwipeSession(refreshed);
+      }
+
+      if (_swipePanelExpanded && !_showSwipeResumePrompt) {
+        final LocalFood? refreshedFood = currentSwipeFood;
+        if (refreshedFood?.id != previousFoodId) {
+          showFoodInTargetFrame(refreshedFood);
+        }
+      }
+    });
+  }
 
   // ===========================================================================
   // Retry
@@ -1478,10 +1577,6 @@ class DashboardViewModel extends BaseViewModel {
   double? _viewportNorth;
   double? _viewportEast;
 
-  double? _lastPinLatitude;
-  double? _lastPinLongitude;
-  double? _lastPinZoom;
-
   Timer? _pinRefreshTimer;
 
   /// Ceiling on one Find Me attempt, a little above the device layer's own so
@@ -1491,13 +1586,6 @@ class DashboardViewModel extends BaseViewModel {
   /// How long the map has to sit still before the pins are refetched. Short
   /// enough to feel immediate, long enough that one pinch is one query.
   static const Duration _pinRefreshDelay = Duration(milliseconds: 350);
-
-  /// Degrees of travel that justify refetching the pins for a new viewport.
-  static const double _pinRefreshDelta = 0.05;
-
-  /// Zoom change that justifies the same. A tenth of a level is below what
-  /// anyone can pinch deliberately, so in practice any real zoom refetches.
-  static const double _pinRefreshZoomDelta = 0.1;
 
   /// What a filter change or a food search triggers: the previous answer is
   /// stale, so the pins go before the new query runs.
@@ -1524,6 +1612,7 @@ class DashboardViewModel extends BaseViewModel {
           .prepareSwipeMode(
             latitude: _centreLatitude,
             longitude: _centreLongitude,
+            distanceOrigin: _sharedLocation,
           );
       if (revision != _swipePrepareRevision || !isDetailedView) return;
       _swipePreparation = preparation;
@@ -1620,22 +1709,7 @@ class DashboardViewModel extends BaseViewModel {
     final int revision = ++_pinLoadRevision;
     final int? requestedFoodId = _activePinFoodId;
 
-    if (clearFirst && (_pins.isNotEmpty || _clusters.isNotEmpty)) {
-      _pins = const <MapPin>[];
-      _clusters = const <MapCluster>[];
-      // A new filter or dish is a different question; an opened cluster from
-      // the old one no longer belongs on the map.
-      _collapseExpandedCluster();
-      _rebuildVisibleMarkers();
-      _pinsInView = 0;
-      _pinLimit = 0;
-      _paintedSignature = _markerSignature();
-      safeNotifyListeners();
-    }
-
-    _lastPinLatitude = _centreLatitude;
-    _lastPinLongitude = _centreLongitude;
-    _lastPinZoom = _zoom;
+    if (clearFirst) _clearPinResults();
     // The viewport and the food go to Postgres; what comes back is what is
     // drawn. The zoom decides both the shape of the answer - cluster counts or
     // individual pins - and how many of them.
@@ -1649,6 +1723,9 @@ class DashboardViewModel extends BaseViewModel {
       fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
       fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
       zoom: _zoom,
+      limit: requestedFoodId == null
+          ? null
+          : DiscoveryLogicFacade.swipeFoodMarkerLimit,
     );
     // REQ103 - the race guard. Swiping Nasi Lemak -> Laksa -> Satay fires
     // three loads; the first two must not land on top of the third. The
@@ -1731,18 +1808,17 @@ class DashboardViewModel extends BaseViewModel {
       ? null
       : _selectedFood?.id;
 
-  /// Has the viewport moved or scaled enough that the pins on screen could
-  /// differ from the ones already fetched?
-  bool _viewportChangedSinceLastPinLoad() {
-    final double? lastLatitude = _lastPinLatitude;
-    final double? lastLongitude = _lastPinLongitude;
-    final double? lastZoom = _lastPinZoom;
-    if (lastLatitude == null || lastLongitude == null || lastZoom == null) {
-      return true;
-    }
-    return (lastLatitude - _centreLatitude).abs() > _pinRefreshDelta ||
-        (lastLongitude - _centreLongitude).abs() > _pinRefreshDelta ||
-        (lastZoom - _zoom).abs() > _pinRefreshZoomDelta;
+  void _clearPinResults({bool invalidateRequests = false}) {
+    if (invalidateRequests) _pinLoadRevision++;
+    if (_pins.isEmpty && _clusters.isEmpty && _expandedPins.isEmpty) return;
+    _pins = const <MapPin>[];
+    _clusters = const <MapCluster>[];
+    _collapseExpandedCluster();
+    _rebuildVisibleMarkers();
+    _pinsInView = 0;
+    _pinLimit = 0;
+    _paintedSignature = _markerSignature();
+    safeNotifyListeners();
   }
 
   /// REQ102_14 - the whole-country fallback.

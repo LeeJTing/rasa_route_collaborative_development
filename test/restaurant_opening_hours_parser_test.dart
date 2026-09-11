@@ -88,4 +88,21 @@ void main() {
 
     expect(rows.single.status, DayStatus.unknown);
   });
+
+  test('accepts imported 24:00 as end-of-day midnight', () {
+    final List<OpeningHour> rows = repository.openingHoursFromRows(
+      <Map<String, dynamic>>[
+        <String, dynamic>{
+          'opening_hours_id': 8,
+          'day': 'Saturday',
+          'status': 'open',
+          'opening_time': '00:00:00',
+          'closing_time': '24:00:00',
+        },
+      ],
+    );
+
+    expect(rows.single.opensAt, 0);
+    expect(rows.single.closesAt, 1440);
+  });
 }

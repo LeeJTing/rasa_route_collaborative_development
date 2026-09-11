@@ -11,6 +11,7 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
+import 'opening_hours_logic.dart';
 
 /// Finding and filtering restaurants.
 ///
@@ -32,8 +33,16 @@ class RestaurantDiscoveryLogic {
 
   late final DiscoveryRepositoryFacade repository = createRepository();
 
-  Future<Restaurant?> findById(int restaurantId) =>
-      repository.getRestaurantById(restaurantId);
+  Future<Restaurant?> findById(
+    int restaurantId, {
+    TouristLocation origin = TouristLocation.unknown,
+  }) async {
+    final Restaurant? restaurant = await repository.getRestaurantById(
+      restaurantId,
+    );
+    if (restaurant == null) return null;
+    return _measure(<Restaurant>[restaurant], origin).single;
+  }
 
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
@@ -357,51 +366,8 @@ class RestaurantDiscoveryLogic {
 
   bool _isConfidentlyClosedHours(
     List<OpeningHour> hours,
-    DateTime now,
-  ) {
-    if (hours.isEmpty) return false;
-    final Weekday today = Weekday.values[now.weekday - 1];
-    final int minute = now.hour * 60 + now.minute;
-
-    // Check if a shift from yesterday is still running (past midnight).
-    final Weekday yesterday = Weekday.values[(now.weekday + 5) % 7];
-    final bool stillOpenFromYesterday = hours.any((OpeningHour h) {
-      return h.day == yesterday &&
-          h.status == DayStatus.open &&
-          h.opensAt != null &&
-          h.closesAt != null &&
-          h.closesAt! < h.opensAt! &&
-          minute < h.closesAt!;
-    });
-    if (stillOpenFromYesterday) return false; // Found an open period, so not closed.
-
-    final List<OpeningHour> todayRows = hours
-        .where((OpeningHour row) => row.day == today)
-        .toList(growable: false);
-
-    // If no records for today, or any record is Unknown, it's not "confidently" closed.
-    if (todayRows.isEmpty ||
-        todayRows.any((OpeningHour row) => row.status == DayStatus.unknown)) {
-      return false;
-    }
-
-    for (final OpeningHour row in todayRows) {
-      if (row.status == DayStatus.open) {
-        final int? opens = row.opensAt;
-        final int? closes = row.closesAt;
-        if (opens == null || closes == null) continue;
-
-        // Also handles "starts today ends tomorrow" (closes < opens)
-        final bool openNow = closes >= opens
-            ? minute >= opens && minute < closes
-            : minute >= opens || minute < closes;
-        if (openNow) return false; // Found an open period, so not closed.
-      }
-    }
-
-    // If today is explicitly marked as Closed, or we have open periods but none cover "now".
-    return true;
-  }
+    DateTime malaysiaNow,
+  ) => OpeningHoursLogic.isConfidentlyClosedAt(hours, malaysiaNow);
 
   Future<List<Restaurant>> _eligibleRestaurants(
     List<Restaurant> candidates,

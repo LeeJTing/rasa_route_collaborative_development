@@ -1,6 +1,7 @@
 import '../../domain_model/report_category.dart';
 import '../../domain_model/report_claim.dart';
 import '../../domain_model/report_outcome.dart';
+import '../../domain_model/opening_hour.dart';
 import 'report_moderation_logic.dart';
 import 'report_moderation_rules.dart';
 
@@ -47,6 +48,21 @@ class ReportLogicFacade {
   /// How many identical claims are needed before a fix is auto-applied.
   int thresholdFor(ReportCategory category) =>
       ReportModerationRules.thresholdFor(category);
+
+  String? priceError(String value, {bool required = false}) =>
+      ReportModerationRules.priceError(value, required: required);
+
+  String? addressError(String value, {bool required = false}) =>
+      ReportModerationRules.addressError(value, required: required);
+
+  String? closureError(
+    String value,
+    ClosureUnit unit, {
+    bool required = false,
+  }) => ReportModerationRules.closureError(value, unit, required: required);
+
+  String? operatingHoursError(Map<Weekday, List<OpeningHour>> operatingHours) =>
+      ReportModerationRules.operatingHoursError(operatingHours);
 
   /// Canonical payload for one day's proposed hours (see
   /// `ReportModerationRules.hoursPayload`). Exposed so the report form and

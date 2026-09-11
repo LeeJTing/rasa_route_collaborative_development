@@ -23,11 +23,11 @@ void main() {
     expect(find.text('Halal'), findsNothing);
 
     await tester.scrollUntilVisible(
-      find.text('Report Restaurant'),
+      find.text('Local Foods Served (1)'),
       300,
       scrollable: find.byType(Scrollable).last,
     );
-    expect(find.text('Local Foods Served'), findsOneWidget);
+    expect(find.text('Local Foods Served (1)'), findsOneWidget);
 
     // Reporting now lives on a separate full-screen page that this button
     // opens (AppRoutes.reportPlace / ReportPlaceView). The button simply
