@@ -217,7 +217,9 @@ class _Header extends StatelessWidget {
   /// to load ("Couldn't load" - almost always the storage bucket not being
   /// public), so a blank card says WHY instead of failing silently.
   Widget _photo() {
-    final String? url = pin.imageUrl;
+    // The card-sized variant, falling back to the full one for the photos no
+    // smaller variant can be asked for.
+    final String? url = pin.thumbnailUrl ?? pin.imageUrl;
     if (url == null || url.isEmpty) {
       return _photoPlaceholder('No photo');
     }
@@ -225,6 +227,7 @@ class _Header extends StatelessWidget {
       source: url,
       borderRadius: AppRadius.cardRadius,
       semanticLabel: pin.label,
+      decodeWidth: AppSizes.pinSheetImage.round(),
       fallback: _photoPlaceholder('Couldn’t load'),
     );
   }
@@ -300,10 +303,10 @@ class _PriceAndStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool? openNow = pin.openNow;
     final String status = openNow == null
-        ? 'Hours unknown'
+        ? 'Unknown'
         : openNow
-        ? 'Open now'
-        : 'Closed now';
+        ? 'Opening'
+        : 'Closed';
     final Color statusColour = openNow == null
         ? AppColors.textSecondary
         : openNow

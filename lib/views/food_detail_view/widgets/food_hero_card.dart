@@ -29,6 +29,19 @@ class _FoodHeroCardState extends State<FoodHeroCard> {
   int _currentImage = 0;
 
   @override
+  void didUpdateWidget(covariant FoodHeroCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final int imageCount = widget.food.imageUrls.isEmpty
+        ? 1
+        : widget.food.imageUrls.length;
+    if (oldWidget.food.id != widget.food.id) {
+      _currentImage = 0;
+    } else if (_currentImage >= imageCount) {
+      _currentImage = imageCount - 1;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final List<String?> images = widget.food.imageUrls.isEmpty
         ? <String?>[null]
@@ -48,6 +61,7 @@ class _FoodHeroCardState extends State<FoodHeroCard> {
                 alignment: Alignment.bottomCenter,
                 children: <Widget>[
                   PageView.builder(
+                    key: ValueKey<int>(widget.food.id),
                     itemCount: images.length,
                     onPageChanged: (int index) =>
                         setState(() => _currentImage = index),

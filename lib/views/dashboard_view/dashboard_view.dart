@@ -145,13 +145,14 @@ class _DashboardViewState extends State<DashboardView> {
       child: MapSearchBar(
         controller: _searchController,
         onChanged: viewModel.updateSearchKeyword,
+        onSubmitted: viewModel.submitSearch,
         onClear: viewModel.clearSearch,
         onTap: viewModel.openSearchPanel,
-        // The filter panel drives the heatmap's availability scores, so it is
-        // offered on the heatmap view only.
-        onFilterTap: viewModel.isHeatmapView
-            ? viewModel.toggleFilterPanel
-            : null,
+        // Offered on both surfaces. The filter narrows the same food selection
+        // either way - the heatmap's scores on one, the pins on the other - and
+        // `_applyFilter` already reloads whichever view is showing, so gating
+        // it to the heatmap only hid a control that worked.
+        onFilterTap: viewModel.toggleFilterPanel,
         filterCount: viewModel.filter.selectionCount,
         filterPanelOpen: viewModel.filterPanelOpen,
       ),
@@ -231,10 +232,16 @@ class _DashboardViewState extends State<DashboardView> {
                   onScaleChanged: viewModel.onHeatmapScaleChanged,
                   detailScale: viewModel.heatmapDetailScale,
                   resetToken: viewModel.heatmapResetToken,
-                  touristLatitude: viewModel.location.isKnown
+                  // REQ102_7 / A3 - shown only when the fix is known *and*
+                  // inside Malaysia. This map covers one country; a dot for a
+                  // tourist in Singapore or Jakarta would be drawn at whatever
+                  // the stylised projection maps their coordinates to, which is
+                  // somewhere in Malaysia. Better to show nothing than to show
+                  // them somewhere they are not.
+                  touristLatitude: viewModel.showCurrentLocation
                       ? viewModel.location.latitude
                       : null,
-                  touristLongitude: viewModel.location.isKnown
+                  touristLongitude: viewModel.showCurrentLocation
                       ? viewModel.location.longitude
                       : null,
                 )
@@ -373,7 +380,7 @@ class _DashboardViewState extends State<DashboardView> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
-              if (viewModel.filterPanelOpen && viewModel.isHeatmapView)
+              if (viewModel.filterPanelOpen)
                 MapFilterPanel(
                   labelFor: viewModel.labelFor,
                   optionsFor: viewModel.optionsFor,
@@ -530,6 +537,27 @@ class _DashboardViewState extends State<DashboardView> {
               ],
             ),
 
+          // REQ102_41 - aggregated counts while the map is zoomed out. One
+          // badge per grid cell, counted in Postgres: at a Malaysia-wide view
+          // this is seven markers instead of twelve thousand.
+          if (viewModel.clusters.isNotEmpty)
+            MarkerLayer(
+              markers: viewModel.clusters
+                  .map(
+                    (MapCluster cluster) => Marker(
+                      key: ValueKey<String>(cluster.key),
+                      point: LatLng(cluster.latitude, cluster.longitude),
+                      width: _clusterDiameter(cluster.count),
+                      height: _clusterDiameter(cluster.count),
+                      child: _ClusterMarker(
+                        count: cluster.count,
+                        onTap: () => viewModel.zoomIntoCluster(cluster),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+
           // REQ102_32 - restaurant and submitted-landmark pins.
           MarkerLayer(
             markers: viewModel.pins
@@ -551,8 +579,9 @@ class _DashboardViewState extends State<DashboardView> {
                 .toList(growable: false),
           ),
 
-          // The tourist's own position (REQ102_7).
-          if (viewModel.location.isKnown)
+          // The tourist's own position (REQ102_7), and only when that position
+          // is inside Malaysia (A3) - see `showCurrentLocation`.
+          if (viewModel.showCurrentLocation)
             MarkerLayer(
               markers: <Marker>[
                 Marker(
@@ -569,6 +598,63 @@ class _DashboardViewState extends State<DashboardView> {
         ],
       ),
     );
+  }
+}
+
+/// A cluster badge grows with what it stands for, but slowly - a count ten
+/// times larger is not a marker ten times wider, or one busy city would cover
+/// the peninsula. Three sizes, chosen so the digits always fit.
+double _clusterDiameter(int count) {
+  if (count >= 1000) return 56;
+  if (count >= 100) return 48;
+  return 40;
+}
+
+/// "1,200 places here", drawn as one tappable circle.
+class _ClusterMarker extends StatelessWidget {
+  const _ClusterMarker({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: DecoratedBox(
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppColors.primary,
+        border: Border.fromBorderSide(
+          BorderSide(color: AppColors.surface, width: 2),
+        ),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: AppColors.shadow,
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Text(
+          _label(count),
+          textAlign: TextAlign.center,
+          style: AppTextStyles.compactBadgeLabel.copyWith(
+            color: AppColors.onPrimary,
+          ),
+        ),
+      ),
+    ),
+  );
+
+  /// Four digits do not fit on a 56pt circle, so past a thousand the count is
+  /// abbreviated rather than truncated.
+  static String _label(int count) {
+    if (count < 1000) return '$count';
+    final double thousands = count / 1000;
+    return thousands >= 10
+        ? '${thousands.round()}k'
+        : '${thousands.toStringAsFixed(1)}k';
   }
 }
 
@@ -614,10 +700,19 @@ class _PinMarker extends StatelessWidget {
             ? AppColors.pinUserLandmark
             : AppColors.pinSystemRestaurant,
         shadows: <Shadow>[
-          const Shadow(color: AppColors.surface, blurRadius: 3),
+          // The white halo/border to make it pop.
+          const Shadow(color: AppColors.surface, blurRadius: 2),
+          const Shadow(color: AppColors.surface, blurRadius: 4),
+          if (selected)
+            const Shadow(
+              color: AppColors.surface,
+              blurRadius: 8,
+            ),
+          // The soft selection glow/ring.
           Shadow(
-            color: selected ? AppColors.pinSelectedRing : AppColors.surface,
-            blurRadius: selected ? 6 : 4,
+            color: selected ? AppColors.pinSelectedRing : AppColors.shadow,
+            blurRadius: selected ? 8 : 4,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -847,64 +942,6 @@ class _CustomCoordinatesDialogState extends State<_CustomCoordinatesDialog> {
 }
 
 /// M3, and the two "showing the whole country instead" explanations.
-/// REQ102_41 - how much of the viewport's answer is on screen.
-///
-/// Deliberately quiet: it reports a limit, it does not ask for anything. The
-/// optional [subtitle] carries the heatmap's own count for the state under the
-/// map, so the number of pins can be read against the state total rather than
-/// mistaken for it.
-class _PinCoverageChip extends StatelessWidget {
-  const _PinCoverageChip({required this.message, this.subtitle});
-
-  final String message;
-  final String? subtitle;
-
-  @override
-  Widget build(BuildContext context) => Align(
-    child: Material(
-      color: AppColors.surface,
-      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
-      elevation: 1,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.xs,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(
-              Icons.place_outlined,
-              size: 14,
-              color: AppColors.textSecondary,
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  message,
-                  style: AppTextStyles.labelSmall.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    style: AppTextStyles.labelSmall.copyWith(
-                      color: AppColors.textDisabled,
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
 class _NoticeBanner extends StatelessWidget {
   const _NoticeBanner({required this.message, required this.onDismiss});
 

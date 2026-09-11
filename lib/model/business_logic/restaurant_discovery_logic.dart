@@ -1,14 +1,14 @@
 import 'dart:math' as math;
 
-import 'package:meta/meta.dart' show protected, visibleForTesting;
+import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/place_closure_rules.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
-import '../../domain_model/restaurant_report_reason.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
 
@@ -18,6 +18,11 @@ import '../repositories/discovery_repository_facade.dart';
 /// facade. It never sees a repository, a shared client or Flutter.
 class RestaurantDiscoveryLogic {
   RestaurantDiscoveryLogic();
+
+  static const int _quickModeResultTarget = 20;
+  static const double _quickModeInitialRadiusKm = 1;
+  static const double _quickModeRadiusStepKm = 1;
+  static const double _quickModeMaximumRadiusKm = 10;
 
   @protected
   DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
@@ -30,80 +35,25 @@ class RestaurantDiscoveryLogic {
   Future<Restaurant?> findById(int restaurantId) =>
       repository.getRestaurantById(restaurantId);
 
-  /// Records a tourist's report against a catalogue restaurant (the shared
-  /// `report` table) and applies the moderation rule: `report_count` is
-  /// incremented, and once it reaches [_reportFreezeAtReports] the
-  /// restaurant is frozen (`status` 'frozen') so the discovery/list filters
-  /// stop showing it. `frozePlace: true` tells the caller that THIS report
-  /// was the one that froze it - the UI leaves the page and refreshes the
-  /// map, dropping the now-hidden pin.
-  ///
-  /// Reporting is a signed-in feature: when no tourist is resolved (no auth
-  /// session) nothing is written and `requiresSignIn: true` is returned so
-  /// the UI can ask the user to sign in. When signed in, one tourist may
-  /// report a place only once - a duplicate is detected first and
-  /// `alreadyReported: true` is returned without touching the count.
-  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
-  submitRestaurantReport({
-    required int restaurantId,
-    required RestaurantReportReason reason,
-    String? touristId,
-  }) async {
-    final String? resolvedTouristId =
-        touristId ?? await repository.currentTouristId();
-    if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
-      return (requiresSignIn: true, alreadyReported: false, frozePlace: false);
-    }
-    final bool duplicate = await repository.report.alreadyReported(
-      kind: 'restaurant',
-      placeId: restaurantId,
-      touristId: resolvedTouristId,
-    );
-    if (duplicate) {
-      return (requiresSignIn: false, alreadyReported: true, frozePlace: false);
-    }
-    await repository.report.insertReport(
-      kind: 'restaurant',
-      placeId: restaurantId,
-      reason: reason.name,
-      touristId: resolvedTouristId,
-    );
-    final int count = await repository.restaurant.incrementReportCount(
-      restaurantId,
-    );
-    final bool frozePlace = shouldFreezeAfterReport(count);
-    if (frozePlace) {
-      await repository.restaurant.freeze(restaurantId);
-      // Frozen places are no longer 'available', so cached map pins must go:
-      // the next read (right after the UI leaves the page) has no pin for it.
-      repository.map.clearCache();
-    }
-    return (
-      requiresSignIn: false,
-      alreadyReported: false,
-      frozePlace: frozePlace,
-    );
-  }
-
-  /// Freeze once the reported count REACHES [_reportFreezeAtReports] (so the
-  /// 5th report freezes). Pure so the boundary is unit-testable without a
-  /// repository seam.
-  @visibleForTesting
-  static bool shouldFreezeAfterReport(int reportedCount) =>
-      reportedCount >= _reportFreezeAtReports;
-
-  /// A restaurant is frozen once its report count reaches this many reports.
-  static const int _reportFreezeAtReports = 5;
-
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
     required double radiusKm,
     required int limit,
   }) async {
-    final List<Restaurant> candidates = _withinRadius(
-      _availableSummaries(
-        _measure(await repository.getRestaurants(), location),
+    if (!location.isKnown || radiusKm <= 0 || limit <= 0) {
+      return const <Restaurant>[];
+    }
+    final List<Restaurant> allMeasured = _measure(
+      await repository.getRestaurantsNear(
+        latitude: location.latitude,
+        longitude: location.longitude,
+        maximumDistanceKm: radiusKm,
       ),
+      location,
+    );
+    await _reactivateExpiredClosures(allMeasured);
+    final List<Restaurant> candidates = _withinRadius(
+      _availableSummaries(allMeasured),
       radiusKm: radiusKm,
     );
     final List<Restaurant> eligible = await _eligibleRestaurants(candidates);
@@ -154,6 +104,7 @@ class RestaurantDiscoveryLogic {
     distanceMetres: distanceMetres ?? restaurant.distanceMetres,
     reviewCount: restaurant.reviewCount,
     status: restaurant.status,
+    closedUntil: restaurant.closedUntil,
     items: items ?? restaurant.items,
   );
 
@@ -186,33 +137,37 @@ class RestaurantDiscoveryLogic {
     return matches;
   }
 
-  /// Quick Mode starts at 1 km and expands silently until [limit] nearest
+  /// Quick Mode starts at 1 km and expands silently until 20 nearest
   /// eligible restaurants are found or the 10 km Use Case boundary is reached.
   Future<List<Restaurant>> nearbyWithAutomaticExpansion({
     required TouristLocation location,
-    required int limit,
-    double initialRadiusKm = 1,
-    double radiusStepKm = 1,
-    double maximumRadiusKm = 10,
   }) async {
-    final List<Restaurant> measured = _availableSummaries(
-      _measure(await repository.getRestaurants(), location),
+    if (!location.isKnown) return const <Restaurant>[];
+    final List<Restaurant> allMeasured = _measure(
+      await repository.getRestaurantsNear(
+        latitude: location.latitude,
+        longitude: location.longitude,
+        maximumDistanceKm: _quickModeMaximumRadiusKm,
+      ),
+      location,
     );
+    await _reactivateExpiredClosures(allMeasured);
+    final List<Restaurant> measured = _availableSummaries(allMeasured);
     final List<Restaurant> eligible = await _eligibleRestaurants(
-      _withinRadius(measured, radiusKm: maximumRadiusKm),
+      _withinRadius(measured, radiusKm: _quickModeMaximumRadiusKm),
     );
-    double radiusKm = initialRadiusKm;
+    double radiusKm = _quickModeInitialRadiusKm;
     List<Restaurant> available = const <Restaurant>[];
-    while (radiusKm <= maximumRadiusKm) {
+    while (radiusKm <= _quickModeMaximumRadiusKm) {
       final List<Restaurant> results = _withinRadius(
         eligible,
         radiusKm: radiusKm,
-      ).take(limit).toList(growable: false);
+      ).take(_quickModeResultTarget).toList(growable: false);
       available = results;
-      if (results.length >= limit || !location.isKnown) {
+      if (results.length >= _quickModeResultTarget || !location.isKnown) {
         return _hydrateSelected(results);
       }
-      radiusKm += radiusStepKm;
+      radiusKm += _quickModeRadiusStepKm;
     }
     return _hydrateSelected(available);
   }
@@ -223,10 +178,6 @@ class RestaurantDiscoveryLogic {
   Future<List<SubmittedLandmarkRecommendation>>
   nearbyLandmarksWithAutomaticExpansion({
     required TouristLocation location,
-    required int limit,
-    double initialRadiusKm = 1,
-    double radiusStepKm = 1,
-    double maximumRadiusKm = 10,
   }) async {
     if (!location.isKnown) return const <SubmittedLandmarkRecommendation>[];
 
@@ -265,9 +216,7 @@ class RestaurantDiscoveryLogic {
           .add(occurrence);
     }
 
-    final DateTime malaysiaNow = currentTime().toUtc().add(
-      const Duration(hours: 8),
-    );
+    final DateTime now = currentTime();
     final List<SubmittedLandmarkRecommendation> measured =
         <SubmittedLandmarkRecommendation>[];
     for (final MapEntry<String, List<FoodOccurrence>> entry
@@ -276,7 +225,7 @@ class RestaurantDiscoveryLogic {
           _isConfidentlyClosedHours(
             hoursByPlace['submittedLandmark:${entry.key}'] ??
                 const <OpeningHour>[],
-            malaysiaNow,
+            now,
           )) {
         continue;
       }
@@ -314,19 +263,19 @@ class RestaurantDiscoveryLogic {
           a.distanceMetres.compareTo(b.distanceMetres),
     );
 
-    double radiusKm = initialRadiusKm;
+    double radiusKm = _quickModeInitialRadiusKm;
     List<SubmittedLandmarkRecommendation> available =
         const <SubmittedLandmarkRecommendation>[];
-    while (radiusKm <= maximumRadiusKm) {
+    while (radiusKm <= _quickModeMaximumRadiusKm) {
       available = measured
           .where(
             (SubmittedLandmarkRecommendation landmark) =>
                 landmark.distanceMetres <= radiusKm * 1000,
           )
-          .take(limit)
+          .take(_quickModeResultTarget)
           .toList(growable: false);
-      if (available.length >= limit) return available;
-      radiusKm += radiusStepKm;
+      if (available.length >= _quickModeResultTarget) return available;
+      radiusKm += _quickModeRadiusStepKm;
     }
     return available;
   }
@@ -361,16 +310,45 @@ class RestaurantDiscoveryLogic {
   }
 
   List<Restaurant> _availableSummaries(List<Restaurant> restaurants) {
-    final DateTime malaysiaNow = currentTime().toUtc().add(
-      const Duration(hours: 8),
-    );
+    final DateTime now = currentTime();
     return restaurants
         .where(
           (Restaurant restaurant) =>
-              restaurant.status?.trim().toLowerCase() == 'available' &&
-              !_isConfidentlyClosed(restaurant, malaysiaNow),
+              // Only 'available' places are discovered - a place frozen by a
+              // report (or by a still-running temporary closure) is hidden.
+              // A frozen place whose TEMPORARY closure has passed is available
+              // again (see PlaceClosureRules) and is included on this read.
+              PlaceClosureRules.isEffectivelyAvailable(
+                status: restaurant.status,
+                closedUntil: restaurant.closedUntil,
+                now: currentTime(),
+              ) &&
+              !_isConfidentlyClosed(restaurant, now),
         )
         .toList(growable: false);
+  }
+
+  /// Read-time auto-reactivation: any restaurant in [allMeasured] that is
+  /// frozen by a temporary closure whose `closed_until` has passed is written
+  /// back to 'available' with `closed_until` cleared, so the DB catches up
+  /// with what this read just decided. Best-effort (a failed write must not
+  /// take discovery down - the restaurant is treated as available this read
+  /// regardless).
+  Future<void> _reactivateExpiredClosures(List<Restaurant> allMeasured) async {
+    for (final Restaurant restaurant in allMeasured) {
+      if (!PlaceClosureRules.needsReactivation(
+        status: restaurant.status,
+        closedUntil: restaurant.closedUntil,
+        now: currentTime(),
+      )) {
+        continue;
+      }
+      try {
+        await repository.reactivateRestaurantFromClosure(restaurant.id);
+      } catch (_) {
+        // Best-effort - see method doc.
+      }
+    }
   }
 
   bool _isConfidentlyClosed(Restaurant restaurant, DateTime malaysiaNow) {
@@ -379,45 +357,50 @@ class RestaurantDiscoveryLogic {
 
   bool _isConfidentlyClosedHours(
     List<OpeningHour> hours,
-    DateTime malaysiaNow,
+    DateTime now,
   ) {
     if (hours.isEmpty) return false;
-    final Weekday today = Weekday.values[malaysiaNow.weekday - 1];
-    final Weekday previous =
-        Weekday.values[(malaysiaNow.weekday + Weekday.values.length - 2) %
-            Weekday.values.length];
-    final int minute = malaysiaNow.hour * 60 + malaysiaNow.minute;
+    final Weekday today = Weekday.values[now.weekday - 1];
+    final int minute = now.hour * 60 + now.minute;
 
-    final bool previousDayStillOpen = hours.any((OpeningHour row) {
-      final int? opens = row.opensAt;
-      final int? closes = row.closesAt;
-      return row.day == previous &&
-          row.status == DayStatus.open &&
-          opens != null &&
-          closes != null &&
-          closes < opens &&
-          minute < closes;
+    // Check if a shift from yesterday is still running (past midnight).
+    final Weekday yesterday = Weekday.values[(now.weekday + 5) % 7];
+    final bool stillOpenFromYesterday = hours.any((OpeningHour h) {
+      return h.day == yesterday &&
+          h.status == DayStatus.open &&
+          h.opensAt != null &&
+          h.closesAt != null &&
+          h.closesAt! < h.opensAt! &&
+          minute < h.closesAt!;
     });
-    if (previousDayStillOpen) return false;
+    if (stillOpenFromYesterday) return false; // Found an open period, so not closed.
 
     final List<OpeningHour> todayRows = hours
         .where((OpeningHour row) => row.day == today)
         .toList(growable: false);
+
+    // If no records for today, or any record is Unknown, it's not "confidently" closed.
     if (todayRows.isEmpty ||
         todayRows.any((OpeningHour row) => row.status == DayStatus.unknown)) {
       return false;
     }
-    final bool openNow = todayRows.any((OpeningHour row) {
-      final int? opens = row.opensAt;
-      final int? closes = row.closesAt;
-      if (row.status != DayStatus.open || opens == null || closes == null) {
-        return false;
+
+    for (final OpeningHour row in todayRows) {
+      if (row.status == DayStatus.open) {
+        final int? opens = row.opensAt;
+        final int? closes = row.closesAt;
+        if (opens == null || closes == null) continue;
+
+        // Also handles "starts today ends tomorrow" (closes < opens)
+        final bool openNow = closes >= opens
+            ? minute >= opens && minute < closes
+            : minute >= opens || minute < closes;
+        if (openNow) return false; // Found an open period, so not closed.
       }
-      if (closes == 1440) return minute >= opens;
-      if (closes < opens) return minute >= opens;
-      return minute >= opens && minute < closes;
-    });
-    return !openNow;
+    }
+
+    // If today is explicitly marked as Closed, or we have open periods but none cover "now".
+    return true;
   }
 
   Future<List<Restaurant>> _eligibleRestaurants(

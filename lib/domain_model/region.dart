@@ -20,6 +20,10 @@ class Region {
     required this.places,
   });
 
+  /// A state or federal territory - the only level `region_boundary` is queried
+  /// at, and what `map_region_distribution` and `map_region_at` are passed.
+  static const int stateLevel = 1;
+
   /// Short ISO-style code, e.g. `JHR`. Stable key for caches and swipe
   /// sessions (C13 keeps one swipe session per state).
   final String code;

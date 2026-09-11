@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:meta/meta.dart' show visibleForTesting;
 
-import '../../domain_model/landmark_report_reason.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
@@ -401,8 +400,10 @@ class LandmarkSubmissionLogic {
   ///   1. a catalogue RESTAURANT within ~100m  -> merge its `restaurant_item`
   ///      (no landmark row is written; the restaurant keeps its opening hours);
   ///   2. else an existing submitted LANDMARK within ~100m -> merge its
-  ///      `landmark_item` (no new landmark row; the existing one keeps its
-  ///      opening hours);
+  ///      `landmark_item` (no new landmark row). The existing row KEEPS its
+  ///      opening hours except for days the re-submission actually asserted
+  ///      and changed (see [updateOpeningHoursOnMerge]) - a day left Unknown
+  ///      keeps its stored hours;
   ///   3. else a brand-new `submitted_landmark` is saved (always `available`,
   ///      `reported_count` 0).
   /// In EVERY outcome the place the tourist just re-confirmed is reactivated:
@@ -433,6 +434,9 @@ class LandmarkSubmissionLogic {
     String? imageUrl,
     String? imageId,
     String? imageCategory,
+    String? phone,
+    String? website,
+    String? address,
     required List<FoodSubmission> foods,
     required Map<Weekday, List<OpeningHour>> operatingHours,
   }) async {
@@ -466,6 +470,32 @@ class LandmarkSubmissionLogic {
         longitude: longitude,
         matchedRestaurant: null,
       );
+      // The merge only attaches dishes - but if the tourist supplied contact/
+      // address details this time, persist them onto the existing row too
+      // (they would otherwise be silently dropped). Best-effort: a contact
+      // save failure must not fail the already-succeeded merge.
+      try {
+        await repository.landmark.updateContactFields(
+          existingLandmark.id,
+          phone: phone,
+          website: website,
+          address: address,
+        );
+      } catch (_) {
+        // Ignored - the merge itself succeeded.
+      }
+      // Opening hours follow the SAME per-field merge rule as contact data:
+      // only days the re-submission actually asserted (Open/Closed) and that
+      // changed are written onto the existing landmark - days left Unknown
+      // keep their stored hours. Best-effort like the contact write.
+      try {
+        await repository.landmark.updateOpeningHoursOnMerge(
+          existingLandmark.id,
+          operatingHours,
+        );
+      } catch (_) {
+        // Ignored - the merge itself succeeded.
+      }
       return LandmarkSubmitResult.mergedIntoLandmark(
         landmarkId: existingLandmark.id,
         targetName: existingLandmark.name,
@@ -489,6 +519,9 @@ class LandmarkSubmissionLogic {
       imageUrl: imageUrl,
       imageId: imageId,
       imageCategory: imageCategory,
+      phone: phone ?? '',
+      website: website ?? '',
+      address: address ?? '',
       items: <LandmarkItem>[
         for (final FoodSubmission entry in foods)
           _toLandmarkItem(entry, touristId),
@@ -689,7 +722,9 @@ class LandmarkSubmissionLogic {
   /// `landmark_item` rows (the A13 landmark merge - used when the place is
   /// already a submitted landmark rather than a catalogue restaurant). Same
   /// dedupe/reporting as [addFoodsToRestaurant]; the landmark's own opening
-  /// hours are untouched (A13.2).
+  /// hours are NOT touched here (A13.2) - the hours merge happens once, in
+  /// [submitLandmark]'s merge branch, via [updateOpeningHoursOnMerge], so
+  /// this dish-attach step stays single-purpose.
   Future<FoodAttachResult> addFoodsToSubmittedLandmark({
     required int landmarkId,
     required String touristId,
@@ -763,70 +798,154 @@ class LandmarkSubmissionLogic {
     }
   }
 
-  /// Records a tourist's report against a submitted landmark (the shared
-  /// `report` table) and applies the moderation rule: `reported_count` is
-  /// incremented, and once it reaches [_reportFreezeAtReports] the landmark
-  /// is frozen (`status` 'frozen') so the map/list filters stop showing it.
-  /// `frozePlace: true` tells the caller that THIS report was the one that
-  /// froze it - the UI leaves the page and refreshes the map, dropping the
-  /// now-hidden pin.
+  // =========================================================================
+  // Add-Landmark contact / address rules (pure, unit-testable)
+  // =========================================================================
+
+  /// Field caps / thresholds for the Add New Landmark form.
   ///
-  /// Reporting is a signed-in feature: when no tourist is resolved (no auth
-  /// session) nothing is written and `requiresSignIn: true` is returned so
-  /// the UI can ask the user to sign in. When signed in, one tourist may
-  /// report a place only once - a duplicate is detected first and
-  /// `alreadyReported: true` is returned without touching the count.
-  Future<({bool requiresSignIn, bool alreadyReported, bool frozePlace})>
-  submitLandmarkReport({
-    required int landmarkId,
-    required LandmarkReportReason reason,
-    String? touristId,
-  }) async {
-    final String? resolvedTouristId =
-        touristId ?? await repository.auth.currentTouristId();
-    if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
-      return (requiresSignIn: true, alreadyReported: false, frozePlace: false);
+  /// Restaurant name: typing STOPS at [maxRestaurantNameLength] (40, input is
+  /// cut off no matter what is pasted), a WARNING shows from
+  /// [restaurantNameWarnFromLength] (31), and submit is only allowed up to
+  /// [restaurantNameSubmitMaxLength] (30).
+  ///
+  /// Website: typing STOPS at [maxWebsiteLength] (80), a WARNING shows from
+  /// [websiteWarnFromLength] (76), submit only allowed up to
+  /// [websiteSubmitMaxLength] (75).
+  ///
+  /// Phone counts FORMATTED text (e.g. "+60 12-345 6789" = 16 chars; the
+  /// digits themselves are at most ~12). Address is capped at 150.
+  static const int maxRestaurantNameLength = 40;
+  static const int restaurantNameSubmitMaxLength = 30;
+  static const int restaurantNameWarnFromLength = 31;
+
+  static const int maxPhoneLength = 18;
+
+  static const int maxWebsiteLength = 80;
+  static const int websiteSubmitMaxLength = 75;
+  static const int websiteWarnFromLength = 76;
+
+  static const int maxAddressLength = 150;
+
+  static String _phoneDigits(String value) =>
+      value.replaceAll(RegExp(r'[^0-9]'), '');
+
+  /// Whether [value] is a plausible MALAYSIAN phone number - format-level
+  /// only (the app cannot verify the number is real/active without an SMS
+  /// OTP, which needs a backend provider). Accepts +60 / 0060 / 0 national
+  /// prefixes with spaces, hyphens, parens and dots anywhere in between.
+  /// STRICT: mobile must be 01x-xxxxxxx/01xx-xxxxxx (national length 9-10);
+  /// landline must be a real MY area code (0[3-9]..., so "02" Jakarta-style
+  /// prefixes are rejected) with national length 8-10.
+  bool isValidMalaysianPhone(String value) {
+    String national = _phoneDigits(value);
+    if (national.isEmpty) return false;
+    if (national.startsWith('0060')) {
+      national = national.substring(4);
+    } else if (national.startsWith('60')) {
+      national = national.substring(2);
+    } else if (national.startsWith('0')) {
+      national = national.substring(1);
+    } else {
+      return false;
     }
-    final bool duplicate = await repository.report.alreadyReported(
-      kind: 'landmark',
-      placeId: landmarkId,
-      touristId: resolvedTouristId,
-    );
-    if (duplicate) {
-      return (requiresSignIn: false, alreadyReported: true, frozePlace: false);
+    if (national.length < 8 || national.length > 10) return false;
+    if (national.startsWith('1')) {
+      // Mobile: 01x / 011x - national 9-10 digits.
+      return RegExp(r'^1[0-9]\d{7,8}$').hasMatch(national);
     }
-    await repository.report.insertReport(
-      kind: 'landmark',
-      placeId: landmarkId,
-      reason: reason.name,
-      touristId: resolvedTouristId,
-    );
-    final int count = await repository.landmark.incrementReportCount(
-      landmarkId,
-    );
-    final bool frozePlace = shouldFreezeAfterReport(count);
-    if (frozePlace) {
-      await repository.landmark.freeze(landmarkId);
-      // Frozen places are no longer 'available', so cached map pins must go:
-      // the next read (right after the UI leaves the page) has no pin for it.
-      repository.map.clearCache();
-    }
-    return (
-      requiresSignIn: false,
-      alreadyReported: false,
-      frozePlace: frozePlace,
-    );
+    // Landline: area code starts 3-9 (03,04,...,09 or 08x) - never '2'.
+    return RegExp(r'^[3-9]\d{7,8}$').hasMatch(national);
   }
 
-  /// Freeze once the reported count REACHES [_reportFreezeAtReports] (so the
-  /// 5th report freezes). Pure so the boundary is unit-testable without a
-  /// repository seam.
-  @visibleForTesting
-  static bool shouldFreezeAfterReport(int reportedCount) =>
-      reportedCount >= _reportFreezeAtReports;
+  /// Whether [value] is a syntactically valid PUBLIC http(s) website URL.
+  /// STRICT: scheme required, no credentials/whitespace, host must be a
+  /// proper dotted domain - each label alphanumeric/hyphen, a TLD of >=2
+  /// letters (or a punycode xn-- TLD) - and localhost / IP-literal hosts are
+  /// rejected (they are not public restaurant websites). Reachability is a
+  /// separate, network-backed check ([isWebsiteReachable]).
+  bool isValidWebsiteFormat(String value) {
+    final String trimmed = value.trim();
+    if (trimmed.isEmpty || trimmed.length > maxWebsiteLength) return false;
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      return false;
+    }
+    // No whitespace anywhere (Dart's Uri percent-encodes a space in the host
+    // into %20, so a host check alone would not catch "exa mple.com").
+    if (RegExp(r'\s').hasMatch(trimmed)) return false;
+    // Reject any embedded credentials - '@' in the authority portion. (Dart's
+    // Uri does not reliably surface `user:pass@` as `userInfo`, so check the
+    // raw authority text instead of relying on that property.)
+    final int afterScheme = trimmed.indexOf('://') + 3;
+    if (afterScheme >= trimmed.length ||
+        trimmed.substring(afterScheme).contains('@')) {
+      return false;
+    }
+    final Uri? uri = Uri.tryParse(trimmed);
+    if (uri == null || uri.host.isEmpty) return false;
+    final String host = uri.host.toLowerCase();
+    if (host == 'localhost') return false;
+    // Reject IPv4 literals (e.g. http://192.168.1.1).
+    if (RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(host)) return false;
+    final List<String> labels = host.split('.');
+    if (labels.length < 2 || labels.any((String label) => label.isEmpty)) {
+      return false;
+    }
+    // Each label must be alphanumeric/hyphen (no leading/trailing hyphen).
+    final bool validLabels = labels.every(
+      (String label) =>
+          RegExp(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$').hasMatch(label),
+    );
+    if (!validLabels) return false;
+    final String tld = labels.last;
+    final bool validTld =
+        tld.length >= 2 &&
+        (RegExp(r'^[a-z]{2,}$').hasMatch(tld) || tld.startsWith('xn--'));
+    return validTld;
+  }
 
-  /// A landmark is frozen once its report count reaches this many reports.
-  static const int _reportFreezeAtReports = 5;
+  /// Whether [value] is acceptable free text for the optional restaurant
+  /// address. STRICT: letters/digits (any script, so Chinese addresses
+  /// work), spaces and common address punctuation ONLY - no control
+  /// characters/newlines - and at least one LETTER is required (a string of
+  /// nothing but digits/punctuation is not an address).
+  bool isValidAddressText(String value) {
+    if (containsControlCharacters(value)) return false;
+    final bool safeChars = RegExp(
+      r"^[\p{L}\p{N}\s.,#\-/()'&+]+$",
+      unicode: true,
+    ).hasMatch(value);
+    if (!safeChars) return false;
+    return RegExp(r'\p{L}', unicode: true).hasMatch(value);
+  }
+
+  /// Whether [value] is acceptable for the restaurant name. STRICT: letters
+  /// or digits of any script, spaces and common name punctuation only; no
+  /// control characters; and at least one letter/digit is required (a name
+  /// made solely of symbols/punctuation is not a name).
+  bool isValidRestaurantNameText(String value) {
+    if (containsControlCharacters(value)) return false;
+    if (!RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(value)) {
+      return false;
+    }
+    return RegExp(
+      r"^[\p{L}\p{N}\s&.'#,\-():/]+$",
+      unicode: true,
+    ).hasMatch(value);
+  }
+
+  /// True when [value] contains control characters (0x00-0x1F, 0x7F) - a
+  /// blanket guard applied to every free-text form field so pasted content
+  /// can never smuggle in newlines/control bytes.
+  bool containsControlCharacters(String value) =>
+      value.contains(RegExp(r'[\x00-\x1F\x7F]'));
+
+  /// Whether [url] answers a GET within 5s with HTTP 200-399 - the website
+  /// field's reachability check (see `LinkCheckRepository`). Best-effort
+  /// from the client for form validation; a production deployment should
+  /// run the equivalent check server-side (SSRF).
+  Future<bool> isWebsiteReachable(String url) =>
+      repository.links.isWebsiteReachable(url);
 }
 
 /// Result of attaching a set of submitted dishes to an existing place -

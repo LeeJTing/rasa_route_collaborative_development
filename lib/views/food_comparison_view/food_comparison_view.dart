@@ -114,10 +114,7 @@ class _FoodComparisonViewState extends State<FoodComparisonView> {
                   ),
                 ],
                 const SizedBox(height: AppSpacing.md),
-                ComparisonInsightCard(
-                  comparison: comparison,
-                  bestValueFood: viewModel.bestValueFood,
-                ),
+                ComparisonInsightCard(comparison: comparison),
                 const SizedBox(height: AppSpacing.md),
                 ComparisonPairCard(
                   comparison: comparison,
@@ -144,7 +141,7 @@ class _FoodComparisonViewState extends State<FoodComparisonView> {
     LocalFood food,
   ) async {
     await viewModel.playPronunciation(food);
-    if (!mounted) return;
+    if (!mounted || !context.mounted) return;
     final String? message = viewModel.takePronunciationMessage();
     if (message == null) return;
     ScaffoldMessenger.of(context)

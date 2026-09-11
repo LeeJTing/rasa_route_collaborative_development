@@ -3,20 +3,22 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../app/routing/app_navigator.dart';
 import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/report_category.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../view_models/dashboard_view_model.dart' show MapSelectionHandoff;
 import '../../view_models/landmark_place_detail_view_model.dart';
+import '../../view_models/report_place_view_model.dart';
 import '../common_widgets/app_image.dart';
 import '../common_widgets/app_tag_chip.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
 import '../common_widgets/landmark_item_formatting.dart';
-import 'widgets/report_landmark_sheet.dart';
 
 /// Full details of a tourist-submitted landmark (A11-4 "View Landmark"),
 /// reached from the dashboard map's pin sheet. Shows the landmark's photo,
@@ -58,49 +60,19 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
     super.dispose();
   }
 
-  /// Opens the report bottom sheet and, on a successful submit, shows the
-  /// confirmation SnackBar - mirrors the catalogue restaurant detail's
-  /// report flow (see `RestaurantDetailView._showReportSheet`).
-  Future<void> _showReportSheet(
-    SubmittedLandmark landmark,
-    LandmarkPlaceDetailViewModel viewModel,
-  ) async {
-    final bool? submitted = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
-      builder: (BuildContext sheetContext) => ReportLandmarkSheet(
-        landmarkName: landmark.name,
-        onSubmit: viewModel.submitReport,
-      ),
-    );
-    if (!mounted || submitted != true) return;
-    final String message;
-    if (viewModel.requiresSignIn) {
-      message =
-          'Sign in to report this place. Please sign in from the profile page and try again.';
-    } else if (viewModel.reportFailed) {
-      message = 'Sorry, your report could not be sent. Please try again.';
-    } else if (viewModel.alreadyReported) {
-      message =
-          'You have already reported this landmark. Thanks for looking out!';
-    } else if (viewModel.reportSubmitted) {
-      message = 'Report received. Thank you for helping keep the map accurate.';
-    } else {
-      return;
-    }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-    final bool leavePage = viewModel.reportFrozePlace;
-    viewModel.consumeReportSubmitted();
-    // A report that froze the landmark hides it - leave the page (back to the
-    // map) so the now-hidden pin is no longer shown. The ViewModel already
-    // asked every live dashboard to drop its caches and re-read, so the map
-    // underneath is current by the time the tourist lands on it.
-    if (leavePage && mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
+  /// Opens the full-screen report page (shared by restaurants and landmarks).
+  /// The place rides [ReportPlaceHandoff] - routes pass no arguments (see
+  /// `AppNavigator` / the codebase's handoff convention). If the report froze
+  /// or removed the landmark, the page pops `true` and this screen leaves too
+  /// so the now-hidden pin is no longer shown.
+  Future<void> _openReport(SubmittedLandmark landmark) async {
+    ReportPlaceHandoff()
+      ..pendingKind = ReportPlaceKind.landmark
+      ..pendingPlaceId = landmark.id
+      ..pendingName = landmark.name;
+    final bool? hidPlace = await AppNavigator.push<bool>(AppRoutes.reportPlace);
+    if (!mounted || hidPlace != true) return;
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
   }
 
   @override
@@ -138,7 +110,7 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
                   }
                   return _LandmarkDetails(
                     landmark: landmark,
-                    onReport: () => _showReportSheet(landmark, viewModel),
+                    onReport: () => _openReport(landmark),
                   );
                 },
           ),

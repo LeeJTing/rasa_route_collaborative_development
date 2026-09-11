@@ -3,17 +3,14 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/food_comparison.dart';
-import '../../../domain_model/local_food.dart';
 
 class ComparisonInsightCard extends StatelessWidget {
   const ComparisonInsightCard({
     required this.comparison,
-    required this.bestValueFood,
     super.key,
   });
 
   final FoodComparison comparison;
-  final LocalFood? bestValueFood;
 
 
   String get _bestMatchText {
@@ -66,11 +63,6 @@ class ComparisonInsightCard extends StatelessWidget {
           _InsightLine(
             label: 'Best match for you',
             value: _bestMatchText,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          _InsightLine(
-            label: 'Best value',
-            value: bestValueFood?.name ?? 'Not enough price data',
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(

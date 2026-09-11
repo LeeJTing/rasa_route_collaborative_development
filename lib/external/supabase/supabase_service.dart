@@ -92,6 +92,8 @@ class SupabaseService {
     String table, {
     String columns = '*',
     Map<String, Object?> eq = const <String, Object?>{},
+    Map<String, num> gte = const <String, num>{},
+    Map<String, num> lte = const <String, num>{},
     Map<String, List<Object?>>? inFilter,
     String? orderBy,
     bool ascending = true,
@@ -102,6 +104,12 @@ class SupabaseService {
     dynamic query = _client.from(table).select(columns);
     for (final MapEntry<String, Object?> filter in eq.entries) {
       query = query.eq(filter.key, filter.value as Object);
+    }
+    for (final MapEntry<String, num> filter in gte.entries) {
+      query = query.gte(filter.key, filter.value);
+    }
+    for (final MapEntry<String, num> filter in lte.entries) {
+      query = query.lte(filter.key, filter.value);
     }
     final Map<String, List<Object?>> inValues =
         inFilter ?? const <String, List<Object?>>{};
@@ -207,6 +215,25 @@ class SupabaseService {
   /// request answered by the `Content-Range` header.
   Future<int> countRows(String table) async =>
       await _client.from(table).count(CountOption.exact);
+
+  // ---------------------------------------------------------------------------
+  // Postgres functions (RPC)
+  // ---------------------------------------------------------------------------
+
+  /// Calls a Postgres function and returns the rows it produced.
+  ///
+  /// This is how the map asks Postgres to do the work instead of doing it here:
+  /// `map_food_clusters` and `map_food_pins` take the viewport and answer with
+  /// the handful of markers actually drawn, rather than the app downloading a
+  /// hundred thousand rows and filtering them on the phone.
+  Future<List<Map<String, dynamic>>> callFunction(
+    String name, {
+    Map<String, Object?> params = const <String, Object?>{},
+  }) async {
+    final dynamic rows = await _client.rpc(name, params: params);
+    if (rows == null) return const <Map<String, dynamic>>[];
+    return (rows as List<dynamic>).cast<Map<String, dynamic>>();
+  }
 
   /// `select` returning at most one row, or `null` when there isn't one.
   Future<Map<String, dynamic>?> selectOne(

@@ -61,6 +61,41 @@ class FoodOccurrence {
 /// Which data source an occurrence came from (C21 keeps the two apart).
 enum FoodOccurrenceSource { restaurant, submittedLandmark }
 
+/// One area's raw counts, before the C1 availability formula is applied.
+///
+/// This is what [MapRepository] produces for a level of the heatmap: an area
+/// paired with the numbers Postgres counted for it against the real
+/// administrative boundary. `MapExplorationLogic` turns a list of these into
+/// [RegionAvailability] by working out the C1 denominator across the set.
+///
+/// It exists so the counts can cross out of the repository as a domain model
+/// rather than as a row - the score is a business rule, and business rules do
+/// not belong in the layer that talks to the database.
+class RegionTally {
+  const RegionTally({
+    required this.region,
+    required this.placeCount,
+    required this.foodCount,
+    required this.restaurantCount,
+    required this.landmarkCount,
+  });
+
+  final Region region;
+
+  /// Distinct places in this area serving a food that survives the current
+  /// filter - the number the gradient is built from.
+  final int placeCount;
+
+  /// Distinct local foods available in this area under the same filter.
+  final int foodCount;
+
+  /// Every `available` restaurant inside the boundary, unfiltered.
+  final int restaurantCount;
+
+  /// Every `available` submitted landmark inside the boundary, unfiltered.
+  final int landmarkCount;
+}
+
 /// One state's slice of the heatmap.
 ///
 /// [score] is C1: `restaurantCount / maximumRestaurantCount`, clamped to 0..1.
@@ -73,6 +108,8 @@ class RegionAvailability {
     required this.maximumPlaceCount,
     required this.score,
     required this.foodCount,
+    this.restaurantCount = 0,
+    this.landmarkCount = 0,
   });
 
   final Region region;
@@ -96,6 +133,16 @@ class RegionAvailability {
   /// Distinct local foods available in this state. Shown on the state card as
   /// context; the gradient no longer uses it.
   final int foodCount;
+
+  /// Every `available` restaurant whose real coordinates fall inside this
+  /// area's boundary, whether or not it serves a food matching the current
+  /// filter. Maintained in Postgres by trigger, so it is a read rather than a
+  /// count. [placeCount] is the filtered number the gradient uses; this is the
+  /// unfiltered total the state card reports.
+  final int restaurantCount;
+
+  /// The same for tourist-submitted landmarks.
+  final int landmarkCount;
 }
 
 /// The whole heatmap for one filter selection (REQ102_29).

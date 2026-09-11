@@ -19,6 +19,7 @@ class RestaurantDataModel implements JsonModel {
     this.restaurantImageId,
     this.restaurantImageUrl,
     this.status,
+    this.closedUntil,
   });
 
   /// `restaurant.restaurant_id` (bigint identity, PK).
@@ -45,6 +46,10 @@ class RestaurantDataModel implements JsonModel {
   final String? restaurantImageUrl;
   final String? status;
 
+  /// `restaurant.closed_until` - when a temporary closure ends. Null when
+  /// never temporarily closed, or already reactivated.
+  final DateTime? closedUntil;
+
   factory RestaurantDataModel.fromJson(Map<String, dynamic> json) {
     return RestaurantDataModel(
       restaurantId: JsonReader.asInt(json['restaurant_id']),
@@ -62,6 +67,7 @@ class RestaurantDataModel implements JsonModel {
         json['restaurant_image_url'],
       ),
       status: JsonReader.asStringOrNull(json['status']),
+      closedUntil: JsonReader.asDateOrNull(json['closed_until']),
     );
   }
 
@@ -80,5 +86,6 @@ class RestaurantDataModel implements JsonModel {
     'restaurant_image_id': restaurantImageId,
     'restaurant_image_url': restaurantImageUrl,
     'status': status,
+    'closed_until': closedUntil?.toUtc().toIso8601String(),
   };
 }

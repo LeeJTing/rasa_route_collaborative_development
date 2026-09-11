@@ -144,6 +144,10 @@ class FoodRepositoryFacade {
     Set<int> foodIds,
   ) => restaurant.restaurantPriceRangeByFood(foodIds);
 
+  Future<Map<int, List<({String name, double price})>>> foodMenuItems(
+    Set<int> foodIds,
+  ) => restaurant.restaurantMenuItemsByFood(foodIds);
+
   /// "If you liked X, try Y" - computed from shared attributes, no AI call.
   Future<List<FoodSimilarity>> getSimilar(
     LocalFood food,

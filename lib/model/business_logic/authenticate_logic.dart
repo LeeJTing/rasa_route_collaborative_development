@@ -29,6 +29,97 @@ class AuthenticateLogic {
   static const String otpSendRateLimitMessage =
       'Too many attempts, please try again later.';
 
+  // Short, cause-specific messages from [emailError] - one reason per line so
+  // the login screen can tell the tourist WHAT is wrong, not just that it is.
+
+  static const String emailTooLongMessage = 'Email is too long.';
+  static const String emailMissingAtMessage = "Email needs an '@'.";
+  static const String emailTooManyAtMessage = "Email can have only one '@'.";
+  static const String emailMissingNameMessage =
+      "Email needs a name before the '@'.";
+  static const String emailMissingDomainMessage =
+      "Email needs a domain after the '@'.";
+  static const String emailSpaceMessage = "Email can't contain spaces.";
+  static const String emailDotMessage =
+      "Email can't start, end, or double a dot.";
+  static const String emailInvalidCharMessage =
+      "Email has characters that aren't allowed.";
+  static const String emailNoTldMessage =
+      'Email needs a domain like example.com.';
+  static const String emailTldBadMessage = 'Email domain looks incomplete.';
+  static const String emailInvalidDomainMessage =
+      'Email domain has invalid characters.';
+
+  /// Why [value] is not a deliverable email address, or null when it is one.
+  ///
+  /// Pure - no repository, no network. Used by the login screen to block the
+  /// Send-OTP button and by [sendEmailOtp]/[verifyEmailOtp] as a final guard.
+  ///
+  /// Deliberately pragmatic rather than full RFC 5322: it rejects what a
+  /// tourist would actually mistype, which is also what a mail provider
+  /// (Gmail etc.) would refuse to deliver to:
+  ///   * boundary failures - `username@`, `@domain.com`, `username@domain`
+  ///     (no dot, so no TLD), `username@domain.c` (one-letter TLD);
+  ///   * dot errors - `.user@…`, `user.@…`, `user..name@…`, `…@domain.`;
+  ///   * formatting blunders - spaces, or more than one `@`;
+  ///   * symbols providers ban in the local part - `!`, `^`, `&`, `?`, …
+  ///
+  /// `null` when [value] is empty/whitespace - an empty field is "required",
+  /// a separate concern from "malformed" (the caller decides which message to
+  /// show for an untouched field).
+  String? emailError(String value) {
+    final String email = value.trim();
+    if (email.isEmpty) return null;
+    if (email.length > 254) return emailTooLongMessage;
+    if (email.contains(RegExp(r'\s'))) return emailSpaceMessage;
+
+    // Exactly one '@', with a local part before it and a domain after it.
+    final int firstAt = email.indexOf('@');
+    final int lastAt = email.lastIndexOf('@');
+    if (firstAt < 0) return emailMissingAtMessage;
+    if (firstAt != lastAt) return emailTooManyAtMessage;
+    if (firstAt == 0) return emailMissingNameMessage;
+    if (firstAt == email.length - 1) return emailMissingDomainMessage;
+
+    final String local = email.substring(0, firstAt);
+    final String domain = email.substring(firstAt + 1);
+
+    // Local part: letters/digits plus . _ % + - ; no leading/trailing dot, no
+    // doubled dots, no spaces or symbols (covers the ! ^ & ? cases).
+    if (local.length > 64 || domain.length > 253) return emailTooLongMessage;
+    if (local.contains('..') || local.startsWith('.') || local.endsWith('.')) {
+      return emailDotMessage;
+    }
+    if (!RegExp(
+      r'^[A-Za-z0-9](?:[A-Za-z0-9._%+-]*[A-Za-z0-9])?$',
+    ).hasMatch(local)) {
+      return emailInvalidCharMessage;
+    }
+
+    // Domain: at least one dot (a real TLD), letter/digit/hyphen labels, no
+    // leading/trailing/doubled dots, and a TLD of two or more letters.
+    if (domain.startsWith('.') ||
+        domain.endsWith('.') ||
+        domain.contains('..')) {
+      return emailDotMessage;
+    }
+    if (!domain.contains('.')) return emailNoTldMessage;
+    final List<String> labels = domain.split('.');
+    final String tld = labels.last;
+    if (tld.length < 2 || !RegExp(r'^[A-Za-z]{2,}$').hasMatch(tld)) {
+      return emailTldBadMessage;
+    }
+    for (final String label in labels) {
+      if (label.isEmpty) return emailDotMessage;
+      if (!RegExp(
+        r'^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$',
+      ).hasMatch(label)) {
+        return emailInvalidDomainMessage;
+      }
+    }
+    return null;
+  }
+
   /// Sends a passwordless OTP to [email], gated by the per-email rate limit.
   ///
   /// Only a *successful* send is recorded, so a mistyped / rejected address
@@ -38,6 +129,15 @@ class AuthenticateLogic {
 
     if (normalizedEmail.isEmpty) {
       throw ArgumentError('Email cannot be empty.');
+    }
+
+    // Defense in depth: the login screen blocks malformed addresses before
+    // navigation, but the OTP screen can also be reached with a stale pending
+    // email (deep-link/restart). Never ask Supabase to mail a string that
+    // cannot be an address.
+    final String? formatError = emailError(normalizedEmail);
+    if (formatError != null) {
+      throw ArgumentError(formatError);
     }
 
     await _assertWithinOtpSendLimit(normalizedEmail);
@@ -63,6 +163,13 @@ class AuthenticateLogic {
 
     if (normalizedEmail.isEmpty) {
       throw ArgumentError('Email cannot be empty.');
+    }
+
+    // Same final guard as [sendEmailOtp]: never hand a malformed address to
+    // the verification call.
+    final String? formatError = emailError(normalizedEmail);
+    if (formatError != null) {
+      throw ArgumentError(formatError);
     }
 
     if (normalizedToken.isEmpty) {

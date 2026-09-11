@@ -1,4 +1,4 @@
-import 'package:meta/meta.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show protected, visibleForTesting;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/local_food.dart';
@@ -13,7 +13,10 @@ import '../repositories/food_repository_facade.dart';
 class FoodKnowledgeLogic {
   FoodKnowledgeLogic();
 
-  final FoodRepositoryFacade repository = FoodRepositoryFacade();
+  @protected
+  FoodRepositoryFacade createRepository() => FoodRepositoryFacade();
+
+  late final FoodRepositoryFacade repository = createRepository();
 
   // =========================================================================
   // Public API for ViewModels
@@ -126,18 +129,20 @@ class FoodKnowledgeLogic {
     return names;
   }
 
-  Future<List<String>> dietaryWarnings(int foodId) async {
+  Future<String?> dietaryWarning(int foodId) async {
     final List<DietaryRestriction> restrictions = await repository
         .foodDietaryRestrictions(foodId);
-    return restrictions
-        .map((DietaryRestriction restriction) {
-          final String label = restriction.name.replaceFirst(
-            RegExp(r'^No\s+', caseSensitive: false),
-            '',
-          );
-          return 'Contains or may include: $label.';
-        })
-        .toList(growable: false);
+    final Map<String, String> labels = <String, String>{};
+    for (final DietaryRestriction restriction in restrictions) {
+      final String label = restriction.name
+          .trim()
+          .replaceFirst(RegExp(r'^No\s+', caseSensitive: false), '')
+          .trim();
+      if (label.isEmpty) continue;
+      labels.putIfAbsent(label.toLowerCase(), () => label);
+    }
+    if (labels.isEmpty) return null;
+    return 'Contains or may include: ${labels.values.join(', ')}.';
   }
 
   Future<List<int>> touristDietaryRestrictionIds() async {

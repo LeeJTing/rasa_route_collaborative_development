@@ -33,6 +33,9 @@ dependencies:
   camera: ^0.12.0+2
   image_picker: ^1.2.3
 
+  # Website reachability check for the Add-Landmark website field (200-399).
+  http: ^1.2.2
+
   # Runtime camera permission - wrapped in DeviceCapabilityManager.
   permission_handler: ^11.3.1
 
@@ -62,6 +65,7 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
   # Auth (ChinShunYon): deterministic timer tests for the OTP resend countdown
   # (already in the tree via flutter_test - this just makes the import direct).
@@ -69,8 +73,14 @@ dev_dependencies:
 
   # End of Auth (ChinShunYon)
 
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo/logo.webp"
+
 flutter:
   uses-material-design: true
   assets:
     - .env
+    - assets/images/logo/
     - assets/images/profile/

@@ -18,6 +18,10 @@ class TouristInformationLogicFacade {
 
   Future<void> sendEmailOtp(String email) => authenticate.sendEmailOtp(email);
 
+  /// Why [email] is not a deliverable address, or null when it is one. Pure
+  /// rule - the login screen reads it live to gate the Send-OTP button.
+  String? emailError(String email) => authenticate.emailError(email);
+
   Future<AuthSession?> verifyEmailOtp({
     required String email,
     required String token,
