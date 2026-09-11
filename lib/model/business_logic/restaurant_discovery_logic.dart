@@ -216,9 +216,7 @@ class RestaurantDiscoveryLogic {
           .add(occurrence);
     }
 
-    final DateTime malaysiaNow = currentTime().toUtc().add(
-      const Duration(hours: 8),
-    );
+    final DateTime now = currentTime();
     final List<SubmittedLandmarkRecommendation> measured =
         <SubmittedLandmarkRecommendation>[];
     for (final MapEntry<String, List<FoodOccurrence>> entry
@@ -227,7 +225,7 @@ class RestaurantDiscoveryLogic {
           _isConfidentlyClosedHours(
             hoursByPlace['submittedLandmark:${entry.key}'] ??
                 const <OpeningHour>[],
-            malaysiaNow,
+            now,
           )) {
         continue;
       }
@@ -312,9 +310,7 @@ class RestaurantDiscoveryLogic {
   }
 
   List<Restaurant> _availableSummaries(List<Restaurant> restaurants) {
-    final DateTime malaysiaNow = currentTime().toUtc().add(
-      const Duration(hours: 8),
-    );
+    final DateTime now = currentTime();
     return restaurants
         .where(
           (Restaurant restaurant) =>
@@ -327,7 +323,7 @@ class RestaurantDiscoveryLogic {
                 closedUntil: restaurant.closedUntil,
                 now: currentTime(),
               ) &&
-              !_isConfidentlyClosed(restaurant, malaysiaNow),
+              !_isConfidentlyClosed(restaurant, now),
         )
         .toList(growable: false);
   }
@@ -361,45 +357,50 @@ class RestaurantDiscoveryLogic {
 
   bool _isConfidentlyClosedHours(
     List<OpeningHour> hours,
-    DateTime malaysiaNow,
+    DateTime now,
   ) {
     if (hours.isEmpty) return false;
-    final Weekday today = Weekday.values[malaysiaNow.weekday - 1];
-    final Weekday previous =
-        Weekday.values[(malaysiaNow.weekday + Weekday.values.length - 2) %
-            Weekday.values.length];
-    final int minute = malaysiaNow.hour * 60 + malaysiaNow.minute;
+    final Weekday today = Weekday.values[now.weekday - 1];
+    final int minute = now.hour * 60 + now.minute;
 
-    final bool previousDayStillOpen = hours.any((OpeningHour row) {
-      final int? opens = row.opensAt;
-      final int? closes = row.closesAt;
-      return row.day == previous &&
-          row.status == DayStatus.open &&
-          opens != null &&
-          closes != null &&
-          closes < opens &&
-          minute < closes;
+    // Check if a shift from yesterday is still running (past midnight).
+    final Weekday yesterday = Weekday.values[(now.weekday + 5) % 7];
+    final bool stillOpenFromYesterday = hours.any((OpeningHour h) {
+      return h.day == yesterday &&
+          h.status == DayStatus.open &&
+          h.opensAt != null &&
+          h.closesAt != null &&
+          h.closesAt! < h.opensAt! &&
+          minute < h.closesAt!;
     });
-    if (previousDayStillOpen) return false;
+    if (stillOpenFromYesterday) return false; // Found an open period, so not closed.
 
     final List<OpeningHour> todayRows = hours
         .where((OpeningHour row) => row.day == today)
         .toList(growable: false);
+
+    // If no records for today, or any record is Unknown, it's not "confidently" closed.
     if (todayRows.isEmpty ||
         todayRows.any((OpeningHour row) => row.status == DayStatus.unknown)) {
       return false;
     }
-    final bool openNow = todayRows.any((OpeningHour row) {
-      final int? opens = row.opensAt;
-      final int? closes = row.closesAt;
-      if (row.status != DayStatus.open || opens == null || closes == null) {
-        return false;
+
+    for (final OpeningHour row in todayRows) {
+      if (row.status == DayStatus.open) {
+        final int? opens = row.opensAt;
+        final int? closes = row.closesAt;
+        if (opens == null || closes == null) continue;
+
+        // Also handles "starts today ends tomorrow" (closes < opens)
+        final bool openNow = closes >= opens
+            ? minute >= opens && minute < closes
+            : minute >= opens || minute < closes;
+        if (openNow) return false; // Found an open period, so not closed.
       }
-      if (closes == 1440) return minute >= opens;
-      if (closes < opens) return minute >= opens;
-      return minute >= opens && minute < closes;
-    });
-    return !openNow;
+    }
+
+    // If today is explicitly marked as Closed, or we have open periods but none cover "now".
+    return true;
   }
 
   Future<List<Restaurant>> _eligibleRestaurants(

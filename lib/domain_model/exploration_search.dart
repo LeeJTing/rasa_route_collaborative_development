@@ -13,6 +13,8 @@ class PlaceSuggestion {
     required this.latitude,
     required this.longitude,
     required this.zoom,
+    this.referenceId,
+    this.isRestaurant = false,
   });
 
   /// What the tourist typed against, e.g. `Penang` or `George Town`.
@@ -29,6 +31,57 @@ class PlaceSuggestion {
   /// Where the map should settle when this entry is picked (REQ102_22). A
   /// city zooms past the detailed-view threshold; a state stops short of it.
   final double zoom;
+
+  /// `restaurant_id` or `landmark_id` for a [PlaceKind.address] result, `null`
+  /// for a state, city, town or area.
+  ///
+  /// Carried so that picking a restaurant out of the search results can open
+  /// **that** restaurant, rather than dropping the tourist on a map full of
+  /// pins and leaving them to work out which one they just searched for.
+  final String? referenceId;
+
+  /// Which table [referenceId] belongs to. Meaningless when it is null; the
+  /// two id spaces overlap, so this is what tells them apart (C21).
+  final bool isRestaurant;
+
+  /// Whether picking this result can open a place's detail sheet.
+  bool get isPlaceOnTheMap =>
+      referenceId != null && referenceId!.trim().isNotEmpty;
+}
+
+/// One place name matched by Postgres, with the score it earned.
+///
+/// The "addresses" half of Smart Search - a restaurant or a submitted landmark
+/// whose *name* answers what was typed. It used to be found by downloading
+/// every restaurant and every menu row and scoring the names on the phone;
+/// `map_place_search` applies the same ladder in the database and sends back
+/// only the handful the list can show.
+///
+/// Deliberately not a [PlaceSuggestion]: the subtitle wording, the [PlaceKind]
+/// and the zoom a result settles at are presentation decisions that belong to
+/// `MapExplorationLogic`, not to the layer that reads the row.
+class MapPlaceHit {
+  const MapPlaceHit({
+    required this.referenceId,
+    required this.isRestaurant,
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+    required this.score,
+  });
+
+  final String referenceId;
+
+  /// False for a tourist-submitted landmark (C21 keeps the two sources apart).
+  final bool isRestaurant;
+
+  final String name;
+  final double latitude;
+  final double longitude;
+
+  /// 100 exact, 60 the name starts with the keyword, 40 a word in it does,
+  /// 20 the name contains it - the ladder the Dart used, unchanged.
+  final int score;
 }
 
 /// What kind of thing a location result points at (C15).

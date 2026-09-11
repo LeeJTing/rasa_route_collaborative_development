@@ -145,13 +145,14 @@ class _DashboardViewState extends State<DashboardView> {
       child: MapSearchBar(
         controller: _searchController,
         onChanged: viewModel.updateSearchKeyword,
+        onSubmitted: viewModel.submitSearch,
         onClear: viewModel.clearSearch,
         onTap: viewModel.openSearchPanel,
-        // The filter panel drives the heatmap's availability scores, so it is
-        // offered on the heatmap view only.
-        onFilterTap: viewModel.isHeatmapView
-            ? viewModel.toggleFilterPanel
-            : null,
+        // Offered on both surfaces. The filter narrows the same food selection
+        // either way - the heatmap's scores on one, the pins on the other - and
+        // `_applyFilter` already reloads whichever view is showing, so gating
+        // it to the heatmap only hid a control that worked.
+        onFilterTap: viewModel.toggleFilterPanel,
         filterCount: viewModel.filter.selectionCount,
         filterPanelOpen: viewModel.filterPanelOpen,
       ),
@@ -231,28 +232,21 @@ class _DashboardViewState extends State<DashboardView> {
                   onScaleChanged: viewModel.onHeatmapScaleChanged,
                   detailScale: viewModel.heatmapDetailScale,
                   resetToken: viewModel.heatmapResetToken,
-                  touristLatitude: viewModel.location.isKnown
+                  // REQ102_7 / A3 - shown only when the fix is known *and*
+                  // inside Malaysia. This map covers one country; a dot for a
+                  // tourist in Singapore or Jakarta would be drawn at whatever
+                  // the stylised projection maps their coordinates to, which is
+                  // somewhere in Malaysia. Better to show nothing than to show
+                  // them somewhere they are not.
+                  touristLatitude: viewModel.showCurrentLocation
                       ? viewModel.location.latitude
                       : null,
-                  touristLongitude: viewModel.location.isKnown
+                  touristLongitude: viewModel.showCurrentLocation
                       ? viewModel.location.longitude
                       : null,
                 )
               : _map(viewModel),
         ),
-
-        // REQ102_12 - the way back up a level. Without it the only way out of
-        // a state's districts is to open the detailed map and come back, which
-        // loses the tourist's place.
-        if (viewModel.isHeatmapView && viewModel.heatmapParentName != null)
-          Positioned(
-            left: AppSpacing.lg,
-            top: AppSpacing.lg,
-            child: _HeatmapLevelChip(
-              label: viewModel.heatmapParentName!,
-              onBack: viewModel.leaveDistrictLevel,
-            ),
-          ),
 
         if (viewModel.isHeatmapView)
           Positioned(
@@ -386,7 +380,7 @@ class _DashboardViewState extends State<DashboardView> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
-              if (viewModel.filterPanelOpen && viewModel.isHeatmapView)
+              if (viewModel.filterPanelOpen)
                 MapFilterPanel(
                   labelFor: viewModel.labelFor,
                   optionsFor: viewModel.optionsFor,
@@ -585,8 +579,9 @@ class _DashboardViewState extends State<DashboardView> {
                 .toList(growable: false),
           ),
 
-          // The tourist's own position (REQ102_7).
-          if (viewModel.location.isKnown)
+          // The tourist's own position (REQ102_7), and only when that position
+          // is inside Malaysia (A3) - see `showCurrentLocation`.
+          if (viewModel.showCurrentLocation)
             MarkerLayer(
               markers: <Marker>[
                 Marker(
@@ -705,10 +700,19 @@ class _PinMarker extends StatelessWidget {
             ? AppColors.pinUserLandmark
             : AppColors.pinSystemRestaurant,
         shadows: <Shadow>[
-          const Shadow(color: AppColors.surface, blurRadius: 3),
+          // The white halo/border to make it pop.
+          const Shadow(color: AppColors.surface, blurRadius: 2),
+          const Shadow(color: AppColors.surface, blurRadius: 4),
+          if (selected)
+            const Shadow(
+              color: AppColors.surface,
+              blurRadius: 8,
+            ),
+          // The soft selection glow/ring.
           Shadow(
-            color: selected ? AppColors.pinSelectedRing : AppColors.surface,
-            blurRadius: selected ? 6 : 4,
+            color: selected ? AppColors.pinSelectedRing : AppColors.shadow,
+            blurRadius: selected ? 8 : 4,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -938,107 +942,6 @@ class _CustomCoordinatesDialogState extends State<_CustomCoordinatesDialog> {
 }
 
 /// M3, and the two "showing the whole country instead" explanations.
-/// REQ102_41 - how much of the viewport's answer is on screen.
-///
-/// Deliberately quiet: it reports a limit, it does not ask for anything. The
-/// optional [subtitle] carries the heatmap's own count for the state under the
-/// map, so the number of pins can be read against the state total rather than
-/// mistaken for it.
-/// REQ102_12 - which state's districts are on screen, and the way back to the
-/// country view.
-class _HeatmapLevelChip extends StatelessWidget {
-  const _HeatmapLevelChip({required this.label, required this.onBack});
-
-  final String label;
-  final VoidCallback onBack;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: AppColors.surface,
-    borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
-    elevation: 1,
-    child: InkWell(
-      onTap: onBack,
-      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.xs,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(
-              Icons.arrow_back,
-              size: 14,
-              color: AppColors.textSecondary,
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Text(
-              label,
-              style: AppTextStyles.labelSmall.copyWith(
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _PinCoverageChip extends StatelessWidget {
-  const _PinCoverageChip({required this.message, this.subtitle});
-
-  final String message;
-  final String? subtitle;
-
-  @override
-  Widget build(BuildContext context) => Align(
-    child: Material(
-      color: AppColors.surface,
-      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
-      elevation: 1,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.xs,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(
-              Icons.place_outlined,
-              size: 14,
-              color: AppColors.textSecondary,
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  message,
-                  style: AppTextStyles.labelSmall.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    style: AppTextStyles.labelSmall.copyWith(
-                      color: AppColors.textDisabled,
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
 class _NoticeBanner extends StatelessWidget {
   const _NoticeBanner({required this.message, required this.onDismiss});
 

@@ -128,6 +128,25 @@ class RestaurantRepository {
     )
   ''';
 
+  /// range (see [restaurantPriceRangeByFood]).
+  static final RegExp _bulkPackPattern = RegExp(
+    r'(?:'
+    r'(\d+)\s*\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set)\b'
+    r'|\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set)\b\s*(\d+)'
+    r')',
+    caseSensitive: false,
+  );
+
+  static bool _isBulkPack(String itemName) {
+    final RegExpMatch? match = _bulkPackPattern.firstMatch(itemName);
+    if (match == null) return false;
+    // The count is captured in group 1 ("30 botol") or group 4 ("BOTOL 30").
+    final String? count = match.group(1) ?? match.group(4);
+    final int? parsed = count == null ? null : int.tryParse(count);
+    // A single unit (e.g. "BOTOL 1") is a normal single-serve price.
+    return parsed != null && parsed > 1;
+  }
+
   Future<Restaurant?> getRestaurantById(int restaurantId) async {
     try {
       final Map<String, dynamic>? row = await api.selectOne(
@@ -400,7 +419,7 @@ class RestaurantRepository {
     try {
       final List<Map<String, dynamic>> rows = await api.selectAll(
         APIManager.tableRestaurantItem,
-        columns: 'local_food_id, restaurant_item_price',
+        columns: 'local_food_id, restaurant_item_name, restaurant_item_price',
         inFilter: <String, List<Object?>>{
           'local_food_id': localFoodIds.cast<Object?>().toList(),
         },
@@ -412,7 +431,16 @@ class RestaurantRepository {
         final double? price = JsonReader.asDoubleOrNull(
           row['restaurant_item_price'],
         );
-        if (foodId == null || price == null || price <= 0) continue;
+        // A bulk/wholesale line (e.g. "Air Katira (30 botol) RM540") prices a
+        // multi-unit pack, not a single serve - it would inflate the range the
+        // comparison shows, so it is excluded from the min/max aggregation.
+        final String itemName = JsonReader.asString(row['restaurant_item_name']);
+        if (foodId == null ||
+            price == null ||
+            price <= 0 ||
+            _isBulkPack(itemName)) {
+          continue;
+        }
         final double currentMin = minByFood[foodId] ?? price;
         final double currentMax = maxByFood[foodId] ?? price;
         minByFood[foodId] = price < currentMin ? price : currentMin;
@@ -428,6 +456,61 @@ class RestaurantRepository {
     } catch (error, stackTrace) {
       developer.log(
         'Restaurant price range query failed.',
+        name: 'RestaurantRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load restaurant prices. Check your connection and try again.',
+      );
+    }
+  }
+
+  /// Every real menu line (name + price) per dish, unfiltered - the source for
+  /// the comparison's "Time and Price" list. Kept verbatim (no min/max, no
+  /// bulk filtering) so a pack line like "BOTOL 30" keeps its unit text and
+  /// is shown to the tourist as-is.
+  Future<Map<int, List<({String name, double price})>>> restaurantMenuItemsByFood(
+    Set<int> localFoodIds,
+  ) async {
+    if (localFoodIds.isEmpty) {
+      return const <int, List<({String name, double price})>>{};
+    }
+    try {
+      final List<Map<String, dynamic>> rows = await api.selectAll(
+        APIManager.tableRestaurantItem,
+        columns: 'local_food_id, restaurant_item_name, restaurant_item_price',
+        inFilter: <String, List<Object?>>{
+          'local_food_id': localFoodIds.cast<Object?>().toList(),
+        },
+      );
+      final Map<int, List<({String name, double price})>> byFood =
+          <int, List<({String name, double price})>>{};
+      for (final Map<String, dynamic> row in rows) {
+        final int? foodId = JsonReader.asIntOrNull(row['local_food_id']);
+        final double? price = JsonReader.asDoubleOrNull(
+          row['restaurant_item_price'],
+        );
+        final String name = JsonReader.asString(
+          row['restaurant_item_name'],
+        ).trim();
+        if (foodId == null || price == null || price <= 0 || name.isEmpty) {
+          continue;
+        }
+        byFood.putIfAbsent(
+          foodId,
+          () => <({String name, double price})>[],
+        ).add((name: name, price: price));
+      }
+      for (final List<({String name, double price})> entries in byFood.values) {
+        entries.sort(
+          (a, b) => a.price.compareTo(b.price),
+        );
+      }
+      return byFood;
+    } catch (error, stackTrace) {
+      developer.log(
+        'Restaurant menu listing query failed.',
         name: 'RestaurantRepository',
         error: error,
         stackTrace: stackTrace,

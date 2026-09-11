@@ -151,9 +151,6 @@ class FoodDistribution {
     required this.regions,
     required this.maximumPlaceCount,
     required this.matchingFoodCount,
-    this.level = Region.stateLevel,
-    this.parentCode,
-    this.parentName,
   });
 
   static const FoodDistribution empty = FoodDistribution(
@@ -161,22 +158,6 @@ class FoodDistribution {
     maximumPlaceCount: 0,
     matchingFoodCount: 0,
   );
-
-  /// Which level these numbers were counted at: [Region.stateLevel] for the
-  /// whole country, [Region.districtLevel] for one state's districts.
-  ///
-  /// REQ102_12 - drilling in **recounts**. A district's number is its own
-  /// tally, never the state's number shown again at a larger size, and
-  /// [maximumPlaceCount] is the largest value *within this set*, so the colour
-  /// ramp re-spreads across the districts on show instead of leaving them all
-  /// one shade of the national maximum.
-  final int level;
-
-  /// The state being drilled into, `null` at [Region.stateLevel].
-  final String? parentCode;
-  final String? parentName;
-
-  bool get isDistrictLevel => level == Region.districtLevel;
 
   /// Every Malaysian state, always - a state with no matching food is still
   /// drawn, in grey.

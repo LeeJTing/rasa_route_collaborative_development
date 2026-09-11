@@ -18,21 +18,11 @@ class Region {
     required this.defaultZoom,
     required this.boundary,
     required this.places,
-    this.level = stateLevel,
-    this.parentCode,
-    this.rings = const <List<GeoPoint>>[],
-    this.minLatitude,
-    this.minLongitude,
-    this.maxLatitude,
-    this.maxLongitude,
   });
 
-  /// A state or federal territory - the level the heatmap opens on.
+  /// A state or federal territory - the only level `region_boundary` is queried
+  /// at, and what `map_region_distribution` and `map_region_at` are passed.
   static const int stateLevel = 1;
-
-  /// A district inside one state - the level the heatmap drills down to
-  /// (REQ102_12) before handing over to the detailed map.
-  static const int districtLevel = 2;
 
   /// Short ISO-style code, e.g. `JHR`. Stable key for caches and swipe
   /// sessions (C13 keeps one swipe session per state).
@@ -49,32 +39,7 @@ class Region {
   final double defaultZoom;
 
   /// Outline of the state, drawn as one closed polygon on the heatmap.
-  ///
-  /// For a multi-part area - Penang's island and mainland, Sabah's 46 pieces -
-  /// this is the largest part only. [rings] carries them all.
   final List<GeoPoint> boundary;
-
-  /// [stateLevel] or [districtLevel].
-  final int level;
-
-  /// The state a district belongs to, `null` for a state.
-  final String? parentCode;
-
-  /// Every closed part of this area. Empty for the hand-drawn state catalogue,
-  /// which is single-part by construction; populated for districts, whose
-  /// outlines come from the real boundary data.
-  final List<List<GeoPoint>> rings;
-
-  /// Bounding box, when it is known. The heatmap fits its projection to this
-  /// when it drills into one state's districts.
-  final double? minLatitude;
-  final double? minLongitude;
-  final double? maxLatitude;
-  final double? maxLongitude;
-
-  /// Every part of the area, whether it was built with one ring or many.
-  List<List<GeoPoint>> get allRings =>
-      rings.isEmpty ? <List<GeoPoint>>[boundary] : rings;
 
   /// Cities and notable locations inside this state, searchable by keyword
   /// (REQ102_19).

@@ -204,23 +204,12 @@ class DiscoveryLogicFacade {
   ///
   /// @param localFoodId (swipe mode) - `LocalFood.id` of the dish in the
   ///        Target Frame, or null to score every food (REQ102_33).
-  /// REQ102_12 - the districts of one state, for the level of the heatmap
-  /// below the country view.
-  Future<List<Region>> districtsOf(String stateCode) =>
-      mapExploration.districtsOf(stateCode);
-
   Future<FoodDistribution> foodDistribution({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-    int level = Region.stateLevel,
-    String? parentCode,
-    String? parentName,
   }) => mapExploration.distribution(
     filter: filter,
     localFoodId: localFoodId,
-    level: level,
-    parentCode: parentCode,
-    parentName: parentName,
   );
 
   /// REQ102_32 - restaurant and submitted-landmark pins for the detailed map.

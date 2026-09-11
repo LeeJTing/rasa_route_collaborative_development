@@ -184,6 +184,7 @@ class MapPin {
     required this.label,
     required this.weight,
     this.imageUrl,
+    this.thumbnailUrl,
     this.category,
     this.rating,
     this.servedFoods = const <String>[],
@@ -204,7 +205,19 @@ class MapPin {
   final int weight;
 
   /// Photo of the place, if the source had one.
+  /// The full-size photo, for the detail sheet.
   final String? imageUrl;
+
+  /// The same photo asked for at card size.
+  ///
+  /// A marker carries both because the pin sheet opens on what the marker
+  /// already has and only then fetches the rest: the card wants the small one
+  /// and the detail wants the large one, and deriving the small one is a string
+  /// rewrite, so neither costs an extra request.
+  ///
+  /// Null when no smaller variant can be asked for - the caller falls back to
+  /// [imageUrl].
+  final String? thumbnailUrl;
 
   /// Cuisine or category line - "Authentic Malaysian Cuisine" in the mock-up.
   final String? category;
