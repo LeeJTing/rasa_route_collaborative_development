@@ -8,40 +8,56 @@ import 'package:rasa_route_collaborative_development/view_models/restaurant_reco
 
 void main() {
   test(
-    'Quick Mode food type filters menus without changing source results',
+    'Quick Mode defaults to Food and re-searches nearby on each filter '
+    'change instead of filtering the previous 20',
     () async {
       final _FakeDiscoveryLogic logic = _FakeDiscoveryLogic();
       final RestaurantRecommendationViewModel viewModel = _TestViewModel(logic);
       addTearDown(viewModel.dispose);
 
+      // No "All" option - 'Food' is selected before any load happens.
+      expect(viewModel.selectedFoodType, 'Food');
+
       await viewModel.loadNearbyRestaurants();
-      expect(viewModel.restaurants, hasLength(2));
+      expect(logic.requestedFoodTypes, <String?>['Food']);
+      expect(viewModel.restaurants, hasLength(1));
+      expect(viewModel.restaurants.single.name, 'Nasi Lemak House');
 
-      viewModel.selectFoodType('Beverage');
+      await viewModel.selectFoodType('Beverage');
 
-      expect(viewModel.visibleRestaurants, hasLength(1));
-      expect(viewModel.visibleRestaurants.single.name, 'Mixed Menu');
-      expect(viewModel.visibleRestaurants.single.items, hasLength(1));
+      expect(viewModel.selectedFoodType, 'Beverage');
       expect(
-        viewModel.visibleRestaurants.single.items.single.foodName,
-        'Teh Tarik',
+        logic.requestedFoodTypes,
+        <String?>['Food', 'Beverage'],
+        reason: 'selecting a chip must re-search nearby for that type, not '
+            'just filter the restaurants already on screen',
       );
-      expect(viewModel.restaurants.first.items, hasLength(2));
-
-      viewModel.selectFoodType(null);
-      expect(viewModel.visibleRestaurants, hasLength(2));
+      expect(viewModel.restaurants, hasLength(1));
+      expect(viewModel.restaurants.single.name, 'Beverage Corner');
+      expect(
+        viewModel.visibleRestaurants,
+        viewModel.restaurants,
+        reason: 'the list already comes back filtered by the repository',
+      );
     },
   );
 
   test('Quick Mode ignores unsupported food type values', () async {
-    final RestaurantRecommendationViewModel viewModel = _TestViewModel(
-      _FakeDiscoveryLogic(),
-    );
+    final _FakeDiscoveryLogic logic = _FakeDiscoveryLogic();
+    final RestaurantRecommendationViewModel viewModel = _TestViewModel(logic);
     addTearDown(viewModel.dispose);
 
-    viewModel.selectFoodType('Unknown');
+    await viewModel.loadNearbyRestaurants();
+    expect(logic.requestedFoodTypes, <String?>['Food']);
 
-    expect(viewModel.selectedFoodType, isNull);
+    await viewModel.selectFoodType('Unknown');
+
+    expect(viewModel.selectedFoodType, 'Food');
+    expect(
+      logic.requestedFoodTypes,
+      <String?>['Food'],
+      reason: 'an unsupported type must not trigger a re-search',
+    );
   });
 }
 
@@ -55,42 +71,46 @@ class _TestViewModel extends RestaurantRecommendationViewModel {
 }
 
 class _FakeDiscoveryLogic extends DiscoveryLogicFacade {
+  /// Every food type passed by the ViewModel, in call order - the test's
+  /// evidence that a filter change re-searches nearby rather than filtering
+  /// restaurants already fetched for a previous type.
+  final List<String?> requestedFoodTypes = <String?>[];
+
   @override
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
-  }) async => <Restaurant>[
-    _restaurant(1, 'Mixed Menu', const <RestaurantItem>[
-      RestaurantItem(
-        id: 11,
-        restaurantId: 1,
-        localFoodId: 1,
-        foodName: 'Nasi Lemak',
-        currency: 'RM',
-        foodCategory: 'Malay',
-        foodType: 'Food',
-      ),
-      RestaurantItem(
-        id: 12,
-        restaurantId: 1,
-        localFoodId: 2,
-        foodName: 'Teh Tarik',
-        currency: 'RM',
-        foodCategory: 'Malay',
-        foodType: 'Beverage',
-      ),
-    ]),
-    _restaurant(2, 'Food Only', const <RestaurantItem>[
-      RestaurantItem(
-        id: 21,
-        restaurantId: 2,
-        localFoodId: 3,
-        foodName: 'Laksa',
-        currency: 'RM',
-        foodCategory: 'Nyonya',
-        foodType: 'Food',
-      ),
-    ]),
-  ];
+    String? foodType,
+  }) async {
+    requestedFoodTypes.add(foodType);
+    if (foodType == 'Beverage') {
+      return <Restaurant>[
+        _restaurant(2, 'Beverage Corner', const <RestaurantItem>[
+          RestaurantItem(
+            id: 21,
+            restaurantId: 2,
+            localFoodId: 2,
+            foodName: 'Teh Tarik',
+            currency: 'RM',
+            foodCategory: 'Malay',
+            foodType: 'Beverage',
+          ),
+        ]),
+      ];
+    }
+    return <Restaurant>[
+      _restaurant(1, 'Nasi Lemak House', const <RestaurantItem>[
+        RestaurantItem(
+          id: 11,
+          restaurantId: 1,
+          localFoodId: 1,
+          foodName: 'Nasi Lemak',
+          currency: 'RM',
+          foodCategory: 'Malay',
+          foodType: 'Food',
+        ),
+      ]),
+    ];
+  }
 
   @override
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({

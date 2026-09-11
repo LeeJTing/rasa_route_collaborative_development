@@ -139,8 +139,15 @@ class RestaurantDiscoveryLogic {
 
   /// Quick Mode starts at 1 km and expands silently until 20 nearest
   /// eligible restaurants are found or the 10 km Use Case boundary is reached.
+  ///
+  /// [foodType] narrows eligibility to restaurants with at least one menu
+  /// item of that type (Food, Beverage, Fruit, Dessert or Kuih). Passing a
+  /// different value re-runs the whole radius expansion against that type -
+  /// it does not just re-filter restaurants already found for a previous
+  /// type.
   Future<List<Restaurant>> nearbyWithAutomaticExpansion({
     required TouristLocation location,
+    String? foodType,
   }) async {
     if (!location.isKnown) return const <Restaurant>[];
     final List<Restaurant> allMeasured = _measure(
@@ -155,6 +162,7 @@ class RestaurantDiscoveryLogic {
     final List<Restaurant> measured = _availableSummaries(allMeasured);
     final List<Restaurant> eligible = await _eligibleRestaurants(
       _withinRadius(measured, radiusKm: _quickModeMaximumRadiusKm),
+      foodType: foodType,
     );
     double radiusKm = _quickModeInitialRadiusKm;
     List<Restaurant> available = const <Restaurant>[];
@@ -404,8 +412,9 @@ class RestaurantDiscoveryLogic {
   }
 
   Future<List<Restaurant>> _eligibleRestaurants(
-    List<Restaurant> candidates,
-  ) async {
+    List<Restaurant> candidates, {
+    String? foodType,
+  }) async {
     if (candidates.isEmpty) return const <Restaurant>[];
     final List<RestaurantItem> menuItems = await repository
         .getRestaurantItemsByRestaurantIds(
@@ -429,14 +438,27 @@ class RestaurantDiscoveryLogic {
         ? const <int, List<int>>{}
         : await repository.getRestrictionIdsByFood();
 
+    final String? normalizedFoodType = foodType?.trim().toLowerCase();
+    final bool hasFoodTypeFilter =
+        normalizedFoodType != null && normalizedFoodType.isNotEmpty;
+
     final List<Restaurant> eligible = <Restaurant>[];
     for (final Restaurant restaurant in candidates) {
       final List<RestaurantItem> items =
           itemsByRestaurant[restaurant.id] ?? const <RestaurantItem>[];
       if (items.isEmpty) continue;
-      final List<RestaurantItem> safeItems = activeRestrictionIds.isEmpty
+      final List<RestaurantItem> typedItems = !hasFoodTypeFilter
           ? items
           : items
+                .where(
+                  (RestaurantItem item) =>
+                      item.foodType.trim().toLowerCase() == normalizedFoodType,
+                )
+                .toList(growable: false);
+      if (typedItems.isEmpty) continue;
+      final List<RestaurantItem> safeItems = activeRestrictionIds.isEmpty
+          ? typedItems
+          : typedItems
                 .where(
                   (RestaurantItem item) =>
                       item.localFoodId > 0 &&
