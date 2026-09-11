@@ -75,6 +75,25 @@ void main() {
     await tester.fling(target, const Offset(240, 0), 800);
     await tester.pump();
     expect(previousCount, 1);
+
+    // A slow release used to be ignored because the widget considered only
+    // end velocity. Distance must also count as an intentional swipe.
+    await tester.timedDrag(
+      target,
+      const Offset(-80, 12),
+      const Duration(milliseconds: 900),
+    );
+    await tester.pump();
+    expect(nextCount, 2);
+
+    // Predominantly vertical movement is not a food-card swipe.
+    await tester.timedDrag(
+      target,
+      const Offset(-20, 90),
+      const Duration(milliseconds: 500),
+    );
+    await tester.pump();
+    expect(nextCount, 2);
   });
 }
 

@@ -94,6 +94,11 @@ class ReportPlaceViewModel extends BaseViewModel {
   /// Temporary-closure duration fields.
   String _closureAmountText = '';
   ClosureUnit _closureUnit = ClosureUnit.days;
+  String? _priceError;
+  String? _addressError;
+  String? _closureError;
+  String? _hoursError;
+  String? _itemError;
 
   // --- Submit state ---------------------------------------------------------
   bool _isSubmitting = false;
@@ -115,6 +120,11 @@ class ReportPlaceViewModel extends BaseViewModel {
   String get addressText => _addressText;
   String get closureAmountText => _closureAmountText;
   ClosureUnit get closureUnit => _closureUnit;
+  String? get priceError => _priceError;
+  String? get addressError => _addressError;
+  String? get closureError => _closureError;
+  String? get hoursError => _hoursError;
+  String? get itemError => _itemError;
 
   bool get isSubmitting => _isSubmitting;
   bool get requiresSignIn => _requiresSignIn;
@@ -149,6 +159,7 @@ class ReportPlaceViewModel extends BaseViewModel {
   void selectCategory(ReportCategory category) {
     _selectedCategory = category;
     _formError = null;
+    _clearFieldErrors();
     _selectedItem = null;
     if (category == ReportCategory.itemPrice ||
         category == ReportCategory.itemNotExist) {
@@ -181,29 +192,34 @@ class ReportPlaceViewModel extends BaseViewModel {
 
   void selectItem(ReportableMenuItem item) {
     _selectedItem = item;
+    _itemError = null;
     safeNotifyListeners();
   }
 
   void setPriceText(String value) {
     _priceText = value;
+    _priceError = reportLogic.priceError(value);
     _formError = null;
     safeNotifyListeners();
   }
 
   void setAddressText(String value) {
     _addressText = value;
+    _addressError = reportLogic.addressError(value);
     _formError = null;
     safeNotifyListeners();
   }
 
   void setClosureAmountText(String value) {
     _closureAmountText = value;
+    _closureError = reportLogic.closureError(value, _closureUnit);
     _formError = null;
     safeNotifyListeners();
   }
 
   void setClosureUnit(ClosureUnit unit) {
     _closureUnit = unit;
+    _closureError = reportLogic.closureError(_closureAmountText, _closureUnit);
     safeNotifyListeners();
   }
 
@@ -215,6 +231,7 @@ class ReportPlaceViewModel extends BaseViewModel {
       OpeningHour(id: 0, day: day, status: status),
     ];
     _hours = Map<Weekday, List<OpeningHour>>.of(_hours)..[day] = updated;
+    _hoursError = null;
     safeNotifyListeners();
   }
 
@@ -225,6 +242,7 @@ class ReportPlaceViewModel extends BaseViewModel {
         ...existing,
         OpeningHour(id: 0, day: day, status: DayStatus.open),
       ];
+    _hoursError = null;
     safeNotifyListeners();
   }
 
@@ -234,6 +252,7 @@ class ReportPlaceViewModel extends BaseViewModel {
     final List<OpeningHour> updated = List<OpeningHour>.of(existing)
       ..removeAt(rangeIndex);
     _hours = Map<Weekday, List<OpeningHour>>.of(_hours)..[day] = updated;
+    _hoursError = null;
     safeNotifyListeners();
   }
 
@@ -255,6 +274,7 @@ class ReportPlaceViewModel extends BaseViewModel {
       closesAt: isOpeningTime ? current.closesAt : minutes,
     );
     _hours = Map<Weekday, List<OpeningHour>>.of(_hours)..[day] = updated;
+    _hoursError = null;
     safeNotifyListeners();
   }
 
@@ -272,6 +292,12 @@ class ReportPlaceViewModel extends BaseViewModel {
     final ReportPlaceKind? kind = _placeKind;
     final ReportCategory? category = _selectedCategory;
     if (kind == null || category == null || _isSubmitting) return;
+    final String? validationError = _validate(category);
+    if (validationError != null) {
+      _formError = validationError;
+      safeNotifyListeners();
+      return;
+    }
     final List<ReportClaim> claims = _buildClaims(kind, category);
     if (claims.isEmpty) {
       _formError = 'Please fill in the details to report.';
@@ -320,6 +346,51 @@ class ReportPlaceViewModel extends BaseViewModel {
       _isSubmitting = false;
       safeNotifyListeners();
     }
+  }
+
+  String? _validate(ReportCategory category) {
+    _clearFieldErrors();
+    switch (category) {
+      case ReportCategory.operatingHours:
+        if (!hasHoursCorrection) {
+          _hoursError = 'Change at least one day before submitting.';
+        } else {
+          _hoursError = reportLogic.operatingHoursError(_hours);
+        }
+        return _hoursError;
+      case ReportCategory.itemPrice:
+        if (_selectedItem == null) {
+          _itemError = 'Select the menu item whose price is wrong.';
+          return _itemError;
+        }
+        _priceError = reportLogic.priceError(_priceText, required: true);
+        return _priceError;
+      case ReportCategory.itemNotExist:
+        if (_selectedItem == null) {
+          _itemError = 'Select the menu item that is no longer available.';
+        }
+        return _itemError;
+      case ReportCategory.address:
+        _addressError = reportLogic.addressError(_addressText, required: true);
+        return _addressError;
+      case ReportCategory.closedPermanently:
+        return null;
+      case ReportCategory.closedTemporarily:
+        _closureError = reportLogic.closureError(
+          _closureAmountText,
+          _closureUnit,
+          required: true,
+        );
+        return _closureError;
+    }
+  }
+
+  void _clearFieldErrors() {
+    _priceError = null;
+    _addressError = null;
+    _closureError = null;
+    _hoursError = null;
+    _itemError = null;
   }
 
   List<ReportClaim> _buildClaims(

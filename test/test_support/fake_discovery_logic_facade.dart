@@ -148,8 +148,10 @@ class FakeDiscoveryLogicFacade extends DiscoveryLogicFacade {
   }) async => restaurants.take(limit).toList(growable: false);
 
   @override
-  Future<Restaurant?> getRestaurantById(int restaurantId) async =>
-      restaurant?.id == restaurantId ? restaurant : null;
+  Future<Restaurant?> getRestaurantById(
+    int restaurantId, {
+    TouristLocation origin = TouristLocation.unknown,
+  }) async => restaurant?.id == restaurantId ? restaurant : null;
 
   @override
   Future<MatchesRecommendationResult> getMatchesRecommendations(

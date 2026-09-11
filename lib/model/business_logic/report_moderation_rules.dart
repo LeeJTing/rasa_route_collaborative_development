@@ -17,6 +17,12 @@ import '../../domain_model/report_claim.dart';
 class ReportModerationRules {
   ReportModerationRules._();
 
+  static const double minimumPrice = 0.01;
+  static const double maximumPrice = 1000;
+  static const int maximumAddressLength = 150;
+  static const int maximumClosureDays = 365;
+  static const int maximumClosureMonths = 12;
+
   /// How many identical claims are needed before a fix is auto-applied.
   static const Map<ReportCategory, int> thresholds = <ReportCategory, int>{
     ReportCategory.operatingHours: 10,
@@ -28,6 +34,93 @@ class ReportModerationRules {
   };
 
   static int thresholdFor(ReportCategory category) => thresholds[category] ?? 0;
+
+  static String? priceError(String raw, {bool required = false}) {
+    final String value = raw.trim();
+    if (value.isEmpty) return required ? 'Enter the corrected price.' : null;
+    if (!RegExp(r'^\d{1,4}(\.\d{1,2})?$').hasMatch(value)) {
+      return 'Use numbers only, with up to 2 decimal places.';
+    }
+    final double? price = double.tryParse(value);
+    if (price == null || price < minimumPrice || price > maximumPrice) {
+      return 'Price must be between RM0.01 and RM1,000.';
+    }
+    return null;
+  }
+
+  static String? addressError(String raw, {bool required = false}) {
+    final String value = raw.trim();
+    if (value.isEmpty) return required ? 'Enter the corrected address.' : null;
+    if (value.length > maximumAddressLength) {
+      return 'Address must be $maximumAddressLength characters or fewer.';
+    }
+    if (RegExp(r'[\x00-\x1F\x7F]').hasMatch(value)) {
+      return 'Address contains unsupported characters.';
+    }
+    if (!RegExp(r'[A-Za-z0-9]').hasMatch(value)) {
+      return 'Enter a meaningful street or place address.';
+    }
+    return null;
+  }
+
+  static String? closureError(
+    String raw,
+    ClosureUnit unit, {
+    bool required = false,
+  }) {
+    final String value = raw.trim();
+    if (value.isEmpty) return required ? 'Enter the closure duration.' : null;
+    final int? amount = int.tryParse(value);
+    if (amount == null || amount <= 0) {
+      return 'Closure duration must be greater than zero.';
+    }
+    final int maximum = unit == ClosureUnit.days
+        ? maximumClosureDays
+        : maximumClosureMonths;
+    if (amount > maximum) {
+      return unit == ClosureUnit.days
+          ? 'Closure duration cannot exceed 365 days.'
+          : 'Closure duration cannot exceed 12 months.';
+    }
+    return null;
+  }
+
+  static String? operatingHoursError(
+    Map<Weekday, List<OpeningHour>> operatingHours,
+  ) {
+    for (final MapEntry<Weekday, List<OpeningHour>> entry
+        in operatingHours.entries) {
+      final List<OpeningHour> changed = entry.value
+          .where((OpeningHour hour) => hour.status != DayStatus.unknown)
+          .toList(growable: false);
+      if (changed.isEmpty || changed.first.status == DayStatus.closed) continue;
+
+      final List<OpeningHour> openRows = changed
+          .where((OpeningHour hour) => hour.status == DayStatus.open)
+          .toList(growable: false);
+      for (final OpeningHour row in openRows) {
+        if (row.opensAt == null || row.closesAt == null) {
+          return 'Set both opening and closing times for ${_dayName(entry.key)}.';
+        }
+        if (row.closesAt! <= row.opensAt!) {
+          return 'Closing time must be after opening time for ${_dayName(entry.key)}.';
+        }
+      }
+      openRows.sort(
+        (OpeningHour first, OpeningHour second) =>
+            first.opensAt!.compareTo(second.opensAt!),
+      );
+      for (int index = 1; index < openRows.length; index++) {
+        if (openRows[index].opensAt! < openRows[index - 1].closesAt!) {
+          return 'Opening-hour ranges overlap for ${_dayName(entry.key)}.';
+        }
+      }
+    }
+    return null;
+  }
+
+  static String _dayName(Weekday day) =>
+      '${day.name[0].toUpperCase()}${day.name.substring(1)}';
 
   /// Whether [claimCount] identical claims (already at or past the threshold)
   /// should trigger the auto-apply for [category].

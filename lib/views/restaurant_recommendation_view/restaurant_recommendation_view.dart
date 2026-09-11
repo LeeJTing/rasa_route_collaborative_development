@@ -6,6 +6,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../domain_model/matches_recommendation.dart';
+import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../view_models/dashboard_view_model.dart';
 import '../../view_models/restaurant_recommendation_view_model.dart';
@@ -13,6 +14,7 @@ import '../common_widgets/app_image.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
 import 'widgets/restaurant_card.dart';
+import 'widgets/restaurant_food_type_filter.dart';
 
 class RestaurantRecommendationView extends StatefulWidget {
   const RestaurantRecommendationView({super.key});
@@ -46,7 +48,10 @@ class _RestaurantRecommendationViewState
         appBar: AppTopBar(
           title: 'Quick Mode',
           showBackButton: true,
-          onProfileTap: () => Navigator.pushNamed(context, AppRoutes.profile),
+          onProfileTap: () async {
+            await Navigator.pushNamed(context, AppRoutes.profile);
+            await _viewModel.loadNearbyRestaurants();
+          },
         ),
         body: Consumer<RestaurantRecommendationViewModel>(
           builder:
@@ -55,43 +60,50 @@ class _RestaurantRecommendationViewState
                 RestaurantRecommendationViewModel vm,
                 Widget? child,
               ) {
-                if (vm.state == ViewState.busy &&
-                    vm.restaurants.isEmpty &&
-                    vm.landmarks.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (vm.state == ViewState.error &&
-                    vm.restaurants.isEmpty &&
-                    vm.landmarks.isEmpty) {
-                  return AsyncMessage(
-                    icon: Icons.location_off_outlined,
-                    title: 'Unable to load nearby places',
-                    message:
-                        vm.errorMessage ??
-                        'Check your connection and location, then try again.',
-                    actionLabel: 'Try again',
-                    onAction: vm.loadNearbyRestaurants,
-                  );
-                }
                 return Column(
                   children: <Widget>[
                     const _NearbyBanner(),
+
                     _SourceTabs(source: vm.source, onChanged: vm.selectSource),
+
+                    if (vm.source == RestaurantSource.google)
+                      RestaurantFoodTypeFilter(
+                        options:
+                            RestaurantRecommendationViewModel.foodTypeOptions,
+                        selected: vm.selectedFoodType,
+                        onSelected: vm.selectFoodType,
+                      ),
+
                     Expanded(
-                      child: vm.selectedSourceIsEmpty
+                      child: vm.isLoadingResult
+                          ? const Center(child: CircularProgressIndicator())
+                          : vm.state == ViewState.error &&
+                                vm.selectedSourceIsEmpty
+                          ? AsyncMessage(
+                              icon: Icons.location_off_outlined,
+                              title: 'Unable to load nearby places',
+                              message:
+                                  vm.errorMessage ??
+                                  'Check your connection and location, then try again.',
+                              actionLabel: 'Try again',
+                              onAction: vm.loadNearbyRestaurants,
+                            )
+                          : vm.selectedSourceIsEmpty
                           ? _EmptySource(source: vm.source)
                           : ListView.separated(
                               padding: AppSpacing.screenPadding.copyWith(
                                 bottom: AppSpacing.xl,
                               ),
                               itemCount: vm.source == RestaurantSource.google
-                                  ? vm.restaurants.length
+                                  ? vm.visibleRestaurants.length
                                   : vm.landmarks.length,
                               separatorBuilder: (_, _) =>
                                   const SizedBox(height: AppSpacing.md),
                               itemBuilder: (BuildContext context, int index) {
                                 if (vm.source == RestaurantSource.google) {
-                                  final restaurant = vm.restaurants[index];
+                                  final Restaurant restaurant =
+                                      vm.visibleRestaurants[index];
+
                                   return RestaurantCard(
                                     restaurant: restaurant,
                                     distanceLabel: vm.distanceLabel(restaurant),
@@ -114,8 +126,10 @@ class _RestaurantRecommendationViewState
                                         ),
                                   );
                                 }
+
                                 final SubmittedLandmarkRecommendation landmark =
                                     vm.landmarks[index];
+
                                 return _SubmittedLandmarkCard(
                                   landmark: landmark,
                                   expanded: vm.isLandmarkExpanded(landmark.id),
@@ -247,6 +261,7 @@ class _NearbyBanner extends StatelessWidget {
 
 class _SourceTabs extends StatelessWidget {
   const _SourceTabs({required this.source, required this.onChanged});
+
   final RestaurantSource source;
   final ValueChanged<RestaurantSource> onChanged;
 

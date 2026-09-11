@@ -15,6 +15,14 @@ class RestaurantRecommendationViewModel extends BaseViewModel
     implements CurrentLocationListener, RestaurantUpdateListener {
   RestaurantRecommendationViewModel();
 
+  static const List<String> foodTypeOptions = <String>[
+    'Food',
+    'Beverage',
+    'Fruit',
+    'Dessert',
+    'Kuih',
+  ];
+
   @protected
   DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
 
@@ -45,20 +53,34 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   List<SubmittedLandmarkRecommendation> _landmarks =
       const <SubmittedLandmarkRecommendation>[];
   RestaurantSource _source = RestaurantSource.google;
+
+  // No "All" option - Quick Mode always searches for one specific food type,
+  // and 'Food' is the default the screen opens with.
+  String _selectedFoodType = foodTypeOptions.first;
   final Set<int> _expandedRestaurantIds = <int>{};
   final Set<int> _expandedLandmarkIds = <int>{};
   bool _isLoadingNearby = false;
   bool _reloadNearbyRequested = false;
+
+  bool _isLoadingResult = false;
+  bool get isLoadingResult => _isLoadingResult;
 
   DateTime? _lastBackgroundReloadAt;
   bool _reloadInFlight = false;
   bool _reloadQueued = false;
 
   List<Restaurant> get restaurants => _restaurants;
+  String get selectedFoodType => _selectedFoodType;
+
+  // The nearby search is already re-run per selected food type (see
+  // [loadNearbyRestaurants]), so `_restaurants` only ever holds restaurants
+  // matching the current selection - nothing left to filter client-side.
+  List<Restaurant> get visibleRestaurants => _restaurants;
+
   List<SubmittedLandmarkRecommendation> get landmarks => _landmarks;
   RestaurantSource get source => _source;
   bool get selectedSourceIsEmpty => switch (_source) {
-    RestaurantSource.google => _restaurants.isEmpty,
+    RestaurantSource.google => visibleRestaurants.isEmpty,
     RestaurantSource.submitted => _landmarks.isEmpty,
   };
   bool isRestaurantExpanded(int id) => _expandedRestaurantIds.contains(id);
@@ -80,24 +102,53 @@ class RestaurantRecommendationViewModel extends BaseViewModel
       _reloadNearbyRequested = true;
       return;
     }
+
     _isLoadingNearby = true;
+    _isLoadingResult = true;
+    safeNotifyListeners();
+
     try {
       do {
         _reloadNearbyRequested = false;
+
         final TouristLocation requestedLocation = _location;
+        final String requestedFoodType = _selectedFoodType;
+
         await runGuarded(() async {
-          final List<Object> results = await Future.wait(<Future<Object>>[
-            discoveryLogic.getQuickModeRestaurants(location: requestedLocation),
-            discoveryLogic.getQuickModeLandmarks(location: requestedLocation),
+          final List<Object> results =
+          await Future.wait(<Future<Object>>[
+            discoveryLogic.getQuickModeRestaurants(
+              location: requestedLocation,
+              foodType: requestedFoodType,
+            ),
+            discoveryLogic.getQuickModeLandmarks(
+              location: requestedLocation,
+            ),
           ]);
-          if (_reloadNearbyRequested || requestedLocation != _location) return;
-          _restaurants = results[0] as List<Restaurant>;
-          _landmarks = results[1] as List<SubmittedLandmarkRecommendation>;
+
+          // Current request is already outdated.
+          if (_reloadNearbyRequested ||
+              requestedLocation != _location ||
+              requestedFoodType != _selectedFoodType) {
+            return;
+          }
+
+          _restaurants =
+          results[0] as List<Restaurant>;
+
+          _landmarks =
+          results[1] as List<SubmittedLandmarkRecommendation>;
+
           _sort();
         });
       } while (_reloadNearbyRequested);
     } finally {
       _isLoadingNearby = false;
+
+      // Only stop when the whole reload loop really finished.
+      _isLoadingResult = false;
+
+      safeNotifyListeners();
     }
   }
 
@@ -145,6 +196,21 @@ class RestaurantRecommendationViewModel extends BaseViewModel
   void selectSource(RestaurantSource source) {
     _source = source;
     safeNotifyListeners();
+  }
+
+  // No "All" - every selection is one concrete type, so this always
+  // re-searches nearby for that type instead of filtering the restaurants
+  // already on screen (see [loadNearbyRestaurants]).
+  Future<void> selectFoodType(String foodType) async {
+    final String normalized = foodType.trim();
+
+    if (!foodTypeOptions.contains(normalized)) return;
+    if (_selectedFoodType == normalized) return;
+
+    _selectedFoodType = normalized;
+    safeNotifyListeners();
+
+    await loadNearbyRestaurants();
   }
 
   void toggleRestaurantExpanded(int id) {

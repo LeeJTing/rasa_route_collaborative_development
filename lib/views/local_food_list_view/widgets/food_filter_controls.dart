@@ -11,7 +11,6 @@ class FoodFilterControls extends StatelessWidget {
     required this.onSort,
     required this.onFilter,
     required this.onSelect,
-    required this.onReset,
   });
 
   final bool isSelecting;
@@ -19,7 +18,6 @@ class FoodFilterControls extends StatelessWidget {
   final VoidCallback onSort;
   final VoidCallback onFilter;
   final VoidCallback onSelect;
-  final VoidCallback onReset;
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +45,6 @@ class FoodFilterControls extends StatelessWidget {
             onTap: onSelect,
           ),
         ),
-        TextButton(onPressed: onReset, child: const Text('Reset')),
       ],
     );
   }

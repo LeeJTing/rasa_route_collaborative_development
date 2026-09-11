@@ -21,6 +21,7 @@ class MapSearchBar extends StatelessWidget {
     super.key,
     required this.controller,
     required this.onChanged,
+    required this.onSubmitted,
     required this.onClear,
     required this.onTap,
     this.onFilterTap,
@@ -31,6 +32,7 @@ class MapSearchBar extends StatelessWidget {
 
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
 
   /// A8.3 - clears the keyword and restores the map.
   final VoidCallback onClear;
@@ -84,11 +86,12 @@ class MapSearchBar extends StatelessWidget {
             child: TextField(
               controller: controller,
               onChanged: onChanged,
+              onSubmitted: onSubmitted,
               onTap: onTap,
               textInputAction: TextInputAction.search,
               style: AppTextStyles.bodyMedium,
               inputFormatters: [
-                LengthLimitingTextInputFormatter(30), // Sets the limit to 10 characters
+                LengthLimitingTextInputFormatter(50), // Sets the limit to 10 characters
               ],
               decoration: InputDecoration(
                 isDense: true,

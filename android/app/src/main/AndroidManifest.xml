@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <application
-        android:label="rasa_route_collaborative_development"
+        android:label="Rasa Route"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
