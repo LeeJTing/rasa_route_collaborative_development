@@ -117,7 +117,11 @@ class DiscoveryLogicFacade {
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
-  }) => restaurantDiscovery.nearbyWithAutomaticExpansion(location: location);
+    String? foodType,
+  }) => restaurantDiscovery.nearbyWithAutomaticExpansion(
+    location: location,
+    foodType: foodType,
+  );
 
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
