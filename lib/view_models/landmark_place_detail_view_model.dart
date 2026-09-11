@@ -2,7 +2,9 @@ import 'package:meta/meta.dart' show protected;
 
 import '../core/base_view_model.dart';
 import '../domain_model/submitted_landmark.dart';
+import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
+import 'current_location_facade.dart';
 
 /// ViewModel for `LandmarkPlaceDetailView` - the full-detail page for a
 /// tourist-submitted landmark, opened from the dashboard map's "View
@@ -16,7 +18,8 @@ import '../model/business_logic/landmark_logic_facade.dart';
 ///   * state goes in private fields with read-only getters; commands wrap their
 ///     facade call in `runGuarded` so busy and error states behave the same on
 ///     every screen.
-class LandmarkPlaceDetailViewModel extends BaseViewModel {
+class LandmarkPlaceDetailViewModel extends BaseViewModel
+    implements CurrentLocationListener {
   LandmarkPlaceDetailViewModel();
 
   @protected
@@ -24,10 +27,41 @@ class LandmarkPlaceDetailViewModel extends BaseViewModel {
 
   late final LandmarkLogicFacade landmarkLogic = createLandmarkLogic();
 
+  /// Inbound: `LocationMonitor` publishes here (registering replays the last
+  /// fix) so the header can show how far away the landmark is - the same
+  /// metric the catalogue restaurant page shows.
+  final CurrentLocationFacade locationFacade = CurrentLocationFacade();
+
+  TouristLocation _currentLocation = TouristLocation.unknown;
+
+  /// The most recent fix. [TouristLocation.unknown] until one arrives.
+  TouristLocation get currentLocation => _currentLocation;
+
   int _landmarkId = 0;
   SubmittedLandmark? _landmark;
 
   SubmittedLandmark? get landmark => _landmark;
+
+  /// Straight-line distance from the tourist to this landmark, in metres -
+  /// null while the landmark has no coordinates or there is no GPS fix yet.
+  /// The View formats it exactly like the restaurant header's distance.
+  double? get landmarkDistanceMetres {
+    final SubmittedLandmark? place = _landmark;
+    final double? lat = place?.latitude;
+    final double? lon = place?.longitude;
+    if (place == null || lat == null || lon == null) return null;
+    if (!_currentLocation.isKnown) return null;
+    return landmarkLogic.distanceMetres(
+      _currentLocation,
+      TouristLocation(latitude: lat, longitude: lon),
+    );
+  }
+
+  @override
+  void onCurrentLocationChanged(TouristLocation location) {
+    _currentLocation = location;
+    safeNotifyListeners();
+  }
 
   /// Set from `MapSelectionHandoff` in the View's `initState`, before
   /// `onInit()` - see that class's doc.
@@ -37,6 +71,7 @@ class LandmarkPlaceDetailViewModel extends BaseViewModel {
 
   @override
   Future<void> onInit() async {
+    locationFacade.register(this);
     if (_landmarkId <= 0) {
       setError('No landmark selected.');
       return;
@@ -55,6 +90,12 @@ class LandmarkPlaceDetailViewModel extends BaseViewModel {
     }
     _landmark = landmark;
   });
+
+  @override
+  void dispose() {
+    locationFacade.unregister(this);
+    super.dispose();
+  }
 }
 
 /// Hands a tapped `LandmarkItem` from `LandmarkPlaceDetailView`'s dish list

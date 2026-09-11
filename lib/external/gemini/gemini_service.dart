@@ -1,9 +1,9 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import '../../app/config/env.dart';
 import '../../domain_model/local_food.dart';
-
 
 class GeminiService {
   factory GeminiService() => _instance;
@@ -18,12 +18,35 @@ class GeminiService {
   /// defaults - a feature-specific service (e.g. `GeminiLandmarkService`)
   /// passes its own key here so its usage/quota is tracked separately from
   /// whatever else calls this shared, generic service.
+  ///
+  /// [temperature] sets the sampling temperature when provided - `0` is
+  /// (near-)deterministic, so the SAME photo + prompt always gets the same
+  /// answer; used by the landmark calls, whose verdicts must not change
+  /// between identical attempts (the manual name check, and the capture
+  /// reads). Null keeps the model's own default sampling.
+  ///
+  /// [jsonResponse] asks the API for `responseMimeType: application/json`
+  /// when the prompt expects a JSON object - one less way for a reply to
+  /// miss the requested shape.
+  ///
+  /// [thinkingBudget] (only when > 0) enables a `thinkingConfig` budget so
+  /// thinking-capable models can reason before answering - slower, but
+  /// measurably better on ambiguous food photos. Omitted entirely
+  /// otherwise, so models/endpoints that do not support it never see it.
+  ///
+  /// [label] is DIAGNOSTIC only: it names this call site ("quick", "full",
+  /// "verify", ...) in the logged reply (see [_logReply]) and never changes
+  /// the request or the answer.
   Future<String> describeImage({
     required List<int> imageBytes,
     required String prompt,
     String mimeType = 'image/jpeg',
     String? apiKey,
     String? model,
+    double? temperature,
+    bool jsonResponse = false,
+    int? thinkingBudget,
+    String? label,
   }) async {
     return _generate(
       <Map<String, Object?>>[
@@ -37,6 +60,10 @@ class GeminiService {
       ],
       apiKey: apiKey,
       model: model,
+      temperature: temperature,
+      jsonResponse: jsonResponse,
+      thinkingBudget: thinkingBudget,
+      label: label,
     );
   }
 
@@ -52,6 +79,8 @@ class GeminiService {
   /// request - so a caller can surface "used a fallback model" to the tourist
   /// rather than hide it.
   ///
+  /// [label] - see [describeImage].
+  ///
   /// [apiKey]/[model] - see [describeImage]'s doc.
   Future<String> generateText(
     String prompt, {
@@ -59,6 +88,7 @@ class GeminiService {
     String? apiKey,
     String? model,
     void Function(String model)? onFallbackModel,
+    String? label,
   }) async {
     Object? lastError;
     for (int attempt = 0; attempt <= retries; attempt++) {
@@ -70,6 +100,7 @@ class GeminiService {
           apiKey: apiKey,
           model: model,
           onFallbackModel: onFallbackModel,
+          label: label,
         ).timeout(Env.apiTimeout);
       } catch (error) {
         lastError = error;
@@ -98,7 +129,11 @@ class GeminiService {
     List<Map<String, Object?>> parts, {
     String? apiKey,
     String? model,
+    double? temperature,
+    bool jsonResponse = false,
+    int? thinkingBudget,
     void Function(String model)? onFallbackModel,
+    String? label,
   }) async {
     final List<String> rotation = _modelRotation(model);
     Object? lastError;
@@ -109,6 +144,10 @@ class GeminiService {
           parts,
           apiKey: apiKey ?? Env.geminiApiKey,
           model: candidate,
+          temperature: temperature,
+          jsonResponse: jsonResponse,
+          thinkingBudget: thinkingBudget,
+          label: label,
         );
         // The first model in the rotation is the requested primary; anything
         // after it means the primary was unavailable and an env-configured
@@ -130,6 +169,10 @@ class GeminiService {
     List<Map<String, Object?>> parts, {
     required String apiKey,
     required String model,
+    double? temperature,
+    bool jsonResponse = false,
+    int? thinkingBudget,
+    String? label,
   }) async {
     final HttpClient client = HttpClient();
     try {
@@ -143,6 +186,24 @@ class GeminiService {
             'contents': <Map<String, Object?>>[
               <String, Object?>{'parts': parts},
             ],
+            // Sampling/format controls, each omitted when unused so other
+            // calls keep the model's own defaults:
+            //  - temperature: calls that must answer identically every time
+            //    (the landmark reads use 0);
+            //  - responseMimeType: strict JSON for JSON-shaped prompts;
+            //  - thinkingConfig: an optional reasoning budget for
+            //    thinking-capable models (accuracy on ambiguous photos).
+            if (temperature != null ||
+                jsonResponse ||
+                (thinkingBudget != null && thinkingBudget > 0))
+              'generationConfig': <String, Object?>{
+                'temperature': ?temperature,
+                if (jsonResponse) 'responseMimeType': 'application/json',
+                if (thinkingBudget != null && thinkingBudget > 0)
+                  'thinkingConfig': <String, Object?>{
+                    'thinkingBudget': thinkingBudget,
+                  },
+              },
           }),
         ),
       );
@@ -152,6 +213,16 @@ class GeminiService {
       final String body = await response.transform(utf8.decoder).join();
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        // Logged BEFORE throwing: several callers swallow the failure in a
+        // best-effort flow, and this is the last place the API's own error
+        // body is still intact.
+        _logReply(
+          label: label,
+          model: model,
+          statusCode: response.statusCode,
+          text: '',
+          raw: body,
+        );
         if (_isTransientStatus(response.statusCode)) {
           throw _GeminiTransientException(
             'Gemini HTTP ${response.statusCode}: $body',
@@ -163,18 +234,71 @@ class GeminiService {
       final Map<String, dynamic> decoded =
           jsonDecode(body) as Map<String, dynamic>;
       final List<dynamic>? candidates = decoded['candidates'] as List<dynamic>?;
-      if (candidates == null || candidates.isEmpty) return '';
+      if (candidates == null || candidates.isEmpty) {
+        // No candidate at all (blocked / filtered) - the raw body carries
+        // the `finishReason` explaining why, so log it instead of nothing.
+        _logReply(
+          label: label,
+          model: model,
+          statusCode: response.statusCode,
+          text: '',
+          raw: body,
+        );
+        return '';
+      }
 
       final Map<String, dynamic> content =
           candidates.first['content'] as Map<String, dynamic>? ??
           const <String, dynamic>{};
       final List<dynamic>? responseParts = content['parts'] as List<dynamic>?;
-      if (responseParts == null || responseParts.isEmpty) return '';
+      if (responseParts == null || responseParts.isEmpty) {
+        _logReply(
+          label: label,
+          model: model,
+          statusCode: response.statusCode,
+          text: '',
+          raw: body,
+        );
+        return '';
+      }
 
-      return (responseParts.first['text'] as String?) ?? '';
+      final String reply = (responseParts.first['text'] as String?) ?? '';
+      _logReply(
+        label: label,
+        model: model,
+        statusCode: response.statusCode,
+        text: reply,
+        // An empty reply means the text part was missing - the raw body
+        // (finishReason: SAFETY / MAX_TOKENS, ...) tells the story.
+        raw: reply.isEmpty ? body : null,
+      );
+      return reply;
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// DIAGNOSTIC: prints what the model actually answered, so a capture that
+  /// behaves oddly can be traced from the console instead of a debugger.
+  ///
+  /// [text] is the model's own reply - the payload every caller parses.
+  /// When the reply is empty or the HTTP call failed, the RAW response body
+  /// is printed instead: that is where `finishReason` (SAFETY / MAX_TOKENS),
+  /// blocked-prompt details and API error bodies live. [label] names the
+  /// call site ("quick", "full", "verify", ...) when the caller supplied
+  /// one.
+  void _logReply({
+    required String model,
+    required int statusCode,
+    required String text,
+    String? label,
+    String? raw,
+  }) {
+    final String tag = label == null ? '' : '[$label] ';
+    developer.log(
+      '$tag$model HTTP $statusCode\n${raw ?? text}',
+      name: 'GeminiService',
+    );
   }
 
   /// 429 (rate limited) and 5xx (server overloaded - e.g. 503 "high demand")

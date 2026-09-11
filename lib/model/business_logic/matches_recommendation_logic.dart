@@ -249,18 +249,14 @@ class MatchesRecommendationLogic {
     return serving.entries
         .map((MapEntry<String, FoodOccurrence> entry) {
           final FoodOccurrence occurrence = entry.value;
-          final List<String> foodNames = allOccurrences
-              .where(
-                (FoodOccurrence value) =>
-                    value.source == FoodOccurrenceSource.submittedLandmark &&
-                    value.sourceId == entry.key,
-              )
-              .map(
-                (FoodOccurrence value) =>
-                    foodsById[value.localFoodId]?.name ?? value.foodName,
-              )
-              .toSet()
-              .toList(growable: false);
+          final List<SubmittedLandmarkDish> dishes = _dishesOf(
+            allOccurrences.where(
+              (FoodOccurrence value) =>
+                  value.source == FoodOccurrenceSource.submittedLandmark &&
+                  value.sourceId == entry.key,
+            ),
+            foodsById,
+          );
           return SubmittedLandmarkRecommendation(
             id: int.tryParse(entry.key) ?? 0,
             name: occurrence.placeName,
@@ -275,12 +271,51 @@ class MatchesRecommendationLogic {
                   occurrence.longitude,
                 ) ??
                 double.infinity,
-            foodNames: foodNames,
+            dishes: dishes,
             imageUrl: occurrence.placeImageUrl,
-            price: occurrence.itemPrice,
+            // The landmark's headline price is the AVERAGE of its dishes'
+            // known prices - one dish's price would misread a stall with a
+            // menu.
+            price: _averageDishPrice(dishes),
           );
         })
         .toList(growable: false);
+  }
+
+  /// The landmark's dishes as the cards list them: the catalogue name when
+  /// the dish links to one, else the recorded text, trimmed and de-duplicated
+  /// by name (first occurrence wins), each with its own price and photo.
+  List<SubmittedLandmarkDish> _dishesOf(
+    Iterable<FoodOccurrence> items,
+    Map<int, LocalFood> foodsById,
+  ) {
+    final List<SubmittedLandmarkDish> dishes = <SubmittedLandmarkDish>[];
+    final Set<String> seen = <String>{};
+    for (final FoodOccurrence item in items) {
+      final String name = (foodsById[item.localFoodId]?.name ?? item.foodName)
+          .trim();
+      if (name.isEmpty || !seen.add(name)) continue;
+      dishes.add(
+        SubmittedLandmarkDish(
+          name: name,
+          price: item.itemPrice,
+          imageUrl: item.itemImageUrl,
+          ingredients: item.itemIngredients,
+        ),
+      );
+    }
+    return dishes;
+  }
+
+  /// The AVERAGE of the dishes' known prices - null while none is known.
+  double? _averageDishPrice(List<SubmittedLandmarkDish> dishes) {
+    final List<double> prices = dishes
+        .map((SubmittedLandmarkDish dish) => dish.price)
+        .whereType<double>()
+        .toList(growable: false);
+    if (prices.isEmpty) return null;
+    return prices.fold<double>(0, (double sum, double price) => sum + price) /
+        prices.length;
   }
 
   Region? _resolveRegion(
@@ -328,6 +363,10 @@ class MatchesRecommendationLogic {
         placeCategory: occurrence.placeCategory,
         placeRating: occurrence.placeRating,
         itemPrice: occurrence.itemPrice,
+        // The per-dish extras must survive the id resolution - the cards
+        // show this dish's own photo and ingredients.
+        itemImageUrl: occurrence.itemImageUrl,
+        itemIngredients: occurrence.itemIngredients,
       );
     }
     return occurrence;

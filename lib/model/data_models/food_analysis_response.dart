@@ -35,6 +35,7 @@ class FoodAnalysisResponse implements JsonModel {
     this.matchConfidence = 0,
     this.observedFood = '',
     this.ingredients = '',
+    this.pronunciation = '',
   });
 
   /// Dish name (e.g., "Nasi Lemak")
@@ -144,9 +145,21 @@ class FoodAnalysisResponse implements JsonModel {
   /// Well-known alternative names for the identified dish - other
   /// languages/scripts/spellings of the SAME dish (e.g. "摩摩喳喳" for
   /// Bubur Cha Cha, "ABC" for ais kacang). Populated by the full analysis
-  /// calls; empty when none are known. Used ONLY to match the dish against
-  /// the curated catalogue (never written to `local_food`).
+  /// calls; empty when none are known. Used to match the dish against the
+  /// curated catalogue, and PERSISTED as the new row's `synonyms` when the
+  /// dish becomes a catalogue row (a genuinely-new dish has no other source
+  /// of alternate names).
   final List<String> aliases;
+
+  /// How the dish name is SAID, written so a text-to-speech voice reads it
+  /// correctly - a simple phonetic respelling in Latin letters (e.g.
+  /// "nah-see luh-mak" for Nasi Lemak, "chah kway teow" for Char Kway
+  /// Teow, "moh moh zha zha" for 摩摩喳喳). Populated by the full analysis
+  /// calls; empty when Gemini didn't supply one (the pronunciation button
+  /// then simply speaks the dish name). Persisted as
+  /// `local_food.pronunciation_text` when the dish is written to the
+  /// catalogue, so a brand-new dish is not mute.
+  final String pronunciation;
 
   /// How many SEPARATE, distinct food items/dishes are clearly visible in the
   /// image. A single dish/plate/portion counts as one. > 1 means the tourist
@@ -198,6 +211,7 @@ class FoodAnalysisResponse implements JsonModel {
     'candidates': candidates.map((FoodCandidate c) => c.toJson()).toList(),
     'priceMin': priceMin,
     'priceMax': priceMax,
+    'pronunciation': pronunciation,
   };
 
   FoodAnalysisResponse copyWith({
@@ -230,6 +244,7 @@ class FoodAnalysisResponse implements JsonModel {
     List<FoodCandidate>? candidates,
     double? priceMin,
     double? priceMax,
+    String? pronunciation,
   }) => FoodAnalysisResponse(
     dish: dish ?? this.dish,
     variant: variant ?? this.variant,
@@ -260,6 +275,7 @@ class FoodAnalysisResponse implements JsonModel {
     candidates: candidates ?? this.candidates,
     priceMin: priceMin ?? this.priceMin,
     priceMax: priceMax ?? this.priceMax,
+    pronunciation: pronunciation ?? this.pronunciation,
   );
 }
 

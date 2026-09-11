@@ -1486,5 +1486,13 @@
   {
     "local_food_id": 372,
     "food_name": "Ramly Burger"
+  },
+  {
+    "local_food_id": 373,
+    "food_name": "Nasi Kukus"
+  },
+  {
+    "local_food_id": 375,
+    "food_name": "Cendol"
   }
 ]

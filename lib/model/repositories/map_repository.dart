@@ -104,16 +104,18 @@ class MapRepository {
     // Driven by the outlines rather than by the rows: an area with nothing in
     // it is still drawn, in grey (REQ102_16), and a row for an area the app has
     // no outline for is not something it can paint.
-    return areas.map((Region region) {
-      final RegionTallyDataModel? row = byCode[region.code];
-      return RegionTally(
-        region: region,
-        placeCount: row?.placeCount ?? 0,
-        foodCount: row?.foodCount ?? 0,
-        restaurantCount: row?.restaurantCount ?? 0,
-        landmarkCount: row?.landmarkCount ?? 0,
-      );
-    }).toList(growable: false);
+    return areas
+        .map((Region region) {
+          final RegionTallyDataModel? row = byCode[region.code];
+          return RegionTally(
+            region: region,
+            placeCount: row?.placeCount ?? 0,
+            foodCount: row?.foodCount ?? 0,
+            restaurantCount: row?.restaurantCount ?? 0,
+            landmarkCount: row?.landmarkCount ?? 0,
+          );
+        })
+        .toList(growable: false);
   }
 
   /// Levels x parents x filter selections worth keeping. Small: the tourist
@@ -225,9 +227,8 @@ class MapRepository {
     return hits;
   }
 
-  static String _tallyKey(List<int>? foodIds) => foodIds == null
-      ? 'all'
-      : (List<int>.of(foodIds)..sort()).join(',');
+  static String _tallyKey(List<int>? foodIds) =>
+      foodIds == null ? 'all' : (List<int>.of(foodIds)..sort()).join(',');
 
   List<CountryOutline>? _outlines;
 
@@ -457,9 +458,7 @@ class MapRepository {
     final List<MapCluster> clusters = <MapCluster>[];
     final List<MapPin> pins = <MapPin>[];
     for (final Map<String, dynamic> row in rows) {
-      final MapMarkerRowDataModel data = MapMarkerRowDataModel.fromJson(
-        row,
-      );
+      final MapMarkerRowDataModel data = MapMarkerRowDataModel.fromJson(row);
       if (data.isCluster) {
         clusters.add(
           MapCluster(
@@ -722,26 +721,27 @@ class MapRepository {
     final List<Map<String, dynamic>> items;
     try {
       // Neither select depends on the other.
-      final List<List<Map<String, dynamic>>> rows =
-          await Future.wait(<Future<List<Map<String, dynamic>>>>[
-            // Paged, not `selectAll`: both tables are far past PostgREST's
-            // 1000-row ceiling, and a truncated read here is what makes a
-            // fully seeded database look like an almost empty map.
-            api.selectEvery(
-              APIManager.tableRestaurant,
-              orderBy: 'restaurant_id',
-              columns:
-                  'restaurant_id, restaurant_name, latitude, longitude, '
-                  'category, rating, restaurant_image_url, status',
-            ),
-            api.selectEvery(
-              APIManager.tableRestaurantItem,
-              orderBy: 'restaurant_item_id',
-              columns:
-                  'restaurant_id, local_food_id, restaurant_item_name, '
-                  'restaurant_item_price',
-            ),
-          ]);
+      final List<List<Map<String, dynamic>>> rows = await Future.wait(
+        <Future<List<Map<String, dynamic>>>>[
+          // Paged, not `selectAll`: both tables are far past PostgREST's
+          // 1000-row ceiling, and a truncated read here is what makes a
+          // fully seeded database look like an almost empty map.
+          api.selectEvery(
+            APIManager.tableRestaurant,
+            orderBy: 'restaurant_id',
+            columns:
+                'restaurant_id, restaurant_name, latitude, longitude, '
+                'category, rating, restaurant_image_url, status',
+          ),
+          api.selectEvery(
+            APIManager.tableRestaurantItem,
+            orderBy: 'restaurant_item_id',
+            columns:
+                'restaurant_id, local_food_id, restaurant_item_name, '
+                'restaurant_item_price',
+          ),
+        ],
+      );
       restaurants = rows[0];
       items = rows[1];
     } catch (_) {
@@ -811,7 +811,7 @@ class MapRepository {
               orderBy: 'landmark_item_id',
               columns:
                   'landmark_id, local_food_id, dish, image_url, item_price, '
-                  'food_category',
+                  'food_category, ingredients',
             ),
           ]);
       landmarks = rows[0];
@@ -862,6 +862,12 @@ class MapRepository {
               _normalizeLandmarkImageUrl(item['image_url']),
           placeCategory: _asStringOrNull(place['category']),
           itemPrice: _asDoubleOrNull(item['item_price']),
+          // The dish's OWN photo, kept apart from the place photo above: the
+          // quick-mode landmark rows show it like a restaurant menu row.
+          itemImageUrl: _normalizeLandmarkImageUrl(item['image_url']),
+          // The dish's ingredients text - the quick-mode row shows it exactly
+          // like a restaurant menu row shows its own.
+          itemIngredients: _asStringOrNull(item['ingredients']),
         ),
       );
     }
@@ -1044,9 +1050,7 @@ class MapRepository {
           APIManager.tableOpeningHours,
           orderBy: 'opening_hours_id',
           columns: _openingHoursColumns,
-          inFilter: <String, List<Object?>>{
-            column: ids.sublist(start, end),
-          },
+          inFilter: <String, List<Object?>>{column: ids.sublist(start, end)},
         ),
       );
     }

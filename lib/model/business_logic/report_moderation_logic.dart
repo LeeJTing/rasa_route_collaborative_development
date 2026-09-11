@@ -84,7 +84,10 @@ class ReportModerationLogic {
         ReportableMenuItem(
           itemKind: ReportItemKind.landmarkItem,
           id: item.id,
-          name: item.dish,
+          // The variant the tourist captured, else the dictionary dish - a
+          // report names the dish as the place lists it (see
+          // `LandmarkItem.displayName`).
+          name: item.displayName,
           price: item.price,
           isRemoved: item.isRemoved,
         ),

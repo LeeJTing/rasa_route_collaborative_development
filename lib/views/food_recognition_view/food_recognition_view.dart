@@ -6,11 +6,17 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/config/env.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
+import '../../domain_model/landmark_draft.dart';
 import '../../view_models/food_recognition_view_model.dart';
+import '../common_widgets/add_landmark_reminder_dialog.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/continue_draft_dialog.dart';
+import '../common_widgets/mock_gps_button.dart';
+import '../common_widgets/unfinished_submission_dialog.dart';
 import 'widgets/multiple_results_card.dart';
 import 'widgets/recognition_result_card.dart';
 
@@ -83,6 +89,15 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   /// adjusts relative to it rather than jittering from wherever it was.
   double _zoomAtPinchStart = 1.0;
 
+  /// Whether the unfinished-submission notice is done for this push - it
+  /// opens at most once, not on every rebuild (the add-landmark ask flow
+  /// below marks it too: that flow already offers the saved drafts).
+  bool _draftPromptShown = false;
+
+  /// Whether a post-frame check for the notice is already queued - prevents
+  /// stacking one callback per frame (see [_scheduleDraftPromptCheck]).
+  bool _draftPromptCheckQueued = false;
+
   void _zoomBy(double delta) {
     final double next = _zoom.clamp(_minZoom, _maxZoom) + delta;
     final double clamped = next.clamp(_minZoom, _maxZoom).toDouble();
@@ -128,8 +143,13 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
     // Which purpose this push is for (food / additional food / signboard /
     // stall) arrives through the hand-off, since routes carry no arguments.
     // Set it BEFORE onInit() - same pattern AddLandmarkView uses for the
-    // recognized food itself.
+    // recognized food itself. For an additional-food / signboard / stall
+    // capture the first food's location also arrives, so this new capture
+    // can be checked against it (50 m same-restaurant rule).
     _viewModel.setPurpose(LandmarkDraftHandoff().takePurpose());
+    _viewModel.setReferenceLocation(
+      LandmarkDraftHandoff().takeReferenceLocation(),
+    );
     _viewModel.onInit();
 
     _initCamera();
@@ -493,6 +513,98 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
     }
   }
 
+  /// "Add New Landmark" reminder: before the form opens, the tourist must
+  /// acknowledge that a landmark has to be added while they are at the
+  /// restaurant - a form started far away cannot be completed (they can
+  /// still save it as an incomplete submission and finish it on a later
+  /// visit). Only the explicit acknowledgement continues; dismissing the
+  /// dialog leaves them on this screen.
+  ///
+  /// After the acknowledgement, a saved draft holding the SAME dish and the
+  /// SAME variant at this spot is offered for continuing - "Continue
+  /// submission" reopens it pre-filled, "Start a new one" falls through to
+  /// the fresh form. See `FoodRecognitionViewModel.draftToContinue`.
+  Future<void> _proceedToAddLandmarkWithReminder(
+    FoodRecognitionViewModel viewModel,
+  ) async {
+    // This flow itself offers the saved drafts (continue / start new), so the
+    // reminder notice must not pop up behind it - it would fire the moment
+    // the reminder dialog closes, mid-flow.
+    _draftPromptShown = true;
+    final bool acknowledged = await showAddLandmarkReminderDialog(context);
+    if (!acknowledged || !mounted) return;
+    final LandmarkDraft? draft = await viewModel.draftToContinue();
+    if (!mounted) return;
+    if (draft != null) {
+      final bool continues = await showContinueDraftDialog(
+        context,
+        dishLabel: continueDraftDishLabel(draft),
+        restaurantName: draft.restaurantName,
+      );
+      if (!mounted) return;
+      if (continues) {
+        viewModel.openDraft(draft);
+        return;
+      }
+    }
+    viewModel.proceedToAddLandmark();
+  }
+
+  /// Queues the one-shot check behind [_askAboutPendingDrafts]: once a
+  /// fresh-capture push knows there are saved incomplete submissions, remind
+  /// the tourist they can continue one from the Profile screen.
+  ///
+  /// The drafts load asynchronously after `initState`, so the check RE-ARMS
+  /// itself until it has fired or is no longer needed. It also fires only
+  /// while THIS screen is the one on top: a camera with the Add-Landmark form
+  /// pushed above it is still mounted and still rebuilds, so a late drafts
+  /// read used to pop "You have N unfinished submissions" over that form
+  /// while the tourist was typing in a field - a notice nothing they did had
+  /// asked for. With a form (or one of this screen's own dialogs) in front,
+  /// the check simply waits: the reminder belongs to the moment the camera is
+  /// genuinely in front again.
+  void _scheduleDraftPromptCheck() {
+    if (_draftPromptCheckQueued || _draftPromptShown) return;
+    _draftPromptCheckQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _draftPromptCheckQueued = false;
+      if (!mounted || _draftPromptShown) return;
+      if (_viewModel.purpose != FoodRecognitionPurpose.food) return;
+      // A route above this one owns the screen right now (the form, or one
+      // of this screen's dialogs) - keep waiting instead of firing over it.
+      if (ModalRoute.of(context)?.isCurrent != true ||
+          _viewModel.pendingDrafts.isEmpty) {
+        _scheduleDraftPromptCheck();
+        return;
+      }
+      _draftPromptShown = true;
+      _askAboutPendingDrafts(_viewModel);
+    });
+  }
+
+  /// Coming back to the camera REMINDS the tourist about a saved incomplete
+  /// submission: it points them at the Profile screen's Incomplete
+  /// Submissions list, where they can continue (or delete) it themselves.
+  /// Nothing is decided here - the notice has a single acknowledgement, so
+  /// the draft is simply left waiting. Shown once per push, and only when
+  /// this push is a fresh food capture - never while an additional food /
+  /// signboard / stall capture is in progress.
+  Future<void> _askAboutPendingDrafts(
+    FoodRecognitionViewModel viewModel,
+  ) async {
+    // This screen can sit under a form for a while, so the list loaded at
+    // initState may be stale - name what is really waiting.
+    await viewModel.refreshPendingDrafts();
+    if (!mounted) return;
+    final List<LandmarkDraft> drafts = viewModel.pendingDrafts;
+    if (drafts.isEmpty) return;
+    await showUnfinishedSubmissionDialog(
+      context,
+      restaurantName: drafts.first.restaurantName,
+      draftCount: drafts.length,
+    );
+  }
+
   Widget _buildPopupContent(FoodRecognitionViewModel viewModel) {
     if (viewModel.isProcessing) {
       return const _LoadingState();
@@ -510,6 +622,8 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
         results: viewModel.multipleResults,
         onSelect: viewModel.selectFromMultiple,
         onEnterName: viewModel.enterFoodName,
+        foodNameMaxLength: viewModel.foodNameMaxLength,
+        foodNameWarning: viewModel.foodNameWarning,
         isProcessing: viewModel.isProcessing,
       );
     }
@@ -526,23 +640,26 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
             : null;
         return RecognitionResultCard(
           food: viewModel.recognizedFood!,
+          variant: viewModel.variant,
           capturedImage: viewModel.capturedImage,
           isLocalFood: viewModel.isLocalFood,
           fitsCatalogueCategory: viewModel.fitsCatalogueCategory,
           isLowConfidence: viewModel.isLowConfidence,
           nameMismatch: viewModel.nameMismatch,
-          observedFoodName: viewModel.observedFoodName,
           typedName: viewModel.typedName,
           dietaryConflicts: viewModel.dietaryConflicts,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
           onViewDetails: viewModel.proceedToViewDetails,
           // Non-addable (not local, a Malaysian snack/package, or the fix is
           // at sea / outside Malaysia): details + "View Details" stay, but
-          // there is no "Add New Landmark".
+          // there is no "Add New Landmark". The reminder dialog must be
+          // acknowledged before the form opens.
           onAddLandmark: canAddFood && locationBlock == null
-              ? viewModel.proceedToAddLandmark
+              ? () => _proceedToAddLandmarkWithReminder(viewModel)
               : null,
           onEnterName: viewModel.enterFoodName,
+          foodNameMaxLength: viewModel.foodNameMaxLength,
+          foodNameWarning: viewModel.foodNameWarning,
           isProcessing: viewModel.isProcessing,
           promptText:
               locationBlock ??
@@ -558,12 +675,12 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
       case FoodRecognitionPurpose.additionalFood:
         return RecognitionResultCard(
           food: viewModel.recognizedFood!,
+          variant: viewModel.variant,
           capturedImage: viewModel.capturedImage,
           isLocalFood: viewModel.isLocalFood,
           fitsCatalogueCategory: viewModel.fitsCatalogueCategory,
           isLowConfidence: viewModel.isLowConfidence,
           nameMismatch: viewModel.nameMismatch,
-          observedFoodName: viewModel.observedFoodName,
           typedName: viewModel.typedName,
           dietaryConflicts: viewModel.dietaryConflicts,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
@@ -573,20 +690,33 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           // than pushing a brand-new AddLandmarkView.
           onViewDetails: viewModel.proceedToViewDetails,
           // Non-addable food: never "Add to Landmark" back onto the form.
+          // Also blocked when this second food was captured more than 50 m
+          // from the first food - it is not the same restaurant, so the only
+          // way forward is capturing it again on site.
           onAddLandmark:
-              viewModel.isLocalFood && viewModel.fitsCatalogueCategory
+              viewModel.isLocalFood &&
+                  viewModel.fitsCatalogueCategory &&
+                  !viewModel.isCaptureOutOfRange
               ? viewModel.confirmFoodAndReturn
               : null,
           onEnterName: viewModel.enterFoodName,
+          foodNameMaxLength: viewModel.foodNameMaxLength,
+          foodNameWarning: viewModel.foodNameWarning,
           isProcessing: viewModel.isProcessing,
           addLandmarkLabel: 'Add to Landmark',
-          promptText: viewModel.isLocalFood && viewModel.fitsCatalogueCategory
-              ? 'Add this food to the landmark?'
-              : !viewModel.isLocalFood
-              ? "This doesn't appear to be Malaysian local food, so it "
-                    "can't be added."
-              : 'This is a Malaysian product but it is a snack or packaged '
-                    "item, so it can't be added.",
+          blockMessage: viewModel.captureRangeError,
+          // Out of range: the warning box above already carries the reason
+          // AND the action ("Move closer... capture again") - a prompt line
+          // here would only repeat it.
+          promptText: viewModel.captureRangeError != null
+              ? null
+              : (viewModel.isLocalFood && viewModel.fitsCatalogueCategory
+                    ? '                 Add this food to the landmark?'
+                    : !viewModel.isLocalFood
+                    ? "This doesn't appear to be Malaysian local food, so it "
+                          "can't be added."
+                    : 'This is a Malaysian product but it is a snack or packaged '
+                          "item, so it can't be added."),
         );
 
       case FoodRecognitionPurpose.signboard:
@@ -594,7 +724,12 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
         return _ImageCaptureConfirm(
           purpose: viewModel.purpose,
           extractedRestaurantName: viewModel.extractedRestaurantName,
-          onConfirm: viewModel.confirmCaptureAndReturn,
+          // Too far from the first food (50 m): not this restaurant's
+          // signboard/stall - no confirm, capture again instead.
+          onConfirm: viewModel.isCaptureOutOfRange
+              ? null
+              : viewModel.confirmCaptureAndReturn,
+          blockMessage: viewModel.captureRangeError,
         );
     }
   }
@@ -609,10 +744,51 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
         _cameraController!.value.isInitialized &&
         _cameraError == null;
 
+    // One-shot: once a fresh-capture push knows there are saved incomplete
+    // submissions, remind the tourist they can continue one from the Profile
+    // screen (see [_askAboutPendingDrafts]). The drafts load asynchronously
+    // after initState, so the check re-arms itself until it has fired.
+    _scheduleDraftPromptCheck();
+
     return ChangeNotifierProvider<FoodRecognitionViewModel>.value(
       value: _viewModel,
       child: Scaffold(
-        appBar: AppTopBar(title: _titleFor(_viewModel.purpose)),
+        appBar: AppTopBar(
+          title: _titleFor(_viewModel.purpose),
+          actions: <Widget>[
+            // Presenter tool (dev builds, Android only): teleports or nudges
+            // the GPS so a demo can "walk" in and out of the 50 m
+            // same-restaurant range between captures without moving the
+            // device - same singleton the dashboard drives.
+            //
+            // This button lives in the APP BAR, outside the body's Consumer,
+            // so it needs its own Consumer: the mock's live state (`isActive`)
+            // and the fix its "walk 60 m" chips move FROM (`currentLocation`)
+            // change whenever a mock is set. Without listening they stayed
+            // frozen at their first-build values - the picker kept showing
+            // "Current fix" with no "Stop mock", and a second nudge moved
+            // from the ORIGINAL fix instead of the mocked one, so
+            // "North then South" never returned to the start.
+            if (Env.appEnv != 'prod' && _viewModel.mockGpsSupported)
+              Consumer<FoodRecognitionViewModel>(
+                builder:
+                    (
+                      BuildContext context,
+                      FoodRecognitionViewModel viewModel,
+                      Widget? _,
+                    ) => MockGpsButton(
+                      isActive: viewModel.mockGpsActive,
+                      onSetMock: (double latitude, double longitude) =>
+                          viewModel.setMockGps(
+                            latitude: latitude,
+                            longitude: longitude,
+                          ),
+                      onStopMock: viewModel.stopMockGps,
+                      fromLocation: viewModel.currentLocation,
+                    ),
+              ),
+          ],
+        ),
         body: Consumer<FoodRecognitionViewModel>(
           builder:
               (
@@ -1186,11 +1362,18 @@ class _ImageCaptureConfirm extends StatelessWidget {
     required this.purpose,
     required this.extractedRestaurantName,
     required this.onConfirm,
+    this.blockMessage,
   });
 
   final FoodRecognitionPurpose purpose;
   final String? extractedRestaurantName;
-  final VoidCallback onConfirm;
+
+  /// Null when the capture cannot be confirmed - it was taken more than 50 m
+  /// from the first food, so it is not this restaurant's signboard/stall.
+  final VoidCallback? onConfirm;
+
+  /// Why the capture cannot be confirmed (see [onConfirm]).
+  final String? blockMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -1198,7 +1381,11 @@ class _ImageCaptureConfirm extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        const Icon(Icons.check_circle, color: AppColors.success, size: 40),
+        Icon(
+          blockMessage == null ? Icons.check_circle : Icons.location_off,
+          color: blockMessage == null ? AppColors.success : AppColors.warning,
+          size: 40,
+        ),
         const SizedBox(height: AppSpacing.md),
         Text(
           isSignboard ? 'Signboard captured' : 'Stall image captured',
@@ -1212,8 +1399,23 @@ class _ImageCaptureConfirm extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
         ],
+        if (blockMessage != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            blockMessage!,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.bannerCautionText,
+              fontWeight: FontWeight.w600,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
         const SizedBox(height: AppSpacing.lg),
-        ElevatedButton(onPressed: onConfirm, child: const Text('Confirm')),
+        // When Confirm is withheld the block message above is the whole
+        // story (reason + action) - no second line repeating "capture
+        // again". The popup's shared close (X) is how the tourist leaves.
+        if (onConfirm != null)
+          ElevatedButton(onPressed: onConfirm, child: const Text('Confirm')),
       ],
     );
   }

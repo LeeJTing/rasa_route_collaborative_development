@@ -152,21 +152,27 @@ class FoodRecognitionLogic {
     }
   }
 
-  /// The dietary tags to ATTRIBUTE to [food] for conflict warnings.
+  /// The dietary tags to ATTRIBUTE to [food] - they ride the result's
+  /// warnings AND are written onto the submitted
+  /// `landmark_item.dietary_restrictions`.
   ///
-  /// A CURATED catalogue row's own `food_dietary_restriction` links are the
-  /// authoritative source - Gemini's fresh tags are ignored (curated wins,
-  /// the same rule as the dish's name/details, and the same links every other
-  /// dietary-filtering feature uses). This is what keeps the warning exact:
-  /// the canonical names never substring-match one another, so only a
-  /// restriction the dish is genuinely linked to can ever be flagged. A
-  /// brand-new dish (id == 0) has no links yet, so Gemini's tags are the only
-  /// source there.
+  /// A FRESH observation of this very photo wins: when [observedTags] names
+  /// any restrictions they describe the VARIANT actually photographed
+  /// ("Cendol Jagung" may differ from the dictionary "Cendol"), so the item
+  /// records its own facts. With nothing observed, a curated row's own
+  /// `food_dietary_restriction` links are the authoritative fallback - the
+  /// same links every other dietary feature uses. A brand-new dish (id == 0)
+  /// has no links yet, so nothing is attributed when it observed nothing.
   Future<List<String>> _dietaryTagsFor(
     LocalFood food,
-    List<String> geminiTags,
+    List<String> observedTags,
   ) async {
-    if (food.id == 0) return geminiTags;
+    final List<String> observed = observedTags
+        .map((String tag) => tag.trim())
+        .where((String tag) => tag.isNotEmpty)
+        .toList(growable: false);
+    if (observed.isNotEmpty) return observed;
+    if (food.id == 0) return const <String>[];
     try {
       final List<DietaryRestriction> linked = await foodRepository
           .foodDietaryRestrictions(food.id);
@@ -174,8 +180,9 @@ class FoodRecognitionLogic {
           .map((DietaryRestriction r) => r.name)
           .toList(growable: false);
     } catch (_) {
-      // A read failure must not rob the warning - fall back to Gemini's tags.
-      return geminiTags;
+      // A read failure must not rob the item - the observation was empty,
+      // so there is nothing to fall back to.
+      return const <String>[];
     }
   }
 
@@ -195,10 +202,26 @@ class FoodRecognitionLogic {
   /// Routed through the facade's flat `getFoods()` (never
   /// `facade.knowledge.xxx`) and [FoodNameMatcher], so "nasi lemak ayam"
   /// resolves to the curated "nasi lemak" and its authoritative details.
-  Future<LocalFood?> _matchCatalogue(String name) async {
+  Future<LocalFood?> _matchCatalogue(String name) async =>
+      (await _matchCatalogueDetailed(name))?.food;
+
+  /// [_matchCatalogue], with the TIER the match came from - an extension
+  /// match ([FoodMatchTier.prefix]/[FoodMatchTier.contained]) is an unlisted
+  /// VARIANT of the row and is recorded as the landmark item's variant, while
+  /// a same-dish match ([FoodMatchTier.exact]/[FoodMatchTier.sameWords])
+  /// records none (see [_variantFor]).
+  Future<FoodNameMatch?> _matchCatalogueDetailed(String name) async {
     final List<LocalFood> catalogue = await foodRepository.getFoods();
-    return FoodNameMatcher.bestMatch(name, catalogue);
+    return FoodNameMatcher.bestMatchDetailed(name, catalogue);
   }
+
+  /// Whether [match] means the name EXTENDS a curated dish into an unlisted
+  /// variant ("cendol jagung" over "cendol") rather than being the dish
+  /// itself.
+  static bool _isExtensionMatch(FoodNameMatch? match) =>
+      match != null &&
+      (match.tier == FoodMatchTier.prefix ||
+          match.tier == FoodMatchTier.contained);
 
   /// Like [_matchCatalogue], but ALSO tries the Gemini-reported [aliases] of
   /// the dish. The primary [name] goes through the usual tiered matcher; an
@@ -206,17 +229,24 @@ class FoodRecognitionLogic {
   /// food_name or synonym (see [_exactSingleOwner]) - never a fuzzy
   /// prefix/containment match, so a loosely-translated alias cannot catch a
   /// similar-sounding dish, and an alias that several rows claim is ignored
-  /// as ambiguous rather than silently picking the first row.
-  Future<LocalFood?> _matchCatalogueWithAliases(
+  /// as ambiguous rather than silently picking the first row. Returns the
+  /// match WITH its tier (see [FoodNameMatch]); an alias hit is always a
+  /// same-dish match.
+  Future<FoodNameMatch?> _matchCatalogueWithAliases(
     String name,
     List<String> aliases,
   ) async {
     final List<LocalFood> catalogue = await foodRepository.getFoods();
-    final LocalFood? primary = FoodNameMatcher.bestMatch(name, catalogue);
+    final FoodNameMatch? primary = FoodNameMatcher.bestMatchDetailed(
+      name,
+      catalogue,
+    );
     if (primary != null) return primary;
     for (final String alias in aliases) {
       final LocalFood? hit = _exactSingleOwner(alias, catalogue);
-      if (hit != null) return hit;
+      // An alias pointing at a single curated row IS that dish (Gemini
+      // merely translated the same dish's name), never an unlisted variant.
+      if (hit != null) return (food: hit, tier: FoodMatchTier.exact);
     }
     return null;
   }
@@ -245,6 +275,92 @@ class FoodRecognitionLogic {
     return owner;
   }
 
+  /// Classic Western dishes that must NEVER be offered as a landmark, no
+  /// matter what the model says: they are ordinary kopitiam/mamak menu items
+  /// but have no Malaysian identity of their own (see the analysis prompts'
+  /// class (c) examples). A deterministic FLOOR under the model's judgement -
+  /// "French Toast" kept coming back as local food and was offered as an
+  /// addable landmark (user-reported). Model variance, a loose judgement or
+  /// a stray catalogue row can no longer flip these.
+  static const List<String> _classicForeignDishes = <String>[
+    'french toast',
+    'pancakes',
+    'waffles',
+  ];
+
+  /// [modelSaysLocal] wins unless [dishName] is one of
+  /// [_classicForeignDishes] - word-boundary containment, so "French Toast"
+  /// and a decorated "French Toast Set" both trip the floor while kaya toast
+  /// / roti bakar are untouched. An empty/unknown name keeps the model's
+  /// judgement.
+  static bool _localFoodFloor(String dishName, bool modelSaysLocal) {
+    if (!modelSaysLocal) return false;
+    final String needle = FoodNameMatcher.normalize(dishName);
+    if (needle.isEmpty) return true;
+    for (final String dish in _classicForeignDishes) {
+      if (needle == dish ||
+          needle.startsWith('$dish ') ||
+          needle.contains(' $dish')) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// The `variant` to record on the submitted `landmark_item` for [food],
+  /// given the name the recognition actually observed ([observedName]).
+  ///
+  /// A variant exists ONLY when [extension] is true - the observed name
+  /// EXTENDS a curated dish without being one of its names ("cendol jagung"
+  /// over "Cendol"): the item then stores dish 'Cendol' + variant 'Cendol
+  /// Jagung' so the variant's own ingredients/dietary can differ from the
+  /// dictionary row's.
+  ///
+  /// A same-dish match records NO variant, even when the spelling differs -
+  /// "nasi kukus ayam goreng" is a curated synonym of row 19 and "cendol
+  /// nyonya" is "Nyonya Cendol" written back-to-front: the item simply uses
+  /// the curated dish.
+  ///
+  /// A BRAND-NEW dish (id == 0) has no dictionary row to extend - its dish
+  /// name IS the observed name - except Gemini's own reported variant, which
+  /// `RecognitionRepository` carries as the single synonym.
+  static String _variantFor(
+    LocalFood food,
+    String observedName, {
+    required bool extension,
+  }) {
+    if (extension) return observedName.trim();
+    if (food.id != 0) return '';
+    return food.synonyms.isNotEmpty ? food.synonyms.first : '';
+  }
+
+  /// The ingredients text to record for a dish whose photo was freshly
+  /// ANALYSED: the [dictionary] row's own ingredients INHERITED, plus
+  /// whatever Gemini observed beyond them - so a variant ("Cendol Jagung")
+  /// keeps the dictionary dish's facts AND gains what makes it that variant
+  /// ("..., sweet corn"). Entries are compared trimmed + case-insensitively,
+  /// the dictionary order comes first, and an observation that names nothing
+  /// new leaves the dictionary text untouched. When the dictionary has
+  /// nothing (a brand-new dish) the observation IS the text; when the
+  /// observation has nothing the dictionary's text stands.
+  static String _observedIngredients(LocalFood dictionary, String observed) {
+    final String base = dictionary.ingredients.trim();
+    final String seen = observed.trim();
+    if (seen.isEmpty) return base;
+    if (base.isEmpty) return seen;
+    final List<String> merged = <String>[];
+    final Set<String> seenKeys = <String>{};
+    for (final String ingredient in <String>[
+      ...base.split(','),
+      ...seen.split(','),
+    ]) {
+      final String name = ingredient.trim();
+      if (name.isEmpty || !seenKeys.add(name.toLowerCase())) continue;
+      merged.add(name);
+    }
+    return merged.join(', ');
+  }
+
   /// Gemini's full analysis is authoritative on WHICH dish a photo shows, but
   /// it must never overwrite an existing `local_food` record: if [fromGemini]
   /// is already curated, the stored row - its authoritative details AND its
@@ -255,12 +371,19 @@ class FoodRecognitionLogic {
   /// row is treated as that match too (see [_matchCatalogueWithAliases]), so
   /// "bubur ca ca" with the alias "Bubur Cha Cha" resolves to the curated
   /// row instead of creating a duplicate.
-  Future<LocalFood> _preferCuratedOverGemini(LocalFood fromGemini) async {
-    final LocalFood? match = await _matchCatalogueWithAliases(
+  ///
+  /// Returns the food AND whether the match was an EXTENSION - an unlisted
+  /// variant of the row - which decides the item's variant text (see
+  /// [_variantFor]).
+  Future<({LocalFood food, bool isExtension})> _preferCuratedOverGemini(
+    LocalFood fromGemini,
+  ) async {
+    final FoodNameMatch? match = await _matchCatalogueWithAliases(
       fromGemini.name,
       fromGemini.aliases,
     );
-    return match ?? fromGemini;
+    if (match == null) return (food: fromGemini, isExtension: false);
+    return (food: match.food, isExtension: _isExtensionMatch(match));
   }
 
   /// Recognises the food in [imageBytes] (REQ106_2, UC500 two-phase flow):
@@ -320,19 +443,35 @@ class FoodRecognitionLogic {
       );
       // The full analysis decides WHICH dish this is - but if that dish is
       // already curated, the stored row (data + id) wins over Gemini's copy.
-      final LocalFood food = await _preferCuratedOverGemini(analysis.food);
-      // A curated dish's own `food_dietary_restriction` links are the
-      // authoritative tags - Gemini's free-text tags are ignored for it (they
-      // often list restrictions the dish is FREE of, which would show the
-      // tourist irrelevant warnings).
+      final ({LocalFood food, bool isExtension}) curated =
+          await _preferCuratedOverGemini(analysis.food);
+      final LocalFood food = curated.food;
+      // Hybrid storage: the dictionary row keeps its canonical fields,
+      // while the ITEM records the variant's own observed facts - the
+      // observed ingredients whenever the analysis named any.
+      final LocalFood itemFood = food.id == 0
+          ? food
+          : food.copyWith(
+              ingredients: _observedIngredients(
+                food,
+                analysis.food.ingredients,
+              ),
+            );
+      // Observed dietary tags when the analysis saw any (the variant's own
+      // restrictions), else the curated row's authoritative links.
       final List<String> dietaryRestrictions = await _dietaryTagsFor(
-        food,
+        itemFood,
         analysis.dietaryRestrictions,
       );
       return FoodRecognitionResult(
-        isLocalFood: analysis.isLocal,
+        isLocalFood: _localFoodFloor(food.name, analysis.isLocal),
         fitsCatalogueCategory: fitsCatalogueCategory(analysis.foodType),
-        candidates: <LocalFood>[food],
+        candidates: <LocalFood>[itemFood],
+        variant: _variantFor(
+          food,
+          analysis.food.name,
+          extension: curated.isExtension,
+        ),
         priceMin: analysis.priceMin,
         priceMax: analysis.priceMax,
         confidence: analysis.confidence,
@@ -360,8 +499,14 @@ class FoodRecognitionLogic {
     }
 
     final List<LocalFood> result;
-    double priceMin = 0;
-    double priceMax = 0;
+    // Gemini's suggested range from the QUICK call rides every path where
+    // the full analysis does NOT run (the catalogue fast path and the
+    // candidate list) - the quick prompt asks for it too, so a dish settled
+    // without the deeper call still carries a range for the form's price
+    // warning. The full analysis overrides it with its own range when it
+    // does run.
+    double priceMin = quick.priceMin;
+    double priceMax = quick.priceMax;
     // Confidence of whatever produced the single result - the quick call for
     // a catalogue hit, the full analysis otherwise. Low values are surfaced
     // in the UI so a shaky result is never presented as certain.
@@ -370,6 +515,11 @@ class FoodRecognitionLogic {
     String imageQuality = quick.imageQuality;
     List<String> imageQualityIssues = quick.imageQualityIssues;
     List<String> dietaryRestrictions = const <String>[];
+    // The single result's VARIANT name - the observed/recognised name when
+    // it EXTENDS the dictionary dish into an unlisted variant (see
+    // [_variantFor]). Empty for a multi-candidate outcome (the picked
+    // candidate resolves separately) and for same-dish matches.
+    String variant = '';
     // The catalogue dish-type classification - refreshed to the full
     // analysis when one runs (it is the authoritative call).
     String foodType = quick.foodType;
@@ -382,14 +532,25 @@ class FoodRecognitionLogic {
       // must never be matched to a catalogue record and shown as certain.
       // Anything less is re-judged by the full analysis, which is the
       // deeper, authoritative call.
-      final LocalFood? existing = await _matchCatalogue(quick.dish);
+      final FoodNameMatch? quickMatch = await _matchCatalogueDetailed(
+        quick.dish,
+      );
+      final LocalFood? existing = quickMatch?.food;
       if (existing != null &&
           quick.confidence >= _highConfidence &&
           !isPoorImageQuality(quick.imageQuality)) {
         result = <LocalFood>[existing];
-        // The fast path skips the full analysis, so the dish's tags must be
-        // read from the curated row's own `food_dietary_restriction` links -
-        // otherwise a catalogue dish would never warn at all here.
+        // The fast path skips the full analysis: the only observation is the
+        // quick call's own name - recorded as the variant when it EXTENDS
+        // the dictionary dish, never when it simply IS the dish.
+        variant = _variantFor(
+          existing,
+          quick.dish,
+          extension: _isExtensionMatch(quickMatch),
+        );
+        // No fresh observation => the dish's tags are read from the curated
+        // row's own `food_dietary_restriction` links - otherwise a
+        // catalogue dish would never warn at all here.
         dietaryRestrictions = await _dietaryTagsFor(existing, const <String>[]);
       } else {
         final analysis = await discoveryRepository.recognition.analyzeFoodFull(
@@ -397,15 +558,33 @@ class FoodRecognitionLogic {
         );
         // Same rule as the not-local branch: an existing curated row always
         // beats Gemini's fresh copy - never overwrite `local_food` data.
-        result = <LocalFood>[await _preferCuratedOverGemini(analysis.food)];
+        // The ITEM then records the variant's own observed ingredients.
+        final ({LocalFood food, bool isExtension}) curated =
+            await _preferCuratedOverGemini(analysis.food);
+        final LocalFood food = curated.food;
+        result = <LocalFood>[
+          food.id == 0
+              ? food
+              : food.copyWith(
+                  ingredients: _observedIngredients(
+                    food,
+                    analysis.food.ingredients,
+                  ),
+                ),
+        ];
+        variant = _variantFor(
+          food,
+          analysis.food.name,
+          extension: curated.isExtension,
+        );
         priceMin = analysis.priceMin;
         priceMax = analysis.priceMax;
         confidence = analysis.confidence;
         localFoodConfidence = analysis.localConfidence;
         imageQuality = analysis.imageQuality;
         imageQualityIssues = analysis.imageQualityIssues;
-        // Curated row => its own links are the tags (never Gemini's); a
-        // brand-new dish keeps Gemini's tags.
+        // The analysis observed this photo, so its tags ride the item; the
+        // dictionary row's links only step in when it observed none.
         dietaryRestrictions = await _dietaryTagsFor(
           result.first,
           analysis.dietaryRestrictions,
@@ -415,9 +594,17 @@ class FoodRecognitionLogic {
     }
 
     return FoodRecognitionResult(
-      isLocalFood: true,
+      // The classic-foreign floor still applies: "French Toast" matching a
+      // catalogue row must never become addable as local food.
+      isLocalFood: _localFoodFloor(
+        result.isEmpty ? '' : result.first.name,
+        true,
+      ),
       fitsCatalogueCategory: fitsCatalogueCategory(foodType),
       candidates: result,
+      // The single result's variant (empty for a picker outcome / a
+      // same-dish match) - carried onto the submitted `landmark_item`.
+      variant: variant,
       priceMin: priceMin,
       priceMax: priceMax,
       confidence: confidence,
@@ -446,6 +633,7 @@ class FoodRecognitionLogic {
   Future<
     ({
       LocalFood food,
+      String variant,
       double priceMin,
       double priceMax,
       bool nameMatchesPhoto,
@@ -463,6 +651,7 @@ class FoodRecognitionLogic {
       trimmed,
     );
     LocalFood food = analysis.food;
+    String variant = '';
     double priceMin = analysis.priceMin;
     double priceMax = analysis.priceMax;
     bool isLocalFood = analysis.isLocal;
@@ -478,22 +667,49 @@ class FoodRecognitionLogic {
     // trusted when the photo really shows the typed name - on a MISMATCH they
     // describe the OBSERVED dish, which must never relabel what the tourist
     // typed (see the mismatch branch below).
-    final LocalFood? match = await _matchCatalogueWithAliases(
+    final FoodNameMatch? match = await _matchCatalogueWithAliases(
       trimmed,
       analysis.nameMatchesPhoto ? analysis.food.aliases : const <String>[],
     );
     if (match != null) {
-      food = match;
-      priceMin = 0;
-      priceMax = 0;
+      // The item records the variant the tourist typed/confirmed ONLY when
+      // it EXTENDS the dictionary dish ("Cendol Jagung" -> "Cendol") - a
+      // synonym or a word-order spelling of the dish itself records none.
+      // The observed ingredients only ride along when the photo really
+      // showed the typed dish - a mismatch confirmation carries the
+      // dictionary row untouched.
+      variant = _variantFor(
+        match.food,
+        trimmed,
+        extension: _isExtensionMatch(match),
+      );
+      food = analysis.nameMatchesPhoto
+          ? match.food.copyWith(
+              ingredients: _observedIngredients(
+                match.food,
+                analysis.food.ingredients,
+              ),
+            )
+          : match.food;
+      // Gemini's suggested range from the VERIFICATION describes the typed
+      // dish as it is sold - keep it, so the form can show it under the
+      // price field. On a mismatch the reply describes the OBSERVED dish
+      // instead, so nothing rides along there.
+      priceMin = analysis.nameMatchesPhoto ? analysis.priceMin : 0;
+      priceMax = analysis.nameMatchesPhoto ? analysis.priceMax : 0;
       // A curated row IS Malaysian local food and a valid catalogue dish
       // type by definition - the observed photo's localness/category is
       // irrelevant once the tourist commits to a curated dish.
       isLocalFood = true;
       fits = true;
-      // Curated row => its own links are the authoritative tags (Gemini's
-      // are ignored - see [_dietaryTagsFor]).
-      dietaryRestrictions = await _dietaryTagsFor(match, const <String>[]);
+      // Observed tags only when the photo really showed the typed dish;
+      // otherwise the curated row's own links.
+      dietaryRestrictions = await _dietaryTagsFor(
+        food,
+        analysis.nameMatchesPhoto
+            ? analysis.dietaryRestrictions
+            : const <String>[],
+      );
     } else if (!analysis.nameMatchesPhoto) {
       // Gemini could not verify the typed name AND there is no curated row
       // for it. Its response describes the dish it actually SAW (the
@@ -509,11 +725,14 @@ class FoodRecognitionLogic {
     }
     return (
       food: food,
+      variant: variant,
       priceMin: priceMin,
       priceMax: priceMax,
       nameMatchesPhoto: analysis.nameMatchesPhoto,
       matchConfidence: analysis.matchConfidence,
-      isLocalFood: isLocalFood,
+      // The classic-foreign floor holds here too - a typed Western dish
+      // cannot become local by being verified.
+      isLocalFood: _localFoodFloor(food.name, isLocalFood),
       fitsCatalogueCategory: fits,
       observedFood: analysis.observedFood,
       dietaryRestrictions: dietaryRestrictions,
@@ -527,6 +746,7 @@ class FoodRecognitionLogic {
   Future<
     ({
       LocalFood food,
+      String variant,
       double priceMin,
       double priceMax,
       bool fitsCatalogueCategory,
@@ -535,16 +755,24 @@ class FoodRecognitionLogic {
   >
   enrichCandidate(List<int> imageBytes, String name) async {
     final String trimmed = name.trim();
-    final LocalFood? match = await _matchCatalogue(trimmed);
+    final FoodNameMatch? match = await _matchCatalogueDetailed(trimmed);
     if (match != null) {
       return (
-        food: match,
+        food: match.food,
+        variant: _variantFor(
+          match.food,
+          trimmed,
+          extension: _isExtensionMatch(match),
+        ),
         priceMin: 0.0,
         priceMax: 0.0,
         fitsCatalogueCategory: true,
         // Curated row => its own links are the authoritative tags (Gemini's
         // are ignored - see [_dietaryTagsFor]).
-        dietaryRestrictions: await _dietaryTagsFor(match, const <String>[]),
+        dietaryRestrictions: await _dietaryTagsFor(
+          match.food,
+          const <String>[],
+        ),
       );
     }
     final analysis = await discoveryRepository.recognition.analyzeFoodByName(
@@ -555,23 +783,41 @@ class FoodRecognitionLogic {
     // at one exactly (e.g. picking "bubur ca ca" whose alias "Bubur Cha Cha"
     // is curated), which keeps the picker linked instead of creating a
     // duplicate.
-    final LocalFood? curated = analysis.food.aliases.isEmpty
+    final FoodNameMatch? curated = analysis.food.aliases.isEmpty
         ? null
         : await _matchCatalogueWithAliases(
             analysis.food.name,
             analysis.food.aliases,
           );
+    // The analysis observed this photo: when it resolves to a curated row,
+    // the item keeps the observed ingredients (the variant's own facts) and
+    // the variant name when the observed name EXTENDS the dictionary dish.
+    final LocalFood resolved = curated == null
+        ? analysis.food
+        : curated.food.copyWith(
+            ingredients: _observedIngredients(
+              curated.food,
+              analysis.food.ingredients,
+            ),
+          );
     return (
-      food: curated ?? analysis.food,
-      priceMin: curated != null ? 0.0 : analysis.priceMin,
-      priceMax: curated != null ? 0.0 : analysis.priceMax,
+      food: resolved,
+      variant: _variantFor(
+        curated?.food ?? analysis.food,
+        analysis.food.name,
+        extension: _isExtensionMatch(curated),
+      ),
+      // Gemini analysed this photo of the picked dish, so its suggested
+      // range applies whether or not it resolved to a curated row.
+      priceMin: analysis.priceMin,
+      priceMax: analysis.priceMax,
       fitsCatalogueCategory: curated != null
           ? true
           : fitsCatalogueCategory(analysis.foodType),
-      // Curated row => its own links are the authoritative tags (Gemini's are
-      // ignored - see [_dietaryTagsFor]).
+      // The observation's tags ride the item when it resolved to a curated
+      // row; an unmatched dish simply keeps them.
       dietaryRestrictions: curated != null
-          ? await _dietaryTagsFor(curated, const <String>[])
+          ? await _dietaryTagsFor(resolved, analysis.dietaryRestrictions)
           : analysis.dietaryRestrictions,
     );
   }
@@ -602,9 +848,10 @@ class FoodRecognitionLogic {
   ///   * dish-name confidence at least [_catalogueInsertConfidence] - the
   ///     same bar the app uses before trusting a quick recognition enough to
   ///     shortcut to a curated record (0.6 is only "warn the tourist");
-  ///   * the matcher finds NO existing canonical entry (exact / whole-word
-  ///     prefix / containment) - so "nasi lemak ayam" never becomes a new
-  ///     row when "nasi lemak" already exists; it just uses the canonical one.
+  ///   * the matcher finds NO existing canonical entry (exact / same words
+  ///     reordered / whole-word prefix / containment) - so "nasi lemak ayam"
+  ///     never becomes a new row when "nasi lemak" already exists; it just
+  ///     uses the canonical one.
   ///
   /// Best-effort: the caller has already saved the landmark, so a catalogue
   /// write failure must not fail the submission.
@@ -682,10 +929,20 @@ class FoodRecognitionLogic {
         if (verification.verdict != OriginVerdict.accept) continue;
       }
 
-      final LocalFood? saved = await foodRepository.insertFood(food);
+      final LocalFood? saved = await foodRepository.insertFood(
+        // Gemini's aliases are the row's alternate names: they are genuine
+        // other names/spellings of the SAME dish, which is exactly what
+        // `local_food.synonyms` holds for curated rows (and what the matcher
+        // reads back on future recognitions). The transient variant stays
+        // where it is when Gemini supplied no aliases.
+        food.aliases.isEmpty ? food : food.copyWith(synonyms: food.aliases),
+      );
       if (saved != null) {
         working.add(saved);
         inserted[food.name] = saved.id;
+        // The tourist's own photo of the dish becomes the catalogue row's
+        // photo, so a new dish is never listed without an image.
+        await _attachDishPhoto(saved.id, entry);
         await _linkAssociations(
           saved.id,
           entry,
@@ -695,6 +952,27 @@ class FoodRecognitionLogic {
       }
     }
     return inserted;
+  }
+
+  /// Attaches the submitted dish photo to a brand-new catalogue row
+  /// (`local_food_image`), so the dish does not sit in the catalogue with no
+  /// image. The photo was already uploaded for the landmark item
+  /// (`landmark-images` bucket) - its public URL is stored as-is and resolves
+  /// correctly (`APIManager.resolveImageUrl` passes full URLs through). A
+  /// food without a photo (e.g. a name-typed dish) simply gets none.
+  /// Best-effort: the landmark is already saved, so a failed photo link must
+  /// never fail the submission.
+  Future<void> _attachDishPhoto(int localFoodId, FoodSubmission entry) async {
+    final String? imageUrl = entry.imageUrl;
+    if (imageUrl == null || imageUrl.trim().isEmpty) return;
+    try {
+      await foodRepository.addFoodImage(
+        localFoodId: localFoodId,
+        imageName: imageUrl,
+      );
+    } catch (_) {
+      // Ignored - see doc above.
+    }
   }
 
   /// Writes the `local_food_preference` (tastes + category) and

@@ -12,6 +12,7 @@ import '../../domain_model/map.dart';
 import '../../domain_model/region.dart';
 import '../../view_models/dashboard_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/mock_gps_button.dart';
 import 'widgets/discovery_layer_bar.dart';
 import 'widgets/map_controls.dart';
 import 'widgets/map_filter_panel.dart';
@@ -287,7 +288,11 @@ class _DashboardViewState extends State<DashboardView> {
               if (Env.appEnv != 'prod' &&
                   viewModel.mockGpsSupported) ...<Widget>[
                 const SizedBox(height: AppSpacing.sm),
-                _MockGpsButton(viewModel: viewModel),
+                MockGpsButton(
+                  isActive: viewModel.mockGpsActive,
+                  onSetMock: viewModel.setMockGps,
+                  onStopMock: viewModel.stopMockGps,
+                ),
               ],
             ],
           ),
@@ -736,211 +741,6 @@ class _CurrentLocationDot extends StatelessWidget {
       ],
     ),
   );
-}
-
-/// Presenter tool (dev builds only, Android only): opens a picker of preset
-/// Malaysian spots - or a custom lat/lon typed by the tourist - and teleports
-/// the OS-level GPS there, so the dashboard can be demoed "at" that location
-/// without moving the device. Wired through
-/// `DashboardViewModel` to `MockLocationService` (the vendored
-/// `fluttermocklocation` plugin); requires Android Developer Options >
-/// "Select mock location app" to point at this app.
-///
-/// A toggle: while a mock is live the button turns into "Stop mock", which
-/// clears the OS test provider and lets the real GPS drive the map again.
-class _MockGpsButton extends StatelessWidget {
-  const _MockGpsButton({required this.viewModel});
-
-  final DashboardViewModel viewModel;
-
-  static const List<({String label, double lat, double lon})> _presets =
-      <({String label, double lat, double lon})>[
-        (label: 'KL', lat: 3.1390, lon: 101.6869),
-        (label: 'Penang', lat: 5.4141, lon: 100.3288),
-        (label: 'Kota Kinabalu', lat: 5.9804, lon: 116.0735),
-        (label: 'Kuching', lat: 1.5535, lon: 110.3593),
-        (label: 'Outside MY', lat: 1.3521, lon: 103.8198),
-        (label: 'At sea', lat: 3.0, lon: 100.2),
-      ];
-
-  @override
-  Widget build(BuildContext context) {
-    final bool active = viewModel.mockGpsActive;
-    return IconButton.filledTonal(
-      tooltip: active ? 'Stop GPS mock (dev)' : 'Mock GPS (dev)',
-      style: active
-          ? IconButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: AppColors.onPrimary,
-            )
-          : null,
-      icon: Icon(active ? Icons.location_off : Icons.my_location),
-      onPressed: active ? () => _stopMock(context) : () => _openPicker(context),
-    );
-  }
-
-  Future<void> _stopMock(BuildContext context) async {
-    await viewModel.stopMockGps();
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('GPS mock stopped (dev)')));
-  }
-
-  Future<void> _openPicker(BuildContext context) async {
-    final _MockGpsChoice? choice = await showModalBottomSheet<_MockGpsChoice>(
-      context: context,
-      builder: (BuildContext sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: <Widget>[
-              for (final ({String label, double lat, double lon}) p in _presets)
-                ActionChip(
-                  label: Text(p.label),
-                  onPressed: () => Navigator.pop(
-                    sheetContext,
-                    _MockGpsChoice.preset(p.lat, p.lon),
-                  ),
-                ),
-              ActionChip(
-                avatar: const Icon(Icons.edit_location_alt_outlined, size: 18),
-                label: const Text('Custom…'),
-                onPressed: () =>
-                    Navigator.pop(sheetContext, const _MockGpsChoice.custom()),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (choice == null || !context.mounted) return;
-
-    // "Custom…" closes the sheet and opens the lat/lon dialog in its place;
-    // a preset is used as-is.
-    final ({double lat, double lon})? custom = choice.isCustom
-        ? await showDialog<({double lat, double lon})>(
-            context: context,
-            builder: (_) => const _CustomCoordinatesDialog(),
-          )
-        : (lat: choice.latitude, lon: choice.longitude);
-    if (custom == null || !context.mounted) return;
-
-    final String? error = await viewModel.setMockGps(custom.lat, custom.lon);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(error ?? 'GPS mocked (dev)')));
-  }
-}
-
-/// What the mock-GPS picker sheet hands back: a preset spot, or a request to
-/// type a custom coordinate (the sheet closes and a small dialog opens).
-class _MockGpsChoice {
-  const _MockGpsChoice.preset(this.latitude, this.longitude) : isCustom = false;
-
-  const _MockGpsChoice.custom() : latitude = 0, longitude = 0, isCustom = true;
-
-  final double latitude;
-  final double longitude;
-  final bool isCustom;
-}
-
-/// The custom-coordinate dialog behind the picker's "Custom…" chip - the only
-/// way the presenter tool can jump to a spot the presets don't cover.
-/// Validates ranges (latitude -90..90, longitude -180..180) before returning
-/// the typed pair.
-class _CustomCoordinatesDialog extends StatefulWidget {
-  const _CustomCoordinatesDialog();
-
-  @override
-  State<_CustomCoordinatesDialog> createState() =>
-      _CustomCoordinatesDialogState();
-}
-
-class _CustomCoordinatesDialogState extends State<_CustomCoordinatesDialog> {
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _latitudeController = TextEditingController();
-  final TextEditingController _longitudeController = TextEditingController();
-
-  @override
-  void dispose() {
-    _latitudeController.dispose();
-    _longitudeController.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    Navigator.pop(context, (
-      lat: double.parse(_latitudeController.text.trim()),
-      lon: double.parse(_longitudeController.text.trim()),
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Custom GPS coordinates'),
-      content: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            TextFormField(
-              controller: _latitudeController,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(
-                signed: true,
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Latitude',
-                hintText: 'e.g. 3.1390',
-              ),
-              validator: (String? value) {
-                final double? lat = double.tryParse((value ?? '').trim());
-                if (lat == null || lat < -90 || lat > 90) {
-                  return 'Latitude must be a number between -90 and 90.';
-                }
-                return null;
-              },
-              onFieldSubmitted: (_) => _submit(),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextFormField(
-              controller: _longitudeController,
-              keyboardType: const TextInputType.numberWithOptions(
-                signed: true,
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Longitude',
-                hintText: 'e.g. 101.6869',
-              ),
-              validator: (String? value) {
-                final double? lon = double.tryParse((value ?? '').trim());
-                if (lon == null || lon < -180 || lon > 180) {
-                  return 'Longitude must be a number between -180 and 180.';
-                }
-                return null;
-              },
-              onFieldSubmitted: (_) => _submit(),
-            ),
-          ],
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('Mock GPS')),
-      ],
-    );
-  }
 }
 
 /// M3, and the two "showing the whole country instead" explanations.
