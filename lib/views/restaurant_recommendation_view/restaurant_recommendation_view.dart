@@ -48,7 +48,10 @@ class _RestaurantRecommendationViewState
         appBar: AppTopBar(
           title: 'Quick Mode',
           showBackButton: true,
-          onProfileTap: () => Navigator.pushNamed(context, AppRoutes.profile),
+          onProfileTap: () async {
+            await Navigator.pushNamed(context, AppRoutes.profile);
+            await _viewModel.loadNearbyRestaurants();
+          },
         ),
         body: Consumer<RestaurantRecommendationViewModel>(
           builder:
