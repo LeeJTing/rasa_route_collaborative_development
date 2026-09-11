@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/dietary_restriction.dart';
 import 'package:rasa_route_collaborative_development/domain_model/food_distribution.dart';
+import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant_item.dart';
 import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
@@ -153,6 +154,60 @@ void main() {
         );
       },
     );
+
+    test('averages the landmark dish prices for the headline price', () async {
+      final _FakeDiscoveryRepositoryFacade repository =
+          _FakeDiscoveryRepositoryFacade(
+            const <Restaurant>[],
+            occurrences: <FoodOccurrence>[
+              _landmarkOccurrence(
+                1,
+                101,
+                'Chicken Rice',
+                distanceKm: 0.5,
+                itemPrice: 10,
+                itemImageUrl: 'https://cdn.example.com/chicken-rice.jpg',
+                itemIngredients: 'Rice, chicken, chili sauce',
+              ),
+              _landmarkOccurrence(
+                1,
+                102,
+                'Nasi Lemak',
+                distanceKm: 0.5,
+                itemPrice: 20,
+              ),
+              // No price recorded - left out of the average.
+              _landmarkOccurrence(1, 103, 'Cendol', distanceKm: 0.5),
+            ],
+          );
+      final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+        repository,
+      );
+
+      final List<SubmittedLandmarkRecommendation> results = await logic
+          .nearbyLandmarksWithAutomaticExpansion(location: _testLocation);
+
+      // The headline price is the AVERAGE of the known dish prices, not one
+      // dish's own price.
+      expect(results.single.price, 15);
+      expect(
+        results.single.dishes.map((SubmittedLandmarkDish dish) => dish.name),
+        orderedEquals(<String>['Chicken Rice', 'Nasi Lemak', 'Cendol']),
+      );
+      expect(results.single.dishes.first.price, 10);
+      expect(
+        results.single.dishes.first.imageUrl,
+        'https://cdn.example.com/chicken-rice.jpg',
+      );
+      expect(results.single.dishes.last.price, isNull);
+      // The dish's ingredients ride along for the expanded row's gray line -
+      // ingredients the record does not have stay null.
+      expect(
+        results.single.dishes.first.ingredients,
+        'Rice, chicken, chili sauce',
+      );
+      expect(results.single.dishes[1].ingredients, isNull);
+    });
 
     test(
       'hydrates only selected restaurants and preserves their menu',
@@ -390,6 +445,9 @@ FoodOccurrence _landmarkOccurrence(
   int localFoodId,
   String foodName, {
   required double distanceKm,
+  double? itemPrice,
+  String? itemImageUrl,
+  String? itemIngredients,
 }) => FoodOccurrence(
   sourceId: '$landmarkId',
   source: FoodOccurrenceSource.submittedLandmark,
@@ -399,6 +457,9 @@ FoodOccurrence _landmarkOccurrence(
   latitude: _testLocation.latitude + distanceKm / 111.2,
   longitude: _testLocation.longitude,
   placeCategory: 'Food stall',
+  itemPrice: itemPrice,
+  itemImageUrl: itemImageUrl,
+  itemIngredients: itemIngredients,
 );
 
 class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {

@@ -1,11 +1,13 @@
 import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/food_recognition_result.dart';
+import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import 'food_recognition_logic.dart';
+import 'landmark_draft_logic.dart';
 import 'landmark_submission_logic.dart';
 
 /// Contributing a food landmark - recognising the dish, capturing the
@@ -33,6 +35,7 @@ class LandmarkLogicFacade {
 
   late final FoodRecognitionLogic foodRecognition = createFoodRecognition();
   final LandmarkSubmissionLogic submission = LandmarkSubmissionLogic();
+  final LandmarkDraftLogic draftLogic = LandmarkDraftLogic();
 
   // ===========================================================================
   // Food recognition, re-exposed (from FoodRecognitionLogic)
@@ -44,6 +47,7 @@ class LandmarkLogicFacade {
   Future<
     ({
       LocalFood food,
+      String variant,
       double priceMin,
       double priceMax,
       bool nameMatchesPhoto,
@@ -60,6 +64,7 @@ class LandmarkLogicFacade {
   Future<
     ({
       LocalFood food,
+      String variant,
       double priceMin,
       double priceMax,
       bool fitsCatalogueCategory,
@@ -133,6 +138,12 @@ class LandmarkLogicFacade {
     double priceMax,
   ) => submission.suggestedPriceWarning(foodName, price, priceMin, priceMax);
 
+  /// The suggested range as an informational display line ("Suggested price:
+  /// RM 2.00 - RM 8.00") - see
+  /// [LandmarkSubmissionLogic.suggestedPriceRangeText].
+  String? suggestedPriceRangeText(double priceMin, double priceMax) =>
+      submission.suggestedPriceRangeText(priceMin, priceMax);
+
   bool isWithinAllowedRange(
     TouristLocation current,
     double adjustedLat,
@@ -145,6 +156,59 @@ class LandmarkLogicFacade {
   bool isOnLand(double latitude, double longitude) =>
       submission.isOnLand(latitude, longitude);
 
+  /// Shortest allowed single opening-hours row, in minutes - see
+  /// `LandmarkSubmissionLogic.minimumOperatingRowMinutes`.
+  int get minimumOpeningRowMinutes =>
+      LandmarkSubmissionLogic.minimumOperatingRowMinutes;
+
+  /// Haversine distance between two fixes, in metres.
+  double distanceMetres(TouristLocation a, TouristLocation b) =>
+      submission.distanceMetres(a, b);
+
+  /// Whether a later capture (additional food / signboard / stall) is close
+  /// enough to the first captured food to belong to the same restaurant -
+  /// see `LandmarkSubmissionLogic.isSameRestaurantCaptureRange`.
+  bool isSameRestaurantCaptureRange(
+    TouristLocation firstFoodLocation,
+    TouristLocation captured,
+  ) => submission.isSameRestaurantCaptureRange(firstFoodLocation, captured);
+
+  /// Message shown when a capture is too far from the first captured food.
+  String captureTooFarMessage(String capturedWhat) =>
+      submission.captureTooFarMessage(capturedWhat);
+
+  // ===========================================================================
+  // Incomplete landmark drafts, re-exposed (from LandmarkDraftLogic)
+  // ===========================================================================
+
+  /// How long a saved draft stays resumable after its last save (24 hours).
+  Duration get landmarkDraftLifetime => LandmarkDraftLogic.draftLifetime;
+
+  /// Saves (or updates, when [draft] already has an id) an incomplete
+  /// Add-New-Landmark form for the signed-in tourist. Returns the draft id,
+  /// or 0 when nobody is signed in.
+  Future<int> saveLandmarkDraft(LandmarkDraft draft) =>
+      draftLogic.saveDraft(draft);
+
+  /// The signed-in tourist's resumable drafts, newest first. Expired drafts
+  /// are deleted on the way (row + photos).
+  Future<List<LandmarkDraft>> pendingLandmarkDrafts() =>
+      draftLogic.pendingDrafts();
+
+  /// Discards one draft - the tourist chose not to continue it.
+  Future<void> discardLandmarkDraft(LandmarkDraft draft) =>
+      draftLogic.deleteDraft(draft);
+
+  /// Removes a draft row after a successful submission (its photos stay -
+  /// the submitted landmark stores them).
+  Future<void> clearSubmittedLandmarkDraft(int draftId) =>
+      draftLogic.clearSubmittedDraft(draftId);
+
+  /// Deletes one uploaded draft photo by its storage object name (best
+  /// effort) - used when a draft photo is replaced by a fresh capture.
+  Future<void> discardLandmarkDraftPhoto(String objectId) =>
+      draftLogic.deletePhoto(objectId);
+
   // Add-Landmark contact / address validation (flat passthroughs - the pure
   // rules live in `LandmarkSubmissionLogic`, reachability in the repository).
 
@@ -153,6 +217,20 @@ class LandmarkLogicFacade {
 
   bool isValidWebsiteFormat(String website) =>
       submission.isValidWebsiteFormat(website);
+
+  bool websiteContainsWhitespace(String website) =>
+      submission.websiteContainsWhitespace(website);
+
+  bool websiteContainsMultipleUrls(String website) =>
+      submission.websiteContainsMultipleUrls(website);
+
+  /// The user-readable verdict when [error] is the pre-submit origin
+  /// verifier's rejection thrown by [submitLandmark] ("...is not recognised
+  /// as a Malaysian local food"), else null. Lets the form re-surface that
+  /// deliberate message without importing logic classes or dumping raw
+  /// error text.
+  String? landmarkVerificationRejectionMessage(Object error) =>
+      error is LandmarkVerificationRejectedException ? error.message : null;
 
   bool isValidAddressText(String address) =>
       submission.isValidAddressText(address);
@@ -168,17 +246,92 @@ class LandmarkLogicFacade {
       LandmarkSubmissionLogic.maxRestaurantNameLength;
   int get maxPhoneLength => LandmarkSubmissionLogic.maxPhoneLength;
   int get maxWebsiteLength => LandmarkSubmissionLogic.maxWebsiteLength;
+
+  /// How close to the website cap the amber "stay under" warning starts
+  /// (2043 of 2048) - advisory only, it never blocks submission.
+  int get websiteWarnFromLength =>
+      LandmarkSubmissionLogic.websiteWarnFromLength;
   int get maxAddressLength => LandmarkSubmissionLogic.maxAddressLength;
 
-  /// Submit limits (name <= 30, website <= 75) - typing may go a little
-  /// further (warn zone) but submission cannot.
+  /// Manual food-name entry cap + amber warning rule, shared by BOTH
+  /// recognition-screen name fields (the single-result card's "type the
+  /// name" and the multiple-results fallback) - see
+  /// `LandmarkSubmissionLogic.foodNameLengthWarning`.
+  int get maxFoodNameLength => LandmarkSubmissionLogic.maxFoodNameLength;
+  String? foodNameLengthWarning(String foodName) =>
+      submission.foodNameLengthWarning(foodName);
+
+  /// Submit limits (name <= 30) - typing may go a little further (warn
+  /// zone) but submission cannot. The website has no submit limit: it is
+  /// capped at [maxWebsiteLength] and validated, nothing more.
   int get restaurantNameSubmitMaxLength =>
       LandmarkSubmissionLogic.restaurantNameSubmitMaxLength;
-  int get websiteSubmitMaxLength =>
-      LandmarkSubmissionLogic.websiteSubmitMaxLength;
 
   Future<bool> isWebsiteReachable(String url) =>
       submission.isWebsiteReachable(url);
+
+  // Dev GPS mock passthroughs (presenter tool). The SAME singleton the
+  // dashboard drives, so a mock set on one screen is live on the other.
+
+  bool get mockGpsSupported => submission.mockGpsSupported;
+  bool get mockGpsActive => submission.mockGpsActive;
+
+  Future<String?> setMockGps({
+    required double latitude,
+    required double longitude,
+  }) => submission.setMockGps(latitude: latitude, longitude: longitude);
+
+  Future<void> stopMockGps() => submission.stopMockGps();
+
+  /// The unfinished submission a capture should ask about CONTINUING -
+  /// matched by dish, variant AND spot (50 m). See
+  /// `LandmarkSubmissionLogic.matchingDraft`.
+  LandmarkDraft? matchingLandmarkDraft({
+    required List<LandmarkDraft> drafts,
+    required LocalFood food,
+    required TouristLocation captureLocation,
+    String variant = '',
+  }) => submission.matchingDraft(
+    drafts: drafts,
+    food: food,
+    captureLocation: captureLocation,
+    variant: variant,
+  );
+
+  /// Whether the candidate dish+variant is already on the form - see
+  /// [LandmarkSubmissionLogic.isSameDishAndVariant].
+  bool isSameDishAndVariant(
+    LocalFood existing,
+    String existingVariant,
+    LocalFood candidate,
+    String candidateVariant,
+  ) => submission.isSameDishAndVariant(
+    existing,
+    existingVariant,
+    candidate,
+    candidateVariant,
+  );
+
+  /// The name to report for a dish - its VARIANT when one was recorded, else
+  /// the dictionary name (see [LandmarkSubmissionLogic.dishLabel]).
+  String dishLabel(String dish, String variant) =>
+      LandmarkSubmissionLogic.dishLabel(dish, variant);
+
+  /// The saved incomplete submission for the same RESTAURANT (name + first
+  /// spot within 100 m) - the Add-Landmark form's Confirm action asks about
+  /// combining the two. See
+  /// [LandmarkSubmissionLogic.matchingDraftForRestaurant].
+  LandmarkDraft? matchingLandmarkDraftForRestaurant({
+    required List<LandmarkDraft> drafts,
+    required String restaurantName,
+    required TouristLocation formLocation,
+    int excludeDraftId = 0,
+  }) => submission.matchingDraftForRestaurant(
+    drafts: drafts,
+    restaurantName: restaurantName,
+    formLocation: formLocation,
+    excludeDraftId: excludeDraftId,
+  );
 
   Future<LandmarkSubmitResult> submitLandmark({
     required String restaurantName,
@@ -237,11 +390,17 @@ class LandmarkLogicFacade {
               newFoodIds,
             );
           }
-          // A brand-new landmark took every dish - nothing pre-existed.
+          // A brand-new landmark took every dish - nothing pre-existed. A
+          // dish is named by its VARIANT when one was captured (that is what
+          // the tourist added), else the dictionary name.
           return result.copyWith(
             addedDishNames: <String>[
               for (final FoodSubmission entry in foods)
-                if (!entry.isFake) entry.food.name,
+                if (!entry.isFake)
+                  LandmarkSubmissionLogic.dishLabel(
+                    entry.food.name,
+                    entry.variant,
+                  ),
             ],
           );
         case LandmarkSubmitOutcome.mergedIntoRestaurant:

@@ -4,6 +4,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../app/theme/app_text_styles.dart';
 import '../../../domain_model/local_food.dart';
+import 'manual_food_name_entry.dart';
 
 /// Reusable piece of `FoodRecognitionView`: the "Multiple Results Found"
 /// content shown inside the popup when Gemini is unsure which of a few likely
@@ -15,12 +16,14 @@ import '../../../domain_model/local_food.dart';
 /// inside it. Widgets in a `widgets/` folder are driven entirely by
 /// constructor parameters and callbacks - they never read a ViewModel
 /// themselves, and they style from the theme rather than raw values.
-class MultipleResultsCard extends StatefulWidget {
+class MultipleResultsCard extends StatelessWidget {
   const MultipleResultsCard({
     super.key,
     required this.results,
     required this.onSelect,
     this.onEnterName,
+    required this.foodNameMaxLength,
+    required this.foodNameWarning,
     this.isProcessing = false,
   });
 
@@ -36,27 +39,14 @@ class MultipleResultsCard extends StatefulWidget {
   /// field.
   final ValueChanged<String>? onEnterName;
 
+  /// Hard input cap for the manual name field (50) + its live amber warning
+  /// (from 45 characters) - the shared `LandmarkSubmissionLogic` rule,
+  /// surfaced by `FoodRecognitionViewModel` so BOTH entry fields obey it.
+  final int foodNameMaxLength;
+  final String? Function(String name) foodNameWarning;
+
   /// Disables the manual-entry field/button while a name is being resolved.
   final bool isProcessing;
-
-  @override
-  State<MultipleResultsCard> createState() => _MultipleResultsCardState();
-}
-
-class _MultipleResultsCardState extends State<MultipleResultsCard> {
-  final TextEditingController _nameController = TextEditingController();
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    super.dispose();
-  }
-
-  void _submitName() {
-    final String name = _nameController.text.trim();
-    if (name.isEmpty || widget.isProcessing) return;
-    widget.onEnterName?.call(name);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,47 +67,28 @@ class _MultipleResultsCardState extends State<MultipleResultsCard> {
             style: AppTextStyles.bodyMedium,
           ),
           const SizedBox(height: AppSpacing.md),
-          for (int i = 0; i < widget.results.length; i++) ...<Widget>[
+          for (int i = 0; i < results.length; i++) ...<Widget>[
             _ResultRow(
               index: i + 1,
-              food: widget.results[i],
-              onTap: () => widget.onSelect(widget.results[i]),
+              food: results[i],
+              onTap: () => onSelect(results[i]),
             ),
-            if (i < widget.results.length - 1)
-              const SizedBox(height: AppSpacing.sm),
+            if (i < results.length - 1) const SizedBox(height: AppSpacing.sm),
           ],
-          if (widget.onEnterName != null) ...<Widget>[
+          if (onEnterName != null) ...<Widget>[
             const SizedBox(height: AppSpacing.lg),
             const Divider(),
             const SizedBox(height: AppSpacing.sm),
-            Text(
-              'None of these? Type the food name:',
-              style: AppTextStyles.bodySmall.copyWith(
-                color: AppColors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: _nameController,
-                    enabled: !widget.isProcessing,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _submitName(),
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. Murtabak',
-                      isDense: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                FilledButton(
-                  onPressed: widget.isProcessing ? null : _submitName,
-                  child: const Text('Show this food'),
-                ),
-              ],
+            // The SAME fallback as the single-result card: a collapsed
+            // "Wrong dish? Type the name" link that opens the name field
+            // with Cancel / Show this food (see [ManualFoodNameEntry]) -
+            // it used to be an always-open field with its own label and an
+            // inline button.
+            ManualFoodNameEntry(
+              onEnterName: onEnterName!,
+              isProcessing: isProcessing,
+              maxNameLength: foodNameMaxLength,
+              nameWarning: foodNameWarning,
             ),
           ],
         ],

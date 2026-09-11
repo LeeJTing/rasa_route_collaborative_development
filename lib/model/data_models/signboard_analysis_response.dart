@@ -9,6 +9,7 @@ class SignboardAnalysisResponse implements JsonModel {
     required this.signboardStatus,
     this.textDetected,
     this.nameOriginalScript,
+    this.scriptVariant = 'n/a',
     this.languageScript = 'latin',
     required this.signboardImageStatus,
     this.confidence = 1.0,
@@ -33,6 +34,13 @@ class SignboardAnalysisResponse implements JsonModel {
   /// "mixed". Defaults to "latin" when the field is absent.
   final String languageScript;
 
+  /// The Chinese style ACTUALLY PAINTED on the signboard, read off the image
+  /// itself: "simplified" | "traditional" | "mixed" | "n/a" (name is not
+  /// Chinese). Used to check that [nameOriginalScript] was copied exactly
+  /// instead of being "turned" into the other style - see
+  /// `LandmarkSubmissionLogic.displaySignboardName`.
+  final String scriptVariant;
+
   /// Frame completeness: "complete" | "partially_captured" | "obstructed"
   /// If not "complete" → Error A19 (signboard not fully in frame)
   final String signboardImageStatus;
@@ -45,6 +53,7 @@ class SignboardAnalysisResponse implements JsonModel {
     'signboardStatus': signboardStatus,
     'textDetected': textDetected,
     'nameOriginalScript': nameOriginalScript,
+    'scriptVariant': scriptVariant,
     'languageScript': languageScript,
     'signboardImageStatus': signboardImageStatus,
     'confidence': confidence,
@@ -54,6 +63,7 @@ class SignboardAnalysisResponse implements JsonModel {
     String? signboardStatus,
     String? textDetected,
     String? nameOriginalScript,
+    String? scriptVariant,
     String? languageScript,
     String? signboardImageStatus,
     double? confidence,
@@ -61,6 +71,7 @@ class SignboardAnalysisResponse implements JsonModel {
     signboardStatus: signboardStatus ?? this.signboardStatus,
     textDetected: textDetected ?? this.textDetected,
     nameOriginalScript: nameOriginalScript ?? this.nameOriginalScript,
+    scriptVariant: scriptVariant ?? this.scriptVariant,
     languageScript: languageScript ?? this.languageScript,
     signboardImageStatus: signboardImageStatus ?? this.signboardImageStatus,
     confidence: confidence ?? this.confidence,

@@ -2,12 +2,16 @@ import 'dart:math' as math;
 
 import 'package:meta/meta.dart' show visibleForTesting;
 
+import '../../core/name_normalization.dart';
+import '../../domain_model/landmark_draft.dart';
+import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/landmark_repository_facade.dart';
+import 'food_name_matcher.dart';
 import 'location_rules.dart';
 
 /// Submitting a new food landmark and attaching dishes to it.
@@ -29,9 +33,10 @@ class LandmarkSubmissionLogic {
   /// so it belongs here, not there).
   ///
   /// For non-Latin signboards (Chinese/Tamil/Jawi) the returned name is the
-  /// exact signboard text with the romanised translation in parentheses,
-  /// e.g. "海天楼 (Hai Tian Lou)" - see [displaySignboardName]. The tourist
-  /// can edit the field afterwards.
+  /// EXACT signboard text, e.g. "海天楼" - the romanised translation is not
+  /// appended, and a transcription Gemini "turned" into the other Chinese
+  /// style is restyled to the style it reported for the sign (see
+  /// [displaySignboardName]). The tourist can edit the field afterwards.
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<String> analyzeSignboard(List<int> imageBytes) async {
     final response = await repository.recognition.analyzeSignboard(imageBytes);
@@ -40,20 +45,21 @@ class LandmarkSubmissionLogic {
         'Signboard not fully in frame. Please ensure the entire signboard is visible.',
       );
     }
-    if (response.textDetected == null || response.textDetected!.isEmpty) {
-      throw Exception('Unable to extract restaurant name from signboard.');
-    }
-    final String romanised = sanitiseSignboardName(response.textDetected!);
-    if (romanised.isEmpty) {
-      // The only "text" was noise (e.g. a lone phone number) - nothing to
-      // auto-fill, same A7 outcome as finding no text at all.
-      throw Exception('Unable to extract restaurant name from signboard.');
-    }
-    return displaySignboardName(
-      romanised: romanised,
+    // Either form can name the field: a Latin signboard supplies only
+    // `textDetected`, a non-Latin one supplies the original script as well
+    // (and THAT is what gets shown - see [displaySignboardName]).
+    final String name = displaySignboardName(
+      romanised: sanitiseSignboardName(response.textDetected ?? ''),
       originalScript: response.nameOriginalScript,
       languageScript: response.languageScript,
+      scriptVariant: response.scriptVariant,
     );
+    if (name.trim().isEmpty) {
+      // No text at all, or only noise (e.g. a lone phone number) - nothing to
+      // auto-fill, the same A7 outcome either way.
+      throw Exception('Unable to extract restaurant name from signboard.');
+    }
+    return name;
   }
 
   /// Strips non-name noise Gemini sometimes appends to a signboard name:
@@ -95,25 +101,83 @@ class LandmarkSubmissionLogic {
   }
 
   /// Builds the Restaurant Name value shown for a signboard capture:
-  /// - Latin-script signs (or when the original-script name is missing or
-  ///   identical to the romanised form) return just the romanised name;
-  /// - non-Latin signs return the exact signboard text with the romanised
-  ///   translation in parentheses, e.g. "海天楼 (Hai Tian Lou)", so the
-  ///   signboard text is kept alongside the translated form.
+  /// - non-Latin signs (Chinese/Tamil/Jawi) return the EXACT signboard text,
+  ///   e.g. "海天楼" - the romanised translation is deliberately NOT appended
+  ///   in parentheses;
+  /// - everything else returns the romanised name (the sign's own text when
+  ///   it is Latin, or the only form Gemini supplied).
+  ///
+  /// [scriptVariant] is the Chinese style Gemini says is PAINTED on the
+  /// sign. When the transcription contradicts it - the model "turned" the
+  /// words into the other style instead of copying them (see
+  /// [isScriptVariantContradiction]) - the DETECTED style wins: the
+  /// transcription is converted BACK to it wherever the app can prove the
+  /// intended glyph ([correctChineseScriptStyle]), so a Traditional sign
+  /// reported as Traditional can never surface as Simplified ("天义" is
+  /// returned as "天義"). Only a contradiction that cannot be fully
+  /// corrected falls back to the romanised name; the original is kept only
+  /// when there is nothing else to show.
   static String displaySignboardName({
     required String romanised,
     String? originalScript,
     String languageScript = 'latin',
+    String scriptVariant = 'n/a',
   }) {
     final String? original = originalScript == null
         ? null
         : sanitiseSignboardName(originalScript);
-    final bool showBoth =
+    final bool useOriginal =
         original != null &&
         original.isNotEmpty &&
         original != romanised &&
         languageScript != 'latin';
-    return showBoth ? '$original ($romanised)' : romanised;
+    if (!useOriginal) return romanised;
+    if (!isScriptVariantContradiction(
+      text: original,
+      scriptVariant: scriptVariant,
+    )) {
+      return original;
+    }
+    // The model contradicted its OWN style report: the sign is said to be
+    // painted in one style, yet the transcription carries the other one.
+    // The detected style wins - restore the transcription to it where the
+    // conversion is provable ("义" can only have been painted as "義"),
+    // never the model's habit over the sign. Only a contradiction the app
+    // cannot fully correct loses to the romanised name.
+    final String corrected = correctChineseScriptStyle(original, scriptVariant);
+    if (corrected != original &&
+        !isScriptVariantContradiction(
+          text: corrected,
+          scriptVariant: scriptVariant,
+        )) {
+      return corrected;
+    }
+    return romanised.isNotEmpty ? romanised : original;
+  }
+
+  /// The script-variant CHECK for a signboard transcription: Gemini copies
+  /// the characters off the sign, but it sometimes "turns" Chinese names
+  /// into the other style (Traditional for a Simplified sign or vice versa).
+  /// The response says which style is painted on the sign ([scriptVariant],
+  /// read from the image); a transcription carrying the opposite style's
+  /// glyphs - or mixing the two on a one-style sign - contradicts it, so it
+  /// cannot be an exact copy of the signboard.
+  ///
+  /// Only a definite clash counts: a "mixed"/"n/a" claim, or a name made
+  /// entirely of glyphs shared by both styles ("海天"), never conflicts.
+  static bool isScriptVariantContradiction({
+    required String text,
+    required String scriptVariant,
+  }) {
+    final String style = chineseScriptStyleOf(text);
+    switch (scriptVariant) {
+      case 'simplified':
+        return style == 'traditional' || style == 'mixed';
+      case 'traditional':
+        return style == 'simplified' || style == 'mixed';
+      default:
+        return false;
+    }
   }
 
   /// True when [segment] is signboard noise (address/phone/postcode/lot),
@@ -215,16 +279,28 @@ class LandmarkSubmissionLogic {
   /// range without needing a whole day's rows to check overlap against.
   bool isValidTimeOrder(int opensAt, int closesAt) => closesAt > opensAt;
 
-  /// Validates the two operating-hours rules that are domain invariants -
-  /// true of an `OpeningHour` no matter where the data came from, unlike a
+  /// Shortest allowed single operating-hours row, in minutes. A row is one
+  /// continuous open period, so a "09:00-09:30" row is not a meaningful
+  /// answer for a restaurant - the tourist should either give the real
+  /// period or mark the day differently. See [validateOperatingHours].
+  static const int minimumOperatingRowMinutes = 60;
+
+  /// Validates the operating-hours rules that are domain invariants - true
+  /// of an `OpeningHour` no matter where the data came from, unlike a
   /// completeness check ("did the tourist fill in both times"), which stays
   /// in `AddLandmarkViewModel` since it's only meaningful because a human is
   /// mid-way through filling in a form (BF-19..23):
   ///  - closing time must be strictly after opening time - no overnight
   ///    wrap-around, since "24:00" already exists to express "open until
   ///    midnight" without needing to cross into the next day;
+  ///  - a single row must be at least [minimumOperatingRowMinutes] long
+  ///    (e.g. "09:00-09:30" on one row is rejected);
   ///  - multiple rows for the same day must not overlap (e.g.
-  ///    "12:00-15:00" and "14:00-18:00" on the same day is invalid).
+  ///    "12:00-15:00" and "14:00-18:00" on the same day is invalid);
+  ///  - multiple rows for the same day must not be CONTIGUOUS - one ending
+  ///    exactly when the next begins ("09:00-12:00" + "12:00-14:00") is one
+  ///    continuous period written as two rows and must be combined into a
+  ///    single row ("09:00-14:00").
   ///
   /// Only meaningful for rows that have already passed the ViewModel's own
   /// completeness check (every Open row's `opensAt`/`closesAt` non-null) -
@@ -246,6 +322,11 @@ class LandmarkSubmissionLogic {
         if (!isValidTimeOrder(row.opensAt!, row.closesAt!)) {
           return 'Closing time must be after opening time for $dayName.';
         }
+        if (row.closesAt! - row.opensAt! < minimumOperatingRowMinutes) {
+          return '$dayName has a row shorter than 1 hour '
+              '(${_timeLabel(row.opensAt!)}-${_timeLabel(row.closesAt!)}) - '
+              'each opening-hours row must be at least 1 hour.';
+        }
         ranges.add((row.opensAt!, row.closesAt!));
       }
 
@@ -254,10 +335,80 @@ class LandmarkSubmissionLogic {
         if (ranges[i].$1 < ranges[i - 1].$2) {
           return "$dayName's operating hours overlap - please adjust the times.";
         }
+        if (ranges[i].$1 == ranges[i - 1].$2) {
+          return "$dayName's rows ${_timeLabel(ranges[i - 1].$1)}-"
+              '${_timeLabel(ranges[i - 1].$2)} and '
+              '${_timeLabel(ranges[i].$1)}-${_timeLabel(ranges[i].$2)} are '
+              'continuous - combine them into one row '
+              '${_timeLabel(ranges[i - 1].$1)}-${_timeLabel(ranges[i].$2)}.';
+        }
       }
     }
     return null;
   }
+
+  /// "HH:MM" for a minutes-since-midnight value (1440 renders as "24:00"),
+  /// used in the operating-hours validation messages.
+  static String _timeLabel(int minutes) {
+    final int hours = minutes ~/ 60;
+    final int mins = minutes % 60;
+    return '${hours.toString().padLeft(2, '0')}:'
+        '${mins.toString().padLeft(2, '0')}';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Same-restaurant capture range (A9-2): every photo that belongs to ONE
+  // landmark must be captured within [sameRestaurantCaptureRangeMetres] of
+  // where the first food was captured - the first capture's fix is the
+  // restaurant's location for the whole form. Two photos further apart than
+  // that are almost certainly two different restaurants, so the second one
+  // is not allowed to join the submission.
+  // ---------------------------------------------------------------------------
+
+  /// Maximum distance between the first captured food's location and any
+  /// later capture (additional food, signboard or stall) for it to count as
+  /// the same restaurant.
+  static const double sameRestaurantCaptureRangeMetres = 50;
+
+  /// How far apart two forms' first-food spots may be and still describe the
+  /// SAME restaurant when they also carry the same restaurant name - the
+  /// range behind [matchingDraftForRestaurant] (the Add-Landmark form's
+  /// Confirm action combines the two instead of keeping two unfinished
+  /// submissions for one restaurant).
+  static const double restaurantFormMergeRangeMetres = 100;
+
+  /// Haversine distance between two fixes, in metres - the public form of
+  /// the pure calculation used by [isWithinAllowedRange] and the
+  /// same-restaurant check.
+  double distanceMetres(TouristLocation a, TouristLocation b) =>
+      _distanceMetres(a.latitude, a.longitude, b.latitude, b.longitude);
+
+  /// Whether [captured] is close enough to [firstFoodLocation] to belong to
+  /// the same restaurant. Always allowed (true) when either fix is unknown -
+  /// with no GPS there is nothing to compare, and the tourist is never
+  /// blocked by a missing fix.
+  bool isSameRestaurantCaptureRange(
+    TouristLocation firstFoodLocation,
+    TouristLocation captured,
+  ) {
+    if (!firstFoodLocation.isKnown || !captured.isKnown) return true;
+    return distanceMetres(firstFoodLocation, captured) <=
+        sameRestaurantCaptureRangeMetres;
+  }
+
+  /// User-facing message when a capture fails the same-restaurant check.
+  /// [capturedWhat] names the rejected capture, e.g. "This food" or
+  /// "This signboard photo".
+  ///
+  /// Deliberately SHORT and consistent with the other capture messages
+  /// ("No food detected in image. Please try again."): state the problem,
+  /// then the action. The recognition card and the capture popup already
+  /// carry their own "capture again" action lines, so this must not repeat
+  /// the whole rule (the old wording did, and read like a paragraph).
+  String captureTooFarMessage(String capturedWhat) =>
+      '$capturedWhat was captured more than '
+      '${sameRestaurantCaptureRangeMetres.round()} m from the first food. '
+      'Move closer to the restaurant and capture again.';
 
   /// Whether [price] (MYR) is a valid price for a landmark's food item
   /// (A16) - a domain invariant true of any price regardless of where it
@@ -287,6 +438,23 @@ class LandmarkSubmissionLogic {
           'Double-check your price.';
     }
     return null;
+  }
+
+  /// The recognised dish's Gemini-suggested price range as a plain display
+  /// line - "Suggested price: RM 4.50 - RM 8.50", or a single value when the
+  /// two bounds coincide. Null when no range is known (either bound <= 0, or
+  /// max < min).
+  ///
+  /// Deliberately separate from [suggestedPriceWarning]: the range line is
+  /// INFORMATIONAL and is shown whenever it is known - including while the
+  /// typed value is still invalid - so the tourist can see the expected
+  /// range while fixing the number. The warning is the stronger out-of-range
+  /// nudge, shown only for an otherwise-valid price.
+  String? suggestedPriceRangeText(double priceMin, double priceMax) {
+    if (priceMin <= 0 || priceMax < priceMin) return null;
+    final String min = priceMin.toStringAsFixed(2);
+    if (priceMax == priceMin) return 'Suggested price: RM $min';
+    return 'Suggested price: RM $min - RM ${priceMax.toStringAsFixed(2)}';
   }
 
   /// Haversine distance between two coordinates, in metres - a pure
@@ -373,13 +541,20 @@ class LandmarkSubmissionLogic {
       // id backfilled after the Option-C catalogue insert).
       localFoodId: localFoodIdOverride ?? entry.food.id,
       dish: entry.food.name,
-      // LocalFood has no dedicated `variant` field (see FoodRecognitionLogic
-      // - it is carried as a synonym instead).
-      variant: entry.food.synonyms.isNotEmpty ? entry.food.synonyms.first : '',
+      // The name the tourist actually saw / typed, when it EXTENDS the
+      // dictionary dish into an unlisted variant (`Cendol Jagung` ->
+      // `Cendol`) - carried explicitly from recognition (see
+      // `FoodSubmission.variant`).
+      variant: entry.variant,
       foodCategory: entry.food.category,
       description: entry.food.description,
       origin: entry.food.origin,
       culturalBackground: entry.food.culturalBackground,
+      // The VARIANT's own facts: ingredients observed on the photo (falling
+      // back to the dictionary row's text) and the restrictions that apply
+      // (observed tags when an analysis ran, else the dictionary links).
+      ingredients: entry.food.ingredients,
+      dietaryRestrictions: entry.dietaryRestrictions,
       imageUrl: entry.imageUrl,
       imageId: entry.imageId,
       price: entry.price,
@@ -478,7 +653,7 @@ class LandmarkSubmissionLogic {
         await repository.landmark.updateContactFields(
           existingLandmark.id,
           phone: phone,
-          website: website,
+          website: website == null ? null : sanitiseWebsiteForSave(website),
           address: address,
         );
       } catch (_) {
@@ -520,7 +695,7 @@ class LandmarkSubmissionLogic {
       imageId: imageId,
       imageCategory: imageCategory,
       phone: phone ?? '',
-      website: website ?? '',
+      website: sanitiseWebsiteForSave(website ?? ''),
       address: address ?? '',
       items: <LandmarkItem>[
         for (final FoodSubmission entry in foods)
@@ -721,10 +896,15 @@ class LandmarkSubmissionLogic {
   /// Attaches the submitted dishes to an EXISTING submitted landmark as
   /// `landmark_item` rows (the A13 landmark merge - used when the place is
   /// already a submitted landmark rather than a catalogue restaurant). Same
-  /// dedupe/reporting as [addFoodsToRestaurant]; the landmark's own opening
-  /// hours are NOT touched here (A13.2) - the hours merge happens once, in
-  /// [submitLandmark]'s merge branch, via [updateOpeningHoursOnMerge], so
-  /// this dish-attach step stays single-purpose.
+  /// dedupe/reporting as [addFoodsToRestaurant], except that the identity is
+  /// dish + VARIANT ([sameDishAndVariantIdentity]): the landmark already
+  /// "has" a dish only when it holds the very same variant, so "Cendol
+  /// Jagung" still joins a landmark that lists plain "Cendol" (and the
+  /// confirmation names the variant, not the dictionary dish). The
+  /// landmark's own opening hours are NOT touched here (A13.2) - the hours
+  /// merge happens once, in [submitLandmark]'s merge branch, via
+  /// [updateOpeningHoursOnMerge], so this dish-attach step stays
+  /// single-purpose.
   Future<FoodAttachResult> addFoodsToSubmittedLandmark({
     required int landmarkId,
     required String touristId,
@@ -733,15 +913,18 @@ class LandmarkSubmissionLogic {
   }) async {
     final List<String> added = <String>[];
     final List<String> existing = <String>[];
-    final Set<String> existingNames = <String>{};
-    final Set<int> existingFoodIds = <int>{};
+    final List<({String dish, int localFoodId, String variant})> listed =
+        <({String dish, int localFoodId, String variant})>[];
     try {
       final SubmittedLandmark? current = await repository.landmark
           .getSubmittedLandmarkById(landmarkId);
       if (current != null) {
         for (final LandmarkItem item in current.items) {
-          if (item.localFoodId > 0) existingFoodIds.add(item.localFoodId);
-          existingNames.add(item.dish.trim().toLowerCase());
+          listed.add((
+            dish: item.dish,
+            localFoodId: item.localFoodId,
+            variant: item.variant,
+          ));
         }
       }
     } catch (_) {
@@ -751,13 +934,22 @@ class LandmarkSubmissionLogic {
     final List<LandmarkItem> toAdd = <LandmarkItem>[];
     for (final FoodSubmission entry in foods) {
       if (entry.isFake) continue;
-      final String key = entry.food.name.trim().toLowerCase();
       final int localFoodId = newFoodIds[entry.food.name] ?? entry.food.id;
-      if ((localFoodId > 0 && existingFoodIds.contains(localFoodId)) ||
-          existingNames.contains(key)) {
-        if (!existing.contains(entry.food.name)) {
-          existing.add(entry.food.name);
-        }
+      final String label = dishLabel(entry.food.name, entry.variant);
+      // "Already there" means the SAME dish AND the same variant - a
+      // different variant is a different dish to list.
+      final bool alreadyListed = listed.any(
+        (row) => sameDishAndVariantIdentity(
+          dish: row.dish,
+          localFoodId: row.localFoodId,
+          variant: row.variant,
+          otherDish: entry.food.name,
+          otherLocalFoodId: localFoodId,
+          otherVariant: entry.variant,
+        ),
+      );
+      if (alreadyListed) {
+        if (!existing.contains(label)) existing.add(label);
         continue;
       }
       toAdd.add(
@@ -768,14 +960,27 @@ class LandmarkSubmissionLogic {
           localFoodIdOverride: localFoodId > 0 ? localFoodId : null,
         ),
       );
+      // A second copy inside the SAME submission is a duplicate too.
+      listed.add((
+        dish: entry.food.name,
+        localFoodId: localFoodId,
+        variant: entry.variant,
+      ));
     }
     if (toAdd.isEmpty) return (added: added, existing: existing);
     await repository.landmark.addItems(landmarkId, toAdd);
     for (final LandmarkItem item in toAdd) {
-      added.add(item.dish);
+      added.add(dishLabel(item.dish, item.variant));
     }
     return (added: added, existing: existing);
   }
+
+  /// The name to REPORT for a submitted dish (the A13 confirmation, the
+  /// report picker, the landmark pages) - its VARIANT when it has one (that
+  /// is what the tourist captured: "Cendol Jagung"), else the dictionary
+  /// dish name. One rule, so every list names a dish the same way.
+  static String dishLabel(String dish, String variant) =>
+      variant.trim().isEmpty ? dish : variant.trim();
 
   /// Option C backfill: after genuinely-new foods are written to `local_food`,
   /// point the just-saved `landmark_item` rows at them (their `local_food_id`
@@ -809,9 +1014,11 @@ class LandmarkSubmissionLogic {
   /// [restaurantNameWarnFromLength] (31), and submit is only allowed up to
   /// [restaurantNameSubmitMaxLength] (30).
   ///
-  /// Website: typing STOPS at [maxWebsiteLength] (80), a WARNING shows from
-  /// [websiteWarnFromLength] (76), submit only allowed up to
-  /// [websiteSubmitMaxLength] (75).
+  /// Website: typing STOPS at [maxWebsiteLength] (2048 - the practical URL
+  /// ceiling), and an amber WARNING shows from [websiteWarnFromLength]
+  /// (2043) as the tourist approaches it. There is no separate submit
+  /// limit: any link that fits the cap and passes [isValidWebsiteFormat]
+  /// may be submitted.
   ///
   /// Phone counts FORMATTED text (e.g. "+60 12-345 6789" = 16 chars; the
   /// digits themselves are at most ~12). Address is capped at 150.
@@ -821,11 +1028,35 @@ class LandmarkSubmissionLogic {
 
   static const int maxPhoneLength = 18;
 
-  static const int maxWebsiteLength = 80;
-  static const int websiteSubmitMaxLength = 75;
-  static const int websiteWarnFromLength = 76;
+  static const int maxWebsiteLength = 2048;
+
+  /// The website's amber "stay under" warning starts here - 5 characters
+  /// before the [maxWebsiteLength] hard stop.
+  static const int websiteWarnFromLength = 2043;
 
   static const int maxAddressLength = 150;
+
+  /// Manual food-name entry (the recognition screen's "Wrong dish? Type the
+  /// name" / "Show this food" fields).
+  ///
+  /// Typing STOPS at [maxFoodNameLength] (50) - enforced by the TextField -
+  /// and from [foodNameWarnFromLength] (45) an amber warning asks the
+  /// tourist to keep the dish name short: a dish name is a LABEL, not a
+  /// description, and an over-long one would be written into the landmark
+  /// item, the catalogue row and the database column behind them.
+  static const int maxFoodNameLength = 50;
+  static const int foodNameWarnFromLength = 45;
+
+  /// Amber "getting long" warning for the manual food-name entry - null
+  /// while the name is a normal length. Counts the TRIMMED value (exactly
+  /// what `FoodRecognitionViewModel.enterFoodName` would submit), so stray
+  /// leading/trailing spaces do not trip it early.
+  String? foodNameLengthWarning(String foodName) {
+    final String value = foodName.trim();
+    if (value.length < foodNameWarnFromLength) return null;
+    return 'Food name should stay under $maxFoodNameLength characters '
+        '(currently ${value.length}).';
+  }
 
   static String _phoneDigits(String value) =>
       value.replaceAll(RegExp(r'[^0-9]'), '');
@@ -858,21 +1089,61 @@ class LandmarkSubmissionLogic {
     return RegExp(r'^[3-9]\d{7,8}$').hasMatch(national);
   }
 
+  /// The characters a URL may contain, per RFC 3986: unreserved
+  /// (`A-Z a-z 0-9 - . _ ~`), gen-delims (`: / ? # [ ] @`) and sub-delims
+  /// (`! $ & ' ( ) * + , ; =`), plus `%XX` percent-encoded triplets.
+  /// Anything else - spaces, tabs, non-ASCII text, quotes, backslashes,
+  /// angle brackets - makes the value NOT a URL.
+  static final RegExp _urlCharacters = RegExp(
+    r"^(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+$",
+  );
+
+  /// True when [value] contains more than one URL scheme marker (`://`) -
+  /// a pasted "https://a.comhttps://b.com" (no space between the links, so
+  /// the whitespace rule never fires) or a second scheme embedded later in
+  /// the path/query is a LIST of links, or one link smuggling another,
+  /// never a single website. The check deliberately runs on the raw text:
+  /// parsing would happily accept "a.comhttps" as one valid host label.
+  bool websiteContainsMultipleUrls(String value) =>
+      '://'.allMatches(value).length > 1;
+
   /// Whether [value] is a syntactically valid PUBLIC http(s) website URL.
-  /// STRICT: scheme required, no credentials/whitespace, host must be a
-  /// proper dotted domain - each label alphanumeric/hyphen, a TLD of >=2
-  /// letters (or a punycode xn-- TLD) - and localhost / IP-literal hosts are
-  /// rejected (they are not public restaurant websites). Reachability is a
-  /// separate, network-backed check ([isWebsiteReachable]).
+  /// STRICT, per RFC 3986 and the XSS rules for stored links:
+  ///  * the scheme is MANDATORY and must be `http://` or `https://` - so
+  ///    `example.com`, `ftp://...` and script schemes such as `javascript:`
+  ///    or `data:` can never pass;
+  ///  * exactly ONE link - a second `://` anywhere (a glued paste like
+  ///    `https://a.comhttps://b.com`, or another scheme embedded in the
+  ///    path/query) is rejected: the value is one website, never a list;
+  ///  * every character must be from the RFC 3986 set, with `%XX` for
+  ///    anything encoded - links may NOT contain spaces (a space is
+  ///    rejected, not silently turned into `%20`);
+  ///  * no embedded credentials (`user:pass@`), the host must be a proper
+  ///    dotted domain - each label alphanumeric/hyphen, a TLD of >=2 letters
+  ///    (or a punycode `xn--` TLD) - and localhost / IP-literal hosts are
+  ///    rejected (they are not public restaurant websites);
+  ///  * the value is capped at [maxWebsiteLength] (2048) characters.
+  /// Storage additionally strips any HTML tags ([sanitiseWebsiteForSave]).
+  /// Reachability is a separate, network-backed check
+  /// ([isWebsiteReachable]) - a valid format does not mean the site exists.
   bool isValidWebsiteFormat(String value) {
     final String trimmed = value.trim();
     if (trimmed.isEmpty || trimmed.length > maxWebsiteLength) return false;
-    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    // Mandatory web scheme - also the XSS guard: `javascript:`, `data:`,
+    // `vbscript:` can never satisfy it (RFC 3986 schemes are
+    // case-insensitive, so the check is too).
+    final String lower = trimmed.toLowerCase();
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
       return false;
     }
-    // No whitespace anywhere (Dart's Uri percent-encodes a space in the host
-    // into %20, so a host check alone would not catch "exa mple.com").
-    if (RegExp(r'\s').hasMatch(trimmed)) return false;
+    // ONE link only - a second scheme marker makes this a list of links
+    // (see [websiteContainsMultipleUrls]); the character and host checks
+    // below cannot see it, because a glued host like "a.comhttps" parses
+    // as a perfectly valid domain label.
+    if (websiteContainsMultipleUrls(trimmed)) return false;
+    // RFC 3986 characters only - this rejects spaces, tabs, non-ASCII text
+    // and any "<...>" markup a paste might carry.
+    if (!_urlCharacters.hasMatch(trimmed)) return false;
     // Reject any embedded credentials - '@' in the authority portion. (Dart's
     // Uri does not reliably surface `user:pass@` as `userInfo`, so check the
     // raw authority text instead of relying on that property.)
@@ -903,6 +1174,34 @@ class LandmarkSubmissionLogic {
         (RegExp(r'^[a-z]{2,}$').hasMatch(tld) || tld.startsWith('xn--'));
     return validTld;
   }
+
+  /// True when [value] contains whitespace - a link may never contain a
+  /// space (RFC 3986); pasted "https://my site.com" gets its own message
+  /// instead of being silently percent-encoded into a different URL.
+  bool websiteContainsWhitespace(String value) => RegExp(r'\s').hasMatch(value);
+
+  /// The website value actually SAVED to the database: HTML tags stripped,
+  /// control characters removed, trimmed. The field validator already
+  /// rejects such input ([isValidWebsiteFormat]); this is the belt-and-
+  /// braces rule that guarantees a stored "link" is plain text - never
+  /// `<script>`/`<a>` markup - on every save path (form, draft, merge).
+  ///
+  /// Whole `script`/`style` ELEMENTS are removed first (tags AND their
+  /// contents, so "…com<script>alert(1)</script>" cannot keep "alert(1)");
+  /// for every other tag only the markup is stripped, leaving the text
+  /// inside as plain text.
+  static String sanitiseWebsiteForSave(String value) => value
+      .replaceAll(
+        RegExp(
+          r'<(script|style)\b[^>]*>.*?</\1\s*>',
+          caseSensitive: false,
+          dotAll: true,
+        ),
+        '',
+      )
+      .replaceAll(RegExp(r'<[^>]*>'), '')
+      .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '')
+      .trim();
 
   /// Whether [value] is acceptable free text for the optional restaurant
   /// address. STRICT: letters/digits (any script, so Chinese addresses
@@ -946,6 +1245,167 @@ class LandmarkSubmissionLogic {
   /// run the equivalent check server-side (SSRF).
   Future<bool> isWebsiteReachable(String url) =>
       repository.links.isWebsiteReachable(url);
+
+  // ===========================================================================
+  // Dev GPS mock (Android-only presenter tool)
+  // ===========================================================================
+  //
+  // The capture screen drives the SAME mock singleton the dashboard drives
+  // (`MockLocationService` behind `LocationRepository`) - see
+  // `MapExplorationLogic` for the discovery-side copy of these
+  // passthroughs. While a mock is live `LocationMonitor` publishes the
+  // mocked fix, so every capture here (signboard / stall / additional food)
+  // freezes the location AT CAPTURE TIME - one tap on "walk 60 m" is enough
+  // to demo the 50 m same-restaurant rule.
+
+  /// Whether this build can mock the OS GPS (Android, non-web).
+  bool get mockGpsSupported => repository.location.mockSupported;
+
+  /// Whether a mock is live right now.
+  bool get mockGpsActive => repository.location.mockActive;
+
+  /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error
+  /// message, or null on success.
+  Future<String?> setMockGps({
+    required double latitude,
+    required double longitude,
+  }) => repository.location.setMockLocation(latitude, longitude);
+
+  /// Stops mocking and resumes real GPS fixes.
+  Future<void> stopMockGps() => repository.location.stopMockLocation();
+
+  // =========================================================================
+  // Continuing an unfinished submission
+  // =========================================================================
+
+  /// The saved incomplete submission that THIS capture should ask about
+  /// continuing - an unfinished Add-Landmark form whose foods already contain
+  /// the SAME dish and [variant] and whose first-food spot is within the
+  /// same-restaurant range (50 m) of [captureLocation]. Null when nothing
+  /// matches.
+  ///
+  /// This is what stops "Save & leave" -> back to the camera -> "Add New
+  /// Landmark" from silently stacking a SECOND draft of the same visit: the
+  /// View asks "continue your unfinished submission?" and reopens this draft
+  /// pre-filled when the tourist agrees.
+  ///
+  /// All three must agree - the dish, the variant and the place. The variant
+  /// compares exactly (see [isSameDishAndVariant]): a plain "Cendol" capture
+  /// does NOT resume a draft holding "Cendol Jagung" - continuing it would
+  /// file the plain dish as that variant - and vice versa. An unknown capture
+  /// fix (or a draft without one) can never match either: a draft saved at
+  /// another restaurant must not be resumed by a stray capture.
+  LandmarkDraft? matchingDraft({
+    required List<LandmarkDraft> drafts,
+    required LocalFood food,
+    required TouristLocation captureLocation,
+    String variant = '',
+  }) {
+    if (drafts.isEmpty || !captureLocation.isKnown) return null;
+    for (final LandmarkDraft draft in drafts) {
+      if (!draft.baseLocation.isKnown) continue;
+      if (!isSameRestaurantCaptureRange(draft.baseLocation, captureLocation)) {
+        continue;
+      }
+      if (!_draftCarriesDish(draft, food, variant)) continue;
+      return draft;
+    }
+    return null;
+  }
+
+  /// Whether [draft] already holds [food] WITH the SAME [variant] - one
+  /// definition of "the same thing to add" for both the continue ask and the
+  /// form's duplicate guard ([isSameDishAndVariant]), so the two rules can
+  /// never drift apart.
+  bool _draftCarriesDish(LandmarkDraft draft, LocalFood food, String variant) {
+    for (final LandmarkDraftFood entry in draft.foods) {
+      if (isSameDishAndVariant(entry.food, entry.variant, food, variant)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Whether [candidate] (with [candidateVariant]) is the SAME thing to add
+  /// as [existing] (with [existingVariant]) - see
+  /// [sameDishAndVariantIdentity], the name/id-level rule this wraps for
+  /// [LocalFood]s.
+  bool isSameDishAndVariant(
+    LocalFood existing,
+    String existingVariant,
+    LocalFood candidate,
+    String candidateVariant,
+  ) => sameDishAndVariantIdentity(
+    dish: existing.name,
+    localFoodId: existing.id,
+    variant: existingVariant,
+    otherDish: candidate.name,
+    otherLocalFoodId: candidate.id,
+    otherVariant: candidateVariant,
+  );
+
+  /// The saved incomplete submission for the SAME RESTAURANT as a form the
+  /// tourist just confirmed - a draft whose restaurant name matches
+  /// ([placeNameKey]: trimmed, case- and script-folded) AND whose FIRST-food
+  /// capture spot is within [restaurantFormMergeRangeMetres] (100 m) of the
+  /// form's own first-food spot. Null when nothing matches, or when either
+  /// side has no name / no fix to compare.
+  ///
+  /// The form's Confirm action asks about combining the two, so one
+  /// restaurant keeps ONE unfinished submission instead of two.
+  LandmarkDraft? matchingDraftForRestaurant({
+    required List<LandmarkDraft> drafts,
+    required String restaurantName,
+    required TouristLocation formLocation,
+    int excludeDraftId = 0,
+  }) {
+    final String wanted = placeNameKey(restaurantName);
+    if (wanted.isEmpty || !formLocation.isKnown) return null;
+    for (final LandmarkDraft draft in drafts) {
+      // A form continuing its own submission never matches itself - it may
+      // only combine with ANOTHER draft of the same restaurant.
+      if (excludeDraftId != 0 && draft.id == excludeDraftId) continue;
+      if (placeNameKey(draft.restaurantName) != wanted) continue;
+      if (!draft.baseLocation.isKnown) continue;
+      if (distanceMetres(draft.baseLocation, formLocation) >
+          restaurantFormMergeRangeMetres) {
+        continue;
+      }
+      return draft;
+    }
+    return null;
+  }
+
+  /// The ONE "is this the same thing to add?" rule, for callers that hold a
+  /// dish as its name + catalogue id + variant. Three places go through it,
+  /// so none of them can drift apart:
+  ///
+  ///   * the Add-Landmark form's duplicate guard (one form cannot hold the
+  ///     same dish + variant twice - [isSameDishAndVariant]);
+  ///   * the continue ask ([matchingDraft]) - only the very same dish +
+  ///     variant resumes a saved form;
+  ///   * the A13 attach dedupe ([addFoodsToSubmittedLandmark]) - a landmark
+  ///     holding "Cendol Jagung" does NOT already have plain "Cendol".
+  ///
+  /// The DISH matches by catalogue id when both sides have one, else by
+  /// script-folded name (海天樓麵 and 海天楼面 are one dish). The VARIANT must
+  /// match too, compared the same way - case and punctuation never split it,
+  /// and an empty variant equals an EMPTY variant only.
+  static bool sameDishAndVariantIdentity({
+    required String dish,
+    required int localFoodId,
+    required String variant,
+    required String otherDish,
+    required int otherLocalFoodId,
+    required String otherVariant,
+  }) {
+    final bool sameDish =
+        (localFoodId != 0 && localFoodId == otherLocalFoodId) ||
+        FoodNameMatcher.normalize(dish) == FoodNameMatcher.normalize(otherDish);
+    if (!sameDish) return false;
+    return FoodNameMatcher.normalize(variant) ==
+        FoodNameMatcher.normalize(otherVariant);
+  }
 }
 
 /// Result of attaching a set of submitted dishes to an existing place -

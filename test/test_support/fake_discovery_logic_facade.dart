@@ -100,7 +100,9 @@ const SubmittedLandmarkRecommendation testLandmarkRecommendation =
       name: 'Uncle Lim Prawn Noodle Stall',
       category: 'Hawker Stall',
       distanceMetres: 620,
-      foodNames: <String>['Prawn Noodle'],
+      dishes: <SubmittedLandmarkDish>[
+        SubmittedLandmarkDish(name: 'Prawn Noodle', price: 12),
+      ],
       price: 12,
     );
 

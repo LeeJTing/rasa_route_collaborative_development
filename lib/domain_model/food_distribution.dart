@@ -23,6 +23,8 @@ class FoodOccurrence {
     this.placeCategory,
     this.placeRating,
     this.itemPrice,
+    this.itemImageUrl,
+    this.itemIngredients,
   });
 
   /// `restaurant_id` or `landmark_id`, as text - the two id spaces overlap, so
@@ -56,6 +58,17 @@ class FoodOccurrence {
 
   /// Price of this one dish here, used to build the pin's price range.
   final double? itemPrice;
+
+  /// Photo of THIS one dish (`landmark_item.image_url`), when the record has
+  /// one. Null for restaurants - their dish photos come from the hydrated
+  /// menu (restaurant detail / quick mode's expanded rows).
+  final String? itemImageUrl;
+
+  /// Ingredients of THIS one dish (`landmark_item.ingredients`), when the
+  /// record has them - the quick-mode landmark rows show the text like a
+  /// restaurant menu row does. Null for restaurants; their menu fetch carries
+  /// its own ingredients.
+  final String? itemIngredients;
 }
 
 /// Which data source an occurrence came from (C21 keeps the two apart).
