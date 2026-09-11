@@ -70,6 +70,10 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                           FoodSearchBar(
                             controller: _searchController,
                             onChanged: vm.updateSearch,
+                            onClear: () {
+                              _searchController.clear();
+                              vm.updateSearch('');
+                            },
                             maxLength:
                                 LocalFoodListViewModel.maximumSearchLength,
                           ),
@@ -80,10 +84,6 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                             onSort: () => _showSortOptions(context, vm),
                             onFilter: () => _showFilters(context, vm),
                             onSelect: vm.toggleSelectionMode,
-                            onReset: () {
-                              _searchController.clear();
-                              vm.reset();
-                            },
                           ),
                         ],
                       ),
@@ -93,13 +93,7 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                       child: RefreshIndicator(
                         onRefresh: vm.loadFoods,
                         child: foods.isEmpty
-                            ? _EmptyState(
-                                onClear: () {
-                                  _searchController.clear();
-                                  vm.updateSearch('');
-                                  vm.clearFilters();
-                                },
-                              )
+                            ? _EmptyState()
                             : ListView.separated(
                                 physics: const AlwaysScrollableScrollPhysics(),
                                 padding: AppSpacing.screenPadding.copyWith(
@@ -116,14 +110,23 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                                     isSelected: vm.selectedIds.contains(
                                       food.id,
                                     ),
-                                    onTap: () {
+                                    onTap: () async {
                                       if (vm.isSelecting) {
                                         vm.toggleSelection(food.id);
                                       } else {
-                                        Navigator.pushNamed(
-                                          context,
-                                          AppRoutes.foodDetail,
-                                          arguments: food.id,
+                                        final result =
+                                            await Navigator.pushNamed(
+                                              context,
+                                              AppRoutes.foodDetail,
+                                              arguments: food.id,
+                                            );
+
+                                        if (!context.mounted || result is! Map)
+                                          return;
+
+                                        vm.updateFavourite(
+                                          result['id'] as int,
+                                          result['isFavourite'] as bool,
                                         );
                                       }
                                     },
@@ -226,69 +229,95 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
   );
 
   Future<void> _showFilters(
-    BuildContext context,
-    LocalFoodListViewModel vm,
-  ) => showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
-    builder: (BuildContext context) =>
-        ChangeNotifierProvider<LocalFoodListViewModel>.value(
-          value: vm,
-          child: DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: AppLayoutRatios.catalogueFilterSheetInitial,
-            maxChildSize: AppLayoutRatios.catalogueFilterSheetMaximum,
-            builder: (BuildContext context, ScrollController controller) =>
-                Consumer<LocalFoodListViewModel>(
-                  builder:
-                      (
-                        BuildContext context,
-                        LocalFoodListViewModel vm,
-                        _,
-                      ) => ListView(
-                        controller: controller,
-                        padding: const EdgeInsets.all(AppSpacing.lg),
-                        children: <Widget>[
-                          Row(
-                            children: <Widget>[
-                              Expanded(
+      BuildContext context,
+      LocalFoodListViewModel vm,
+      ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: AppRadius.sheetRadius,
+      ),
+      builder: (BuildContext context) =>
+      ChangeNotifierProvider<LocalFoodListViewModel>.value(
+        value: vm,
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize:
+          AppLayoutRatios.catalogueFilterSheetInitial,
+          maxChildSize:
+          AppLayoutRatios.catalogueFilterSheetMaximum,
+          builder: (
+              BuildContext context,
+              ScrollController controller,
+              ) =>
+              Consumer<LocalFoodListViewModel>(
+                builder: (
+                    BuildContext context,
+                    LocalFoodListViewModel vm,
+                    _,
+                    ) =>
+                    ListView(
+                      controller: controller,
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      children: <Widget>[
+                        Text(
+                          'Filter local food',
+                          style: Theme.of(
+                            context,
+                          ).textTheme.titleLarge,
+                        ),
+
+                        ...FoodFilterGroup.values.map(
+                              (FoodFilterGroup group) => _FilterGroup(
+                            title: _filterTitle(group),
+                            values: LocalFoodListViewModel
+                                .filterOptions[group]!,
+                            isSelected: (String value) =>
+                                vm.isFilterSelected(group, value),
+                            onToggle: (String value) =>
+                                vm.toggleFilter(group, value),
+                          ),
+                        ),
+
+                        const SizedBox(height: AppSpacing.xl),
+
+                        Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: vm.displayedFoods.isEmpty
+                                    ? null
+                                    : () =>
+                                    Navigator.pop(context),
                                 child: Text(
-                                  'Filter local food',
-                                  style: Theme.of(context).textTheme.titleLarge,
+                                  'Show ${vm.displayedFoods.length} local food',
+                                  textAlign: TextAlign.center,
                                 ),
                               ),
-                              TextButton(
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: ElevatedButton(
                                 onPressed: vm.clearFilters,
                                 child: const Text('Clear'),
                               ),
-                            ],
-                          ),
-                          ...FoodFilterGroup.values.map(
-                            (FoodFilterGroup group) => _FilterGroup(
-                              title: _filterTitle(group),
-                              values:
-                                  LocalFoodListViewModel.filterOptions[group]!,
-                              isSelected: (String value) =>
-                                  vm.isFilterSelected(group, value),
-                              onToggle: (String value) =>
-                                  vm.toggleFilter(group, value),
                             ),
-                          ),
-                          const SizedBox(height: AppSpacing.xl),
-                          ElevatedButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: Text(
-                              'Show ${vm.displayedFoods.length} local food',
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.lg),
-                        ],
-                      ),
-                ),
-          ),
+                          ],
+                        ),
+
+                        const SizedBox(height: AppSpacing.lg),
+                      ],
+                    ),
+              ),
         ),
-  );
+      ),
+    );
+
+    if (vm.displayedFoods.isEmpty) {
+      vm.clearFilters();
+    }
+  }
 
   void _openComparison(BuildContext context, LocalFoodListViewModel vm) {
     if (vm.selectedIds.length < 2) {
@@ -370,9 +399,7 @@ class _LoadingState extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onClear});
-
-  final VoidCallback onClear;
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -405,12 +432,6 @@ class _EmptyState extends StatelessWidget {
                       color: AppColors.textSecondary,
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.lg),
-                  OutlinedButton.icon(
-                    onPressed: onClear,
-                    icon: const Icon(Icons.restart_alt),
-                    label: const Text('Clear search and filters'),
-                  ),
                 ],
               ),
             ),
@@ -423,6 +444,7 @@ class _EmptyState extends StatelessWidget {
 
 class _ErrorState extends StatelessWidget {
   const _ErrorState({required this.message, required this.onRetry});
+
   final String? message;
   final VoidCallback onRetry;
 
