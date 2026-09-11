@@ -225,9 +225,7 @@ class RestaurantDiscoveryLogic {
           .add(occurrence);
     }
 
-    final DateTime malaysiaNow = currentTime().toUtc().add(
-      const Duration(hours: 8),
-    );
+    final DateTime now = currentTime();
     final List<SubmittedLandmarkRecommendation> measured =
         <SubmittedLandmarkRecommendation>[];
     for (final MapEntry<String, List<FoodOccurrence>> entry
@@ -236,7 +234,7 @@ class RestaurantDiscoveryLogic {
           _isConfidentlyClosedHours(
             hoursByPlace['submittedLandmark:${entry.key}'] ??
                 const <OpeningHour>[],
-            malaysiaNow,
+            now,
           )) {
         continue;
       }
@@ -321,9 +319,7 @@ class RestaurantDiscoveryLogic {
   }
 
   List<Restaurant> _availableSummaries(List<Restaurant> restaurants) {
-    final DateTime malaysiaNow = currentTime().toUtc().add(
-      const Duration(hours: 8),
-    );
+    final DateTime now = currentTime();
     return restaurants
         .where(
           (Restaurant restaurant) =>
@@ -336,7 +332,7 @@ class RestaurantDiscoveryLogic {
                 closedUntil: restaurant.closedUntil,
                 now: currentTime(),
               ) &&
-              !_isConfidentlyClosed(restaurant, malaysiaNow),
+              !_isConfidentlyClosed(restaurant, now),
         )
         .toList(growable: false);
   }

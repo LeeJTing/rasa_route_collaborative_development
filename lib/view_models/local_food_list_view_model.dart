@@ -242,8 +242,30 @@ class LocalFoodListViewModel extends BaseViewModel {
     for (final Set<String> values in _filters.values) {
       values.clear();
     }
-    _selectedIds.clear();
-    _isSelecting = false;
     safeNotifyListeners();
+  }
+
+  void updateFavourite(int id, bool isFavourite) {
+    _foods = _foods.map((LocalFood food) {
+      return food.id == id
+          ? food.copyWith(isFavourite: isFavourite)
+          : food;
+    }).toList(growable: false);
+
+    safeNotifyListeners();
+  }
+
+  Future<void> refreshFavourite() async {
+    final Set<int> favouriteIds = await foodLogic.favouriteFoodIds();
+
+    _foods = _foods
+        .map(
+          (LocalFood food) => food.copyWith(
+        isFavourite: favouriteIds.contains(food.id),
+      ),
+    )
+        .toList(growable: false);
+
+    notifyListeners();
   }
 }

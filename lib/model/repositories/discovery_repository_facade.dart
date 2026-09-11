@@ -7,6 +7,7 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
+import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/swipe_session.dart';
 import 'auth_repository.dart';
 import 'camera_repository.dart';
@@ -17,6 +18,7 @@ import 'map_repository.dart';
 import 'recognition_repository.dart';
 import 'report_repository.dart';
 import 'restaurant_repository.dart';
+import 'submitted_landmark_repository.dart';
 import 'swipe_repository.dart';
 import 'tourist_profile_repository.dart';
 
@@ -38,6 +40,7 @@ class DiscoveryRepositoryFacade {
   DiscoveryRepositoryFacade();
 
   final RestaurantRepository restaurant = RestaurantRepository();
+  final SubmittedLandmarkRepository landmark = SubmittedLandmarkRepository();
   final DietaryRestrictionRepository dietaryRestriction =
       DietaryRestrictionRepository();
   final RecognitionRepository recognition = RecognitionRepository();
@@ -91,6 +94,9 @@ class DiscoveryRepositoryFacade {
 
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
       restaurant.getRestaurantById(restaurantId);
+
+  Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) =>
+      landmark.getSubmittedLandmarkById(landmarkId);
 
   Future<void> reactivateRestaurantFromClosure(int restaurantId) =>
       restaurant.reactivateRestaurantFromClosure(restaurantId);
