@@ -68,6 +68,10 @@ class _FakeFoodKnowledgeRepository extends FoodKnowledgeRepository {
   List<LocalFood> catalogue = const <LocalFood>[];
   final List<LocalFood> inserted = <LocalFood>[];
 
+  /// `local_food_image` links recorded by [addFoodImage].
+  final List<({int localFoodId, String imageName})> images =
+      <({int localFoodId, String imageName})>[];
+
   /// Curated `food_dietary_restriction` links per food id - empty by default,
   /// so tests that do not care see no dietary tags.
   Map<int, List<DietaryRestriction>> foodRestrictionLinks =
@@ -79,7 +83,18 @@ class _FakeFoodKnowledgeRepository extends FoodKnowledgeRepository {
   @override
   Future<LocalFood?> insertFood(LocalFood food) async {
     inserted.add(food);
-    return food;
+    // The real insert returns the row with its assigned identity id - a
+    // plain increment keeps that contract for the tests that assert on the
+    // id (e.g. the attached food-image link).
+    return food.copyWith(id: 100 + inserted.length);
+  }
+
+  @override
+  Future<void> addFoodImage({
+    required int localFoodId,
+    required String imageName,
+  }) async {
+    images.add((localFoodId: localFoodId, imageName: imageName));
   }
 
   /// Not an override - `FoodKnowledgeRepository` has no such method (the
@@ -111,6 +126,15 @@ class _FakeFoodRepositoryFacade extends FoodRepositoryFacade {
   @override
   Future<LocalFood?> insertFood(LocalFood food) =>
       fakeKnowledge.insertFood(food);
+
+  @override
+  Future<void> addFoodImage({
+    required int localFoodId,
+    required String imageName,
+  }) => fakeKnowledge.addFoodImage(
+    localFoodId: localFoodId,
+    imageName: imageName,
+  );
 
   @override
   Future<({Map<String, int> tastes, Map<String, int> categories})>
@@ -163,6 +187,8 @@ FoodAnalysisResponse _quickResponse({
   int foodCount = 1,
   List<FoodCandidate> candidates = const <FoodCandidate>[],
   String foodType = '',
+  double priceMin = 0,
+  double priceMax = 0,
 }) => FoodAnalysisResponse(
   dish: dish,
   variant: '',
@@ -174,6 +200,8 @@ FoodAnalysisResponse _quickResponse({
   foodType: foodType,
   isMalaysianLocalFood: isLocal,
   culturalBackground: '',
+  priceMin: priceMin,
+  priceMax: priceMax,
   foodStatus: foodStatus,
   foodImageStatus: foodImageStatus,
   confidence: confidence,
@@ -274,6 +302,49 @@ void main() {
       },
     );
 
+    test('a classic Western dish can never be local food, even when the '
+        'model and the catalogue say it is (French Toast floor)', () async {
+      // The quick call reads the photo as "French Toast" and returns its
+      // (occasionally wrong) "local" flag - the catalogue even holds a row.
+      final frenchToast = _food('French Toast');
+      knowledge.catalogue = <LocalFood>[frenchToast];
+      recognition.onIdentify = (_) async => _quickResponse(
+        dish: 'French Toast',
+        confidence: 0.95,
+        foodType: 'Food',
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      // Floored to false - the card must not offer to add it as a landmark.
+      expect(result.isLocalFood, isFalse);
+      expect(result.candidates.single.name, 'French Toast');
+    });
+
+    test('the floor also holds when the full analysis re-judges a classic '
+        'Western dish as local', () async {
+      recognition.onIdentify = (_) async => _quickResponse(isLocal: false);
+      recognition.onAnalyzeFull = (List<int> _) async => (
+        food: _food('French Toast'),
+        priceMin: 0.0,
+        priceMax: 0.0,
+        isLocal: true, // The model's (wrong) re-judgement.
+        confidence: 0.9,
+        localConfidence: 0.6,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 0.9,
+        observedFood: '',
+        foodType: 'Food',
+        dietaryRestrictions: const <String>[],
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      expect(result.isLocalFood, isFalse);
+    });
+
     test('a Malaysian snack (e.g. Tam Tam) is not-addable even when it matches '
         'the catalogue', () async {
       final tamtam = _food('Tam Tam');
@@ -305,6 +376,27 @@ void main() {
 
       expect(result.isLocalFood, isTrue);
       expect(result.fitsCatalogueCategory, isTrue);
+    });
+
+    test("the quick call's suggested price range rides the catalogue fast "
+        'path', () async {
+      final tehTarik = _food('Teh Tarik');
+      knowledge.catalogue = <LocalFood>[tehTarik];
+      recognition.onIdentify = (_) async => _quickResponse(
+        dish: 'Teh Tarik',
+        confidence: 0.95,
+        foodType: 'Beverage',
+        priceMin: 1.5,
+        priceMax: 3.0,
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      // The fast path skips the full analysis, so without the quick call
+      // carrying the range this would be 0/0 - the live gap that left most
+      // landmark_item.price_min/price_max NULL.
+      expect(result.priceMin, 1.5);
+      expect(result.priceMax, 3.0);
     });
 
     test('quick says not-local but the full analysis says local is still addable '
@@ -659,8 +751,8 @@ void main() {
       expect(result.dietaryRestrictions, <String>['No Coconut']);
     });
 
-    test('a curated dish matched by the full analysis ignores Gemini\'s '
-        'free-text tags and uses its own links instead', () async {
+    test('a curated dish matched by the full analysis keeps the observed tags '
+        '(the variant\'s own facts)', () async {
       final bubur = _food('Bubur Cha Cha');
       knowledge.catalogue = <LocalFood>[bubur];
       knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
@@ -670,8 +762,8 @@ void main() {
       };
       recognition.onIdentify = (_) async =>
           _quickResponse(dish: 'Bubur Cha Cha', confidence: 0.4);
-      // The full analysis judges it a curated dish, but Gemini's own tags
-      // are noisy - it lists restrictions the dish is FREE of.
+      // The full analysis judges it a curated dish and OBSERVED these tags
+      // on this very photo - they describe the variant and ride the item.
       recognition.onAnalyzeFull = (List<int> _) async => (
         food: _food('Bubur Cha Cha (Gemini)'),
         priceMin: 2.0,
@@ -694,12 +786,162 @@ void main() {
 
       final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
 
-      // Curated wins: the dish resolves to the catalogue row and its own
-      // link is the ONLY tag - the gluten/egg noise is dropped so the tourist
-      // is not warned about restrictions the dish does not violate.
+      // The dish resolves to the catalogue row (its details/id win), while
+      // the FRESH observation's tags are what the item records - hybrid
+      // storage, so a variant's own facts are never lost.
+      expect(result.candidates.single.id, bubur.id);
+      expect(result.dietaryRestrictions, <String>[
+        'No Coconut',
+        'No Gluten',
+        'No Egg',
+      ]);
+    });
+
+    test('a curated dish whose analysis observed no tags falls back to its '
+        'own food_dietary_restriction links', () async {
+      final bubur = _food('Bubur Cha Cha');
+      knowledge.catalogue = <LocalFood>[bubur];
+      knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
+        bubur.id: <DietaryRestriction>[
+          const DietaryRestriction(id: 19, name: 'No Coconut'),
+        ],
+      };
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'Bubur Cha Cha', confidence: 0.4);
+      recognition.onAnalyzeFull = (List<int> _) async => (
+        food: _food('Bubur Cha Cha (Gemini)'),
+        priceMin: 2.0,
+        priceMax: 5.0,
+        isLocal: true,
+        confidence: 0.9,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 1.0,
+        observedFood: '',
+        foodType: 'Food',
+        dietaryRestrictions: const <String>[],
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      // Nothing observed => the curated row's own links are the fallback.
       expect(result.candidates.single.id, bubur.id);
       expect(result.dietaryRestrictions, <String>['No Coconut']);
     });
+
+    test('a recognised variant ("Cendol Jagung") stores the dictionary dish '
+        'with the variant name + observed ingredients', () async {
+      final cendol = _food('Cendol').copyWith(
+        id: 375,
+        ingredients: 'Pandan jelly, coconut milk, palm sugar, shaved ice',
+      );
+      knowledge.catalogue = <LocalFood>[cendol];
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'Cendol Jagung', confidence: 0.4);
+      recognition.onAnalyzeFull = (List<int> _) async => (
+        food: LocalFood(
+          id: 0, // Gemini's unsaved copy - the curated row beats it.
+          name: 'Cendol Jagung',
+          description: 'Cendol topped with sweet corn',
+          origin: 'Malaysia',
+          culturalBackground: '',
+          ingredients: 'Pandan jelly, coconut milk, gula Melaka, sweet corn',
+          category: 'Dessert',
+          cookingStyle: 'Chilling',
+          mealType: 'Dessert',
+          foodType: 'Dessert',
+        ),
+        priceMin: 3.0,
+        priceMax: 8.0,
+        isLocal: true,
+        confidence: 0.9,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 1.0,
+        observedFood: '',
+        foodType: 'Dessert',
+        dietaryRestrictions: const <String>['Contains Coconut'],
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      // The dictionary row keeps the canonical fields (id + description)...
+      expect(result.candidates.single.id, cendol.id);
+      expect(result.candidates.single.name, 'Cendol');
+      expect(result.candidates.single.description, 'Description of Cendol');
+      // ...the VARIANT name is recorded for `landmark_item.variant`...
+      expect(result.variant, 'Cendol Jagung');
+      // ...and the item INHERITS the dictionary's ingredients and gains the
+      // observation's extras ("gula Melaka", "sweet corn") - what makes it
+      // that variant - with the entries both sides name only once.
+      expect(
+        result.candidates.single.ingredients,
+        'Pandan jelly, coconut milk, palm sugar, shaved ice, gula Melaka, '
+        'sweet corn',
+      );
+    });
+
+    test('a high-confidence variant keeps the dictionary facts while still '
+        'recording the variant name (fast path)', () async {
+      final cendol = _food('Cendol').copyWith(
+        id: 375,
+        ingredients: 'Pandan jelly, coconut milk, palm sugar',
+      );
+      knowledge.catalogue = <LocalFood>[cendol];
+      knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
+        cendol.id: <DietaryRestriction>[
+          const DietaryRestriction(id: 5, name: 'Contains Coconut'),
+        ],
+      };
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'Cendol Jagung', confidence: 0.95);
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      expect(result.candidates.single.id, cendol.id);
+      expect(result.variant, 'Cendol Jagung');
+      // No full analysis ran - the dictionary's own ingredients stay.
+      expect(
+        result.candidates.single.ingredients,
+        'Pandan jelly, coconut milk, palm sugar',
+      );
+      // No observation => the row's own links are the tags.
+      expect(result.dietaryRestrictions, <String>['Contains Coconut']);
+    });
+
+    test('a match on the dictionary name records no variant', () async {
+      knowledge.catalogue = <LocalFood>[_food('Cendol').copyWith(id: 375)];
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'Cendol', confidence: 0.95);
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      expect(result.variant, isEmpty);
+    });
+
+    test(
+      'a curated synonym spelling records NO variant (same dish, not a variant)',
+      () async {
+        final cendol = _food(
+          'Cendol',
+        ).copyWith(id: 375, synonyms: <String>['cendol gula Melaka']);
+        knowledge.catalogue = <LocalFood>[cendol];
+        recognition.onIdentify = (_) async =>
+            _quickResponse(dish: 'Cendol Gula Melaka', confidence: 0.95);
+
+        final FoodRecognitionResult result = await logic.recognizeFood(<int>[
+          1,
+        ]);
+
+        // The synonym IS the dish - the item simply uses the curated row.
+        expect(result.candidates.single.id, 375);
+        expect(result.variant, isEmpty);
+      },
+    );
 
     test(
       'a brand-new dish (no curated row) keeps Gemini\'s dietary tags',
@@ -863,10 +1105,40 @@ void main() {
       expect(analyzeByNameCalled, isTrue);
       expect(result.nameMatchesPhoto, isTrue);
       expect(result.isLocalFood, isTrue);
-      // Once verified, the curated catalogue row's details are preferred.
+      // Once verified, the curated catalogue row's details are preferred...
       expect(result.food.name, 'Murtabak');
-      expect(result.priceMin, 0.0);
+      // ...and Gemini's suggested range for the verified typed dish rides
+      // along, so the form can show it under the price field.
+      expect(result.priceMin, 1.5);
+      expect(result.priceMax, 6.0);
     });
+
+    test(
+      'typing a classic Western dish stays non-local even when verified',
+      () async {
+        knowledge.catalogue = const <LocalFood>[];
+        recognition.onAnalyzeByName = (List<int> _, String name) async => (
+          food: _food(name),
+          priceMin: 0.0,
+          priceMax: 0.0,
+          isLocal: true,
+          confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 0.95,
+          observedFood: '',
+          foodType: 'Food',
+          dietaryRestrictions: const <String>[],
+        );
+
+        final result = await logic.resolveByName(<int>[1], 'French Toast');
+
+        expect(result.nameMatchesPhoto, isTrue);
+        expect(result.isLocalFood, isFalse);
+      },
+    );
 
     test(
       'sends the typed name + image to Gemini and returns that one dish',
@@ -1027,37 +1299,106 @@ void main() {
       expect(result.priceMin, 0.0);
     });
 
-    test('a curated typed dish carries its own food_dietary_restriction links '
-        '(never Gemini\'s tags)', () async {
-      final murtabak = _food('Murtabak');
-      knowledge.catalogue = <LocalFood>[murtabak];
-      knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
-        murtabak.id: <DietaryRestriction>[
-          const DietaryRestriction(id: 1, name: 'No Pork'),
-        ],
-      };
-      recognition.onAnalyzeByName = (List<int> _, String name) async => (
-        food: _food('Murtabak (Gemini)'),
-        priceMin: 3.0,
-        priceMax: 8.0,
-        isLocal: true,
-        confidence: 1.0,
-        localConfidence: 1.0,
-        imageQuality: 'good',
-        imageQualityIssues: const <String>[],
-        nameMatchesPhoto: true,
-        matchConfidence: 1.0,
-        observedFood: '',
-        foodType: 'Food',
-        // Gemini's noisy tags - must be ignored for the curated row.
-        dietaryRestrictions: const <String>['No Pork', 'No Gluten'],
-      );
+    test(
+      'a curated typed dish keeps the observation\'s dietary tags',
+      () async {
+        final murtabak = _food('Murtabak');
+        knowledge.catalogue = <LocalFood>[murtabak];
+        knowledge.foodRestrictionLinks = <int, List<DietaryRestriction>>{
+          murtabak.id: <DietaryRestriction>[
+            const DietaryRestriction(id: 1, name: 'No Pork'),
+          ],
+        };
+        recognition.onAnalyzeByName = (List<int> _, String name) async => (
+          food: _food('Murtabak (Gemini)'),
+          priceMin: 3.0,
+          priceMax: 8.0,
+          isLocal: true,
+          confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 1.0,
+          observedFood: '',
+          foodType: 'Food',
+          // The photo was verified as showing the typed dish, so the observed
+          // tags describe THIS dish and ride the item.
+          dietaryRestrictions: const <String>['No Pork', 'No Gluten'],
+        );
 
-      final result = await logic.resolveByName(<int>[1], 'Murtabak');
+        final result = await logic.resolveByName(<int>[1], 'Murtabak');
 
-      expect(result.food.id, murtabak.id);
-      expect(result.dietaryRestrictions, <String>['No Pork']);
-    });
+        expect(result.food.id, murtabak.id);
+        expect(result.dietaryRestrictions, <String>['No Pork', 'No Gluten']);
+      },
+    );
+
+    test(
+      'a typed variant name is recorded while the curated dish links',
+      () async {
+        final cendol = _food('Cendol').copyWith(id: 375);
+        knowledge.catalogue = <LocalFood>[cendol];
+        recognition.onAnalyzeByName = (List<int> _, String name) async => (
+          food: _food('Cendol Jagung').copyWith(
+            id: 0,
+            ingredients: 'Pandan jelly, coconut milk, gula Melaka, sweet corn',
+          ),
+          priceMin: 3.0,
+          priceMax: 8.0,
+          isLocal: true,
+          confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 0.9,
+          observedFood: '',
+          foodType: 'Dessert',
+          dietaryRestrictions: const <String>[],
+        );
+
+        final result = await logic.resolveByName(<int>[1], 'Cendol Jagung');
+
+        // The typed variant resolves to the curated 'Cendol' row...
+        expect(result.food.id, cendol.id);
+        expect(result.food.name, 'Cendol');
+        // ...while the item records what the tourist actually typed.
+        expect(result.variant, 'Cendol Jagung');
+      },
+    );
+
+    test(
+      'a word-order spelling links to its own row and records no variant',
+      () async {
+        final cendol = _food('Cendol').copyWith(id: 375);
+        final nyonya = _food('Nyonya Cendol').copyWith(id: 58);
+        knowledge.catalogue = <LocalFood>[cendol, nyonya];
+        recognition.onAnalyzeByName = (List<int> _, String name) async => (
+          food: _food('cendol nyonya').copyWith(id: 0),
+          priceMin: 3.0,
+          priceMax: 6.0,
+          isLocal: true,
+          confidence: 1.0,
+          localConfidence: 1.0,
+          imageQuality: 'good',
+          imageQualityIssues: const <String>[],
+          nameMatchesPhoto: true,
+          matchConfidence: 0.9,
+          observedFood: '',
+          foodType: 'Dessert',
+          dietaryRestrictions: const <String>[],
+        );
+
+        final result = await logic.resolveByName(<int>[1], 'cendol nyonya');
+
+        // "cendol nyonya" is "Nyonya Cendol" - it must link to THAT row,
+        // never to the plain 'Cendol' prefix - and being the same dish it
+        // records no variant.
+        expect(result.food.id, 58);
+        expect(result.variant, isEmpty);
+      },
+    );
 
     test('a verified typed alias resolves to the curated row via Gemini '
         'aliases (bubur ca ca)', () async {
@@ -1163,6 +1504,7 @@ void main() {
 
         final ({
           LocalFood food,
+          String variant,
           double priceMin,
           double priceMax,
           bool fitsCatalogueCategory,
@@ -1218,7 +1560,11 @@ void main() {
       late FoodRecognitionLogic logic;
 
       /// A food as Gemini produces it - not yet a curated row (`id: 0`).
-      LocalFood geminiFood(String name) => LocalFood(
+      LocalFood geminiFood(
+        String name, {
+        List<String> aliases = const <String>[],
+        String pronunciationText = '',
+      }) => LocalFood(
         id: 0,
         name: name,
         description: 'Description of $name',
@@ -1229,6 +1575,8 @@ void main() {
         cookingStyle: 'Frying',
         mealType: 'Breakfast',
         foodType: 'Food',
+        pronunciationText: pronunciationText,
+        aliases: aliases,
       );
 
       FoodSubmission submission(
@@ -1236,12 +1584,14 @@ void main() {
         double confidence = 0.9,
         bool isLocalFood = true,
         bool isFake = false,
+        String? imageUrl,
       }) => FoodSubmission(
         food: food,
         price: 5,
         confidence: confidence,
         isLocalFood: isLocalFood,
         isFake: isFake,
+        imageUrl: imageUrl,
       );
 
       setUp(() {
@@ -1305,6 +1655,74 @@ void main() {
         ]);
 
         expect(knowledge.inserted, isEmpty);
+      });
+
+      test(
+        'attaches the submitted dish photo to the new catalogue row',
+        () async {
+          knowledge.catalogue = const <LocalFood>[];
+
+          await logic.registerNewDishes(<FoodSubmission>[
+            submission(
+              geminiFood('Laksam'),
+              imageUrl:
+                  'https://cdn.example.com/storage/landmark-images/photo/a.jpg',
+            ),
+          ]);
+
+          expect(knowledge.images.length, 1);
+          expect(
+            knowledge.images.single.localFoodId,
+            101,
+          ); // the saved row's id
+          expect(
+            knowledge.images.single.imageName,
+            'https://cdn.example.com/storage/landmark-images/photo/a.jpg',
+          );
+        },
+      );
+
+      test('a dish without a photo gets no image link', () async {
+        knowledge.catalogue = const <LocalFood>[];
+
+        await logic.registerNewDishes(<FoodSubmission>[
+          submission(geminiFood('Laksam')),
+        ]);
+
+        expect(knowledge.inserted.length, 1);
+        expect(knowledge.images, isEmpty);
+      });
+
+      test('persists Gemini aliases as the new row\'s synonyms', () async {
+        knowledge.catalogue = const <LocalFood>[];
+
+        await logic.registerNewDishes(<FoodSubmission>[
+          submission(
+            geminiFood(
+              'Bubur Cha Cha',
+              aliases: <String>['摩摩喳喳', 'Bobochacha'],
+            ),
+            confidence: 0.95,
+          ),
+        ]);
+
+        expect(knowledge.inserted.single.synonyms, <String>[
+          '摩摩喳喳',
+          'Bobochacha',
+        ]);
+      });
+
+      test('persists the pronunciation Gemini supplied', () async {
+        knowledge.catalogue = const <LocalFood>[];
+
+        await logic.registerNewDishes(<FoodSubmission>[
+          submission(
+            geminiFood('Roti Canai', pronunciationText: 'roh-tee chah-nai'),
+            confidence: 0.95,
+          ),
+        ]);
+
+        expect(knowledge.inserted.single.pronunciationText, 'roh-tee chah-nai');
       });
 
       test('verifyNewFoodsOrThrow lets an accepted new dish through', () async {

@@ -46,4 +46,61 @@ void main() {
       expect(placeNameKey('   '), '');
     });
   });
+
+  group('chineseScriptStyleOf', () {
+    test('tells the two styles apart', () {
+      expect(chineseScriptStyleOf('海天樓'), 'traditional');
+      expect(chineseScriptStyleOf('海天楼'), 'simplified');
+    });
+
+    test('reports a name that mixes both styles', () {
+      expect(chineseScriptStyleOf('海天樓记'), 'mixed');
+    });
+
+    test('dual-role glyphs prove nothing about the style', () {
+      // 皇后 is written identically in the two styles - 后 is not evidence.
+      expect(chineseScriptStyleOf('皇后'), 'unknown');
+      expect(chineseScriptStyleOf('面'), 'unknown');
+    });
+
+    test('shared-only glyphs and non-Chinese text are "unknown"', () {
+      expect(chineseScriptStyleOf('海天'), 'unknown');
+      expect(chineseScriptStyleOf('Village Park Restaurant'), 'unknown');
+      expect(chineseScriptStyleOf(''), 'unknown');
+    });
+  });
+
+  group('correctChineseScriptStyle', () {
+    test('restores the complex form when the sign is Traditional', () {
+      expect(correctChineseScriptStyle('天义', 'traditional'), '天義');
+      expect(correctChineseScriptStyle('海天楼', 'traditional'), '海天樓');
+      expect(correctChineseScriptStyle('天义记', 'traditional'), '天義記');
+      // Already Traditional - nothing to correct.
+      expect(correctChineseScriptStyle('天義', 'traditional'), '天義');
+    });
+
+    test('folds to the simple form when the sign is Simplified', () {
+      expect(correctChineseScriptStyle('天義', 'simplified'), '天义');
+      expect(correctChineseScriptStyle('海天樓', 'simplified'), '海天楼');
+      expect(correctChineseScriptStyle('海天樓记', 'simplified'), '海天楼记');
+      expect(correctChineseScriptStyle('天义', 'simplified'), '天义');
+    });
+
+    test('never invents glyphs it cannot prove', () {
+      // 发 is the Simplified form of both 發 and 髮 - no single origin.
+      expect(correctChineseScriptStyle('发', 'traditional'), '发');
+      // 后 is a legitimate Traditional glyph (皇后) - never rewritten.
+      expect(correctChineseScriptStyle('皇后', 'traditional'), '皇后');
+      // 馆 was simplified from more than one Traditional form.
+      expect(correctChineseScriptStyle('馆', 'traditional'), '馆');
+      // Shared glyphs, other claims and non-Chinese text pass through.
+      expect(correctChineseScriptStyle('海天', 'traditional'), '海天');
+      expect(correctChineseScriptStyle('天义', 'n/a'), '天义');
+      expect(correctChineseScriptStyle('天义', 'mixed'), '天义');
+      expect(
+        correctChineseScriptStyle('Village Park', 'traditional'),
+        'Village Park',
+      );
+    });
+  });
 }

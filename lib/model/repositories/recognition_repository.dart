@@ -245,6 +245,7 @@ class RecognitionRepository {
         foodType: _normaliseFoodType(response.foodType),
         tastes: response.tasteTags,
         mainTaste: response.mainTaste,
+        pronunciationText: response.pronunciation,
         synonyms: response.variant.isEmpty
             ? const <String>[]
             : <String>[response.variant],

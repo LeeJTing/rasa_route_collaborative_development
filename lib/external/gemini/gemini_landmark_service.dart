@@ -48,6 +48,19 @@ class GeminiLandmarkService {
     throw FormatException('Gemini returned non-object JSON: $body');
   }
 
+  /// The local/foreign flag the app trusts: the single-letter `localClass`
+  /// the model reported in Step 3 ("a"/"b" = Malaysian, "c"/"d" = not),
+  /// falling back to `isMalaysianLocalFood` when no letter came back. Lite
+  /// models occasionally write a boolean that CONTRADICTS the class they
+  /// chose; the one-letter classification is the simpler, more reliable
+  /// output, so it is the flag of record.
+  static bool _isLocalFromClass(Object? jsonClass, Object? fallback) {
+    final String value = (jsonClass as String?)?.trim().toLowerCase() ?? '';
+    if (value.startsWith('a') || value.startsWith('b')) return true;
+    if (value.startsWith('c') || value.startsWith('d')) return false;
+    return (fallback as bool?) ?? false;
+  }
+
   /// Coerces a Gemini JSON price into a `double`. Gemini may return the
   /// suggested range as a JSON number, OR as a string (e.g. `"2.00"` or
   /// `"RM 2.00"`) - `as num?` would silently drop string values and the
@@ -111,14 +124,20 @@ class GeminiLandmarkService {
         identity of its own.
         e.g. sushi, ramen, pho, pad thai, pizza, spaghetti, croissant,
         a burger or fried chicken from a Western fast-food chain,
-        Korean fried chicken, plain Western steak, doughnuts.
+        Korean fried chicken, plain Western steak, doughnuts, french toast,
+        pancakes.
     (d) UNIDENTIFIABLE - you genuinely cannot tell what the dish is.
 
-  Step 4. Report all three of these:
+  Step 4. Report all four of these:
+    - "localClass": EXACTLY ONE letter - "a", "b", "c" or "d" - the class
+      you chose in Step 3. One letter only, never a word, a range or two
+      letters.
     - "localFoodReasoning": ONE short sentence - the dish, its origin, and
       the class letter you chose. e.g. "Ramly burger - Malaysian street
       adaptation sold at roadside stalls, class (a)."
-    - "isMalaysianLocalFood": true for (a) and (b); false for (c) and (d).
+    - "isMalaysianLocalFood": true for (a) and (b); false for (c) and (d) -
+      it must AGREE with "localClass". If they disagree, the class letter
+      is the correct one and the boolean is the mistake.
     - "localFoodConfidence": 0.0-1.0 - how sure you are of THIS judgement
       specifically. This is SEPARATE from "confidence" (how sure you are of
       the dish NAME). A clearly-photographed burger may score high
@@ -129,6 +148,12 @@ class GeminiLandmarkService {
   from a Western chain is class (c); a Ramly burger is class (a). If you
   cannot distinguish which the photo shows, say so with a LOW
   "localFoodConfidence" rather than guessing true.
+
+  KOPITIAM CAVEAT: serving a dish at a kopitiam, mamak or roadside stall
+  does not make it class (a). Kaya toast, roti bakar and half-boiled eggs
+  ARE Malaysian kopitiam food (class (a)); a Western breakfast cooked the
+  same way - french toast, pancakes - is still a foreign dish (class (c)).
+  Judge the DISH, never the venue.
 
   CONFIDENCE CALIBRATION - use the full range, do not default to high:
     0.90-1.00  Certain. The dish is unmistakable and clearly photographed.
@@ -216,6 +241,30 @@ class GeminiLandmarkService {
   Set "foodType" to exactly one of: Food|Beverage|Fruit|Dessert|Kuih|none.
   ''';
 
+  /// Concrete VISUAL differentiators for the dish clusters the lite model
+  /// most often confuses - a murtabak photo read as "french toast" was a
+  /// user-reported failure. Weak models cannot reliably apply cultural
+  /// knowledge, but they CAN compare what is visible: shape, the filling at
+  /// the cut edge, and the sides plated with it. Shared by the quick, full
+  /// and verification prompts.
+  static const String _lookalikeRules = '''
+  CONFUSABLE LOOKALIKES - decide by VISIBLE SHAPE, FILLING and SIDES:
+  - murtabak: a thick folded/squared flatbread enclosing a savoury filling
+    (minced meat, onion, egg). The CUT EDGE shows filling layers, and it is
+    normally served with curry/dal or pickled onion - not syrup.
+  - roti canai / roti telur: a soft round flaky flatbread eaten with curry,
+    plain or egg-coated - not a thick stack of soaked bread.
+  - roti john: a LONG baguette-style roll omelette sandwich eaten with
+    chilli sauce; long and loaf-shaped, not square.
+  - french toast / pancakes / waffles: triangular bread slices or a stack
+    of round fluffy pieces, eggy-yellow and soaked-soft or fluffy, with
+    butter/syrup/honey - and NO curry, dal or pickled onion beside them.
+  - kaya toast: thin TOASTED bread slices with a green/brown coconut-jam
+    filling, with half-boiled eggs and kopi/teh - not syrup.
+  A murtabak is NOT french toast just because it is flat bread with egg:
+  check the cut surface, the filling, and what is served beside it.
+  ''';
+
   /// Quick, name-only call - phase 1 of the two-phase recognition flow.
   /// Cheaper than [analyzeFoodImage]: only `dish` and the status fields are
   /// meaningful on the response. Used to check the catalogue first; the full
@@ -284,6 +333,18 @@ class GeminiLandmarkService {
      not sure, give your best guess but set confidence low - NEVER invent a
      plausible-sounding dish for an unidentifiable photo.
 
+  2b. visualEvidence: BEFORE you finalise the name, note the key VISIBLE
+     FEATURES you are using - shape/form, colour, filling or cut surface,
+     and any side, sauce or packaging plated with it. 1-2 short phrases,
+     not a general description. When a similar dish could fit, name that
+     dish and the visible feature that rules it out (see CONFUSABLE
+     LOOKALIKES below).
+
+  2c. suggestedPriceMin / suggestedPriceMax: the typical selling-price range
+     for that dish in Malaysia, in MYR (a stall price up to a restaurant
+     price, e.g. 4.5 and 8.5). Whole ringgit is fine. Use 0 and 0 when you
+     cannot estimate - never invent a range for an unidentifiable photo.
+
   3. candidates: list up to 3 POSSIBLE dish names for the main food, most
      likely first, each with a confidence 0.0-1.0. If you are confident it
      is one dish, list only that one with a high confidence.
@@ -326,37 +387,46 @@ $_imageQualityRules
 
 $_catalogueFoodTypeRules
 
+$_lookalikeRules
+
   Worked examples - match this reasoning style and calibration:
 
   Example A - a plate of coconut rice with sambal, anchovies, peanuts, egg:
-  {"foodCount":1,"dish":"Nasi Lemak","candidates":[{"dish":"Nasi Lemak","confidence":0.94}],
+  {"visualEvidence":"white rice heap with red sambal, fried anchovies, peanuts, boiled egg and cucumber slices on one plate","foodCount":1,"dish":"Nasi Lemak","candidates":[{"dish":"Nasi Lemak","confidence":0.94}],
+   "localClass":"a",
    "localFoodReasoning":"Nasi lemak - Malaysian national dish, class (a).",
    "isMalaysianLocalFood":true,"localFoodConfidence":0.97,
    "imageQuality":"good","imageQualityIssues":[],
    "foodStatus":"detected","foodImageStatus":"complete","confidence":0.94}
 
   Example B - a boxed burger with branded fast-food packaging visible:
-  {"foodCount":1,"dish":"Fast-food cheeseburger","candidates":[{"dish":"Fast-food cheeseburger","confidence":0.9}],
+  {"visualEvidence":"burger inside a branded fast-food box and paper wrapper, no local stall cues","foodCount":1,"dish":"Fast-food cheeseburger","candidates":[{"dish":"Fast-food cheeseburger","confidence":0.9}],
+   "localClass":"c",
    "localFoodReasoning":"Western fast-food chain burger, branded packaging visible, no Malaysian identity - class (c).",
    "isMalaysianLocalFood":false,"localFoodConfidence":0.88,
    "imageQuality":"good","imageQualityIssues":[],
    "foodStatus":"detected","foodImageStatus":"complete","confidence":0.9}
 
   Example C - a burger in plain paper wrap, no branding, unclear origin:
-  {"foodCount":1,"dish":"Burger","candidates":[{"dish":"Ramly burger","confidence":0.45},{"dish":"Fast-food cheeseburger","confidence":0.4}],
-   "localFoodReasoning":"A burger, but no packaging or preparation cue shows whether it is a Malaysian Ramly-style burger or a generic one - class uncertain between (a) and (c).",
+  {"visualEvidence":"plain paper-wrapped burger, no branding or stall cues visible","foodCount":1,"dish":"Burger","candidates":[{"dish":"Ramly burger","confidence":0.45},{"dish":"Fast-food cheeseburger","confidence":0.4}],
+   "localClass":"c",
+   "localFoodReasoning":"A burger, but no packaging or preparation cue shows whether it is a Malaysian Ramly-style burger or a generic one - cannot tell, so reported as (c) with low confidence.",
    "isMalaysianLocalFood":false,"localFoodConfidence":0.35,
    "imageQuality":"good","imageQualityIssues":[],
    "foodStatus":"detected","foodImageStatus":"complete","confidence":0.5}
 
   Return ONLY raw JSON, no markdown fences, no extra text:
   {
+    "visualEvidence": "string",
     "foodCount": 1,
     "dish": "string",
     "candidates": [{"dish": "string", "confidence": 0.0-1.0}],
+    "localClass": "a|b|c|d",
     "localFoodReasoning": "string",
     "isMalaysianLocalFood": boolean,
     "localFoodConfidence": 0.0-1.0,
+    "suggestedPriceMin": 0.0,
+    "suggestedPriceMax": 0.0,
     "imageQuality": "good|acceptable|poor",
     "imageQualityIssues": ["string"],
     "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
@@ -371,6 +441,14 @@ $_catalogueFoodTypeRules
       prompt: prompt,
       apiKey: Env.geminiApiKeyLandmark,
       model: Env.geminiModelLandmark,
+      // Deterministic, strict-JSON landmark read: temperature 0 means the
+      // same photo gets the same (most probable) answer instead of a fresh
+      // sample per attempt; thinkingBudget is opt-in via
+      // GEMINI_THINKING_BUDGET (0 = off).
+      temperature: 0,
+      jsonResponse: true,
+      thinkingBudget: Env.geminiThinkingBudget,
+      label: 'quick',
     );
     final Map<String, dynamic> json = _decodeJsonObject(raw);
     return FoodAnalysisResponse(
@@ -382,7 +460,12 @@ $_catalogueFoodTypeRules
       mealType: '',
       foodCategory: '',
       foodType: (json['foodType'] as String?) ?? '',
-      isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
+      // The class letter the model chose ("a"/"b" local, "c"/"d" not) is
+      // the flag of record; the boolean is only a fallback.
+      isMalaysianLocalFood: _isLocalFromClass(
+        json['localClass'],
+        json['isMalaysianLocalFood'],
+      ),
       localFoodConfidence: ((json['localFoodConfidence'] as num?) ?? 1)
           .toDouble(),
       localFoodReasoning: (json['localFoodReasoning'] as String?) ?? '',
@@ -392,6 +475,11 @@ $_catalogueFoodTypeRules
               ?.whereType<String>()
               .toList() ??
           const <String>[],
+      // The quick call asks for the same suggested range the full call does,
+      // so a catalogue fast-path result still has one - see
+      // `FoodRecognitionLogic.recognizeFood`.
+      priceMin: _asDouble(json['suggestedPriceMin']),
+      priceMax: _asDouble(json['suggestedPriceMax']),
       culturalBackground: '',
       foodStatus: (json['foodStatus'] as String?) ?? 'unclear',
       foodImageStatus: (json['foodImageStatus'] as String?) ?? 'unclear',
@@ -436,6 +524,7 @@ $_catalogueFoodTypeRules
       priceMin: 2.0,
       priceMax: 8.0,
       foodCount: 1,
+      pronunciation: 'nah-see luh-mak',
     );
   }
 
@@ -447,10 +536,19 @@ $_catalogueFoodTypeRules
   Analyze this food image and extract the following information:
 
   1. Identify the dish name
+  1b. visualEvidence: the key VISIBLE FEATURES you used to name it -
+      shape/form, colour, filling or cut surface, and any side, sauce or
+      packaging plated with it (1-2 short phrases, not a description).
+      When a similar dish could fit, name it and the visible feature that
+      rules it out - see CONFUSABLE LOOKALIKES below.
   2. Identify the dish variant
   3. Provide a brief description
-  3b. List the main ingredients, comma-separated (e.g. "rice, coconut milk,
-      sambal, peanuts, anchovies, egg")
+  3b. ingredients: the main ingredients of the dish AS SHOWN IN THIS PHOTO,
+      comma-separated (e.g. "rice, coconut milk, sambal, peanuts, anchovies,
+      egg"). When the photo shows a VARIANT (step 2), the ingredient(s) that
+      make it that variant MUST be in the list too (e.g. a "Cendol Jagung"
+      photo adds "sweet corn"; a "Nasi Lemak Ayam" photo adds "fried
+      chicken") - the list names what makes it THAT variant.
 
   3c. aliases: list up to 4 WELL-KNOWN alternative names of the dish you
       identified - genuine other names/scripts/spellings of the SAME dish
@@ -460,9 +558,20 @@ $_catalogueFoodTypeRules
       description, an ingredient list or a made-up translation. Use [] when
       you do not know reliable aliases.
 
+  3d. pronunciation: how the dish name is SAID, written so a text-to-speech
+      voice reads it correctly - a simple phonetic respelling in lowercase
+      Latin letters and hyphens (e.g. "nah-see luh-mak" for Nasi Lemak,
+      "chah kway teow" for Char Kway Teow, "moh moh zha zha" for 摩摩喳喳,
+      "roh-tee chah-nai" for Roti Canai). Use the dish's common spoken form,
+      not a literal letter-by-letter reading. Empty string when the name is
+      already spoken exactly as written.
+
   4. Identify the origin/region
   5. Identify the cooking style
-  6. Identify the meal type (Breakfast/Lunch/Dinner/Snack)
+  6. Identify the meal type - EXACTLY ONE of the catalogue's own values,
+     spelled exactly as listed: All-Day Dining | Breakfast | Lunch | High
+     Tea | Dinner | Supper | Street Food | Dessert | Beverage (Beverage for
+     drinks). Never invent another value.
   7. Categorize: Malay|Chinese|Indian|Nyonya|Sabah|Sarawak|Other
   8. Cultural background
   9. Taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3,
@@ -509,6 +618,8 @@ $_imageQualityRules
 
 $_catalogueFoodTypeRules
 
+$_lookalikeRules
+
   This is the IN-DEPTH analysis - your judgement here overrides any quicker
   first-pass guess, so take the full procedure above seriously rather than
   agreeing with an obvious first impression.
@@ -521,6 +632,7 @@ $_catalogueFoodTypeRules
 
   Return ONLY raw JSON, no markdown fences, no extra text:
   {
+    "visualEvidence": "string",
     "dish": "string",
     "variant": "string",
     "description": "string",
@@ -530,6 +642,7 @@ $_catalogueFoodTypeRules
     "mealType": "string",
     "foodCategory": "string",
     "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
+    "localClass": "a|b|c|d",
     "localFoodReasoning": "string",
     "isMalaysianLocalFood": boolean,
     "localFoodConfidence": 0.0-1.0,
@@ -540,6 +653,7 @@ $_catalogueFoodTypeRules
     "mainTaste": "string",
     "dietaryRestrictions": ["string"],
     "aliases": ["string"],
+    "pronunciation": "string",
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "suggestedPriceMin": 0.0,
@@ -553,6 +667,10 @@ $_catalogueFoodTypeRules
       prompt: prompt,
       apiKey: Env.geminiApiKeyLandmark,
       model: Env.geminiModelLandmark,
+      temperature: 0,
+      jsonResponse: true,
+      thinkingBudget: Env.geminiThinkingBudget,
+      label: 'full',
     );
     final Map<String, dynamic> json = _decodeJsonObject(raw);
     return FoodAnalysisResponse(
@@ -565,7 +683,10 @@ $_catalogueFoodTypeRules
       mealType: (json['mealType'] as String?) ?? '',
       foodCategory: (json['foodCategory'] as String?) ?? '',
       foodType: (json['foodType'] as String?) ?? '',
-      isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
+      isMalaysianLocalFood: _isLocalFromClass(
+        json['localClass'],
+        json['isMalaysianLocalFood'],
+      ),
       localFoodConfidence: ((json['localFoodConfidence'] as num?) ?? 1)
           .toDouble(),
       localFoodReasoning: (json['localFoodReasoning'] as String?) ?? '',
@@ -594,6 +715,7 @@ $_catalogueFoodTypeRules
           (json['aliases'] as List<dynamic>?)?.whereType<String>().toList() ??
           const <String>[],
       foodCount: (json['foodCount'] as num?)?.toInt() ?? 1,
+      pronunciation: (json['pronunciation'] as String?) ?? '',
     );
   }
 
@@ -631,6 +753,7 @@ $_catalogueFoodTypeRules
       foodImageStatus: 'complete',
       confidence: 0.9,
       foodCount: 1,
+      pronunciation: name,
     );
   }
 
@@ -646,7 +769,10 @@ $_catalogueFoodTypeRules
   Step 1. Look at the photo BEFORE considering the name "$name" at all. In
           "observedFood", name the dish you actually see in 1-3 words (a
           menu-style label), e.g. "Nasi Lemak", "Pepperoni Pizza" - not a
-          full description.
+          full description. Also fill "visualEvidence" with the key visible
+          features behind your read - shape/form, colour, filling or cut
+          surface, sides/sauce - and, when a similar dish could fit, the
+          feature that rules it out (see CONFUSABLE LOOKALIKES).
   Step 2. Now compare your observation with "$name". Could this photo
           reasonably be "$name"?
             - Consider regional spellings and alternative names for the same
@@ -670,11 +796,15 @@ $_catalogueFoodTypeRules
   is better served by being told than by being agreed with.
 
   When "nameMatchesPhoto" is true, provide the details for "$name":
-    - variant, a brief description, main ingredients (comma-separated),
-      origin/region, cooking style
-    - meal type (Breakfast/Lunch/Dinner/Snack)
+    - variant, a brief description, main ingredients of "$name" (comma-
+      separated; include what makes the typed variant that variant - a
+      "Cendol Jagung" adds "sweet corn"), origin/region, cooking style
+    - meal type - EXACTLY ONE of the catalogue's own values: All-Day Dining,
+      Breakfast, Lunch, High Tea, Dinner, Supper, Street Food, Dessert or
+      Beverage (Beverage for drinks; never invent another value)
     - food category (Malay|Chinese|Indian|Nyonya|Sabah|Sarawak|Other)
-    - isMalaysianLocalFood (true/false)
+    - localClass ("a"|"b"|"c"|"d" per the local-food rules above) and
+      isMalaysianLocalFood (true for a/b, false for c/d - they must agree)
     - cultural background
     - taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3,
       plus the single most important one as "mainTaste"
@@ -692,11 +822,22 @@ $_catalogueFoodTypeRules
       cha cha, "ABC" for ais kacang, "Bee Koh Moy" for pulut hitam). Only
       genuine established names of the SAME dish - never a different dish, a
       description or a made-up translation. [] when unknown.
+    - pronunciation: how the dish name is SAID, written so a text-to-speech
+      voice reads it correctly - a simple phonetic respelling in lowercase
+      Latin letters and hyphens (e.g. "nah-see luh-mak" for Nasi Lemak,
+      "chah kway teow" for Char Kway Teow, "moh moh zha zha" for 摩摩喳喳).
+      Use the dish's common spoken form, not a literal letter-by-letter
+      reading. Empty string when the name is already spoken as written.
+
+$_localFoodRules
+
+$_lookalikeRules
 
 $_catalogueFoodTypeRules
 
   Return ONLY raw JSON, no markdown fences, no candidate list:
   {
+    "visualEvidence": "string",
     "observedFood": "string",
     "nameMatchesPhoto": boolean,
     "matchConfidence": 0.0-1.0,
@@ -709,12 +850,14 @@ $_catalogueFoodTypeRules
     "mealType": "string",
     "foodCategory": "string",
     "foodType": "Food|Beverage|Fruit|Dessert|Kuih|none",
+    "localClass": "a|b|c|d",
     "isMalaysianLocalFood": boolean,
     "culturalBackground": "string",
     "tasteTags": ["string"],
     "mainTaste": "string",
     "dietaryRestrictions": ["string"],
     "aliases": ["string"],
+    "pronunciation": "string",
     "foodStatus": "detected|not_detected|unclear",
     "foodImageStatus": "complete|partially_captured|obstructed",
     "suggestedPriceMin": 0.0,
@@ -728,6 +871,14 @@ $_catalogueFoodTypeRules
       prompt: prompt,
       apiKey: Env.geminiApiKeyLandmark,
       model: Env.geminiModelLandmark,
+      // Deterministic verdict: the SAME photo + typed name must get the same
+      // answer on every attempt. Without this the model samples at its
+      // default temperature, so re-typing the same name could "roll" a
+      // different observed dish (murtabak vs roti john on the same photo).
+      temperature: 0,
+      jsonResponse: true,
+      thinkingBudget: Env.geminiThinkingBudget,
+      label: 'verify',
     );
     final Map<String, dynamic> json = _decodeJsonObject(raw);
     return FoodAnalysisResponse(
@@ -740,7 +891,10 @@ $_catalogueFoodTypeRules
       mealType: (json['mealType'] as String?) ?? '',
       foodCategory: (json['foodCategory'] as String?) ?? '',
       foodType: (json['foodType'] as String?) ?? '',
-      isMalaysianLocalFood: (json['isMalaysianLocalFood'] as bool?) ?? false,
+      isMalaysianLocalFood: _isLocalFromClass(
+        json['localClass'],
+        json['isMalaysianLocalFood'],
+      ),
       culturalBackground: (json['culturalBackground'] as String?) ?? '',
       tasteTags:
           (json['tasteTags'] as List<dynamic>?)?.whereType<String>().toList() ??
@@ -763,6 +917,7 @@ $_catalogueFoodTypeRules
       matchConfidence: ((json['matchConfidence'] as num?) ?? 0).toDouble(),
       observedFood: (json['observedFood'] as String?) ?? '',
       foodCount: 1,
+      pronunciation: (json['pronunciation'] as String?) ?? '',
     );
   }
 
@@ -770,7 +925,10 @@ $_catalogueFoodTypeRules
   /// Returns: extracted text + frame status. Multilingual-aware - Malaysian
   /// signs mix Malay/English (Latin), Chinese, Tamil and Jawi; the prompt
   /// romanises non-Latin names into [SignboardAnalysisResponse.textDetected]
-  /// and keeps the exact displayed text in [SignboardAnalysisResponse.nameOriginalScript].
+  /// and keeps the exact displayed text in
+  /// [SignboardAnalysisResponse.nameOriginalScript], with
+  /// [SignboardAnalysisResponse.scriptVariant] describing the style actually
+  /// painted on the sign so a "turned" transcription can be caught.
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<SignboardAnalysisResponse> analyzeSignboardImage({
     required List<int> imageBytes,
@@ -824,14 +982,56 @@ $_catalogueFoodTypeRules
      "茶餐室" are part of the name, KEEP them - do not strip or drop them.
      If a lot number or phone number appears on the signboard, leave it
      out of "textDetected" entirely.
-  4. Transcribe the name faithfully from the signboard.
+  4. Transcribe the name faithfully from the signboard - the form you
+     DETECTED is the form you RETURN, never the one you prefer:
+       - If you detected Traditional Chinese, return Traditional Chinese.
+         If you detected Simplified Chinese, return Simplified Chinese.
+         NEVER convert between them, in either direction: if the sign
+         paints 樓, return 樓 - not 楼; if it paints 记, return 记 - not
+         記 (same for every pair: 麵/面, 雞/鸡, 館/馆, ...). Write the
+         painted variant even when you would normally write the other one.
+       - Judge each character by its STROKES, not by its meaning: the
+         complex form is Traditional (義 has many strokes), the reduced
+         form is Simplified (义 has three). Example: the characters painted
+         天義 MUST come back as 天義 - never 天义; the characters painted
+         天义 MUST come back as 天义 - never 天義. The reading is
+         identical either way, so the reading must never decide the
+         characters - only the painted glyphs decide.
+       - The SAME rule applies to EVERY language and script, not just
+         Chinese: copy Jawi as Jawi, Tamil as Tamil, English/Malay exactly
+         as written, and unusual or old spellings exactly as painted.
+         Never transliterate, and never switch a script or a spelling to
+         the form you prefer - your preference is not part of the photo.
+       - Never reorder, add or drop characters, and keep the punctuation
+         and spacing as painted.
+  5. Before returning, re-read your transcription character by character
+     against the signboard: fix any character you substituted, and make
+     sure the characters you are about to return ARE the variant you
+     report in "scriptVariant" - Traditional characters for a
+     "traditional" sign, Simplified characters for a "simplified" sign,
+     never the other way round. For every character whose stroke count
+     you are unsure of, look at the signboard again and return the glyph
+     that is painted there, not the glyph you would normally write.
 
   For non-Latin names (Chinese/Tamil/Jawi):
   - "textDetected" = the romanised (Latin) form using the most common
     Malaysian spelling (pinyin for Chinese, romanised Tamil/Jawi). If
     unsure, transcribe phonetically so it is still usable in the app.
-  - "nameOriginalScript" = the exact characters exactly as they appear on
-    the signboard.
+  - "nameOriginalScript" = the name exactly as it is painted on the
+    signboard (see step 4 - Traditional stays Traditional, Simplified
+    stays Simplified). Copy EVERY painted line of the name into this
+    field, in reading order: when the sign paints Chinese characters with
+    a Latin line such as "Tian Yi" beneath them, the whole painted name
+    goes here - "天義 Tian Yi". A line painted on the signboard is part
+    of the name, not a translation; never add a Latin line that is not
+    painted, and never drop one that is.
+  - "scriptVariant" = the Chinese style ACTUALLY PAINTED on the signboard,
+    read off the sign in the image - "simplified" | "traditional" | "mixed"
+    (the sign itself mixes both styles) | "n/a" (name is not Chinese). Take
+    it from the painted glyphs, NOT from what you would normally write -
+    and "nameOriginalScript" MUST match it: the transcription and this
+    label can never disagree (a Traditional sign returned in Simplified
+    characters - or the reverse - is a failure of this task).
   For Latin-script names both fields carry the same text and
   "languageScript" is "latin".
 
@@ -842,8 +1042,9 @@ $_catalogueFoodTypeRules
   Return ONLY raw JSON, no markdown fences, no extra text:
   {
     "signboardStatus": "detected|not_detected|unclear",
+    "scriptVariant": "simplified|traditional|mixed|n/a - decide this style FIRST",
     "textDetected": "restaurant name only - no lot number, address, or phone number, or null",
-    "nameOriginalScript": "exact displayed name or null if Latin",
+    "nameOriginalScript": "the name exactly as painted - every painted line in reading order (e.g. 天義 Tian Yi), in the style decided above, or null if the name is Latin",
     "languageScript": "latin|chinese|tamil|jawi|mixed",
     "signboardImageStatus": "complete|partially_captured|obstructed",
     "confidence": 0.0-1.0
@@ -855,12 +1056,17 @@ $_catalogueFoodTypeRules
       prompt: prompt,
       apiKey: Env.geminiApiKeyLandmark,
       model: Env.geminiModelLandmark,
+      jsonResponse: true,
+      thinkingBudget: Env.geminiThinkingBudget,
+      label: 'signboard',
     );
     final Map<String, dynamic> json = _decodeJsonObject(raw);
     return SignboardAnalysisResponse(
       signboardStatus: (json['signboardStatus'] as String?) ?? 'unclear',
       textDetected: json['textDetected'] as String?,
       nameOriginalScript: json['nameOriginalScript'] as String?,
+      scriptVariant:
+          (json['scriptVariant'] as String?)?.trim().toLowerCase() ?? 'n/a',
       languageScript:
           (json['languageScript'] as String?)?.trim().toLowerCase() ?? 'latin',
       signboardImageStatus:
@@ -910,6 +1116,9 @@ $_catalogueFoodTypeRules
       prompt: prompt,
       model: Env.geminiModelLandmark,
       apiKey: Env.geminiApiKeyLandmark,
+      jsonResponse: true,
+      thinkingBudget: Env.geminiThinkingBudget,
+      label: 'stall',
     );
     final Map<String, dynamic> json = _decodeJsonObject(raw);
     return StallAnalysisResponse(
@@ -969,6 +1178,7 @@ $_catalogueFoodTypeRules
       prompt,
       apiKey: Env.geminiApiKeyLandmark,
       model: Env.geminiModelLandmark,
+      label: 'origin-direct',
     );
     return _decodeJsonObject(raw);
   }
@@ -1004,6 +1214,7 @@ $_catalogueFoodTypeRules
       prompt,
       apiKey: Env.geminiApiKeyLandmark,
       model: Env.geminiModelLandmark,
+      label: 'origin-adjudicate',
     );
     return _decodeJsonObject(raw);
   }
@@ -1030,6 +1241,7 @@ $_catalogueFoodTypeRules
       prompt,
       apiKey: Env.geminiApiKeyLandmark,
       model: Env.geminiModelLandmark,
+      label: 'origin-pattern',
     );
     return _decodeJsonObject(raw);
   }

@@ -270,6 +270,14 @@ class SubmittedLandmarkRepository {
         'description': item.description,
         'origin': item.origin,
         'cultural_background': item.culturalBackground,
+        // The variant's own observed facts (see `LandmarkItem.ingredients`
+        // / `dietaryRestrictions`) - null when there is nothing to record.
+        'ingredients': item.ingredients.trim().isEmpty
+            ? null
+            : item.ingredients,
+        'dietary_restrictions': item.dietaryRestrictions.isEmpty
+            ? null
+            : item.dietaryRestrictions.join(', '),
         'image_url': item.imageUrl,
         'image_id': item.imageId,
         'item_price': item.price,
@@ -618,6 +626,8 @@ class SubmittedLandmarkRepository {
       description: data.description ?? '',
       origin: data.origin ?? '',
       culturalBackground: data.culturalBackground ?? '',
+      ingredients: data.ingredients ?? '',
+      dietaryRestrictions: _splitRestrictions(data.dietaryRestrictions),
       imageUrl: data.imageUrl,
       imageId: data.imageId,
       price: data.itemPrice,
@@ -628,6 +638,18 @@ class SubmittedLandmarkRepository {
       mealType: data.mealType ?? '',
       isRemoved: data.isRemoved,
       isFake: fake,
+    );
+  }
+
+  /// Splits the comma-separated `landmark_item.dietary_restrictions` text
+  /// back into canonical restriction names. Null / empty -> empty list.
+  static List<String> _splitRestrictions(String? text) {
+    if (text == null) return const <String>[];
+    return List<String>.unmodifiable(
+      text
+          .split(',')
+          .map((String name) => name.trim())
+          .where((String name) => name.isNotEmpty),
     );
   }
 

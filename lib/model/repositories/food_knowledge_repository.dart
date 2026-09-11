@@ -204,26 +204,86 @@ class FoodKnowledgeRepository {
     )) {
       return null;
     }
-    final Map<String, dynamic>? row = await api
-        .insertRowReturning(APIManager.tableLocalFood, <String, dynamic>{
-          'food_name': food.name.trim(),
-          'description': food.description.isEmpty ? null : food.description,
-          'origin': food.origin.isEmpty ? null : food.origin,
-          'cultural_background': food.culturalBackground.isEmpty
-              ? null
-              : food.culturalBackground,
-          'ingredients': food.ingredients.isEmpty ? null : food.ingredients,
-          'food_category': food.category.isEmpty ? null : food.category,
-          'cooking_style': food.cookingStyle.isEmpty ? null : food.cookingStyle,
-          'meal_type': food.mealType.isEmpty ? null : food.mealType,
-          'food_type': food.foodType.isEmpty ? null : food.foodType,
-          'synonyms': food.synonyms.isEmpty ? null : food.synonyms.join(','),
-        });
+    final Map<String, dynamic>? row = await api.insertRowReturning(
+      APIManager.tableLocalFood,
+      <String, dynamic>{
+        'food_name': food.name.trim(),
+        'description': food.description.isEmpty ? null : food.description,
+        'origin': food.origin.isEmpty ? null : food.origin,
+        'cultural_background': food.culturalBackground.isEmpty
+            ? null
+            : food.culturalBackground,
+        'ingredients': food.ingredients.isEmpty ? null : food.ingredients,
+        'food_category': food.category.isEmpty ? null : food.category,
+        'cooking_style': food.cookingStyle.isEmpty ? null : food.cookingStyle,
+        'meal_type': food.mealType.isEmpty ? null : food.mealType,
+        'food_type': food.foodType.isEmpty ? null : food.foodType,
+        // How the dish name is said (Gemini's respelling) - the same
+        // column the curated rows carry; without it the pronunciation
+        // button has no text to fall back to until a curated recording is
+        // generated for this dish.
+        'pronunciation_text': food.pronunciationText.isEmpty
+            ? null
+            : food.pronunciationText,
+        'synonyms': food.synonyms.isEmpty ? null : food.synonyms.join(','),
+      },
+    );
     if (row == null) return null;
     final LocalFood saved = _toDomain(row, isFavourite: false);
     // The cached catalogue no longer reflects what is on the server.
     invalidate();
     return saved;
+  }
+
+  /// Attaches a photo to a catalogue dish (`local_food_image`) - used when a
+  /// brand-new dish is added from a landmark submission, so the catalogue row
+  /// carries the tourist's own photo of the dish instead of appearing with no
+  /// image. [imageName] may be either a storage object name in the
+  /// food-images bucket or a full public URL: `APIManager.resolveImageUrl`
+  /// passes `http(s)` values through unchanged, so the submission's already
+  /// uploaded `landmark-images` URL works as-is (no second upload).
+  ///
+  /// `local_food_image_id` may or may not be an identity column depending on
+  /// how the table was created, so the natural insert is attempted first and
+  /// an explicit next id is supplied when that is refused (the same
+  /// belt-and-suspenders pattern `SubmittedLandmarkRepository` uses for
+  /// tables without an identity default). Throws when neither works - callers
+  /// treat a failed photo link as best-effort.
+  Future<void> addFoodImage({
+    required int localFoodId,
+    required String imageName,
+  }) async {
+    final String name = imageName.trim();
+    if (localFoodId <= 0 || name.isEmpty) return;
+    try {
+      await api.insertRow(APIManager.tableLocalFoodImage, <String, dynamic>{
+        'img_name': name,
+        'local_food_id': localFoodId,
+      });
+      return;
+    } catch (_) {
+      // Fall through to the explicit-id attempt.
+    }
+    final int nextId = await _nextLocalFoodImageId();
+    await api.insertRow(APIManager.tableLocalFoodImage, <String, dynamic>{
+      'local_food_image_id': nextId,
+      'img_name': name,
+      'local_food_id': localFoodId,
+    });
+  }
+
+  /// Next `local_food_image_id` (max + 1); 1 when the table is empty (or the
+  /// read is denied).
+  Future<int> _nextLocalFoodImageId() async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableLocalFoodImage,
+      columns: 'local_food_image_id',
+      orderBy: 'local_food_image_id',
+      ascending: false,
+      limit: 1,
+    );
+    if (rows.isEmpty) return 1;
+    return ((rows.first['local_food_image_id'] as num?)?.toInt() ?? 0) + 1;
   }
 
   /// Writes the `local_food_preference` links for a freshly-inserted dish -

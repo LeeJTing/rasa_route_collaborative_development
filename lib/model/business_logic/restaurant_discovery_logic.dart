@@ -247,6 +247,7 @@ class RestaurantDiscoveryLogic {
         continue;
       }
       final FoodOccurrence place = entry.value.first;
+      final List<SubmittedLandmarkDish> dishes = _dishesOf(entry.value);
       measured.add(
         SubmittedLandmarkRecommendation(
           id: int.tryParse(entry.key) ?? 0,
@@ -260,18 +261,12 @@ class RestaurantDiscoveryLogic {
             place.latitude,
             place.longitude,
           ),
-          foodNames: entry.value
-              .map((FoodOccurrence item) => item.foodName.trim())
-              .where((String name) => name.isNotEmpty)
-              .toSet()
-              .toList(growable: false),
+          dishes: dishes,
           imageUrl: place.placeImageUrl,
-          price: entry.value
-              .map((FoodOccurrence item) => item.itemPrice)
-              .whereType<double>()
-              .fold<double?>(null, (double? lowest, double price) {
-                return lowest == null || price < lowest ? price : lowest;
-              }),
+          // The headline price is the AVERAGE of the landmark's known dish
+          // prices (one dish's price would misread a stall with a menu);
+          // null while none is known.
+          price: _averageDishPrice(dishes),
         ),
       );
     }
@@ -295,6 +290,38 @@ class RestaurantDiscoveryLogic {
       radiusKm += _quickModeRadiusStepKm;
     }
     return available;
+  }
+
+  /// The landmark's dishes as the quick-mode rows list them: the recorded
+  /// dish text, trimmed and de-duplicated by name (first occurrence wins),
+  /// each with its own price and photo.
+  List<SubmittedLandmarkDish> _dishesOf(List<FoodOccurrence> items) {
+    final List<SubmittedLandmarkDish> dishes = <SubmittedLandmarkDish>[];
+    final Set<String> seen = <String>{};
+    for (final FoodOccurrence item in items) {
+      final String name = item.foodName.trim();
+      if (name.isEmpty || !seen.add(name)) continue;
+      dishes.add(
+        SubmittedLandmarkDish(
+          name: name,
+          price: item.itemPrice,
+          imageUrl: item.itemImageUrl,
+          ingredients: item.itemIngredients,
+        ),
+      );
+    }
+    return dishes;
+  }
+
+  /// The AVERAGE of the dishes' known prices - null while none is known.
+  double? _averageDishPrice(List<SubmittedLandmarkDish> dishes) {
+    final List<double> prices = dishes
+        .map((SubmittedLandmarkDish dish) => dish.price)
+        .whereType<double>()
+        .toList(growable: false);
+    if (prices.isEmpty) return null;
+    return prices.fold<double>(0, (double sum, double price) => sum + price) /
+        prices.length;
   }
 
   Future<List<Restaurant>> _hydrateSelected(List<Restaurant> selected) async {

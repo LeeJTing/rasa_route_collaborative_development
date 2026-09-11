@@ -44,6 +44,21 @@ void main() {
           result.groups.single.submittedLandmarks.single.foodNames,
           containsAll(<String>['Liked Food', 'Not Liked Food']),
         );
+        // Each dish carries its OWN price, and the landmark's headline price
+        // is their AVERAGE (8 and 12 -> 10), not one dish's price.
+        final SubmittedLandmarkRecommendation landmark =
+            result.groups.single.submittedLandmarks.single;
+        expect(
+          landmark.dishes
+              .map((SubmittedLandmarkDish dish) => dish.name)
+              .toList(),
+          orderedEquals(<String>['Liked Food', 'Not Liked Food']),
+        );
+        expect(landmark.dishes.first.price, 8);
+        expect(landmark.dishes.last.price, 12);
+        expect(landmark.price, 10);
+        expect(landmark.dishes.first.ingredients, 'Rice, sambal');
+        expect(landmark.dishes.last.ingredients, isNull);
       },
     );
 
@@ -286,6 +301,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           latitude: 1,
           longitude: 1.002,
           itemPrice: 8,
+          itemIngredients: 'Rice, sambal',
         ),
         FoodOccurrence(
           sourceId: '20',
@@ -295,6 +311,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           foodName: 'Not Liked Food',
           latitude: 1,
           longitude: 1.002,
+          itemPrice: 12,
         ),
       ];
   @override
