@@ -303,10 +303,10 @@ class _PriceAndStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool? openNow = pin.openNow;
     final String status = openNow == null
-        ? 'Hours unknown'
+        ? 'Unknown'
         : openNow
-        ? 'Open now'
-        : 'Closed now';
+        ? 'Opening'
+        : 'Closed';
     final Color statusColour = openNow == null
         ? AppColors.textSecondary
         : openNow

@@ -23,7 +23,7 @@ void main() {
           FoodSearchBar(
             controller: controller,
             onChanged: (String value) => latest = value,
-            maxLength: LocalFoodListViewModel.maximumSearchLength,
+            maxLength: LocalFoodListViewModel.maximumSearchLength, onClear: () {  },
           ),
         ),
       );

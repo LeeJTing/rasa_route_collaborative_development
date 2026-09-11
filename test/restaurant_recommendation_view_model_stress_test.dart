@@ -60,6 +60,7 @@ class _FakeDiscoveryLogic extends DiscoveryLogicFacade {
   @override
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
+    String? foodType,
   }) {
     requestedLatitudes.add(location.latitude);
     return _restaurantResults

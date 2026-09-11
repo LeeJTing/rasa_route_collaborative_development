@@ -152,13 +152,11 @@ class DiscoveryLayerBar extends StatelessWidget {
         message: 'No local food with a serving location was found here.',
       );
     }
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragEnd: (DragEndDetails details) {
-        final double velocity = details.primaryVelocity ?? 0;
-        if (velocity < -80 && nextFood != null) onNext();
-        if (velocity > 80 && previousFood != null) onPrevious();
-      },
+    return _SwipeDeckGesture(
+      canMovePrevious: previousFood != null,
+      canMoveNext: nextFood != null,
+      onPrevious: onPrevious,
+      onNext: onNext,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.sm,
@@ -211,6 +209,70 @@ class DiscoveryLayerBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Recognises both a quick flick and a deliberate slow drag.
+///
+/// Using only release velocity made a card appear unresponsive when the
+/// tourist moved it far enough but lifted their finger gently. Pan tracking
+/// also tolerates the small vertical drift common on a narrow phone while
+/// still requiring the gesture to be predominantly horizontal.
+class _SwipeDeckGesture extends StatefulWidget {
+  const _SwipeDeckGesture({
+    required this.canMovePrevious,
+    required this.canMoveNext,
+    required this.onPrevious,
+    required this.onNext,
+    required this.child,
+  });
+
+  final bool canMovePrevious;
+  final bool canMoveNext;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final Widget child;
+
+  @override
+  State<_SwipeDeckGesture> createState() => _SwipeDeckGestureState();
+}
+
+class _SwipeDeckGestureState extends State<_SwipeDeckGesture> {
+  static const double _dragThreshold = 36;
+  static const double _flingVelocity = 250;
+  static const double _horizontalDominance = 0.65;
+
+  Offset _travel = Offset.zero;
+
+  void _reset() => _travel = Offset.zero;
+
+  void _finish(DragEndDetails details) {
+    final Offset travel = _travel;
+    _reset();
+    final double velocity = details.velocity.pixelsPerSecond.dx;
+    final bool horizontalEnough =
+        travel.dx.abs() >= travel.dy.abs() * _horizontalDominance;
+    if (!horizontalEnough) return;
+
+    final bool moveNext =
+        travel.dx <= -_dragThreshold || velocity <= -_flingVelocity;
+    final bool movePrevious =
+        travel.dx >= _dragThreshold || velocity >= _flingVelocity;
+    if (moveNext && widget.canMoveNext) {
+      widget.onNext();
+    } else if (movePrevious && widget.canMovePrevious) {
+      widget.onPrevious();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onPanStart: (_) => _reset(),
+    onPanUpdate: (DragUpdateDetails details) => _travel += details.delta,
+    onPanEnd: _finish,
+    onPanCancel: _reset,
+    child: widget.child,
+  );
 }
 
 class _Header extends StatelessWidget {

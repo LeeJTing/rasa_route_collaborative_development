@@ -11,6 +11,7 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
+import 'opening_hours_logic.dart';
 
 /// Finding and filtering restaurants.
 ///
@@ -32,8 +33,16 @@ class RestaurantDiscoveryLogic {
 
   late final DiscoveryRepositoryFacade repository = createRepository();
 
-  Future<Restaurant?> findById(int restaurantId) =>
-      repository.getRestaurantById(restaurantId);
+  Future<Restaurant?> findById(
+    int restaurantId, {
+    TouristLocation origin = TouristLocation.unknown,
+  }) async {
+    final Restaurant? restaurant = await repository.getRestaurantById(
+      restaurantId,
+    );
+    if (restaurant == null) return null;
+    return _measure(<Restaurant>[restaurant], origin).single;
+  }
 
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
@@ -139,8 +148,15 @@ class RestaurantDiscoveryLogic {
 
   /// Quick Mode starts at 1 km and expands silently until 20 nearest
   /// eligible restaurants are found or the 10 km Use Case boundary is reached.
+  ///
+  /// [foodType] narrows eligibility to restaurants with at least one menu
+  /// item of that type (Food, Beverage, Fruit, Dessert or Kuih). Passing a
+  /// different value re-runs the whole radius expansion against that type -
+  /// it does not just re-filter restaurants already found for a previous
+  /// type.
   Future<List<Restaurant>> nearbyWithAutomaticExpansion({
     required TouristLocation location,
+    String? foodType,
   }) async {
     if (!location.isKnown) return const <Restaurant>[];
     final List<Restaurant> allMeasured = _measure(
@@ -155,6 +171,7 @@ class RestaurantDiscoveryLogic {
     final List<Restaurant> measured = _availableSummaries(allMeasured);
     final List<Restaurant> eligible = await _eligibleRestaurants(
       _withinRadius(measured, radiusKm: _quickModeMaximumRadiusKm),
+      foodType: foodType,
     );
     double radiusKm = _quickModeInitialRadiusKm;
     List<Restaurant> available = const <Restaurant>[];
@@ -216,9 +233,7 @@ class RestaurantDiscoveryLogic {
           .add(occurrence);
     }
 
-    final DateTime malaysiaNow = currentTime().toUtc().add(
-      const Duration(hours: 8),
-    );
+    final DateTime now = currentTime();
     final List<SubmittedLandmarkRecommendation> measured =
         <SubmittedLandmarkRecommendation>[];
     for (final MapEntry<String, List<FoodOccurrence>> entry
@@ -227,7 +242,7 @@ class RestaurantDiscoveryLogic {
           _isConfidentlyClosedHours(
             hoursByPlace['submittedLandmark:${entry.key}'] ??
                 const <OpeningHour>[],
-            malaysiaNow,
+            now,
           )) {
         continue;
       }
@@ -312,9 +327,7 @@ class RestaurantDiscoveryLogic {
   }
 
   List<Restaurant> _availableSummaries(List<Restaurant> restaurants) {
-    final DateTime malaysiaNow = currentTime().toUtc().add(
-      const Duration(hours: 8),
-    );
+    final DateTime now = currentTime();
     return restaurants
         .where(
           (Restaurant restaurant) =>
@@ -327,7 +340,7 @@ class RestaurantDiscoveryLogic {
                 closedUntil: restaurant.closedUntil,
                 now: currentTime(),
               ) &&
-              !_isConfidentlyClosed(restaurant, malaysiaNow),
+              !_isConfidentlyClosed(restaurant, now),
         )
         .toList(growable: false);
   }
@@ -362,49 +375,12 @@ class RestaurantDiscoveryLogic {
   bool _isConfidentlyClosedHours(
     List<OpeningHour> hours,
     DateTime malaysiaNow,
-  ) {
-    if (hours.isEmpty) return false;
-    final Weekday today = Weekday.values[malaysiaNow.weekday - 1];
-    final Weekday previous =
-        Weekday.values[(malaysiaNow.weekday + Weekday.values.length - 2) %
-            Weekday.values.length];
-    final int minute = malaysiaNow.hour * 60 + malaysiaNow.minute;
-
-    final bool previousDayStillOpen = hours.any((OpeningHour row) {
-      final int? opens = row.opensAt;
-      final int? closes = row.closesAt;
-      return row.day == previous &&
-          row.status == DayStatus.open &&
-          opens != null &&
-          closes != null &&
-          closes < opens &&
-          minute < closes;
-    });
-    if (previousDayStillOpen) return false;
-
-    final List<OpeningHour> todayRows = hours
-        .where((OpeningHour row) => row.day == today)
-        .toList(growable: false);
-    if (todayRows.isEmpty ||
-        todayRows.any((OpeningHour row) => row.status == DayStatus.unknown)) {
-      return false;
-    }
-    final bool openNow = todayRows.any((OpeningHour row) {
-      final int? opens = row.opensAt;
-      final int? closes = row.closesAt;
-      if (row.status != DayStatus.open || opens == null || closes == null) {
-        return false;
-      }
-      if (closes == 1440) return minute >= opens;
-      if (closes < opens) return minute >= opens;
-      return minute >= opens && minute < closes;
-    });
-    return !openNow;
-  }
+  ) => OpeningHoursLogic.isConfidentlyClosedAt(hours, malaysiaNow);
 
   Future<List<Restaurant>> _eligibleRestaurants(
-    List<Restaurant> candidates,
-  ) async {
+    List<Restaurant> candidates, {
+    String? foodType,
+  }) async {
     if (candidates.isEmpty) return const <Restaurant>[];
     final List<RestaurantItem> menuItems = await repository
         .getRestaurantItemsByRestaurantIds(
@@ -428,14 +404,27 @@ class RestaurantDiscoveryLogic {
         ? const <int, List<int>>{}
         : await repository.getRestrictionIdsByFood();
 
+    final String? normalizedFoodType = foodType?.trim().toLowerCase();
+    final bool hasFoodTypeFilter =
+        normalizedFoodType != null && normalizedFoodType.isNotEmpty;
+
     final List<Restaurant> eligible = <Restaurant>[];
     for (final Restaurant restaurant in candidates) {
       final List<RestaurantItem> items =
           itemsByRestaurant[restaurant.id] ?? const <RestaurantItem>[];
       if (items.isEmpty) continue;
-      final List<RestaurantItem> safeItems = activeRestrictionIds.isEmpty
+      final List<RestaurantItem> typedItems = !hasFoodTypeFilter
           ? items
           : items
+                .where(
+                  (RestaurantItem item) =>
+                      item.foodType.trim().toLowerCase() == normalizedFoodType,
+                )
+                .toList(growable: false);
+      if (typedItems.isEmpty) continue;
+      final List<RestaurantItem> safeItems = activeRestrictionIds.isEmpty
+          ? typedItems
+          : typedItems
                 .where(
                   (RestaurantItem item) =>
                       item.localFoodId > 0 &&
