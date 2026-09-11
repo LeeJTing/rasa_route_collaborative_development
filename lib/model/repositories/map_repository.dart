@@ -751,14 +751,8 @@ class MapRepository {
       );
     }
 
-    // A restaurant is on the map unless it is explicitly marked otherwise.
-    //
-    // This used to require `status == 'available'`, which silently dropped
-    // every row where the column was never set - 3,368 of 12,584 in the seeded
-    // data, including 2,177 in Selangor and 579 in Johor. A scraped row with no
-    // status is not evidence that the place is shut; it is a column nobody
-    // filled in. Anything genuinely withdrawn carries a different value and is
-    // still excluded.
+    // Only `available` places are on the map - see [_isVisible]. Anything
+    // frozen, or with no status set at all, is left off.
     final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
       for (final Map<String, dynamic> row in restaurants)
         if (_asInt(row['restaurant_id']) != 0 && _isVisible(row['status']))
@@ -1053,12 +1047,16 @@ class MapRepository {
     return out;
   }
 
-  /// Whether a `restaurant.status` value means the place should be shown.
-  /// Null or blank counts as visible - see [_restaurantOccurrences].
-  static bool _isVisible(Object? status) {
-    final String value = _asString(status).trim().toLowerCase();
-    return value.isEmpty || value == 'available';
-  }
+  /// Whether a `status` value means the place should be shown.
+  ///
+  /// **`available` and nothing else.** This briefly treated null and blank as
+  /// visible too, because thousands of scraped rows had never had the column
+  /// set and dropping them made the map look empty. JT - who owns the rule -
+  /// has since said the map and the heatmap are to show `available` only, so
+  /// an unset status is now as good as frozen and the fix for those rows is to
+  /// set them, not to guess on their behalf.
+  static bool _isVisible(Object? status) =>
+      _asString(status).trim().toLowerCase() == 'available';
 
   static Weekday? _weekday(String value) {
     final String name = value.trim().toLowerCase();

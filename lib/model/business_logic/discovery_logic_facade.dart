@@ -271,20 +271,13 @@ class DiscoveryLogicFacade {
   /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
   static const int maximumMarkers = MapExplorationLogic.maximumMarkers;
-  static const int swipeFoodMarkerLimit =
-      MapExplorationLogic.swipeFoodMarkerLimit;
-  static const double swipeFoodFocusZoom =
-      MapExplorationLogic.swipeFoodFocusZoom;
 
-  Future<GeoPoint?> nearestFoodLocation({
-    required int localFoodId,
-    required double fromLatitude,
-    required double fromLongitude,
-  }) => mapExploration.nearestFoodLocation(
-    localFoodId: localFoodId,
-    fromLatitude: fromLatitude,
-    fromLongitude: fromLongitude,
-  );
+  // `swipeFoodMarkerLimit`, `swipeFoodFocusZoom` and `nearestFoodLocation`
+  // stood here and named three members `MapExplorationLogic` does not have, so
+  // the file could not compile. Nothing read them - not this facade, not a
+  // ViewModel, not a View - so they were left behind by work that went away,
+  // the way the drill-down constants were. Re-exposing a constant is free;
+  // re-exposing one that does not exist is a build error, so they are gone.
 
   /// REQ102_41 - what a tap on [cluster] should do: the zoom that visibly
   /// breaks it up, or its members when no zoom ever separates them.

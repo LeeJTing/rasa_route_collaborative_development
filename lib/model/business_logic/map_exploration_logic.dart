@@ -8,10 +8,8 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
-import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
-import 'opening_hours_logic.dart';
 import 'dart:math' as math;
 
 /// REQ102 - the Local Food Dashboard.
@@ -33,8 +31,6 @@ class MapExplorationLogic {
   MapExplorationLogic();
 
   final DiscoveryRepositoryFacade repository = DiscoveryRepositoryFacade();
-
-  DateTime currentTime() => DateTime.now();
 
   // ===========================================================================
   // Dev GPS mock (Android-only presenter tool)
@@ -88,15 +84,6 @@ class MapExplorationLogic {
   /// REQ102_12 / REQ102_13 - "the predefined zoom level". At or above this the
   /// dashboard is a detailed map view; below it, the heatmap.
   static const double detailedViewZoom = 7.5;
-
-  /// Neighbourhood-level camera used when a Swipe card becomes active. It is
-  /// close enough to make individual places useful without dropping directly
-  /// onto a building-level view.
-  static const double swipeFoodFocusZoom = 13;
-
-  /// A food filter should be a focused answer, not hundreds of markers across
-  /// a state. Normal Dashboard browsing keeps [maximumMarkers].
-  static const int swipeFoodMarkerLimit = 10;
 
   /// REQ102_12, for the heatmap illustration rather than the slippy map.
   ///
@@ -515,29 +502,10 @@ class MapExplorationLogic {
 
     // Distance to the tourist is the one thing Postgres was not asked for: it
     // changes with every GPS fix, and recomputing it here costs nothing.
-    // Swipe Mode must not recommend a place the stored schedule confidently
-    // says is closed now. Missing/malformed scraped hours remain visible as
-    // unknown rather than being silently treated as closed.
-    List<MapPin> eligiblePins = markers.pins;
-    if (localFoodId != null && eligiblePins.isNotEmpty) {
-      final Set<String> placeKeys = eligiblePins.map(_placeKeyForPin).toSet();
-      final Map<String, List<OpeningHour>> hoursByPlace = await repository
-          .openingHoursByPlace(placeKeys: placeKeys);
-      final DateTime malaysiaNow = _malaysiaNow;
-      eligiblePins = eligiblePins
-          .where(
-            (MapPin pin) => !OpeningHoursLogic.isConfidentlyClosedAt(
-              hoursByPlace[_placeKeyForPin(pin)],
-              malaysiaNow,
-            ),
-          )
-          .toList(growable: false);
-    }
-
-    final List<MapPin> withDistance =
-        fromLatitude == null || fromLongitude == null
-        ? eligiblePins
-        : eligiblePins
+    final List<MapPin> withDistance = fromLatitude == null ||
+            fromLongitude == null
+        ? markers.pins
+        : markers.pins
               .map(
                 (MapPin pin) => _withDistance(
                   pin,
@@ -559,52 +527,6 @@ class MapExplorationLogic {
       totalInView: withDistance.length + markers.clusters.length,
       limit: cap,
     );
-  }
-
-  /// The closest visible place serving [localFoodId] to the map's current
-  /// exploration anchor. Swipe Mode uses this before loading its focused
-  /// viewport; GPS is deliberately not used because tourists may be exploring
-  /// a different state.
-  Future<GeoPoint?> nearestFoodLocation({
-    required int localFoodId,
-    required double fromLatitude,
-    required double fromLongitude,
-  }) async {
-    final List<Object> gathered = await Future.wait(<Future<Object>>[
-      repository.foodOccurrences(),
-      repository.openingHoursByPlace(),
-    ]);
-    final List<FoodOccurrence> occurrences =
-        gathered[0] as List<FoodOccurrence>;
-    final Map<String, List<OpeningHour>> hoursByPlace =
-        gathered[1] as Map<String, List<OpeningHour>>;
-    final DateTime malaysiaNow = _malaysiaNow;
-    FoodOccurrence? nearest;
-    double nearestDistance = double.infinity;
-    for (final FoodOccurrence occurrence in occurrences) {
-      if (occurrence.localFoodId != localFoodId) continue;
-      final String key = occurrence.source == FoodOccurrenceSource.restaurant
-          ? 'restaurant:${occurrence.sourceId}'
-          : 'submittedLandmark:${occurrence.sourceId}';
-      if (OpeningHoursLogic.isConfidentlyClosedAt(
-        hoursByPlace[key],
-        malaysiaNow,
-      )) {
-        continue;
-      }
-      final double distance = _distanceMetres(
-        fromLatitude,
-        fromLongitude,
-        occurrence.latitude,
-        occurrence.longitude,
-      );
-      if (distance >= nearestDistance) continue;
-      nearest = occurrence;
-      nearestDistance = distance;
-    }
-    return nearest == null
-        ? null
-        : GeoPoint(nearest.latitude, nearest.longitude);
   }
 
   /// REQ102_41 - what a tap on [cluster] should do.
@@ -645,26 +567,12 @@ class MapExplorationLogic {
       );
     }
 
-    List<MapPin> members = await repository.map.clusterMembers(
+    final List<MapPin> members = await repository.map.clusterMembers(
       latitude: cluster.latitude,
       longitude: cluster.longitude,
       zoom: zoom,
       foodIds: foodIds,
     );
-    if (localFoodId != null && members.isNotEmpty) {
-      final Set<String> placeKeys = members.map(_placeKeyForPin).toSet();
-      final Map<String, List<OpeningHour>> hoursByPlace = await repository
-          .openingHoursByPlace(placeKeys: placeKeys);
-      final DateTime malaysiaNow = _malaysiaNow;
-      members = members
-          .where(
-            (MapPin pin) => !OpeningHoursLogic.isConfidentlyClosedAt(
-              hoursByPlace[_placeKeyForPin(pin)],
-              malaysiaNow,
-            ),
-          )
-          .toList(growable: false);
-    }
     return ClusterExpansion(
       splitZoom: null,
       memberCount: probe.memberCount == 0 ? members.length : probe.memberCount,
@@ -733,13 +641,6 @@ class MapExplorationLogic {
         distanceMetres: pin.distanceMetres,
       );
 
-  DateTime get _malaysiaNow =>
-      currentTime().toUtc().add(const Duration(hours: 8));
-
-  static String _placeKeyForPin(MapPin pin) => pin.kind == MapPinKind.restaurant
-      ? 'restaurant:${pin.referenceId}'
-      : 'submittedLandmark:${pin.referenceId}';
-
   /// How far apart to push markers that share a position, in screen pixels.
   static const double collisionSpreadPixels = 18;
 
@@ -757,11 +658,20 @@ class MapExplorationLogic {
     if (localFoodId != null) return <int>[localFoodId];
     if (filter.selectionCount == 0) return null;
 
-    // The same four chips produce the same ids every time, and this is asked on
+    // The same chips produce the same ids every time, and this is asked on
     // every pan. Resolve once per filter selection rather than walking the
     // catalogue again for each load.
-    final String key =
-        '${filter.meal}|${filter.category}|${filter.taste}|${filter.type}';
+    //
+    // Sorted, because a group is now a set: ticking Lunch then Breakfast and
+    // ticking Breakfast then Lunch are the same filter and must not be cached
+    // twice under two different keys.
+    final String key = ExplorationFilterGroup.values
+        .map((ExplorationFilterGroup group) {
+          final List<String> chosen = filter.selectionFor(group).toList()
+            ..sort();
+          return chosen.join(',');
+        })
+        .join('|');
     final List<int>? cached = _foodIdCache[key];
     if (cached != null) return cached;
 
@@ -794,22 +704,8 @@ class MapExplorationLogic {
   }) async {
     final int? id = int.tryParse(pin.referenceId);
     if (id == null || id <= 0) return pin;
+    if (pin.kind != MapPinKind.restaurant) return pin;
 
-    if (pin.kind == MapPinKind.restaurant) {
-      return _restaurantPinDetail(pin, id, filter: filter, localFoodId: localFoodId);
-    } else if (pin.kind == MapPinKind.landmark) {
-      return _landmarkPinDetail(pin, id, filter: filter, localFoodId: localFoodId);
-    }
-
-    return pin;
-  }
-
-  Future<MapPin> _restaurantPinDetail(
-    MapPin pin,
-    int id, {
-    ExplorationFilter filter = ExplorationFilter.none,
-    int? localFoodId,
-  }) async {
     final Restaurant? restaurant;
     final List<RestaurantItem> items;
     final Map<String, List<OpeningHour>> hours;
@@ -817,7 +713,9 @@ class MapExplorationLogic {
       final List<Object?> gathered = await Future.wait(<Future<Object?>>[
         repository.getRestaurantById(id),
         repository.getRestaurantItemsByRestaurantIds(<int>[id]),
-        repository.openingHoursByPlace(placeKeys: <String>{'restaurant:$id'}),
+        repository.openingHoursByPlace(
+          placeKeys: <String>{'restaurant:$id'},
+        ),
       ]);
       restaurant = gathered[0] as Restaurant?;
       items = gathered[1] as List<RestaurantItem>;
@@ -873,68 +771,7 @@ class MapExplorationLogic {
             : served,
       ),
       priceRange: _priceRangeOf(prices),
-      openNow: openNow(hours['restaurant:$id']),
-      distanceMetres: pin.distanceMetres,
-    );
-  }
-
-  Future<MapPin> _landmarkPinDetail(
-    MapPin pin,
-    int id, {
-    ExplorationFilter filter = ExplorationFilter.none,
-    int? localFoodId,
-  }) async {
-    final SubmittedLandmark? landmark;
-    try {
-      landmark = await repository.getSubmittedLandmarkById(id);
-    } catch (_) {
-      return pin;
-    }
-    if (landmark == null) return pin;
-
-    // A landmark's items are already in its items list. Filter them the same
-    // way restaurant items are filtered.
-    final List<LocalFood> catalogue = await repository.getLocalFoods();
-    final Map<int, String> nameById = <int, String>{
-      for (final LocalFood food in catalogue) food.id: food.name,
-    };
-    final Set<int> wanted = <int>{
-      for (final LocalFood food in catalogue)
-        if ((localFoodId == null || food.id == localFoodId) &&
-            matchesFilter(food, filter))
-          food.id,
-    };
-    final bool narrowed = localFoodId != null || filter.selectionCount > 0;
-
-    final List<String> served = <String>[];
-    final List<double> prices = <double>[];
-    for (final LandmarkItem item in landmark.items) {
-      final bool matches = wanted.contains(item.localFoodId);
-      if (narrowed && !matches) continue;
-      final String name = (nameById[item.localFoodId] ?? item.dish).trim();
-      if (name.isNotEmpty && !served.contains(name)) served.add(name);
-      final double? price = item.price;
-      if (price != null && price > 0) prices.add(price);
-    }
-
-    return MapPin(
-      referenceId: pin.referenceId,
-      kind: pin.kind,
-      latitude: pin.latitude,
-      longitude: pin.longitude,
-      label: landmark.name.isEmpty ? pin.label : landmark.name,
-      weight: served.isEmpty ? pin.weight : served.length,
-      imageUrl: landmark.imageUrl ?? pin.imageUrl,
-      thumbnailUrl: pin.thumbnailUrl,
-      category: landmark.category.isEmpty ? null : landmark.category,
-      rating: pin.rating, // Landmarks don't have star ratings yet.
-      servedFoods: List<String>.unmodifiable(
-        served.length > maximumServedFoods
-            ? served.sublist(0, maximumServedFoods)
-            : served,
-      ),
-      priceRange: _priceRangeOf(prices),
-      openNow: openNow(landmark.openingHours),
+      openNow: _openNow(hours['restaurant:$id']),
       distanceMetres: pin.distanceMetres,
     );
   }
@@ -973,56 +810,34 @@ class MapExplorationLogic {
 
   /// Is the place open at this moment (UC300 C12)?
   ///
-  /// Returns:
-  /// * null - **Unknown** (no records today, or any record is `DayStatus.unknown`)
-  /// * true - **Opening** (at least one Open record covers the current local time)
-  /// * false - **Closed** (all Open records are outside current time, or status is `closed`)
-  static bool? openNow(List<OpeningHour>? hours) {
+  /// Returns **null when there is nothing on record** - the sheet says "Hours
+  /// unknown" rather than claiming the place is shut. A row whose times are
+  /// missing is a closed day; a range that ends before it starts has run past
+  /// midnight.
+  static bool? _openNow(List<OpeningHour>? hours) {
     if (hours == null || hours.isEmpty) return null;
 
     final DateTime now = DateTime.now();
     final Weekday today = Weekday.values[now.weekday - 1];
-    final int minutes = now.hour * 60 + now.minute;
-
-    // Check if a shift from yesterday is still running (past midnight).
-    final Weekday yesterday = Weekday.values[(now.weekday + 5) % 7];
-    final bool stillOpenFromYesterday = hours.any((OpeningHour h) {
-      return h.day == yesterday &&
-          h.status == DayStatus.open &&
-          h.opensAt != null &&
-          h.closesAt != null &&
-          h.closesAt! < h.opensAt! &&
-          minutes < h.closesAt!;
-    });
-    if (stillOpenFromYesterday) return true;
-
-    final List<OpeningHour> todayRows = hours
+    final List<OpeningHour> rows = hours
         .where((OpeningHour hour) => hour.day == today)
         .toList(growable: false);
+    if (rows.isEmpty) return null;
 
-    // UNKNOWN: no usable records for today, or any record explicitly set to Unknown.
-    if (todayRows.isEmpty ||
-        todayRows.any((OpeningHour h) => h.status == DayStatus.unknown)) {
-      return null;
+    final int minutes = now.hour * 60 + now.minute;
+    for (final OpeningHour hour in rows) {
+      if (hour.status != DayStatus.open) continue;
+      final int? opensAt = hour.opensAt;
+      final int? closesAt = hour.closesAt;
+      if (opensAt == null || closesAt == null) continue;
+      final bool open = closesAt >= opensAt
+          ? minutes >= opensAt && minutes < closesAt
+          : minutes >= opensAt || minutes < closesAt;
+      if (open) return true;
     }
-
-    for (final OpeningHour hour in todayRows) {
-      if (hour.status == DayStatus.open) {
-        final int? opensAt = hour.opensAt;
-        final int? closesAt = hour.closesAt;
-        if (opensAt == null || closesAt == null) continue;
-
-        // OPENING: inside ANY valid operating period.
-        // Also handles "starts today ends tomorrow" (closes < opens)
-        final bool open = closesAt >= opensAt
-            ? minutes >= opensAt && minutes < closesAt
-            : minutes >= opensAt || minutes < closesAt;
-        if (open) return true;
-      }
-    }
-
-    // CLOSED: has records but none are currently Open.
-    return false;
+    return rows.any((OpeningHour hour) => hour.status == DayStatus.unknown)
+        ? null
+        : false;
   }
 
   /// Great-circle distance in metres. Straight-line, not walking distance -
@@ -1047,35 +862,58 @@ class MapExplorationLogic {
 
   static double _radians(double degrees) => degrees * math.pi / 180;
 
-  /// Does [food] survive the four filter groups? A group left unset is no
+  /// Does [food] survive the four filter groups? An empty group is no
   /// constraint. A dish marked `All-Day Dining` satisfies every meal filter -
   /// it is, by definition, served at all of them.
+  ///
+  /// **Options within a group are OR; the groups are AND.** Breakfast *or*
+  /// Lunch, *and* Malay - which is the only reading that makes ticking two
+  /// chips in one row useful, since no dish is two meals at once and an AND
+  /// there would answer nothing every time.
+  ///
+  /// Note what is being asked the question: a [LocalFood], never a restaurant.
+  /// Meal, category, taste and type are the dish's attributes, and a place
+  /// reaches the map by serving a dish that survives this - restaurants and
+  /// landmarks carry no meal of their own (C2 - C5).
   bool matchesFilter(LocalFood food, ExplorationFilter filter) {
-    final String? meal = filter.meal;
-    if (meal != null) {
+    final Set<String> meals = filter.meals;
+    if (meals.isNotEmpty) {
       final String dishMeal = food.mealType.toLowerCase().trim();
-      if (!dishMeal.contains('all-day') && dishMeal != meal.toLowerCase()) {
-        return false;
-      }
+      final bool matches =
+          dishMeal.contains('all-day') ||
+          meals.any(
+            (String meal) => meal.toLowerCase().trim() == dishMeal,
+          );
+      if (!matches) return false;
     }
 
-    final String? category = filter.category;
-    if (category != null &&
-        food.category.toLowerCase().trim() != category.toLowerCase()) {
-      return false;
-    }
-
-    final String? type = filter.type;
-    if (type != null &&
-        food.foodType.toLowerCase().trim() != type.toLowerCase()) {
-      return false;
-    }
-
-    final String? taste = filter.taste;
-    if (taste != null) {
-      final bool matches = food.tastes.any(
-        (String value) => value.toLowerCase().trim() == taste.toLowerCase(),
+    final Set<String> categories = filter.categories;
+    if (categories.isNotEmpty) {
+      final String dishCategory = food.category.toLowerCase().trim();
+      final bool matches = categories.any(
+        (String category) => category.toLowerCase().trim() == dishCategory,
       );
+      if (!matches) return false;
+    }
+
+    final Set<String> types = filter.types;
+    if (types.isNotEmpty) {
+      final String dishType = food.foodType.toLowerCase().trim();
+      final bool matches = types.any(
+        (String type) => type.toLowerCase().trim() == dishType,
+      );
+      if (!matches) return false;
+    }
+
+    final Set<String> tastes = filter.tastes;
+    if (tastes.isNotEmpty) {
+      // OR on both sides: any chosen taste, against any taste the dish has.
+      final bool matches = food.tastes.any((String value) {
+        final String dishTaste = value.toLowerCase().trim();
+        return tastes.any(
+          (String taste) => taste.toLowerCase().trim() == dishTaste,
+        );
+      });
       if (!matches) return false;
     }
 
@@ -1090,9 +928,25 @@ class MapExplorationLogic {
   /// catalogue, returned as the single grouped result list of A8 step 3.
   ///
   /// Both lists coming back empty is A8.2 - the caller turns that into M2.
+  /// Search answers with what is on the map, and nothing else narrows it:
+  /// the active filter is deliberately not a parameter. Filters drive the
+  /// heatmap and the pin list; a keyword is the other way in, and a tourist who
+  /// types a restaurant's name expects to find it whether or not it serves
+  /// something the filter chips happen to be asking for.
   Future<ExplorationSearchResults> search(String keyword) async {
-    final String needle = keyword.trim().toLowerCase();
+    // Normalised, not merely lowercased: "nasi-lemak", "char_kway_teow" and
+    // "cHarKwayteOW" are all somebody asking for a dish, and the punctuation
+    // they reached for is not part of the question.
+    final String needle = searchNormalise(keyword);
     if (needle.isEmpty) return ExplorationSearchResults.empty;
+
+    // What the *database* is asked. An abbreviation is the one case where the
+    // text as typed can match nothing at all - no restaurant is called "ckt" -
+    // so a whole-name synonym is spent before the request goes out. Anything
+    // else is sent as typed: one request per keyword either way, which is the
+    // point of resolving this here rather than asking twice.
+    final String? alias = foodSynonyms[needle];
+    final String placeNeedle = alias == null ? needle : searchNormalise(alias);
 
     // States, the place table, the food catalogue and the place-name search are
     // independent reads.
@@ -1105,13 +959,34 @@ class MapExplorationLogic {
     final List<Object> gathered = await Future.wait(<Future<Object>>[
       regions(),
       repository.map.places(),
-      repository.searchLocalFoods(keyword),
-      repository.map.searchPlaceNames(needle, limit: maximumPlaceResults),
+      repository.getLocalFoods(),
+      repository.map.searchPlaceNames(placeNeedle, limit: maximumPlaceResults),
     ]);
     final List<Region> allRegions = gathered[0] as List<Region>;
     final List<MapPlace> catalogue = gathered[1] as List<MapPlace>;
-    final List<LocalFood> foods = gathered[2] as List<LocalFood>;
+    final List<LocalFood> allFoods = gathered[2] as List<LocalFood>;
     final List<MapPlaceHit> hits = gathered[3] as List<MapPlaceHit>;
+
+    // REQ102_30 - the "Local Food" group, scored here rather than read back
+    // from the repository's plain `contains`.
+    //
+    // Deciding that "ckt" and "Char Kuey Teow" are the same dish is a rule,
+    // and rules live in this layer. The catalogue itself is the same cached
+    // 368 rows either way, so this costs nothing extra to read.
+    final List<_ScoredFood> scoredFoods = <_ScoredFood>[];
+    for (final LocalFood food in allFoods) {
+      final int score = _score(needle, <String>[food.name]);
+      if (score == 0) continue;
+      scoredFoods.add(_ScoredFood(score, food));
+    }
+    scoredFoods.sort((_ScoredFood a, _ScoredFood b) {
+      final int byScore = b.score.compareTo(a.score);
+      if (byScore != 0) return byScore;
+      return a.food.name.compareTo(b.food.name);
+    });
+    final List<LocalFood> foods = List<LocalFood>.unmodifiable(
+      scoredFoods.map((_ScoredFood entry) => entry.food),
+    );
 
     final List<_ScoredPlace> scored = <_ScoredPlace>[];
 
@@ -1237,25 +1112,162 @@ class MapExplorationLogic {
   /// The ladder [_score] applies is also the one `map_place_search` applies -
   /// `_scoreExact` / `_scorePrefix` / `_scoreWord` / `_scoreContains` are the
   /// 100 / 60 / 40 / 20 the function returns. If either changes, both have to.
+  ///
+  /// **They are out of step right now, and knowingly so.** The squashed rungs
+  /// and the synonym expansion below are client-side only until the pending
+  /// migration lands, because the Supabase connector dropped out before the SQL
+  /// could be applied. Regions, the place table and the food catalogue are
+  /// matched here and get the smarter reading immediately; restaurant and
+  /// landmark names are matched in Postgres and keep the plain one until then.
+  /// The rungs a name can reach are unchanged either way, so nothing that
+  /// matched before stops matching - the two halves simply admit different
+  /// spellings until the SQL catches up.
+  ///
+  /// [needle] arrives normalised; the candidates are normalised here. Both
+  /// sides are then expanded through [searchVariants], which is what lets a
+  /// tourist's spelling meet the catalogue's: one map of synonyms applied to
+  /// whichever side happens to be holding the odd spelling.
   static int _score(String needle, List<String> candidates) {
+    if (needle.isEmpty) return 0;
+    final List<String> typedForms = searchVariants(needle);
     int best = 0;
     for (final String candidate in candidates) {
-      final String value = candidate.toLowerCase().trim();
-      if (value.isEmpty) continue;
-      if (value == needle) {
-        best = _scoreExact;
-      } else if (value.startsWith(needle)) {
-        if (best < _scorePrefix) best = _scorePrefix;
-      } else if (_startsAWord(value, needle)) {
-        // "alor" finding "Jalan Alor" - a word boundary is a much better
-        // signal than a substring landing mid-word.
-        if (best < _scoreWord) best = _scoreWord;
-      } else if (value.contains(needle)) {
-        if (best < _scoreContains) best = _scoreContains;
+      for (final String value in searchVariants(candidate)) {
+        if (value.isEmpty) continue;
+        final String squashedValue = searchSquash(value);
+        for (final String typed in typedForms) {
+          if (typed.isEmpty) continue;
+          // The squashed forms are the same two strings with the spaces gone,
+          // so "charkwayteow" reaches "Char Kway Teow". They are only ever
+          // consulted alongside the spaced comparison, never instead of it,
+          // so a match that respected the words still wins.
+          final String squashedTyped = searchSquash(typed);
+          if (value == typed || squashedValue == squashedTyped) {
+            best = _scoreExact;
+          } else if (value.startsWith(typed) ||
+              squashedValue.startsWith(squashedTyped)) {
+            if (best < _scorePrefix) best = _scorePrefix;
+          } else if (_startsAWord(value, typed)) {
+            // "alor" finding "Jalan Alor" - a word boundary is a much better
+            // signal than a substring landing mid-word.
+            if (best < _scoreWord) best = _scoreWord;
+          } else if (value.contains(typed) ||
+              squashedValue.contains(squashedTyped)) {
+            if (best < _scoreContains) best = _scoreContains;
+          }
+          if (best == _scoreExact) break;
+        }
+        if (best == _scoreExact) break;
       }
       if (best == _scoreExact) break;
     }
     return best;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Text normalisation and local-food synonyms (REQ102_30, REQ102_31)
+  // ---------------------------------------------------------------------------
+
+  /// What "the same text" means for search.
+  ///
+  /// Case folded, every run of punctuation - hyphens, underscores, apostrophes,
+  /// dots, brackets - reduced to a single space, and the ends trimmed. So
+  /// `nasi-lemak`, `NASI LEMAK` and `nasi_lemak  ` are one keyword, and a
+  /// keyword of nothing but punctuation is empty rather than unanswerable.
+  ///
+  /// Letters and digits are kept by category rather than by an `a-z0-9` range,
+  /// so an accented name is folded, not gutted.
+  static String searchNormalise(String value) => value
+      .toLowerCase()
+      .replaceAll(_punctuation, ' ')
+      .trim();
+
+  /// [searchNormalise] with the spaces taken out too.
+  ///
+  /// The last resort of the ladder: it is what makes `cHarKwayteOW` findable,
+  /// and it is deliberately blind to word boundaries, which is why a match
+  /// found this way never scores above one found with them.
+  static String searchSquash(String value) =>
+      searchNormalise(value).replaceAll(' ', '');
+
+  static final RegExp _punctuation = RegExp(r'[^\p{L}\p{N}]+', unicode: true);
+
+  /// Whole-name local-food synonyms: what tourists type, against what the
+  /// catalogue calls the dish (REQ102_30).
+  ///
+  /// Applied to **both** sides of a comparison, so the direction of an entry
+  /// does not matter - `ckt` and `Char Kuey Teow` both arrive at
+  /// `char kway teow` and meet there. Keys are normalised form.
+  static const Map<String, String> foodSynonyms = <String, String>{
+    'ckt': 'char kway teow',
+    'bkt': 'bak kut teh',
+    'ytf': 'yong tau foo',
+    'abc': 'ais kacang',
+    'ice kacang': 'ais kacang',
+    'poh piah': 'popiah',
+    'coconut rice': 'nasi lemak',
+    'chicken rice': 'nasi ayam',
+    'fried rice': 'nasi goreng',
+    'fried noodles': 'mee goreng',
+    'pulled tea': 'teh tarik',
+    'shaved ice': 'ais kacang',
+  };
+
+  /// Word-level spelling variants, applied word by word to both sides.
+  ///
+  /// Malaysian dish names are transliterations and have no single spelling -
+  /// `kuey`, `koay` and `kway` are the same syllable, and the catalogue can
+  /// only pick one of them. Each entry folds a variant onto the spelling the
+  /// catalogue uses; because it is applied to both sides, an entry read the
+  /// wrong way round still brings the two together.
+  static const Map<String, String> foodWordSynonyms = <String, String>{
+    'kuey': 'kway',
+    'koay': 'kway',
+    'kueh': 'kuih',
+    'kue': 'kuih',
+    'chendol': 'cendol',
+    'chanai': 'canai',
+    'prata': 'canai',
+    'mie': 'mee',
+    'mi': 'mee',
+    'sate': 'satay',
+    'satey': 'satay',
+    'wonton': 'wantan',
+    'wanton': 'wantan',
+  };
+
+  /// [value] as every spelling the synonym tables can reach from it.
+  ///
+  /// Always contains the normalised original first, so nothing a plain reading
+  /// would have matched is lost by expanding it.
+  static List<String> searchVariants(String value) {
+    final String base = searchNormalise(value);
+    if (base.isEmpty) return const <String>[];
+
+    final List<String> variants = <String>[base];
+
+    void add(String candidate) {
+      if (candidate.isNotEmpty && !variants.contains(candidate)) {
+        variants.add(candidate);
+      }
+    }
+
+    final String? whole = foodSynonyms[base];
+    if (whole != null) add(searchNormalise(whole));
+
+    final List<String> words = base.split(' ');
+    final List<String> folded = <String>[
+      for (final String word in words) foodWordSynonyms[word] ?? word,
+    ];
+    add(folded.join(' '));
+
+    // A phrase whose words were folded may itself be a whole-name synonym -
+    // "char kuey teow" folds to "char kway teow" and stops there, but "fried
+    // noodle" spellings reach their entry only after folding.
+    final String? foldedWhole = foodSynonyms[folded.join(' ')];
+    if (foldedWhole != null) add(searchNormalise(foldedWhole));
+
+    return List<String>.unmodifiable(variants);
   }
 
   static bool _startsAWord(String value, String needle) {
@@ -1464,4 +1476,14 @@ class _ScoredPlace {
 
   final int score;
   final PlaceSuggestion suggestion;
+}
+
+/// The "Local Food" half of a search result, carrying the score that ordered
+/// it. The score is a search detail and stops here - the caller receives plain
+/// [LocalFood]s, best answer first.
+class _ScoredFood {
+  const _ScoredFood(this.score, this.food);
+
+  final int score;
+  final LocalFood food;
 }

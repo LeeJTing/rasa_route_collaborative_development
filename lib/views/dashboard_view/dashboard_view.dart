@@ -110,7 +110,7 @@ class _DashboardViewState extends State<DashboardView> {
         appBar: AppTopBar(
           title: 'Dashboard',
           showBackButton: false,
-          onProfileTap: _viewModel.openProfile,
+          onProfileTap: () => Navigator.pushNamed(context, AppRoutes.profile),
         ),
         body: Consumer<DashboardViewModel>(
           builder:
@@ -145,14 +145,16 @@ class _DashboardViewState extends State<DashboardView> {
       child: MapSearchBar(
         controller: _searchController,
         onChanged: viewModel.updateSearchKeyword,
-        onSubmitted: viewModel.submitSearch,
         onClear: viewModel.clearSearch,
         onTap: viewModel.openSearchPanel,
+        onSubmitted: viewModel.submitSearch,
         // Offered on both surfaces. The filter narrows the same food selection
         // either way - the heatmap's scores on one, the pins on the other - and
-        // `_applyFilter` already reloads whichever view is showing, so gating
+        // `applyFilter` already reloads whichever view is showing, so gating
         // it to the heatmap only hid a control that worked.
         onFilterTap: viewModel.toggleFilterPanel,
+        // The *applied* count, not the draft's: this badge says what the map is
+        // showing, and half-ticked chips have not reached it yet.
         filterCount: viewModel.filter.selectionCount,
         filterPanelOpen: viewModel.filterPanelOpen,
       ),
@@ -253,7 +255,8 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumPlaceCount: viewModel.distribution.maximumPlaceCount,
+              maximumPlaceCount:
+                  viewModel.distribution.maximumPlaceCount,
             ),
           ),
 
@@ -336,14 +339,11 @@ class _DashboardViewState extends State<DashboardView> {
               onHeartTap: viewModel.toggleCurrentSwipeFoodLike,
               onContinue: viewModel.continueSwipeSession,
               onStartNew: viewModel.startNewSwipeSession,
-              onMatchesTap: () async {
-                await Navigator.pushNamed(
-                  context,
-                  AppRoutes.matchesRecommendation,
-                  arguments: viewModel.matchesRecommendationRequest,
-                );
-                await viewModel.refreshSwipeSessionAfterMatches();
-              },
+              onMatchesTap: () => Navigator.pushNamed(
+                context,
+                AppRoutes.matchesRecommendation,
+                arguments: viewModel.matchesRecommendationRequest,
+              ),
             ),
           ),
 
@@ -388,9 +388,12 @@ class _DashboardViewState extends State<DashboardView> {
                   optionsFor: viewModel.optionsFor,
                   selectionFor: viewModel.selectionFor,
                   isExpanded: viewModel.isGroupExpanded,
+                  selectionCount: viewModel.draftSelectionCount,
                   onToggleOption: viewModel.toggleFilterOption,
                   onClearGroup: viewModel.clearFilterGroup,
                   onToggleExpanded: viewModel.toggleGroupExpanded,
+                  onApply: viewModel.applyFilter,
+                  onCancel: viewModel.cancelFilter,
                 ),
               if (viewModel.searchPanelOpen &&
                   viewModel.searchKeyword.isNotEmpty)
@@ -702,19 +705,10 @@ class _PinMarker extends StatelessWidget {
             ? AppColors.pinUserLandmark
             : AppColors.pinSystemRestaurant,
         shadows: <Shadow>[
-          // The white halo/border to make it pop.
-          const Shadow(color: AppColors.surface, blurRadius: 2),
-          const Shadow(color: AppColors.surface, blurRadius: 4),
-          if (selected)
-            const Shadow(
-              color: AppColors.surface,
-              blurRadius: 8,
-            ),
-          // The soft selection glow/ring.
+          const Shadow(color: AppColors.surface, blurRadius: 3),
           Shadow(
-            color: selected ? AppColors.pinSelectedRing : AppColors.shadow,
-            blurRadius: selected ? 8 : 4,
-            offset: const Offset(0, 2),
+            color: selected ? AppColors.pinSelectedRing : AppColors.surface,
+            blurRadius: selected ? 6 : 4,
           ),
         ],
       ),
@@ -944,6 +938,64 @@ class _CustomCoordinatesDialogState extends State<_CustomCoordinatesDialog> {
 }
 
 /// M3, and the two "showing the whole country instead" explanations.
+/// REQ102_41 - how much of the viewport's answer is on screen.
+///
+/// Deliberately quiet: it reports a limit, it does not ask for anything. The
+/// optional [subtitle] carries the heatmap's own count for the state under the
+/// map, so the number of pins can be read against the state total rather than
+/// mistaken for it.
+class _PinCoverageChip extends StatelessWidget {
+  const _PinCoverageChip({required this.message, this.subtitle});
+
+  final String message;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    child: Material(
+      color: AppColors.surface,
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
+      elevation: 1,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xs,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(
+              Icons.place_outlined,
+              size: 14,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  message,
+                  style: AppTextStyles.labelSmall.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    style: AppTextStyles.labelSmall.copyWith(
+                      color: AppColors.textDisabled,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _NoticeBanner extends StatelessWidget {
   const _NoticeBanner({required this.message, required this.onDismiss});
 
