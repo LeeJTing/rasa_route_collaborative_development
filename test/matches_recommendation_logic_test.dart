@@ -75,6 +75,29 @@ void main() {
       expect(result.groups.single.restaurants.single.name, 'Actual Restaurant');
     });
 
+    test(
+      'uses occurrence prices when catalogue summaries omit menu items',
+      () async {
+        final _MatchesRepository summaryRepository = _MatchesRepository()
+          ..catalogueIncludesItems = false;
+        final MatchesRecommendationLogic summaryLogic =
+            _TestMatchesRecommendationLogic(summaryRepository);
+
+        final MatchesRecommendationResult result = await summaryLogic
+            .recommendations(
+              const MatchesRecommendationRequest(
+                stateCode: 'TST',
+                origin: TouristLocation(latitude: 1, longitude: 1),
+              ),
+            );
+
+        final List<RestaurantItem> items =
+            result.groups.single.restaurants.single.items;
+        expect(items, hasLength(1));
+        expect(items.single.price, 9.5);
+      },
+    );
+
     test('excludes a recommendation confidently closed now', () async {
       repository.hoursByPlace = const <String, List<OpeningHour>>{
         'restaurant:10': <OpeningHour>[
@@ -144,6 +167,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
   SwipeSession? savedSession;
   Map<String, List<OpeningHour>> hoursByPlace =
       const <String, List<OpeningHour>>{};
+  bool catalogueIncludesItems = true;
 
   @override
   Future<String?> currentTouristId() async => 'tourist';
@@ -201,7 +225,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
   ];
 
   @override
-  Future<List<Restaurant>> getRestaurants() async => const <Restaurant>[
+  Future<List<Restaurant>> getRestaurants() async => <Restaurant>[
     Restaurant(
       id: 10,
       name: 'Actual Restaurant',
@@ -210,26 +234,28 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
       phone: '',
       website: '',
       openingHours: [],
-      items: <RestaurantItem>[
-        RestaurantItem(
-          id: 101,
-          restaurantId: 10,
-          localFoodId: 1,
-          foodName: 'Liked Food',
-          currency: 'RM',
-          foodCategory: 'Local',
-          price: 10,
-        ),
-        RestaurantItem(
-          id: 102,
-          restaurantId: 10,
-          localFoodId: 2,
-          foodName: 'Not Liked Food',
-          currency: 'RM',
-          foodCategory: 'Local',
-          price: 12,
-        ),
-      ],
+      items: catalogueIncludesItems
+          ? const <RestaurantItem>[
+              RestaurantItem(
+                id: 101,
+                restaurantId: 10,
+                localFoodId: 1,
+                foodName: 'Liked Food',
+                currency: 'RM',
+                foodCategory: 'Local',
+                price: 10,
+              ),
+              RestaurantItem(
+                id: 102,
+                restaurantId: 10,
+                localFoodId: 2,
+                foodName: 'Not Liked Food',
+                currency: 'RM',
+                foodCategory: 'Local',
+                price: 12,
+              ),
+            ]
+          : const <RestaurantItem>[],
     ),
   ];
 
@@ -249,6 +275,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           foodName: 'Liked Food',
           latitude: 1,
           longitude: 1.001,
+          itemPrice: 9.5,
         ),
         FoodOccurrence(
           sourceId: '20',

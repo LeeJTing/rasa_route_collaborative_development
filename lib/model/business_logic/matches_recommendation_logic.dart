@@ -143,43 +143,56 @@ class MatchesRecommendationLogic {
     Map<int, Restaurant> restaurantsById,
     MatchesRecommendationRequest request,
   ) {
-    final Map<int, FoodOccurrence> serving = <int, FoodOccurrence>{};
+    final Map<int, List<FoodOccurrence>> serving =
+        <int, List<FoodOccurrence>>{};
     for (final FoodOccurrence occurrence in occurrences) {
       if (occurrence.source != FoodOccurrenceSource.restaurant) continue;
       final int? id = int.tryParse(occurrence.sourceId);
-      if (id != null) serving.putIfAbsent(id, () => occurrence);
+      if (id != null) {
+        serving.putIfAbsent(id, () => <FoodOccurrence>[]).add(occurrence);
+      }
     }
     final List<Restaurant> recommendations = <Restaurant>[];
-    for (final MapEntry<int, FoodOccurrence> entry in serving.entries) {
+    for (final MapEntry<int, List<FoodOccurrence>> entry in serving.entries) {
+      final FoodOccurrence occurrence = entry.value.first;
       final Restaurant? catalogueRestaurant = restaurantsById[entry.key];
-      final List<RestaurantItem> matchedItems =
+      final List<RestaurantItem> catalogueItems =
           catalogueRestaurant?.items
               .where((RestaurantItem item) => item.localFoodId == foodId)
               .toList(growable: false) ??
-          <RestaurantItem>[
-            RestaurantItem(
-              id: 0,
-              restaurantId: entry.key,
-              localFoodId: foodId,
-              foodName: entry.value.foodName,
-              price: entry.value.itemPrice,
-              currency: 'RM',
-              foodCategory: '',
-            ),
-          ];
+          const <RestaurantItem>[];
+      // `getRestaurants()` intentionally returns lightweight summaries, so
+      // its Restaurant objects normally have no menu items. The occurrence
+      // query already carries every matching restaurant-item price; use those
+      // rows instead of incorrectly presenting a real price as unavailable.
+      final List<RestaurantItem> matchedItems = catalogueItems.isNotEmpty
+          ? catalogueItems
+          : entry.value
+                .map(
+                  (FoodOccurrence item) => RestaurantItem(
+                    id: 0,
+                    restaurantId: entry.key,
+                    localFoodId: foodId,
+                    foodName: item.foodName,
+                    price: item.itemPrice,
+                    currency: 'RM',
+                    foodCategory: '',
+                  ),
+                )
+                .toList(growable: false);
       final Restaurant restaurant =
           catalogueRestaurant ??
           Restaurant(
             id: entry.key,
-            name: entry.value.placeName,
-            category: entry.value.placeCategory ?? '',
+            name: occurrence.placeName,
+            category: occurrence.placeCategory ?? '',
             address: '',
-            rating: entry.value.placeRating,
-            latitude: entry.value.latitude,
-            longitude: entry.value.longitude,
+            rating: occurrence.placeRating,
+            latitude: occurrence.latitude,
+            longitude: occurrence.longitude,
             phone: '',
             website: '',
-            imageUrl: entry.value.placeImageUrl,
+            imageUrl: occurrence.placeImageUrl,
             openingHours: const [],
             items: matchedItems,
           );
@@ -190,8 +203,8 @@ class MatchesRecommendationLogic {
           distanceMetres: _distanceMetres(
             request.origin.latitude,
             request.origin.longitude,
-            entry.value.latitude,
-            entry.value.longitude,
+            occurrence.latitude,
+            occurrence.longitude,
           ),
           items: matchedItems,
         ),

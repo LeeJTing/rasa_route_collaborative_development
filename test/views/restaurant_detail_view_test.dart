@@ -20,6 +20,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('OldTown Heritage Kitchen'), findsWidgets);
+    expect(find.text('4.6'), findsOneWidget);
+    expect(find.textContaining('reviews'), findsNothing);
     expect(find.text('Halal'), findsNothing);
 
     await tester.scrollUntilVisible(
