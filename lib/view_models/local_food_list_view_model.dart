@@ -254,4 +254,18 @@ class LocalFoodListViewModel extends BaseViewModel {
 
     safeNotifyListeners();
   }
+
+  Future<void> refreshFavourite() async {
+    final Set<int> favouriteIds = await foodLogic.favouriteFoodIds();
+
+    _foods = _foods
+        .map(
+          (LocalFood food) => food.copyWith(
+        isFavourite: favouriteIds.contains(food.id),
+      ),
+    )
+        .toList(growable: false);
+
+    notifyListeners();
+  }
 }
