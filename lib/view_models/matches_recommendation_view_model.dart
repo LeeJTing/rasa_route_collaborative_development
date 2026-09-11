@@ -78,8 +78,9 @@ class MatchesRecommendationViewModel extends BaseViewModel {
           final List<Restaurant> restaurants =
               _sortedRestaurants(group.restaurants)
                   .where((Restaurant value) {
-                    return (value.distanceMetres ?? double.infinity) <=
-                        radiusFor(group.food.id) * 1000;
+                    final double? distance = value.distanceMetres;
+                    return distance == null ||
+                        distance <= radiusFor(group.food.id) * 1000;
                   })
                   .take(
                     _visibleRestaurantCount[group.food.id] ??
@@ -96,6 +97,7 @@ class MatchesRecommendationViewModel extends BaseViewModel {
             _sortedLandmarks(group.submittedLandmarks)
                 .where(
                   (SubmittedLandmarkRecommendation value) =>
+                      !value.distanceMetres.isFinite ||
                       value.distanceMetres <= radiusFor(group.food.id) * 1000,
                 )
                 .take(
@@ -260,7 +262,7 @@ class MatchesRecommendationViewModel extends BaseViewModel {
             .map(
               (SubmittedLandmarkRecommendation value) => value.distanceMetres,
             )
-            .where((double value) => value > current * 1000)
+            .where((double value) => value.isFinite && value > current * 1000)
             .toList(growable: false)
           ..sort();
     return outside.isEmpty
@@ -318,23 +320,28 @@ class MatchesRecommendationViewModel extends BaseViewModel {
     final List<Restaurant> sorted = List<Restaurant>.of(values);
     sorted.sort((Restaurant first, Restaurant second) {
       final int comparison = switch (_restaurantSort) {
-        MatchesRestaurantSort.distance => _ascendingNullable(
+        MatchesRestaurantSort.distance => _compareNullable(
           first.distanceMetres,
           second.distanceMetres,
+          _restaurantSortDirection,
         ),
-        MatchesRestaurantSort.price => _ascendingNullable(
+        MatchesRestaurantSort.price => _compareNullable(
           _minimumPrice(first),
           _minimumPrice(second),
+          _restaurantSortDirection,
         ),
-        MatchesRestaurantSort.preference => first.items.length.compareTo(
-          second.items.length,
+        MatchesRestaurantSort.preference => _applyDirection(
+          first.items.length.compareTo(second.items.length),
+          _restaurantSortDirection,
         ),
-        MatchesRestaurantSort.rating => _ascendingNullable(
+        MatchesRestaurantSort.rating => _compareNullable(
           first.rating,
           second.rating,
+          _restaurantSortDirection,
         ),
       };
-      return _applyDirection(comparison, _restaurantSortDirection);
+      if (comparison != 0) return comparison;
+      return first.name.toLowerCase().compareTo(second.name.toLowerCase());
     });
     return sorted;
   }
@@ -349,14 +356,20 @@ class MatchesRecommendationViewModel extends BaseViewModel {
       SubmittedLandmarkRecommendation second,
     ) {
       final int comparison = switch (_landmarkSort) {
-        MatchesLandmarkSort.distance => first.distanceMetres.compareTo(
-          second.distanceMetres,
+        MatchesLandmarkSort.distance => _compareNullable(
+          first.distanceMetres.isFinite ? first.distanceMetres : null,
+          second.distanceMetres.isFinite ? second.distanceMetres : null,
+          _landmarkSortDirection,
         ),
         MatchesLandmarkSort.name => first.name.toLowerCase().compareTo(
           second.name.toLowerCase(),
         ),
       };
-      return _applyDirection(comparison, _landmarkSortDirection);
+      final int directed = _landmarkSort == MatchesLandmarkSort.distance
+          ? comparison
+          : _applyDirection(comparison, _landmarkSortDirection);
+      if (directed != 0) return directed;
+      return first.id.compareTo(second.id);
     });
     return sorted;
   }
@@ -370,8 +383,19 @@ class MatchesRecommendationViewModel extends BaseViewModel {
     return prices.reduce(math.min);
   }
 
-  int _ascendingNullable(double? first, double? second) =>
-      (first ?? double.infinity).compareTo(second ?? double.infinity);
+  int _compareNullable(
+    double? first,
+    double? second,
+    MatchesSortDirection direction,
+  ) {
+    // Unavailable values are always last. Reversing an ordinary
+    // `null -> infinity` comparison would incorrectly put them first in a
+    // descending sort.
+    if (first == null && second == null) return 0;
+    if (first == null) return 1;
+    if (second == null) return -1;
+    return _applyDirection(first.compareTo(second), direction);
+  }
 
   int _applyDirection(int comparison, MatchesSortDirection direction) =>
       direction == MatchesSortDirection.ascending ? comparison : -comparison;

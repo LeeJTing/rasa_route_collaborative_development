@@ -10,6 +10,7 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
+import 'opening_hours_logic.dart';
 import 'dart:math' as math;
 
 /// REQ102 - the Local Food Dashboard.
@@ -31,6 +32,8 @@ class MapExplorationLogic {
   MapExplorationLogic();
 
   final DiscoveryRepositoryFacade repository = DiscoveryRepositoryFacade();
+
+  DateTime currentTime() => DateTime.now();
 
   // ===========================================================================
   // Dev GPS mock (Android-only presenter tool)
@@ -84,6 +87,15 @@ class MapExplorationLogic {
   /// REQ102_12 / REQ102_13 - "the predefined zoom level". At or above this the
   /// dashboard is a detailed map view; below it, the heatmap.
   static const double detailedViewZoom = 7.5;
+
+  /// Neighbourhood-level camera used when a Swipe card becomes active. It is
+  /// close enough to make individual places useful without dropping directly
+  /// onto a building-level view.
+  static const double swipeFoodFocusZoom = 13;
+
+  /// A food filter should be a focused answer, not hundreds of markers across
+  /// a state. Normal Dashboard browsing keeps [maximumMarkers].
+  static const int swipeFoodMarkerLimit = 10;
 
   /// REQ102_12, for the heatmap illustration rather than the slippy map.
   ///
@@ -502,10 +514,29 @@ class MapExplorationLogic {
 
     // Distance to the tourist is the one thing Postgres was not asked for: it
     // changes with every GPS fix, and recomputing it here costs nothing.
-    final List<MapPin> withDistance = fromLatitude == null ||
-            fromLongitude == null
-        ? markers.pins
-        : markers.pins
+    // Swipe Mode must not recommend a place the stored schedule confidently
+    // says is closed now. Missing/malformed scraped hours remain visible as
+    // unknown rather than being silently treated as closed.
+    List<MapPin> eligiblePins = markers.pins;
+    if (localFoodId != null && eligiblePins.isNotEmpty) {
+      final Set<String> placeKeys = eligiblePins.map(_placeKeyForPin).toSet();
+      final Map<String, List<OpeningHour>> hoursByPlace = await repository
+          .openingHoursByPlace(placeKeys: placeKeys);
+      final DateTime malaysiaNow = _malaysiaNow;
+      eligiblePins = eligiblePins
+          .where(
+            (MapPin pin) => !OpeningHoursLogic.isConfidentlyClosedAt(
+              hoursByPlace[_placeKeyForPin(pin)],
+              malaysiaNow,
+            ),
+          )
+          .toList(growable: false);
+    }
+
+    final List<MapPin> withDistance =
+        fromLatitude == null || fromLongitude == null
+        ? eligiblePins
+        : eligiblePins
               .map(
                 (MapPin pin) => _withDistance(
                   pin,
@@ -527,6 +558,52 @@ class MapExplorationLogic {
       totalInView: withDistance.length + markers.clusters.length,
       limit: cap,
     );
+  }
+
+  /// The closest visible place serving [localFoodId] to the map's current
+  /// exploration anchor. Swipe Mode uses this before loading its focused
+  /// viewport; GPS is deliberately not used because tourists may be exploring
+  /// a different state.
+  Future<GeoPoint?> nearestFoodLocation({
+    required int localFoodId,
+    required double fromLatitude,
+    required double fromLongitude,
+  }) async {
+    final List<Object> gathered = await Future.wait(<Future<Object>>[
+      repository.foodOccurrences(),
+      repository.openingHoursByPlace(),
+    ]);
+    final List<FoodOccurrence> occurrences =
+        gathered[0] as List<FoodOccurrence>;
+    final Map<String, List<OpeningHour>> hoursByPlace =
+        gathered[1] as Map<String, List<OpeningHour>>;
+    final DateTime malaysiaNow = _malaysiaNow;
+    FoodOccurrence? nearest;
+    double nearestDistance = double.infinity;
+    for (final FoodOccurrence occurrence in occurrences) {
+      if (occurrence.localFoodId != localFoodId) continue;
+      final String key = occurrence.source == FoodOccurrenceSource.restaurant
+          ? 'restaurant:${occurrence.sourceId}'
+          : 'submittedLandmark:${occurrence.sourceId}';
+      if (OpeningHoursLogic.isConfidentlyClosedAt(
+        hoursByPlace[key],
+        malaysiaNow,
+      )) {
+        continue;
+      }
+      final double distance = _distanceMetres(
+        fromLatitude,
+        fromLongitude,
+        occurrence.latitude,
+        occurrence.longitude,
+      );
+      if (distance >= nearestDistance) continue;
+      nearest = occurrence;
+      nearestDistance = distance;
+    }
+    return nearest == null
+        ? null
+        : GeoPoint(nearest.latitude, nearest.longitude);
   }
 
   /// REQ102_41 - what a tap on [cluster] should do.
@@ -567,12 +644,26 @@ class MapExplorationLogic {
       );
     }
 
-    final List<MapPin> members = await repository.map.clusterMembers(
+    List<MapPin> members = await repository.map.clusterMembers(
       latitude: cluster.latitude,
       longitude: cluster.longitude,
       zoom: zoom,
       foodIds: foodIds,
     );
+    if (localFoodId != null && members.isNotEmpty) {
+      final Set<String> placeKeys = members.map(_placeKeyForPin).toSet();
+      final Map<String, List<OpeningHour>> hoursByPlace = await repository
+          .openingHoursByPlace(placeKeys: placeKeys);
+      final DateTime malaysiaNow = _malaysiaNow;
+      members = members
+          .where(
+            (MapPin pin) => !OpeningHoursLogic.isConfidentlyClosedAt(
+              hoursByPlace[_placeKeyForPin(pin)],
+              malaysiaNow,
+            ),
+          )
+          .toList(growable: false);
+    }
     return ClusterExpansion(
       splitZoom: null,
       memberCount: probe.memberCount == 0 ? members.length : probe.memberCount,
@@ -641,6 +732,13 @@ class MapExplorationLogic {
         distanceMetres: pin.distanceMetres,
       );
 
+  DateTime get _malaysiaNow =>
+      currentTime().toUtc().add(const Duration(hours: 8));
+
+  static String _placeKeyForPin(MapPin pin) => pin.kind == MapPinKind.restaurant
+      ? 'restaurant:${pin.referenceId}'
+      : 'submittedLandmark:${pin.referenceId}';
+
   /// How far apart to push markers that share a position, in screen pixels.
   static const double collisionSpreadPixels = 18;
 
@@ -704,9 +802,7 @@ class MapExplorationLogic {
       final List<Object?> gathered = await Future.wait(<Future<Object?>>[
         repository.getRestaurantById(id),
         repository.getRestaurantItemsByRestaurantIds(<int>[id]),
-        repository.openingHoursByPlace(
-          placeKeys: <String>{'restaurant:$id'},
-        ),
+        repository.openingHoursByPlace(placeKeys: <String>{'restaurant:$id'}),
       ]);
       restaurant = gathered[0] as Restaurant?;
       items = gathered[1] as List<RestaurantItem>;

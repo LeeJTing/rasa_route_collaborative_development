@@ -433,7 +433,9 @@ class RestaurantRepository {
         // A bulk/wholesale line (e.g. "Air Katira (30 botol) RM540") prices a
         // multi-unit pack, not a single serve - it would inflate the range the
         // comparison shows, so it is excluded from the min/max aggregation.
-        final String itemName = JsonReader.asString(row['restaurant_item_name']);
+        final String itemName = JsonReader.asString(
+          row['restaurant_item_name'],
+        );
         if (foodId == null ||
             price == null ||
             price <= 0 ||
@@ -469,9 +471,8 @@ class RestaurantRepository {
   /// the comparison's "Time and Price" list. Kept verbatim (no min/max, no
   /// bulk filtering) so a pack line like "BOTOL 30" keeps its unit text and
   /// is shown to the tourist as-is.
-  Future<Map<int, List<({String name, double price})>>> restaurantMenuItemsByFood(
-    Set<int> localFoodIds,
-  ) async {
+  Future<Map<int, List<({String name, double price})>>>
+  restaurantMenuItemsByFood(Set<int> localFoodIds) async {
     if (localFoodIds.isEmpty) {
       return const <int, List<({String name, double price})>>{};
     }
@@ -496,15 +497,12 @@ class RestaurantRepository {
         if (foodId == null || price == null || price <= 0 || name.isEmpty) {
           continue;
         }
-        byFood.putIfAbsent(
-          foodId,
-          () => <({String name, double price})>[],
-        ).add((name: name, price: price));
+        byFood.putIfAbsent(foodId, () => <({String name, double price})>[]).add(
+          (name: name, price: price),
+        );
       }
       for (final List<({String name, double price})> entries in byFood.values) {
-        entries.sort(
-          (a, b) => a.price.compareTo(b.price),
-        );
+        entries.sort((a, b) => a.price.compareTo(b.price));
       }
       return byFood;
     } catch (error, stackTrace) {
@@ -869,9 +867,13 @@ class RestaurantRepository {
     if (parts.length < 2) return null;
     final int? hour = int.tryParse(parts[0]);
     final int? minute = int.tryParse(parts[1]);
-    if (hour == null || minute == null || hour > 23 || minute > 59) {
+    if (hour == null || minute == null || minute > 59) {
       return null;
     }
+    // The imported catalogue uses 24:00:00 to mean the end of the day. It is
+    // distinct from 00:00:00 (the start of the day) in the domain model.
+    if (hour == 24) return minute == 0 ? 1440 : null;
+    if (hour < 0 || hour > 23) return null;
     return hour * 60 + minute;
   }
 

@@ -190,6 +190,84 @@ void main() {
     });
   });
 
+  group('report input validation', () {
+    test('price accepts a realistic amount and rejects unsafe values', () {
+      expect(ReportModerationRules.priceError('8.50', required: true), isNull);
+      expect(ReportModerationRules.priceError('', required: true), isNotNull);
+      expect(ReportModerationRules.priceError('0', required: true), isNotNull);
+      expect(
+        ReportModerationRules.priceError('1000.01', required: true),
+        isNotNull,
+      );
+    });
+
+    test('address must contain meaningful text within the length limit', () {
+      expect(
+        ReportModerationRules.addressError(
+          '12 Jalan Merdeka, Kuala Lumpur',
+          required: true,
+        ),
+        isNull,
+      );
+      expect(ReportModerationRules.addressError('', required: true), isNotNull);
+      expect(
+        ReportModerationRules.addressError('---', required: true),
+        isNotNull,
+      );
+    });
+
+    test('temporary closure respects the selected unit limit', () {
+      expect(
+        ReportModerationRules.closureError(
+          '12',
+          ClosureUnit.months,
+          required: true,
+        ),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.closureError(
+          '13',
+          ClosureUnit.months,
+          required: true,
+        ),
+        isNotNull,
+      );
+    });
+
+    test('opening hours reject incomplete and overlapping ranges', () {
+      expect(
+        ReportModerationRules.operatingHoursError(<Weekday, List<OpeningHour>>{
+          Weekday.monday: const <OpeningHour>[
+            OpeningHour(id: 0, day: Weekday.monday, status: DayStatus.open),
+          ],
+        }),
+        isNotNull,
+      );
+      expect(
+        ReportModerationRules.operatingHoursError(<Weekday, List<OpeningHour>>{
+          Weekday.monday: const <OpeningHour>[
+            OpeningHour(
+              id: 0,
+              day: Weekday.monday,
+              status: DayStatus.open,
+              opensAt: 540,
+              closesAt: 720,
+            ),
+            OpeningHour(
+              id: 0,
+              day: Weekday.monday,
+              status: DayStatus.open,
+              opensAt: 660,
+              closesAt: 780,
+            ),
+          ],
+        }),
+        isNotNull,
+      );
+    });
+  });
+
   group('resolveMostCommonClosure', () {
     test('returns the most common duration', () {
       final ProposedClosure? resolved =

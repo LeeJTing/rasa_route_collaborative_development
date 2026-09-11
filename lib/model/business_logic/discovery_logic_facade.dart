@@ -66,14 +66,31 @@ class DiscoveryLogicFacade {
   Future<SwipeModePreparation> prepareSwipeMode({
     required double latitude,
     required double longitude,
-  }) =>
-      foodDiscovery.prepareSwipeMode(latitude: latitude, longitude: longitude);
+    TouristLocation distanceOrigin = TouristLocation.unknown,
+  }) => foodDiscovery.prepareSwipeMode(
+    latitude: latitude,
+    longitude: longitude,
+    distanceOrigin: distanceOrigin,
+  );
 
   Future<SwipeSession> startNewSwipeSession(SwipeModePreparation preparation) =>
       foodDiscovery.startNewSession(preparation);
 
   Future<SwipeSession> continueSwipeSession(SwipeModePreparation preparation) =>
       foodDiscovery.continueSession(preparation);
+
+  Future<SwipeModePreparation> refreshSwipeModeAfterProfileChange({
+    required double latitude,
+    required double longitude,
+    TouristLocation distanceOrigin = TouristLocation.unknown,
+  }) => foodDiscovery.refreshAfterProfileChange(
+    latitude: latitude,
+    longitude: longitude,
+    distanceOrigin: distanceOrigin,
+  );
+
+  Future<SwipeSession?> reloadSwipeSession(SwipeModePreparation preparation) =>
+      foodDiscovery.reloadSession(preparation);
 
   Future<SwipeSession> moveSwipeSession(
     SwipeSession session,
@@ -93,8 +110,10 @@ class DiscoveryLogicFacade {
   Future<SwipeSession> removeMatchedFood(SwipeSession session, int foodId) =>
       matchesRecommendation.removeLike(session, foodId);
 
-  Future<Restaurant?> getRestaurantById(int restaurantId) =>
-      restaurantDiscovery.findById(restaurantId);
+  Future<Restaurant?> getRestaurantById(
+    int restaurantId, {
+    TouristLocation origin = TouristLocation.unknown,
+  }) => restaurantDiscovery.findById(restaurantId, origin: origin);
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
@@ -207,10 +226,7 @@ class DiscoveryLogicFacade {
   Future<FoodDistribution> foodDistribution({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-  }) => mapExploration.distribution(
-    filter: filter,
-    localFoodId: localFoodId,
-  );
+  }) => mapExploration.distribution(filter: filter, localFoodId: localFoodId);
 
   /// REQ102_32 - restaurant and submitted-landmark pins for the detailed map.
   ///
@@ -251,6 +267,20 @@ class DiscoveryLogicFacade {
   /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
   static const int maximumMarkers = MapExplorationLogic.maximumMarkers;
+  static const int swipeFoodMarkerLimit =
+      MapExplorationLogic.swipeFoodMarkerLimit;
+  static const double swipeFoodFocusZoom =
+      MapExplorationLogic.swipeFoodFocusZoom;
+
+  Future<GeoPoint?> nearestFoodLocation({
+    required int localFoodId,
+    required double fromLatitude,
+    required double fromLongitude,
+  }) => mapExploration.nearestFoodLocation(
+    localFoodId: localFoodId,
+    fromLatitude: fromLatitude,
+    fromLongitude: fromLongitude,
+  );
 
   /// REQ102_41 - what a tap on [cluster] should do: the zoom that visibly
   /// breaks it up, or its members when no zoom ever separates them.
@@ -274,11 +304,7 @@ class DiscoveryLogicFacade {
     MapPin pin, {
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-  }) => mapExploration.pinDetail(
-    pin,
-    filter: filter,
-    localFoodId: localFoodId,
-  );
+  }) => mapExploration.pinDetail(pin, filter: filter, localFoodId: localFoodId);
 
   /// A8 - one keyword against locations and the local-food catalogue.
   Future<ExplorationSearchResults> searchExploration(String keyword) =>

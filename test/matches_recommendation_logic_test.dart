@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/food_distribution.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
+import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
 import 'package:rasa_route_collaborative_development/domain_model/region.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
@@ -73,6 +74,42 @@ void main() {
       expect(result.groups.single.restaurants.single.id, 10);
       expect(result.groups.single.restaurants.single.name, 'Actual Restaurant');
     });
+
+    test('excludes a recommendation confidently closed now', () async {
+      repository.hoursByPlace = const <String, List<OpeningHour>>{
+        'restaurant:10': <OpeningHour>[
+          OpeningHour(id: 1, day: Weekday.monday, status: DayStatus.closed),
+        ],
+      };
+
+      final MatchesRecommendationResult result = await logic.recommendations(
+        const MatchesRecommendationRequest(
+          stateCode: 'TST',
+          origin: TouristLocation(latitude: 1, longitude: 1),
+        ),
+      );
+
+      expect(result.groups.single.restaurants, isEmpty);
+      expect(result.groups.single.submittedLandmarks, isNotEmpty);
+    });
+
+    test(
+      'does not substitute the explored state centre for missing GPS',
+      () async {
+        final MatchesRecommendationResult result = await logic.recommendations(
+          const MatchesRecommendationRequest(
+            stateCode: 'TST',
+            origin: TouristLocation.unknown,
+          ),
+        );
+
+        expect(result.groups.single.restaurants.single.distanceMetres, isNull);
+        expect(
+          result.groups.single.submittedLandmarks.single.distanceMetres,
+          double.infinity,
+        );
+      },
+    );
   });
 }
 
@@ -83,6 +120,9 @@ class _TestMatchesRecommendationLogic extends MatchesRecommendationLogic {
 
   @override
   DiscoveryRepositoryFacade createRepository() => repository;
+
+  @override
+  DateTime currentTime() => DateTime(2026, 9, 7, 12);
 }
 
 class _MissingCatalogueRestaurantRepository extends _MatchesRepository {
@@ -102,6 +142,8 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
     dislikedFoodIds: <int>[],
   );
   SwipeSession? savedSession;
+  Map<String, List<OpeningHour>> hoursByPlace =
+      const <String, List<OpeningHour>>{};
 
   @override
   Future<String?> currentTouristId() async => 'tourist';
@@ -190,6 +232,11 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
       ],
     ),
   ];
+
+  @override
+  Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
+    Set<String>? placeKeys,
+  }) async => hoursByPlace;
 
   @override
   Future<List<FoodOccurrence>> foodOccurrences() async =>

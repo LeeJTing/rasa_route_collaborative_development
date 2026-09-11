@@ -163,13 +163,14 @@ class _ReportPlaceViewState extends State<ReportPlaceView> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-    final bool leavePage = viewModel.placeHiddenNow;
+    final bool hiddenPlace = viewModel.placeHiddenNow;
+    final bool leavePage = hiddenPlace || viewModel.reportSubmitted;
     viewModel.consumeOutcome();
     // A report that hid the place (froze/removed it) hides its pin - leave the
     // report page (and the caller's detail page pops on its own result) so the
     // now-hidden pin is no longer shown.
     if (leavePage && mounted && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop(true);
+      Navigator.of(context).pop(hiddenPlace);
     }
   }
 }
@@ -238,17 +239,29 @@ class _HoursBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OperatingHoursEditor(
-      operatingHours: viewModel.hours,
-      onStatusChanged: viewModel.setDayStatus,
-      onRangeTimeChanged: viewModel.setRangeTime,
-      onAddRange: viewModel.addTimeRange,
-      onRemoveRange: viewModel.removeTimeRange,
-      title: 'Correct Operating Hours',
-      helperText:
-          'Only change the days that are wrong - days you leave untouched '
-          'are not reported. Needs ${viewModel.thresholdFor(ReportCategory.operatingHours)} '
-          'matching reports to apply.',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        OperatingHoursEditor(
+          operatingHours: viewModel.hours,
+          onStatusChanged: viewModel.setDayStatus,
+          onRangeTimeChanged: viewModel.setRangeTime,
+          onAddRange: viewModel.addTimeRange,
+          onRemoveRange: viewModel.removeTimeRange,
+          title: 'Correct Operating Hours',
+          helperText:
+              'Only change the days that are wrong - days you leave untouched '
+              'are not reported. Needs ${viewModel.thresholdFor(ReportCategory.operatingHours)} '
+              'matching reports to apply.',
+        ),
+        if (viewModel.hoursError != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            viewModel.hoursError!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -266,6 +279,13 @@ class _ItemPriceBody extends StatelessWidget {
         const Text('Which item?', style: AppTextStyles.titleSmall),
         const SizedBox(height: AppSpacing.sm),
         _ItemListBody(viewModel: viewModel),
+        if (viewModel.itemError != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            viewModel.itemError!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
+          ),
+        ],
         if (viewModel.selectedItem != null) ...<Widget>[
           const SizedBox(height: AppSpacing.md),
           Text(
@@ -283,7 +303,7 @@ class _ItemPriceBody extends StatelessWidget {
             decoration: const InputDecoration(
               labelText: 'Price (MYR)',
               prefixText: 'RM ',
-            ),
+            ).copyWith(errorText: viewModel.priceError),
             onChanged: viewModel.setPriceText,
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -313,6 +333,13 @@ class _ItemNotExistBody extends StatelessWidget {
         Text('Which item is not there?', style: AppTextStyles.titleSmall),
         const SizedBox(height: AppSpacing.sm),
         _ItemListBody(viewModel: viewModel),
+        if (viewModel.itemError != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            viewModel.itemError!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
+          ),
+        ],
       ],
     );
   }
@@ -386,9 +413,15 @@ class _AddressBody extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         TextField(
           maxLines: 2,
-          decoration: const InputDecoration(
+          maxLength: 150,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.deny(RegExp(r'[\x00-\x1F\x7F]')),
+          ],
+          decoration: InputDecoration(
             labelText: 'New address',
             hintText: 'e.g. 12, Jalan Bukit Bintang, Kuala Lumpur',
+            errorText: viewModel.addressError,
           ),
           onChanged: viewModel.setAddressText,
         ),
@@ -437,10 +470,17 @@ class _ClosedTemporarilyBody extends StatelessWidget {
             Expanded(
               child: TextField(
                 keyboardType: TextInputType.number,
+                maxLength: 3,
+                maxLengthEnforcement: MaxLengthEnforcement.enforced,
                 inputFormatters: <TextInputFormatter>[
                   FilteringTextInputFormatter.digitsOnly,
                 ],
-                decoration: const InputDecoration(labelText: 'Duration'),
+                decoration: InputDecoration(
+                  labelText: 'Duration',
+                  counterText: '',
+                  errorText: viewModel.closureError,
+                  errorMaxLines: 2,
+                ),
                 onChanged: viewModel.setClosureAmountText,
               ),
             ),

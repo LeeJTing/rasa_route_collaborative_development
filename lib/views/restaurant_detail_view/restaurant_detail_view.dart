@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/routing/app_navigator.dart';
 import '../../app/routing/app_routes.dart';
@@ -76,6 +77,27 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
                 body: SafeArea(
                   child: _buildBody(context, viewModel, restaurant),
                 ),
+                bottomNavigationBar: restaurant == null
+                    ? null
+                    : SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.lg,
+                            AppSpacing.sm,
+                            AppSpacing.lg,
+                            AppSpacing.md,
+                          ),
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openReport(restaurant),
+                            icon: const Icon(
+                              Icons.flag_outlined,
+                              color: AppColors.error,
+                            ),
+                            label: const Text('Report Restaurant'),
+                          ),
+                        ),
+                      ),
               );
             },
       ),
@@ -123,15 +145,17 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
       children: <Widget>[
         RestaurantDetailHeader(restaurant: restaurant),
         const SizedBox(height: AppSpacing.xl),
-        RestaurantInformationSection(restaurant: restaurant),
+        RestaurantInformationSection(
+          restaurant: restaurant,
+          onAddressTap: () => _openRestaurantMap(restaurant),
+          onPhoneTap: () => _launchExternal(
+            Uri(scheme: 'tel', path: restaurant.phone.trim()),
+            failureMessage: 'Unable to open the phone app.',
+          ),
+          onWebsiteTap: () => _openWebsite(restaurant.website),
+        ),
         const SizedBox(height: AppSpacing.xl),
         RestaurantMenuPreview(items: restaurant.items),
-        const SizedBox(height: AppSpacing.lg),
-        OutlinedButton.icon(
-          onPressed: () => _openReport(restaurant),
-          icon: const Icon(Icons.flag_outlined, color: AppColors.error),
-          label: const Text('Report Restaurant'),
-        ),
       ],
     );
   }
@@ -149,5 +173,59 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
     final bool? hidPlace = await AppNavigator.push<bool>(AppRoutes.reportPlace);
     if (!mounted || hidPlace != true) return;
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+  }
+
+  Future<void> _openRestaurantMap(Restaurant restaurant) async {
+    final double? latitude = restaurant.latitude;
+    final double? longitude = restaurant.longitude;
+    final String query = latitude != null && longitude != null
+        ? '$latitude,$longitude'
+        : restaurant.address.trim();
+    await _launchExternal(
+      Uri.https('www.google.com', '/maps/search/', <String, String>{
+        'api': '1',
+        'query': query,
+      }),
+      failureMessage: 'Unable to open the map application.',
+    );
+  }
+
+  Future<void> _openWebsite(String rawWebsite) async {
+    final String value = rawWebsite.trim();
+    final Uri? parsed = Uri.tryParse(value);
+    final Uri? uri =
+        parsed != null && (parsed.scheme == 'http' || parsed.scheme == 'https')
+        ? parsed
+        : Uri.tryParse('https://$value');
+    if (uri == null || uri.host.isEmpty) {
+      _showLaunchFailure('This restaurant website is invalid.');
+      return;
+    }
+    await _launchExternal(
+      uri,
+      failureMessage: 'Unable to open the restaurant website.',
+    );
+  }
+
+  Future<void> _launchExternal(
+    Uri uri, {
+    required String failureMessage,
+  }) async {
+    try {
+      final bool launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) _showLaunchFailure(failureMessage);
+    } catch (_) {
+      _showLaunchFailure(failureMessage);
+    }
+  }
+
+  void _showLaunchFailure(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
