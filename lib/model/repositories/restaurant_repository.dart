@@ -101,7 +101,8 @@ class RestaurantRepository {
     food_img_url,
     food_category,
     restaurant_item_price,
-    is_removed
+    is_removed,
+    local_food(food_type)
   ''';
 
   static const String _detailColumns =
@@ -357,6 +358,10 @@ class RestaurantRepository {
 
   /// Loads the menu facts needed to decide Quick Mode eligibility without
   /// downloading nested catalogue images for every restaurant in 10 km.
+  ///
+  /// Includes each item's `local_food.food_type` (Food, Beverage, Fruit,
+  /// Dessert, Kuih) so a food-type search can decide eligibility itself,
+  /// rather than the caller filtering an already-fetched batch afterwards.
   Future<List<RestaurantItem>> getRestaurantItemsByRestaurantIds(
     List<int> restaurantIds,
   ) async {
@@ -386,8 +391,12 @@ class RestaurantRepository {
           );
           items.addAll(
             rows.map(
-              (Map<String, dynamic> row) =>
-                  _itemDataToDomain(RestaurantItemDataModel.fromJson(row)),
+              (Map<String, dynamic> row) => _itemDataToDomain(
+                RestaurantItemDataModel.fromJson(row),
+                foodType: JsonReader.asStringOrNull(
+                  JsonReader.asMapOrNull(row['local_food'])?['food_type'],
+                ),
+              ),
             ),
           );
           if (rows.length < _cataloguePageSize) break;
@@ -878,19 +887,22 @@ class RestaurantRepository {
     return hour * 60 + minute;
   }
 
-  RestaurantItem _itemDataToDomain(RestaurantItemDataModel data) =>
-      RestaurantItem(
-        id: data.restaurantItemId,
-        restaurantId: data.restaurantId,
-        localFoodId: data.localFoodId,
-        foodName: data.restaurantItemName,
-        ingredients: data.ingredients,
-        imageUrl: data.foodImgUrl,
-        price: data.restaurantItemPrice,
-        currency: 'RM',
-        foodCategory: data.foodCategory ?? '',
-        isRemoved: data.isRemoved,
-      );
+  RestaurantItem _itemDataToDomain(
+    RestaurantItemDataModel data, {
+    String? foodType,
+  }) => RestaurantItem(
+    id: data.restaurantItemId,
+    restaurantId: data.restaurantId,
+    localFoodId: data.localFoodId,
+    foodName: data.restaurantItemName,
+    ingredients: data.ingredients,
+    imageUrl: data.foodImgUrl,
+    price: data.restaurantItemPrice,
+    currency: 'RM',
+    foodCategory: data.foodCategory ?? '',
+    foodType: foodType ?? '',
+    isRemoved: data.isRemoved,
+  );
 
   RestaurantItem _itemToDomain(Map<String, dynamic> row) {
     final RestaurantItemDataModel data = RestaurantItemDataModel.fromJson(row);
