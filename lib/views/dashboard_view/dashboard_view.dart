@@ -110,7 +110,7 @@ class _DashboardViewState extends State<DashboardView> {
         appBar: AppTopBar(
           title: 'Dashboard',
           showBackButton: false,
-          onProfileTap: () => Navigator.pushNamed(context, AppRoutes.profile),
+          onProfileTap: _viewModel.openProfile,
         ),
         body: Consumer<DashboardViewModel>(
           builder:
@@ -253,8 +253,7 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumPlaceCount:
-                  viewModel.distribution.maximumPlaceCount,
+              maximumPlaceCount: viewModel.distribution.maximumPlaceCount,
             ),
           ),
 
@@ -337,11 +336,14 @@ class _DashboardViewState extends State<DashboardView> {
               onHeartTap: viewModel.toggleCurrentSwipeFoodLike,
               onContinue: viewModel.continueSwipeSession,
               onStartNew: viewModel.startNewSwipeSession,
-              onMatchesTap: () => Navigator.pushNamed(
-                context,
-                AppRoutes.matchesRecommendation,
-                arguments: viewModel.matchesRecommendationRequest,
-              ),
+              onMatchesTap: () async {
+                await Navigator.pushNamed(
+                  context,
+                  AppRoutes.matchesRecommendation,
+                  arguments: viewModel.matchesRecommendationRequest,
+                );
+                await viewModel.refreshSwipeSessionAfterMatches();
+              },
             ),
           ),
 

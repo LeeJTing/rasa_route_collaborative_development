@@ -31,6 +31,7 @@ class _FakeDiscoveryFacade extends DiscoveryLogicFacade {
   @override
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
+    String? foodType,
   }) async {
     restaurantCalls++;
     observedLocations.add(location);

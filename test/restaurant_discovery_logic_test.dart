@@ -11,6 +11,24 @@ import 'package:rasa_route_collaborative_development/model/repositories/discover
 void main() {
   group('Quick Mode automatic radius expansion', () {
     test(
+      'restaurant details calculate distance from the supplied origin',
+      () async {
+        final Restaurant restaurant = _restaurant(1, distanceKm: 2);
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          _FakeDiscoveryRepositoryFacade(<Restaurant>[restaurant]),
+        );
+
+        final Restaurant? result = await logic.findById(
+          restaurant.id,
+          origin: _testLocation,
+        );
+
+        expect(result, isNotNull);
+        expect(result!.distanceMetres, closeTo(2000, 20));
+      },
+    );
+
+    test(
       'continues past early results until 20 restaurants are found',
       () async {
         final List<Restaurant> restaurants = <Restaurant>[
@@ -408,6 +426,14 @@ class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   Future<List<Restaurant>> getRestaurants() async {
     allRestaurantQueryCount++;
     return restaurants;
+  }
+
+  @override
+  Future<Restaurant?> getRestaurantById(int restaurantId) async {
+    for (final Restaurant restaurant in restaurants) {
+      if (restaurant.id == restaurantId) return restaurant;
+    }
+    return null;
   }
 
   @override

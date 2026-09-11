@@ -38,21 +38,60 @@ class DietaryRestrictionRepository {
   /// The restriction ids are loaded directly because the imported schema has
   /// more than one relationship to `dietary_restriction`, which makes an
   /// implicit PostgREST embed ambiguous.
+  // Future<List<DietaryRestriction>> restrictionsForFood(int localFoodId) async {
+  //   final List<Map<String, dynamic>> rows = await api.selectAll(
+  //     APIManager.tableFoodDietaryRestriction,
+  //     columns: 'dietary_restriction_id',
+  //     eq: <String, Object?>{'local_food_id': localFoodId},
+  //   );
+  //   return _restrictionsByIds(
+  //     rows
+  //         .map(
+  //           (Map<String, dynamic> row) =>
+  //               JsonReader.asIntOrNull(row['dietary_restriction_id']),
+  //         )
+  //         .whereType<int>()
+  //         .toSet(),
+  //   );
+  // }
+
   Future<List<DietaryRestriction>> restrictionsForFood(int localFoodId) async {
-    final List<Map<String, dynamic>> rows = await api.selectAll(
+    final String touristId = await api.resolveCurrentTouristId();
+    if (touristId.isEmpty) return const <DietaryRestriction>[];
+
+    final List<Map<String, dynamic>> foodRows = await api.selectAll(
       APIManager.tableFoodDietaryRestriction,
       columns: 'dietary_restriction_id',
       eq: <String, Object?>{'local_food_id': localFoodId},
     );
-    return _restrictionsByIds(
-      rows
-          .map(
-            (Map<String, dynamic> row) =>
-                JsonReader.asIntOrNull(row['dietary_restriction_id']),
-          )
-          .whereType<int>()
-          .toSet(),
+
+    final Set<int> foodRestrictionIds = foodRows
+        .map(
+          (Map<String, dynamic> row) =>
+              JsonReader.asIntOrNull(row['dietary_restriction_id']),
+        )
+        .whereType<int>()
+        .toSet();
+
+    final List<Map<String, dynamic>> userRows = await api.selectAll(
+      APIManager.tableUserDietaryRestriction,
+      columns: 'dietary_restriction_id',
+      eq: <String, Object?>{'tourist_id': touristId},
     );
+
+    final Set<int> userRestrictionIds = userRows
+        .map(
+          (Map<String, dynamic> row) =>
+              JsonReader.asIntOrNull(row['dietary_restriction_id']),
+        )
+        .whereType<int>()
+        .toSet();
+
+    final Set<int> matchingIds = foodRestrictionIds.intersection(
+      userRestrictionIds,
+    );
+
+    return _restrictionsByIds(matchingIds);
   }
 
   /// Every dish's dietary-restriction ids (`food_dietary_restriction` joined

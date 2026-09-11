@@ -110,6 +110,7 @@ class SubmittedLandmarkRecommendationCard extends StatelessWidget {
   );
 
   String _distanceLabel(double distanceMetres) {
+    if (!distanceMetres.isFinite) return 'Distance unavailable';
     if (distanceMetres < 1000) return '${distanceMetres.round()} m';
     return '${(distanceMetres / 1000).toStringAsFixed(1)} km';
   }

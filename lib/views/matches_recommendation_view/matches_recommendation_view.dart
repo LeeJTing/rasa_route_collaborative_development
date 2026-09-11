@@ -191,14 +191,27 @@ class _MatchesRecommendationViewState extends State<MatchesRecommendationView> {
         (restaurant) => MatchesRestaurantCard(
           restaurant: restaurant,
           matchedFoodName: group.food.name,
-          onTap: () => Navigator.pushNamed(
-            context,
-            AppRoutes.restaurantDetail,
-            arguments: restaurant.id,
-          ),
+          onTap: () => _openRestaurantDetails(context, restaurant.id),
         ),
       )
       .toList(growable: true);
+
+  /// Restaurant reporting can change a place from `available` to `frozen`
+  /// while this Matches route remains mounted. Reload after the detail route
+  /// returns so a newly hidden restaurant is removed without requiring the
+  /// tourist to leave and reopen Matches.
+  Future<void> _openRestaurantDetails(
+    BuildContext context,
+    int restaurantId,
+  ) async {
+    await Navigator.pushNamed(
+      context,
+      AppRoutes.restaurantDetail,
+      arguments: restaurantId,
+    );
+    if (!mounted) return;
+    await _viewModel.loadRecommendations();
+  }
 
   List<Widget> _landmarkCards(
     BuildContext context,

@@ -1,5 +1,6 @@
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
+import '../../domain_model/food_preference.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/origin_verification.dart';
 import '../../domain_model/opening_hour.dart';
@@ -19,6 +20,7 @@ import 'report_repository.dart';
 import 'restaurant_repository.dart';
 import 'submitted_landmark_repository.dart';
 import 'swipe_repository.dart';
+import 'tourist_profile_repository.dart';
 
 /// Everything about finding food out in the world: restaurants, menus, photo
 /// recognition, and the map the tourist finds them on.
@@ -45,6 +47,7 @@ class DiscoveryRepositoryFacade {
   final AuthRepository auth = AuthRepository();
   final FoodKnowledgeRepository food = FoodKnowledgeRepository();
   final SwipeRepository swipe = SwipeRepository();
+  final TouristProfileRepository touristProfile = TouristProfileRepository();
 
   /// Shared tourist report table (kind + place_id + reason).
   final ReportRepository report = ReportRepository();
@@ -105,6 +108,9 @@ class DiscoveryRepositoryFacade {
 
   Future<Set<int>> favouriteFoodIdsForTourist(String touristId) =>
       food.favouriteFoodIdsForTourist(touristId);
+
+  Future<List<FoodPreference>> foodPreferencesForTourist(String touristId) =>
+      touristProfile.getFoodPreferences(touristId);
 
   Future<List<DietaryRestriction>> dietaryRestrictionsForTourist(
     String touristId,

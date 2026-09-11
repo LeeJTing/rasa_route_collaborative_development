@@ -100,6 +100,29 @@ void main() {
     viewModel.dispose();
   });
 
+  test('restaurant price sort changes the displayed order', () async {
+    final MatchesRecommendationViewModel viewModel =
+        _TestMatchesRecommendationViewModel(FakeDiscoveryLogicFacade());
+    await viewModel.onInit();
+
+    viewModel.selectRestaurantSort(MatchesRestaurantSort.price);
+    expect(
+      viewModel.displayedGroups.single.restaurants.map(
+        (Restaurant restaurant) => restaurant.id,
+      ),
+      <int>[2, 1],
+    );
+
+    viewModel.selectRestaurantSort(MatchesRestaurantSort.price);
+    expect(
+      viewModel.displayedGroups.single.restaurants.map(
+        (Restaurant restaurant) => restaurant.id,
+      ),
+      <int>[3, 1],
+    );
+    viewModel.dispose();
+  });
+
   test(
     'removing a liked food removes its entire recommendation group',
     () async {
@@ -125,6 +148,7 @@ class _TestMatchesRecommendationViewModel
   @override
   DiscoveryLogicFacade createDiscoveryLogic() => logic;
 }
+
 Restaurant _restaurantAtDistance(
   Restaurant restaurant,
   double distanceMetres,
