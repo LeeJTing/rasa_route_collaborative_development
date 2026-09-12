@@ -6,6 +6,7 @@ import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../view_models/profile_view_model.dart';
+import '../common_widgets/app_dialog.dart';
 import '../common_widgets/app_tag_chip.dart';
 import '../common_widgets/app_top_bar.dart';
 import 'widgets/profile_chip_row.dart';
@@ -55,6 +56,31 @@ class _ProfileViewState extends State<ProfileView> {
       if (!mounted) return;
       Navigator.of(context).pop(_viewModel.discoverySettingsChanged);
     });
+  }
+
+  Future<void> _confirmSignOut(ProfileViewModel viewModel) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AppDialog(
+        icon: Icons.logout,
+        title: 'Log out ?',
+        message:
+            'Are you sure you want to log out of your account?',
+        actions: <Widget>[
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Log out'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    await viewModel.signOut();
   }
 
   @override
@@ -163,7 +189,7 @@ class _ProfileViewState extends State<ProfileView> {
                           iconColor: AppColors.textPrimary,
                           label: 'Log Out',
                           showChevron: false,
-                          onTap: viewModel.signOut,
+                          onTap: () => _confirmSignOut(viewModel),
                         ),
                         const SizedBox(height: AppSpacing.xl),
                       ],

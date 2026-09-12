@@ -168,7 +168,13 @@ class RestaurantDiscoveryLogic {
       location,
     );
     await _reactivateExpiredClosures(allMeasured);
-    final List<Restaurant> measured = _availableSummaries(allMeasured);
+    final DateTime now = currentTime();
+    final List<Restaurant> measured = _availableSummaries(allMeasured)
+        .where(
+          (Restaurant restaurant) =>
+              _isConfidentlyOpenHours(restaurant.openingHours, now),
+        )
+        .toList(growable: false);
     final List<Restaurant> eligible = await _eligibleRestaurants(
       _withinRadius(measured, radiusKm: _quickModeMaximumRadiusKm),
       foodType: foodType,
@@ -412,6 +418,11 @@ class RestaurantDiscoveryLogic {
     List<OpeningHour> hours,
     DateTime malaysiaNow,
   ) => OpeningHoursLogic.isConfidentlyClosedAt(hours, malaysiaNow);
+
+  bool _isConfidentlyOpenHours(
+    List<OpeningHour> hours,
+    DateTime malaysiaNow,
+  ) => OpeningHoursLogic.isConfidentlyOpenAt(hours, malaysiaNow);
 
   Future<List<Restaurant>> _eligibleRestaurants(
       List<Restaurant> candidates, {
