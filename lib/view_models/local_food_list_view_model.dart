@@ -3,6 +3,7 @@ import 'package:meta/meta.dart' show protected;
 import '../core/base_view_model.dart';
 import '../domain_model/local_food.dart';
 import '../model/business_logic/food_logic_facade.dart';
+import '../model/business_logic/food_search_matcher.dart';
 
 enum FoodSortOrder { ascending, descending }
 
@@ -104,25 +105,34 @@ class LocalFoodListViewModel extends BaseViewModel {
       _filters[group]!.contains(value);
 
   List<LocalFood> get displayedFoods {
-    final String needle = _query.toLowerCase();
-    final List<LocalFood> result = _foods.where((LocalFood food) {
-      final bool matchesSearch = needle.isEmpty || _matchesQuery(food, needle);
-      return matchesSearch && _matchesFilters(food);
-    }).toList();
-    result.sort(
-      (LocalFood a, LocalFood b) => _sortOrder == FoodSortOrder.ascending
-          ? a.name.compareTo(b.name)
-          : b.name.compareTo(a.name),
-    );
+    if (_query.isEmpty) {
+      final List<LocalFood> result = _foods.where(_matchesFilters).toList();
+      result.sort(_byName);
+      return result;
+    }
+    // A typed query ranks by HOW WELL the name matches, the chosen name order
+    // only breaking ties: a fuzzy hit ("maggie" -> "Maggi") is useless if it
+    // is buried, so the closest spelling floats to the top.
+    final Map<LocalFood, int> scores = <LocalFood, int>{};
+    final List<LocalFood> result = <LocalFood>[];
+    for (final LocalFood food in _foods) {
+      if (!_matchesFilters(food)) continue;
+      final int score = FoodSearchMatcher.score(_query, food);
+      if (score == 0) continue;
+      scores[food] = score;
+      result.add(food);
+    }
+    result.sort((LocalFood a, LocalFood b) {
+      final int byScore = scores[b]!.compareTo(scores[a]!);
+      return byScore != 0 ? byScore : _byName(a, b);
+    });
     return result;
   }
 
-  bool _matchesQuery(LocalFood food, String needle) {
-    if (food.name.toLowerCase().contains(needle)) return true;
-    return food.synonyms.any(
-      (String synonym) => synonym.toLowerCase().contains(needle),
-    );
-  }
+  int _byName(LocalFood a, LocalFood b) =>
+      _sortOrder == FoodSortOrder.ascending
+          ? a.name.compareTo(b.name)
+          : b.name.compareTo(a.name);
 
   bool _matchesFilters(LocalFood food) {
     final Map<FoodFilterGroup, Set<String>> values =
