@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -256,8 +258,7 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumPlaceCount:
-                  viewModel.distribution.maximumPlaceCount,
+              maximumPlaceCount: viewModel.distribution.maximumPlaceCount,
             ),
           ),
 
@@ -373,6 +374,15 @@ class _DashboardViewState extends State<DashboardView> {
                   onUpdate: viewModel.applyMapUpdate,
                   onDismiss: viewModel.dismissMapUpdate,
                   busy: viewModel.isBusy,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
+              if (viewModel.swipeQueueUpdateAvailable) ...<Widget>[
+                MapUpdateBanner(
+                  message: viewModel.swipeQueueUpdateMessage,
+                  onUpdate: viewModel.applySwipeQueueUpdate,
+                  onDismiss: viewModel.dismissSwipeQueueUpdate,
+                  busy: viewModel.swipeLoading,
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
@@ -504,6 +514,22 @@ class _DashboardViewState extends State<DashboardView> {
             final LatLng centre = camera.center;
             final double zoom = camera.zoom;
             final LatLngBounds bounds = camera.visibleBounds;
+            // Swipe Mode deliberately never moves the camera. Its fixed
+            // discovery area is the unobstructed top half of this map, above
+            // the expanded card panel. Convert that screen rectangle here,
+            // where the Flutter Map geometry belongs, and pass only plain
+            // coordinates into the ViewModel.
+            final double mapWidth = camera.nonRotatedSize.x;
+            final double topHalfHeight = camera.nonRotatedSize.y / 2;
+            final bool hasMeasuredMap = mapWidth > 0 && topHalfHeight > 0;
+            final LatLng swipeNorthWest = hasMeasuredMap
+                ? camera.pointToLatLng(const math.Point<double>(0, 0))
+                : bounds.northWest;
+            final LatLng swipeSouthEast = hasMeasuredMap
+                ? camera.pointToLatLng(
+                    math.Point<double>(mapWidth, topHalfHeight),
+                  )
+                : bounds.southEast;
             Future<void>.microtask(() {
               if (!mounted) return;
               viewModel.onCameraChanged(
@@ -514,6 +540,10 @@ class _DashboardViewState extends State<DashboardView> {
                 west: bounds.west,
                 north: bounds.north,
                 east: bounds.east,
+                swipeSouth: swipeSouthEast.latitude,
+                swipeWest: swipeNorthWest.longitude,
+                swipeNorth: swipeNorthWest.latitude,
+                swipeEast: swipeSouthEast.longitude,
               );
             });
           },
@@ -565,6 +595,32 @@ class _DashboardViewState extends State<DashboardView> {
                       child: _ClusterMarker(
                         count: cluster.count,
                         onTap: () => viewModel.zoomIntoCluster(cluster),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+
+          // The same badges for the search layer, in its own colour and its own
+          // layer - drawn after the filtered ones so a search count is never
+          // hidden underneath a count the chips produced. Tapping behaves
+          // identically; only the dishes it is opened against differ.
+          if (viewModel.searchClusters.isNotEmpty)
+            MarkerLayer(
+              markers: viewModel.searchClusters
+                  .map(
+                    (MapCluster cluster) => Marker(
+                      key: ValueKey<String>('search:${cluster.key}'),
+                      point: LatLng(cluster.latitude, cluster.longitude),
+                      width: _clusterDiameter(cluster.count),
+                      height: _clusterDiameter(cluster.count),
+                      child: _ClusterMarker(
+                        count: cluster.count,
+                        searchResult: true,
+                        onTap: () => viewModel.zoomIntoCluster(
+                          cluster,
+                          searchLayer: true,
+                        ),
                       ),
                     ),
                   )
@@ -629,22 +685,34 @@ double _clusterDiameter(int count) {
 
 /// "1,200 places here", drawn as one tappable circle.
 class _ClusterMarker extends StatelessWidget {
-  const _ClusterMarker({required this.count, required this.onTap});
+  const _ClusterMarker({
+    required this.count,
+    required this.onTap,
+    this.searchResult = false,
+  });
 
   final int count;
+
+  /// Whether this badge belongs to the search layer. Same shape, same size,
+  /// same tap - a different fill, so a count the keyword produced is not read
+  /// as one the filter chips did.
+  final bool searchResult;
+
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: AppColors.primary,
-        border: Border.fromBorderSide(
+        color: searchResult
+            ? AppColors.clusterSearchFill
+            : AppColors.primary,
+        border: const Border.fromBorderSide(
           BorderSide(color: AppColors.surface, width: 2),
         ),
-        boxShadow: <BoxShadow>[
+        boxShadow: const <BoxShadow>[
           BoxShadow(
             color: AppColors.shadow,
             blurRadius: 4,
