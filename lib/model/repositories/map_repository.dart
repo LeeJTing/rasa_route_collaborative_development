@@ -1053,7 +1053,7 @@ class MapRepository {
       List<Object?> ids,
       ) {
     final List<Future<List<Map<String, dynamic>>>> out =
-        <Future<List<Map<String, dynamic>>>>[];
+    <Future<List<Map<String, dynamic>>>>[];
     for (int start = 0; start < ids.length; start += _idsPerRequest) {
       final int end = start + _idsPerRequest > ids.length
           ? ids.length
