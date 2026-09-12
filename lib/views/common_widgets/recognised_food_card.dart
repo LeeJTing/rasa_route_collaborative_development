@@ -13,8 +13,8 @@ import 'app_tag_chip.dart';
 /// ("Form 1") and `LandmarkDetailView` ("View Details"). Thumbnail on the
 /// left, Dish/Variant/Origin/Food Category/Meal Type as one field list on
 /// the right (Food Category/Meal Type rendered as small coloured pills),
-/// with the fuller details (Description/Cooking Style/Cultural Background)
-/// below.
+/// with the fuller details (Description/Ingredients/Cooking Style/Cultural
+/// Background) below.
 ///
 /// [collapsible] - on `AddLandmarkView` those fuller details start collapsed
 /// behind an expand/collapse arrow; on `LandmarkDetailView` they are shown
@@ -32,14 +32,27 @@ class RecognisedFoodCard extends StatefulWidget {
   const RecognisedFoodCard({
     super.key,
     required this.food,
+    this.variant = '',
     this.image,
+    this.imageUrl,
     this.collapsible = false,
     this.footer,
     this.dietaryConflicts = const <String>[],
   });
 
   final LocalFood food;
+
+  /// The VARIANT name the dish was actually seen/typed as when it EXTENDS
+  /// the dictionary [food] into an unlisted variant (`Cendol Jagung` ->
+  /// `Cendol`) - shown as the card's "Variant" row; empty hides the row.
+  final String variant;
+
   final XFile? image;
+
+  /// Stored URL of this food's photo - used when [image] is null (a form
+  /// resumed from an incomplete submission keeps its photo in storage, not
+  /// on this device).
+  final String? imageUrl;
   final bool collapsible;
   final Widget? footer;
 
@@ -98,14 +111,17 @@ class _RecognisedFoodCardState extends State<RecognisedFoodCard> {
                 if (widget.image != null) ...<Widget>[
                   _FoodThumbnail(image: widget.image!),
                   const SizedBox(width: AppSpacing.md),
+                ] else if (widget.imageUrl != null) ...<Widget>[
+                  _StoredFoodThumbnail(url: widget.imageUrl!),
+                  const SizedBox(width: AppSpacing.md),
                 ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       _FieldRow(label: 'Dish', value: food.name),
-                      if (food.synonyms.isNotEmpty)
-                        _FieldRow(label: 'Variant', value: food.synonyms.first),
+                      if (widget.variant.isNotEmpty)
+                        _FieldRow(label: 'Variant', value: widget.variant),
                       _FieldRow(label: 'Origin', value: food.origin),
                       _ChipFieldRow(
                         label: 'Food Category',
@@ -134,6 +150,17 @@ class _RecognisedFoodCardState extends State<RecognisedFoodCard> {
                 _ExpandedTextField(
                   label: 'Description',
                   value: food.description,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
+              // The dish's ingredients - the dictionary row's own list with
+              // the recognition's observation merged in (a "Cendol Jagung"
+              // shows the Cendol ingredients PLUS sweet corn), so View
+              // Details always says what the dish is made of.
+              if (food.ingredients.isNotEmpty) ...<Widget>[
+                _ExpandedTextField(
+                  label: 'Ingredients',
+                  value: food.ingredients,
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
@@ -188,7 +215,7 @@ class _DietaryConflictWarning extends StatelessWidget {
           Expanded(
             child: Text(
               'Your profile avoids: ${conflicts.join(', ')}. '
-              "This dish may not suit you - you can still add it.",
+              "This dish may not suit you.",
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: AppColors.warning,
                 fontWeight: FontWeight.w600,
@@ -275,6 +302,33 @@ class _FoodThumbnail extends StatelessWidget {
             fit: BoxFit.cover,
           );
         },
+      ),
+    );
+  }
+}
+
+/// Same thumbnail frame as [_FoodThumbnail], for a photo that lives in
+/// storage (a form resumed from an incomplete submission). Falls back to the
+/// empty placeholder when the image cannot be loaded.
+class _StoredFoodThumbnail extends StatelessWidget {
+  const _StoredFoodThumbnail({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: Image.network(
+        url,
+        width: AppSizes.avatarLg,
+        height: AppSizes.avatarLg,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => const SizedBox(
+          width: AppSizes.avatarLg,
+          height: AppSizes.avatarLg,
+          child: ColoredBox(color: AppColors.surfaceVariant),
+        ),
       ),
     );
   }

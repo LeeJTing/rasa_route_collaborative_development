@@ -66,14 +66,31 @@ class DiscoveryLogicFacade {
   Future<SwipeModePreparation> prepareSwipeMode({
     required double latitude,
     required double longitude,
-  }) =>
-      foodDiscovery.prepareSwipeMode(latitude: latitude, longitude: longitude);
+    TouristLocation distanceOrigin = TouristLocation.unknown,
+  }) => foodDiscovery.prepareSwipeMode(
+    latitude: latitude,
+    longitude: longitude,
+    distanceOrigin: distanceOrigin,
+  );
 
   Future<SwipeSession> startNewSwipeSession(SwipeModePreparation preparation) =>
       foodDiscovery.startNewSession(preparation);
 
   Future<SwipeSession> continueSwipeSession(SwipeModePreparation preparation) =>
       foodDiscovery.continueSession(preparation);
+
+  Future<SwipeModePreparation> refreshSwipeModeAfterProfileChange({
+    required double latitude,
+    required double longitude,
+    TouristLocation distanceOrigin = TouristLocation.unknown,
+  }) => foodDiscovery.refreshAfterProfileChange(
+    latitude: latitude,
+    longitude: longitude,
+    distanceOrigin: distanceOrigin,
+  );
+
+  Future<SwipeSession?> reloadSwipeSession(SwipeModePreparation preparation) =>
+      foodDiscovery.reloadSession(preparation);
 
   Future<SwipeSession> moveSwipeSession(
     SwipeSession session,
@@ -93,17 +110,25 @@ class DiscoveryLogicFacade {
   Future<SwipeSession> removeMatchedFood(SwipeSession session, int foodId) =>
       matchesRecommendation.removeLike(session, foodId);
 
-  Future<Restaurant?> getRestaurantById(int restaurantId) =>
-      restaurantDiscovery.findById(restaurantId);
+  Future<Restaurant?> getRestaurantById(
+    int restaurantId, {
+    TouristLocation origin = TouristLocation.unknown,
+  }) => restaurantDiscovery.findById(restaurantId, origin: origin);
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
-  }) => restaurantDiscovery.nearbyWithAutomaticExpansion(location: location);
+    String? foodType,
+  }) => restaurantDiscovery.nearbyWithAutomaticExpansion(
+    location: location,
+    foodType: foodType,
+  );
 
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
+    String? foodType,
   }) => restaurantDiscovery.nearbyLandmarksWithAutomaticExpansion(
     location: location,
+    foodType: foodType,
   );
 
   /// Nearby restaurant data shared by discovery experiences such as Matches.
@@ -207,10 +232,7 @@ class DiscoveryLogicFacade {
   Future<FoodDistribution> foodDistribution({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-  }) => mapExploration.distribution(
-    filter: filter,
-    localFoodId: localFoodId,
-  );
+  }) => mapExploration.distribution(filter: filter, localFoodId: localFoodId);
 
   /// REQ102_32 - restaurant and submitted-landmark pins for the detailed map.
   ///
@@ -252,6 +274,13 @@ class DiscoveryLogicFacade {
   /// ViewModel may not name a logic class to read a constant off it.
   static const int maximumMarkers = MapExplorationLogic.maximumMarkers;
 
+  // `swipeFoodMarkerLimit`, `swipeFoodFocusZoom` and `nearestFoodLocation`
+  // stood here and named three members `MapExplorationLogic` does not have, so
+  // the file could not compile. Nothing read them - not this facade, not a
+  // ViewModel, not a View - so they were left behind by work that went away,
+  // the way the drill-down constants were. Re-exposing a constant is free;
+  // re-exposing one that does not exist is a build error, so they are gone.
+
   /// REQ102_41 - what a tap on [cluster] should do: the zoom that visibly
   /// breaks it up, or its members when no zoom ever separates them.
   Future<ClusterExpansion> expandMapCluster(
@@ -274,11 +303,7 @@ class DiscoveryLogicFacade {
     MapPin pin, {
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-  }) => mapExploration.pinDetail(
-    pin,
-    filter: filter,
-    localFoodId: localFoodId,
-  );
+  }) => mapExploration.pinDetail(pin, filter: filter, localFoodId: localFoodId);
 
   /// A8 - one keyword against locations and the local-food catalogue.
   Future<ExplorationSearchResults> searchExploration(String keyword) =>

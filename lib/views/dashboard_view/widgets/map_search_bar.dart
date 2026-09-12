@@ -23,6 +23,7 @@ class MapSearchBar extends StatelessWidget {
     required this.onChanged,
     required this.onClear,
     required this.onTap,
+    this.onSubmitted,
     this.onFilterTap,
     this.filterCount = 0,
     this.filterPanelOpen = false,
@@ -36,6 +37,13 @@ class MapSearchBar extends StatelessWidget {
   final VoidCallback onClear;
 
   final VoidCallback onTap;
+
+  /// The keyboard's Search key.
+  ///
+  /// The field already asked for that key with [TextInputAction.search] but
+  /// had nothing wired to it, so pressing it did nothing at all: the only way
+  /// to get results was to type another character and wait out the debounce.
+  final ValueChanged<String>? onSubmitted;
 
   /// Null hides the Filter pill - the detailed-map variant.
   final VoidCallback? onFilterTap;
@@ -85,6 +93,7 @@ class MapSearchBar extends StatelessWidget {
               controller: controller,
               onChanged: onChanged,
               onTap: onTap,
+              onSubmitted: onSubmitted,
               textInputAction: TextInputAction.search,
               style: AppTextStyles.bodyMedium,
               inputFormatters: [

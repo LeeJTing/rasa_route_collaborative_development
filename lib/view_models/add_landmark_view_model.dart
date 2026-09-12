@@ -1,8 +1,12 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../app/routing/app_navigator.dart';
 import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
+import '../domain_model/landmark_draft.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/opening_hour.dart';
 import '../domain_model/submitted_landmark.dart';
@@ -33,25 +37,37 @@ class LandmarkFoodEntry {
     required this.entryId,
     required this.food,
     this.image,
+    this.photoRef,
     this.price,
     this.priceMin = 0,
     this.priceMax = 0,
+    this.captureLocation = TouristLocation.unknown,
+    this.variant = '',
+    this.dietaryRestrictions = const <String>[],
   });
 
   /// Creates a new form entry with a fresh, form-local identity.
   factory LandmarkFoodEntry.newEntry({
     required LocalFood food,
     XFile? image,
+    LandmarkDraftPhoto? photoRef,
     double? price,
     double priceMin = 0,
     double priceMax = 0,
+    TouristLocation captureLocation = TouristLocation.unknown,
+    String variant = '',
+    List<String> dietaryRestrictions = const <String>[],
   }) => LandmarkFoodEntry._(
     entryId: _nextEntryId++,
     food: food,
     image: image,
+    photoRef: photoRef,
     price: price,
     priceMin: priceMin,
     priceMax: priceMax,
+    captureLocation: captureLocation,
+    variant: variant,
+    dietaryRestrictions: dietaryRestrictions,
   );
 
   static int _nextEntryId = 0;
@@ -64,6 +80,11 @@ class LandmarkFoodEntry {
   /// The primary food's photo is tracked separately, via
   /// `AddLandmarkViewModel._recognizedFoodImage` - not duplicated here.
   final XFile? image;
+
+  /// The stored form of this food's photo (see [image]) - set when a draft
+  /// is resumed, so submission reuses the uploaded object instead of
+  /// re-uploading. Null while only a local capture exists.
+  final LandmarkDraftPhoto? photoRef;
   final double? price;
 
   /// Gemini's suggested MYR price range for this food, carried onto the
@@ -71,22 +92,45 @@ class LandmarkFoodEntry {
   final double priceMin;
   final double priceMax;
 
+  /// Where this food's photo was captured (see the 50 m same-restaurant
+  /// rule) - only meaningful for additional foods; the primary food's spot
+  /// lives on the ViewModel itself.
+  final TouristLocation captureLocation;
+
+  /// The VARIANT name this food was seen/typed as, when it EXTENDS the
+  /// dictionary dish into an unlisted variant (`Cendol Jagung` -> curated
+  /// `Cendol`) - written to `landmark_item.variant`. Empty when the name IS
+  /// the dish.
+  final String variant;
+
+  /// Canonical dietary-restriction names that apply to THIS food - written
+  /// to `landmark_item.dietary_restrictions` (one comma-joined text column).
+  final List<String> dietaryRestrictions;
+
   LandmarkFoodEntry withPrice(double newPrice) => LandmarkFoodEntry._(
     entryId: entryId,
     food: food,
     image: image,
+    photoRef: photoRef,
     price: newPrice,
     priceMin: priceMin,
     priceMax: priceMax,
+    captureLocation: captureLocation,
+    variant: variant,
+    dietaryRestrictions: dietaryRestrictions,
   );
 
   LandmarkFoodEntry withFood(LocalFood newFood) => LandmarkFoodEntry._(
     entryId: entryId,
     food: newFood,
     image: image,
+    photoRef: photoRef,
     price: price,
     priceMin: priceMin,
     priceMax: priceMax,
+    captureLocation: captureLocation,
+    variant: variant,
+    dietaryRestrictions: dietaryRestrictions,
   );
 
   LandmarkFoodEntry withPriceRange({
@@ -96,9 +140,43 @@ class LandmarkFoodEntry {
     entryId: entryId,
     food: food,
     image: image,
+    photoRef: photoRef,
     price: price,
     priceMin: priceMin,
     priceMax: priceMax,
+    captureLocation: captureLocation,
+    variant: variant,
+    dietaryRestrictions: dietaryRestrictions,
+  );
+
+  /// The observed/typed VARIANT name for this food - see [variant].
+  LandmarkFoodEntry withVariant(String newVariant) => LandmarkFoodEntry._(
+    entryId: entryId,
+    food: food,
+    image: image,
+    photoRef: photoRef,
+    price: price,
+    priceMin: priceMin,
+    priceMax: priceMax,
+    captureLocation: captureLocation,
+    variant: newVariant,
+    dietaryRestrictions: dietaryRestrictions,
+  );
+
+  /// After this entry's local photo was uploaded while saving a draft - the
+  /// stored reference replaces nothing (the local file is kept for preview
+  /// until submission).
+  LandmarkFoodEntry withPhotoRef(LandmarkDraftPhoto ref) => LandmarkFoodEntry._(
+    entryId: entryId,
+    food: food,
+    image: image,
+    photoRef: ref,
+    price: price,
+    priceMin: priceMin,
+    priceMax: priceMax,
+    captureLocation: captureLocation,
+    variant: variant,
+    dietaryRestrictions: dietaryRestrictions,
   );
 }
 
@@ -130,9 +208,21 @@ class LandmarkFoodEntry {
 ///     directly - see [openSignboardCapture]/[openStallCapture].
 class AddLandmarkViewModel extends BaseViewModel
     implements CurrentLocationListener {
-  AddLandmarkViewModel();
+  /// [websiteReachability] is a test seam for the live website-link probe
+  /// (see [setRestaurantWebsite]) - it defaults to the logic facade's
+  /// network check; tests inject a stub so the field's check state can be
+  /// exercised without touching the network.
+  AddLandmarkViewModel({Future<bool> Function(String url)? websiteReachability})
+    : _websiteReachability = websiteReachability;
 
-  final LandmarkLogicFacade landmarkLogic = LandmarkLogicFacade();
+  /// Creates the logic facade below - a seam the ViewModel tests override to
+  /// hand in a fake, so no test ever reaches Supabase/Gemini.
+  @protected
+  LandmarkLogicFacade createLandmarkLogic() => LandmarkLogicFacade();
+
+  late final LandmarkLogicFacade landmarkLogic = createLandmarkLogic();
+
+  final Future<bool> Function(String url)? _websiteReachability;
 
   /// Inbound: `LocationMonitor` publishes here.
   final CurrentLocationFacade locationFacade = CurrentLocationFacade();
@@ -145,6 +235,13 @@ class AddLandmarkViewModel extends BaseViewModel
   // --- LOCATION STATE ---
   TouristLocation _currentLocation = TouristLocation.unknown;
   TouristLocation _adjustedLocation = TouristLocation.unknown;
+
+  /// Where the FIRST food was captured - the landmark's location (the pin
+  /// defaults here, and a hand-moved pin may only stray 100 m from it).
+  /// Set from `LandmarkDraftHandoff` before `onInit()`, or from a resumed
+  /// draft. [TouristLocation.unknown] when the capture carried no fix - the
+  /// live fix is used instead, see [baseLocation].
+  TouristLocation _captureLocation = TouristLocation.unknown;
 
   /// Pushed by `LocationMonitor` through [CurrentLocationFacade].
   @override
@@ -168,6 +265,11 @@ class AddLandmarkViewModel extends BaseViewModel
   /// there - see [setRecognizedFoodImage].
   XFile? _recognizedFoodImage;
 
+  /// The stored version of [_recognizedFoodImage] - set when a draft is
+  /// resumed, so the card can show the photo and submission can reuse the
+  /// uploaded object instead of re-uploading it.
+  LandmarkDraftPhoto? _recognizedFoodImageRef;
+
   /// Gemini's confidence in the recognized primary dish's name, carried from
   /// the recognition screen through `LandmarkDraftHandoff` - the catalogue-
   /// growth gate (`FoodRecognitionLogic.registerNewDishes`) demands a high
@@ -179,6 +281,12 @@ class AddLandmarkViewModel extends BaseViewModel
   /// `food_dietary_restriction` association table when it becomes a new
   /// catalogue row.
   List<String> _recognizedFoodDietaryRestrictions = const <String>[];
+
+  /// The VARIANT name the primary food was seen/typed as when it EXTENDS the
+  /// dictionary dish into an unlisted variant (`Cendol Jagung` -> `Cendol`) -
+  /// written to the submitted `landmark_item.variant`; empty when the name IS
+  /// the dish. Carried from `LandmarkDraftHandoff`.
+  String _recognizedFoodVariant = '';
 
   /// The signed-in tourist's restrictions the recognized primary dish
   /// conflicts with - shown as a warning on its card (adding is still
@@ -196,6 +304,16 @@ class AddLandmarkViewModel extends BaseViewModel
   bool _isSignboardDisabled = false; // True after stall captured
   bool _isStallDisabled = false; // True after signboard captured
 
+  /// Where the signboard/stall photo was taken - its OWN fix, kept separately
+  /// from the first food's [_captureLocation]. `unknown` until a photo is
+  /// captured, and dropped with it (see [clearCapturedImage]).
+  TouristLocation _capturedImageLocation = TouristLocation.unknown;
+
+  /// The stored version of [_capturedImage] (object name + URL + type) -
+  /// set when a draft is resumed, so the preview can render it and
+  /// submission reuses the uploaded object.
+  LandmarkDraftPhoto? _capturedImageRef;
+
   // --- FORM STATE ---
   String _restaurantName = '';
 
@@ -204,6 +322,15 @@ class AddLandmarkViewModel extends BaseViewModel
   String _phone = '';
   String _website = '';
   String _address = '';
+
+  /// Live website-link probe state - see [setRestaurantWebsite]. The probe
+  /// waits for typing to pause ([websiteLinkCheckDelay]).
+  Timer? _websiteLinkDebounce;
+  bool _websiteLinkChecking = false;
+  bool _websiteLinkUnreachable = false;
+
+  /// How long typing must pause before the website link is probed.
+  static const Duration websiteLinkCheckDelay = Duration(milliseconds: 700);
 
   /// Bumped by [setExtractedRestaurantName] whenever a signboard capture
   /// overwrites [_restaurantName]. `AddLandmarkView` compares this to the
@@ -232,9 +359,61 @@ class AddLandmarkViewModel extends BaseViewModel
           ],
       };
 
+  // --- DRAFT (INCOMPLETE SUBMISSION) STATE ---
+  /// The saved draft row this form is updating; `0` while it has never been
+  /// saved. Saving again UPDATES the same row instead of piling up a new
+  /// draft every time the app goes to the background.
+  int _draftId = 0;
+  int get draftId => _draftId;
+
+  /// The rows of drafts that were COMBINED into this form (see
+  /// [mergeExistingDraft]). They are removed once this form is saved - or
+  /// once it is submitted - so the restaurant keeps ONE submission; until
+  /// then their data is safe in case this form is discarded.
+  final List<int> _absorbedDraftIds = <int>[];
+
+  /// Whether this form is editing an ALREADY-SAVED incomplete submission
+  /// (opened from the Incomplete Submissions list, or auto-continued when
+  /// the same dish was captured again). Its Discard
+  /// lives on the Incomplete Submissions screen, so the leave dialog does
+  /// not offer a second, hidden delete - see `AddLandmarkView._confirmLeave`.
+  bool get hasSavedDraft => _draftId != 0;
+
+  /// True while a draft save (photo uploads + row write) is running, so the
+  /// lifecycle hook and the back-button flow can never start two
+  /// overlapping saves.
+  bool _draftSaving = false;
+  bool get isSavingDraft => _draftSaving;
+
+  /// Set when a BACKGROUND save (the app went to the background) succeeded -
+  /// the View shows a "draft saved, kept for 24 hours" note when the tourist
+  /// comes back, then clears this via [takeAutoDraftSavedNotice].
+  bool _autoDraftSaved = false;
+
+  bool takeAutoDraftSavedNotice() {
+    final bool saved = _autoDraftSaved;
+    _autoDraftSaved = false;
+    return saved;
+  }
+
+  /// Set when an "Add More Food" result was REJECTED because the same dish
+  /// (same variant) is already on this form - the View shows a snackbar and
+  /// clears it via [takeDuplicateFoodNotice].
+  bool _duplicateFoodRejected = false;
+
+  bool takeDuplicateFoodNotice() {
+    final bool rejected = _duplicateFoodRejected;
+    _duplicateFoodRejected = false;
+    return rejected;
+  }
+
   // --- SUBMISSION STATE ---
   bool _isSubmitting = false;
   String? _submitError;
+
+  /// The sign-in requirement - copy this ViewModel authors itself, so the
+  /// submit-failure mapper may pass it through verbatim.
+  static const String _signInRequiredMessage = 'Sign in to submit a landmark.';
 
   /// True when the last submit MERGED the dishes into an existing place
   /// (catalogue restaurant or submitted landmark, same name within ~100m)
@@ -249,16 +428,27 @@ class AddLandmarkViewModel extends BaseViewModel
   TouristLocation get adjustedLocation => _adjustedLocation;
   String? get locationError => _locationError;
 
+  /// Where the first food was captured. See [_captureLocation].
+  TouristLocation get captureLocation => _captureLocation;
+
+  /// The landmark's own location: the first food's capture spot when there
+  /// is one, else the live fix (e.g. a name-typed food with no GPS fix at
+  /// capture time). The pin starts here and submission uses this spot.
+  TouristLocation get baseLocation =>
+      _captureLocation.isKnown ? _captureLocation : _currentLocation;
+
   /// Whether the current fix makes adding a landmark impossible (A9) - a new
   /// landmark may only be submitted on Malaysian land, so a fix at sea or
   /// outside Malaysia blocks the form. `false` when there is no fix yet
-  /// (nothing to judge against).
-  bool get isAddLocationBlocked =>
-      _currentLocation.isKnown &&
-      !landmarkLogic.isOnLand(
-        _currentLocation.latitude,
-        _currentLocation.longitude,
-      );
+  /// (nothing to judge against). Judged at the EFFECTIVE landmark location
+  /// (a hand-moved pin, else the captured/gps spot).
+  bool get isAddLocationBlocked {
+    final TouristLocation location = _adjustedLocation.isKnown
+        ? _adjustedLocation
+        : baseLocation;
+    return location.isKnown &&
+        !landmarkLogic.isOnLand(location.latitude, location.longitude);
+  }
 
   /// Why the form is blocked for the current spot - shown on the Location
   /// card and as the disabled-Submit reason. Null when the location allows
@@ -271,9 +461,27 @@ class AddLandmarkViewModel extends BaseViewModel
       'outside Malaysia, so no landmark can be submitted here.';
 
   LocalFood? get recognizedFood => _primaryFood?.food;
+
+  /// The VARIANT name the primary food was seen/typed as when it EXTENDS the
+  /// dictionary dish into an unlisted variant (`Cendol Jagung` -> `Cendol`) -
+  /// shown on its card and written to `landmark_item.variant`. Empty when the
+  /// name IS the dish.
+  String get recognizedFoodVariant => _recognizedFoodVariant;
+
   XFile? get recognizedFoodImage => _recognizedFoodImage;
   double? get primaryFoodPrice => _primaryFood?.price;
   String? get primaryFoodPriceWarning => _primaryFoodPriceWarning;
+
+  /// Gemini's suggested price range for the primary food as a display line
+  /// ("Suggested price: RM 4.50 - RM 8.50"), shown under its price field
+  /// whenever it is known - even while the typed value is invalid. Null when
+  /// no range is known.
+  String? get primaryFoodSuggestedPriceText => _primaryFood == null
+      ? null
+      : landmarkLogic.suggestedPriceRangeText(
+          _primaryFood!.priceMin,
+          _primaryFood!.priceMax,
+        );
 
   /// The restrictions the recognized primary dish conflicts with - see
   /// `_recognizedFoodDietaryConflicts`.
@@ -281,14 +489,49 @@ class AddLandmarkViewModel extends BaseViewModel
       _recognizedFoodDietaryConflicts;
   String? additionalFoodPriceWarning(int entryId) =>
       _additionalFoodPriceWarnings[entryId];
+
+  /// Gemini's suggested price range for one additional food - see
+  /// [primaryFoodSuggestedPriceText].
+  String? additionalFoodSuggestedPriceText(int entryId) {
+    for (final LandmarkFoodEntry entry in _additionalFoods) {
+      if (entry.entryId == entryId) {
+        return landmarkLogic.suggestedPriceRangeText(
+          entry.priceMin,
+          entry.priceMax,
+        );
+      }
+    }
+    return null;
+  }
+
   List<LandmarkFoodEntry> get additionalFoods =>
       List<LandmarkFoodEntry>.unmodifiable(_additionalFoods);
 
   XFile? get capturedImage => _capturedImage;
   String? get capturedImageType => _capturedImageType;
-  bool get hasImageCaptured => _capturedImage != null;
+
+  /// Where the signboard/stall photo itself was taken - its OWN fix, separate
+  /// from the first food's [captureLocation]; the second food keeps its own
+  /// on [LandmarkFoodEntry.captureLocation]. `unknown` until a photo is
+  /// captured (restored with a resumed draft's stored photo, which carries
+  /// its own spot), and cleared with the photo.
+  TouristLocation get capturedImageLocation => _capturedImageLocation;
+
+  /// Whether the form's mandatory signboard/stall photo exists - either
+  /// captured on this device or carried over from a resumed draft.
+  bool get hasImageCaptured =>
+      _capturedImage != null || _capturedImageRef != null;
   bool get isSignboardDisabled => _isSignboardDisabled;
   bool get isStallDisabled => _isStallDisabled;
+
+  /// Stored URL of the landmark's own signboard/stall photo - set when this
+  /// form was resumed from a draft (in which case [capturedImage] is null
+  /// and the photo lives in storage). Null when no photo exists yet.
+  String? get capturedImageUrl => _capturedImageRef?.url;
+
+  /// Stored URL of the primary food's photo - set when this form was resumed
+  /// from a draft (see [capturedImageUrl]).
+  String? get recognizedFoodImageUrl => _recognizedFoodImageRef?.url;
 
   String get restaurantName => _restaurantName;
 
@@ -347,28 +590,58 @@ class AddLandmarkViewModel extends BaseViewModel
     return null;
   }
 
+  /// Optional website. STRICT (RFC 3986 + XSS rules - see
+  /// `LandmarkSubmissionLogic.isValidWebsiteFormat`): exactly ONE full
+  /// http(s) link with no spaces and no markup, on a real dotted domain -
+  /// and at most [maxWebsiteLength] characters.
   String? get restaurantWebsiteError {
     if (_website.isEmpty) return null;
     if (landmarkLogic.containsControlCharacters(_website)) {
       return 'Website contains invalid characters.';
     }
-    if (!landmarkLogic.isValidWebsiteFormat(_website)) {
-      return 'Enter a valid public http(s) website, e.g. https://example.com.';
+    if (landmarkLogic.websiteContainsWhitespace(_website)) {
+      return 'Website links cannot contain spaces.';
     }
-    if (_website.length >= landmarkLogic.maxWebsiteLength) {
+    if (landmarkLogic.websiteContainsMultipleUrls(_website)) {
+      return 'Enter only one website link, e.g. https://example.com.';
+    }
+    if (_website.length > landmarkLogic.maxWebsiteLength) {
       return 'Website limit is ${landmarkLogic.maxWebsiteLength} characters.';
+    }
+    if (!landmarkLogic.isValidWebsiteFormat(_website)) {
+      return 'Enter a valid link starting with http:// or https://, '
+          'e.g. https://example.com.';
     }
     return null;
   }
 
-  /// Amber warning while the website is past the submit limit (76-79 chars)
-  /// but below the hard input stop - typing continues, submission does not.
+  /// Amber warning once the website is within 5 characters of its 2048 cap
+  /// (2043-2048) - typing continues to the cap and a valid link AT the cap
+  /// is still submit-able; the warning is advisory only.
   String? get restaurantWebsiteWarning {
     final int length = _website.length;
-    final int submitMax = landmarkLogic.websiteSubmitMaxLength;
-    if (length >= submitMax + 1 && length < landmarkLogic.maxWebsiteLength) {
-      return 'Website should be $submitMax characters or fewer '
+    if (length >= landmarkLogic.websiteWarnFromLength) {
+      return 'Website should stay under '
+          '${landmarkLogic.maxWebsiteLength} characters '
           '(currently $length).';
+    }
+    return null;
+  }
+
+  /// True while the debounced website-link probe is running.
+  bool get isCheckingWebsiteLink => _websiteLinkChecking;
+
+  /// True when the last probe could not open the link. ADVISORY only -
+  /// [submitLandmark] re-probes and blocks on its own result.
+  bool get websiteLinkUnreachable => _websiteLinkUnreachable;
+
+  /// The live status line under the website field: "Checking this link…"
+  /// while the probe runs, then a "could not open" note when it failed.
+  /// Null while idle or after a successful probe.
+  String? get websiteLinkStatus {
+    if (_websiteLinkChecking) return 'Checking this link…';
+    if (_websiteLinkUnreachable) {
+      return "We couldn't open this link. Check the address and try again.";
     }
     return null;
   }
@@ -459,13 +732,13 @@ class AddLandmarkViewModel extends BaseViewModel
 
   bool get canSubmit =>
       !isAddLocationBlocked &&
-      _capturedImage != null &&
+      hasImageCaptured &&
+      _restaurantConfirmed &&
       restaurantNameError == null &&
       restaurantPhoneError == null &&
       restaurantWebsiteError == null &&
       restaurantAddressError == null &&
       restaurantNameWarning == null &&
-      restaurantWebsiteWarning == null &&
       _primaryFood != null &&
       _primaryFood!.price != null &&
       _additionalFoods.every(
@@ -483,7 +756,7 @@ class AddLandmarkViewModel extends BaseViewModel
     if (isAddLocationBlocked) {
       return addLocationBlockMessage;
     }
-    if (_capturedImage == null) {
+    if (!hasImageCaptured) {
       return 'Please capture either signboard or stall image';
     }
     if (_restaurantName.isEmpty) {
@@ -511,16 +784,25 @@ class AddLandmarkViewModel extends BaseViewModel
     if (addressError != null) return addressError;
     final String? nameWarning = restaurantNameWarning;
     if (nameWarning != null) return nameWarning;
-    final String? websiteWarning = restaurantWebsiteWarning;
-    if (websiteWarning != null) return websiteWarning;
-    return _operatingHoursError();
+    final String? hoursError = _operatingHoursError();
+    if (hoursError != null) return hoursError;
+    // Checked LAST: everything else being filled in but the tourist never
+    // confirmed the restaurant is exactly the case this message is for.
+    if (!_restaurantConfirmed) return _confirmRestaurantReason;
+    return null;
   }
+
+  /// Shown when the tourist tries to submit without pressing "Confirm" under
+  /// the Restaurant Name - they must verify the name first.
+  static const String _confirmRestaurantReason =
+      'Please click Confirm to check the restaurant name first.';
 
   // --- COMMANDS ---
 
   /// Set recognized food (auto-filled from food recognition, or from
   /// `LandmarkDraftHandoff` before `onInit()` - see class doc). Keeps any
-  /// price already entered for this food if it is set again.
+  /// price already entered for this food if it is set again. [captureLocation]
+  /// is where the food photo was taken - the landmark's location.
   void setRecognizedFood(
     LocalFood food, {
     double priceMin = 0,
@@ -528,19 +810,25 @@ class AddLandmarkViewModel extends BaseViewModel
     double confidence = 0,
     List<String> dietaryRestrictions = const <String>[],
     List<String> dietaryConflicts = const <String>[],
+    String variant = '',
+    TouristLocation captureLocation = TouristLocation.unknown,
   }) {
     _recognizedFoodConfidence = confidence;
     _recognizedFoodDietaryRestrictions = dietaryRestrictions;
     _recognizedFoodDietaryConflicts = dietaryConflicts;
+    _recognizedFoodVariant = variant;
+    if (captureLocation.isKnown) _captureLocation = captureLocation;
     _primaryFood = _primaryFood == null
         ? LandmarkFoodEntry.newEntry(
             food: food,
             priceMin: priceMin,
             priceMax: priceMax,
+            variant: variant,
           )
         : _primaryFood!
               .withFood(food)
-              .withPriceRange(priceMin: priceMin, priceMax: priceMax);
+              .withPriceRange(priceMin: priceMin, priceMax: priceMax)
+              .withVariant(variant);
     // The previous food's suggested range no longer applies.
     _primaryFoodPriceWarning = null;
     safeNotifyListeners();
@@ -548,8 +836,21 @@ class AddLandmarkViewModel extends BaseViewModel
 
   /// Set the primary food's photo - see `_recognizedFoodImage`.
   void setRecognizedFoodImage(XFile image) {
+    // Replaces the stored draft photo, if this form was resumed - see
+    // setCapturedImage.
+    _discardReplacedPhoto(_recognizedFoodImageRef);
+    _recognizedFoodImageRef = null;
     _recognizedFoodImage = image;
     safeNotifyListeners();
+  }
+
+  /// Best-effort delete of a stored draft photo that a fresh capture just
+  /// replaced (or the tourist removed), so the old object does not linger.
+  void _discardReplacedPhoto(LandmarkDraftPhoto? ref) {
+    if (ref == null) return;
+    unawaited(
+      landmarkLogic.discardLandmarkDraftPhoto(ref.id).catchError((Object _) {}),
+    );
   }
 
   /// Set the price for the primary (recognized) food. (A16)
@@ -572,12 +873,12 @@ class AddLandmarkViewModel extends BaseViewModel
   }
 
   /// Adjust map pin location (user drags pin). GPS can be inaccurate, so the
-  /// tourist may correct the pin - but only within 100m of the current fix
+  /// tourist may correct the pin - but only within 100m of the captured fix
   /// (A9.1). Beyond that, the change is rejected and the pin reverts to its
   /// last valid position; nothing here is mutated.
   void adjustLandmarkLocation(double latitude, double longitude) {
     if (!landmarkLogic.isWithinAllowedRange(
-      currentLocation,
+      baseLocation,
       latitude,
       longitude,
     )) {
@@ -608,15 +909,33 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Opens `FoodRecognitionView` in signboard-capture mode and waits for its
   /// result. This screen stays on the stack the whole time - the result
   /// comes back through the pushed route's own `Future<T?>`, not a hand-off.
+  /// The first food's capture spot is handed over as the reference location,
+  /// so the camera can reject a signboard shot taken too far away (50 m
+  /// same-restaurant rule); the check is repeated here as a backstop.
   Future<void> openSignboardCapture() async {
     LandmarkDraftHandoff().pendingPurpose = FoodRecognitionPurpose.signboard;
+    LandmarkDraftHandoff().pendingReferenceLocation = baseLocation.isKnown
+        ? baseLocation
+        : null;
     final LandmarkImageCaptureResult? result =
         await AppNavigator.push<LandmarkImageCaptureResult>(
           AppRoutes.foodRecognition,
         );
     if (result == null) return; // Tourist backed out without confirming.
+    // Too far from the first food (50 m): the photo is not this
+    // restaurant's - reject it and let them capture again.
+    if (!_acceptCaptureLocation(
+      result.captureLocation,
+      'This signboard photo',
+    )) {
+      return;
+    }
 
-    setCapturedImage(result.image, result.imageType);
+    setCapturedImage(
+      result.image,
+      result.imageType,
+      captureLocation: result.captureLocation,
+    );
     if (result.extractedRestaurantName != null) {
       setExtractedRestaurantName(result.extractedRestaurantName);
     }
@@ -625,20 +944,54 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Same as [openSignboardCapture], in stall-capture mode - no auto-fill.
   Future<void> openStallCapture() async {
     LandmarkDraftHandoff().pendingPurpose = FoodRecognitionPurpose.stall;
+    LandmarkDraftHandoff().pendingReferenceLocation = baseLocation.isKnown
+        ? baseLocation
+        : null;
     final LandmarkImageCaptureResult? result =
         await AppNavigator.push<LandmarkImageCaptureResult>(
           AppRoutes.foodRecognition,
         );
     if (result == null) return;
+    if (!_acceptCaptureLocation(result.captureLocation, 'This stall photo')) {
+      return;
+    }
 
-    setCapturedImage(result.image, result.imageType);
+    setCapturedImage(
+      result.image,
+      result.imageType,
+      captureLocation: result.captureLocation,
+    );
   }
 
-  /// Set captured image (signboard or stall)
-  /// Automatically disables the other button
-  void setCapturedImage(XFile image, String imageType) {
+  /// Backstop for the 50 m same-restaurant rule (the camera screen already
+  /// blocks such a capture): whether [captured] may join this landmark.
+  /// When it is too far from the first food's capture spot, records the
+  /// user-facing reason in [submitError] and returns false - the caller
+  /// then drops the capture, and the tourist captures again on site.
+  bool _acceptCaptureLocation(TouristLocation captured, String capturedWhat) {
+    if (landmarkLogic.isSameRestaurantCaptureRange(baseLocation, captured)) {
+      return true;
+    }
+    _submitError = landmarkLogic.captureTooFarMessage(capturedWhat);
+    safeNotifyListeners();
+    return false;
+  }
+
+  /// Set captured image (signboard or stall), plus where THAT photo was taken
+  /// ([captureLocation] - its own fix, not the first food's).
+  /// Automatically disables the other button.
+  void setCapturedImage(
+    XFile image,
+    String imageType, {
+    TouristLocation captureLocation = TouristLocation.unknown,
+  }) {
+    // A fresh capture replaces the stored photo of a resumed draft - the old
+    // object is unreferenced from here on, so it is deleted (best-effort).
+    _discardReplacedPhoto(_capturedImageRef);
+    _capturedImageRef = null;
     _capturedImage = image;
     _capturedImageType = imageType;
+    _capturedImageLocation = captureLocation;
 
     if (imageType == 'signboard') {
       _isStallDisabled = true; // Can't capture stall after signboard
@@ -655,8 +1008,13 @@ class AddLandmarkViewModel extends BaseViewModel
   /// `_restaurantName` even if it was auto-filled from a signboard - the
   /// tourist may still want to keep that.
   void clearCapturedImage() {
+    // A stored draft photo is dropped with the capture - never resurrect it
+    // on the next save.
+    _discardReplacedPhoto(_capturedImageRef);
+    _capturedImageRef = null;
     _capturedImage = null;
     _capturedImageType = null;
+    _capturedImageLocation = TouristLocation.unknown;
     _isSignboardDisabled = false;
     _isStallDisabled = false;
     safeNotifyListeners();
@@ -670,22 +1028,226 @@ class AddLandmarkViewModel extends BaseViewModel
   /// skip it, leaving the tourist's typed name on screen).
   void setExtractedRestaurantName(String? name) {
     if (name != null && name.trim().isNotEmpty) {
-      _restaurantName = _clampTo(
+      final String next = _clampTo(
         name.trim(),
         landmarkLogic.maxRestaurantNameLength,
       );
+      // A NEW signboard name takes the restaurant confirmation back - that
+      // click was given for the PREVIOUS name (see [confirmRestaurant]).
+      if (next != _restaurantName) _restaurantConfirmed = false;
+      _restaurantName = next;
       _extractedRestaurantNameVersion++;
       safeNotifyListeners();
     }
   }
 
-  /// Manually set restaurant name (user types)
+  /// Manually set restaurant name (user types). An actual change takes the
+  /// restaurant confirmation back - that click checked the PREVIOUS name and
+  /// looked up ITS unfinished submissions (see [confirmRestaurant]).
   void setRestaurantName(String name) {
-    _restaurantName = _clampTo(
+    final String next = _clampTo(
       name.trim(),
       landmarkLogic.maxRestaurantNameLength,
     );
+    if (next != _restaurantName) _restaurantConfirmed = false;
+    _restaurantName = next;
     safeNotifyListeners();
+  }
+
+  /// Whether the tourist confirmed the restaurant details ("Confirm" under
+  /// the Restaurant Name). Submission requires it: the confirmation is what
+  /// checks the mandatory photo + the name, and what looks for another
+  /// unfinished submission for the same restaurant to combine with.
+  bool _restaurantConfirmed = false;
+  bool get restaurantConfirmed => _restaurantConfirmed;
+
+  /// The "Confirm" action under the Restaurant Name. Needs the mandatory
+  /// signboard/stall photo AND a non-blank name; returns the problem to show
+  /// (the confirmation does not take), or null once confirmed.
+  ///
+  /// Confirming survives later edits to the OTHER fields (the tourist's
+  /// choice), but a CHANGE of the restaurant name takes it back - the click
+  /// validated the previous name and it is the moment another unfinished
+  /// submission for the same restaurant (same name + first food spot within
+  /// 100 m) was looked up (see [draftForRestaurantMerge] /
+  /// [mergeExistingDraft]); a new name wants its OWN check.
+  String? confirmRestaurant() {
+    if (!hasImageCaptured) {
+      return 'Please capture either signboard or stall image first.';
+    }
+    if (_restaurantName.trim().isEmpty) {
+      return 'Enter the restaurant name before confirming.';
+    }
+    _restaurantConfirmed = true;
+    safeNotifyListeners();
+    return null;
+  }
+
+  /// The saved incomplete submission for THIS restaurant - same name
+  /// (trimmed, case/script-folded) and its first-food spot within 100 m of
+  /// this form's (see
+  /// `LandmarkLogicFacade.matchingLandmarkDraftForRestaurant`). A form
+  /// continuing a draft never matches ITSELF - only another draft of the
+  /// same restaurant (which is then absorbed: see [mergeExistingDraft]).
+  /// Null when the name is blank, when the drafts cannot be read, or when
+  /// nothing matches.
+  Future<LandmarkDraft?> draftForRestaurantMerge() async {
+    if (_restaurantName.trim().isEmpty) return null;
+    try {
+      final List<LandmarkDraft> drafts = await landmarkLogic
+          .pendingLandmarkDrafts();
+      return landmarkLogic.matchingLandmarkDraftForRestaurant(
+        drafts: drafts,
+        restaurantName: _restaurantName,
+        formLocation: baseLocation,
+        excludeDraftId: _draftId,
+      );
+    } catch (_) {
+      // Best-effort - without the records this form simply stays its own.
+      return null;
+    }
+  }
+
+  /// Combines [draft] (another saved submission for this restaurant) INTO
+  /// this form: the draft's dishes join as additional foods, its empty
+  /// fields fill the ones this form left empty, and the two become ONE
+  /// submission. A form that had never been saved adopts that draft's row
+  /// (saving updates it); a form already CONTINUING its own draft keeps its
+  /// row and remembers the absorbed draft, whose row is deleted once this
+  /// form is saved (see [_deleteAbsorbedDrafts]). This form's own values
+  /// always win: its price, photo, name and any field it already filled are
+  /// never overwritten.
+  ///
+  /// Returns the labels of dishes this form already held and whose blank
+  /// details were filled from the draft (shown as the merge notice); empty
+  /// when nothing needed filling.
+  List<String> mergeExistingDraft(LandmarkDraft draft) {
+    final List<String> filled = <String>[];
+    for (final LandmarkDraftFood saved in draft.foods) {
+      if (_primaryFood != null &&
+          landmarkLogic.isSameDishAndVariant(
+            _primaryFood!.food,
+            _primaryFood!.variant,
+            saved.food,
+            saved.variant,
+          )) {
+        // Already this form's first food - only fill its blanks.
+        bool updated = false;
+        if (_primaryFood!.price == null && saved.price != null) {
+          _primaryFood = _primaryFood!.withPrice(saved.price!);
+          updated = true;
+        }
+        if (_recognizedFoodImage == null &&
+            _recognizedFoodImageRef == null &&
+            saved.photo != null) {
+          _recognizedFoodImageRef = saved.photo;
+          updated = true;
+        }
+        if (updated) {
+          filled.add(landmarkLogic.dishLabel(saved.food.name, saved.variant));
+        }
+        continue;
+      }
+
+      final int index = _additionalFoods.indexWhere(
+        (LandmarkFoodEntry entry) => landmarkLogic.isSameDishAndVariant(
+          entry.food,
+          entry.variant,
+          saved.food,
+          saved.variant,
+        ),
+      );
+      if (index == -1) {
+        // A dish this form does not have yet - it joins as an added food.
+        _additionalFoods = <LandmarkFoodEntry>[
+          ..._additionalFoods,
+          LandmarkFoodEntry.newEntry(
+            food: saved.food,
+            photoRef: saved.photo,
+            price: saved.price,
+            priceMin: saved.priceMin,
+            priceMax: saved.priceMax,
+            captureLocation: saved.captureLocation,
+            variant: saved.variant,
+            dietaryRestrictions: saved.dietaryRestrictions,
+          ),
+        ];
+        continue;
+      }
+
+      LandmarkFoodEntry mine = _additionalFoods[index];
+      bool updated = false;
+      if (mine.price == null && saved.price != null) {
+        mine = mine.withPrice(saved.price!);
+        updated = true;
+      }
+      if (mine.photoRef == null && mine.image == null && saved.photo != null) {
+        mine = mine.withPhotoRef(saved.photo!);
+        updated = true;
+      }
+      if (updated) {
+        _additionalFoods = List<LandmarkFoodEntry>.of(_additionalFoods);
+        _additionalFoods[index] = mine;
+        filled.add(landmarkLogic.dishLabel(saved.food.name, saved.variant));
+      }
+    }
+
+    // Other fields: this form's value wins; the draft only fills blanks.
+    if (_phone.trim().isEmpty && draft.phone.trim().isNotEmpty) {
+      _phone = draft.phone;
+    }
+    if (_website.trim().isEmpty && draft.website.trim().isNotEmpty) {
+      _website = draft.website;
+    }
+    if (_address.trim().isEmpty && draft.address.trim().isNotEmpty) {
+      _address = draft.address;
+    }
+    if (!_adjustedLocation.isKnown && draft.adjustedLocation.isKnown) {
+      _adjustedLocation = draft.adjustedLocation;
+    }
+    // Opening hours merge DAY BY DAY: a day this form carries nothing for
+    // takes the draft's hours, a day this form filled keeps its own. The
+    // form's default "unknown" placeholder row counts as nothing - it is
+    // just the empty editor state, not an entered value.
+    bool dayHasValue(List<OpeningHour> rows) =>
+        rows.any((OpeningHour hour) => hour.status != DayStatus.unknown);
+    final Map<Weekday, List<OpeningHour>> mergedHours =
+        Map<Weekday, List<OpeningHour>>.of(_operatingHours);
+    draft.operatingHours.forEach((Weekday day, List<OpeningHour> hours) {
+      final List<OpeningHour> mine = mergedHours[day] ?? const <OpeningHour>[];
+      if (!dayHasValue(mine) && dayHasValue(hours)) mergedHours[day] = hours;
+    });
+    _operatingHours = mergedHours;
+
+    // A form that was never saved adopts that submission's row - saving then
+    // updates it. A form CONTINUING its own draft keeps its row and notes
+    // the other draft as absorbed: its row is removed once this form is
+    // saved, so the restaurant still keeps ONE submission.
+    if (_draftId == 0) {
+      _draftId = draft.id;
+    } else if (draft.id != _draftId) {
+      _absorbedDraftIds.add(draft.id);
+    }
+    safeNotifyListeners();
+    return filled;
+  }
+
+  /// Removes the rows of drafts that were COMBINED into this form (see
+  /// [mergeExistingDraft]). Best-effort, and called only AFTER this form's
+  /// own row has been written, so an abandoned form can never lose the other
+  /// submission's data. The rows' photos are kept - the combined form
+  /// references them.
+  Future<void> _deleteAbsorbedDrafts() async {
+    if (_absorbedDraftIds.isEmpty) return;
+    final List<int> ids = List<int>.of(_absorbedDraftIds);
+    _absorbedDraftIds.clear();
+    for (final int id in ids) {
+      try {
+        await landmarkLogic.clearSubmittedLandmarkDraft(id);
+      } catch (_) {
+        // Best-effort - an orphaned row expires on its own.
+      }
+    }
   }
 
   /// Optional contact/address setters - capped to their field limits while
@@ -697,6 +1259,47 @@ class AddLandmarkViewModel extends BaseViewModel
 
   void setRestaurantWebsite(String value) {
     _website = _clampTo(value, landmarkLogic.maxWebsiteLength);
+    _scheduleWebsiteLinkCheck();
+    safeNotifyListeners();
+  }
+
+  /// Debounced live probe of the website field: after typing pauses and the
+  /// value is a well-formed link, the app tries to open it - a dead or
+  /// mistyped address surfaces while the tourist is still on the form, not
+  /// only at submit. The result is ADVISORY ([websiteLinkStatus]);
+  /// [submitLandmark] always re-probes and blocks on its own result.
+  void _scheduleWebsiteLinkCheck() {
+    _websiteLinkDebounce?.cancel();
+    _websiteLinkChecking = false;
+    _websiteLinkUnreachable = false;
+    final String url = _website.trim();
+    if (url.isEmpty || url.length > landmarkLogic.maxWebsiteLength) return;
+    if (!landmarkLogic.isValidWebsiteFormat(url)) return;
+    // Probe only while the form is actually watched (the View subscribes
+    // through the provider): headless and pure unit-test flows must never
+    // fire network calls.
+    if (!hasListeners) return;
+    _websiteLinkDebounce = Timer(websiteLinkCheckDelay, () {
+      unawaited(_probeWebsiteLink(url));
+    });
+  }
+
+  Future<void> _probeWebsiteLink(String url) async {
+    _websiteLinkChecking = true;
+    safeNotifyListeners();
+    bool reachable;
+    try {
+      reachable =
+          await (_websiteReachability?.call(url) ??
+              landmarkLogic.isWebsiteReachable(url));
+    } catch (_) {
+      // A broken probe must never claim the link is bad - the submit-time
+      // check stays the authority.
+      reachable = true;
+    }
+    if (_website.trim() != url) return; // The field changed while probing.
+    _websiteLinkChecking = false;
+    _websiteLinkUnreachable = !reachable;
     safeNotifyListeners();
   }
 
@@ -850,31 +1453,53 @@ class AddLandmarkViewModel extends BaseViewModel
   /// additional-food-capture mode and waits for the recognized food (and
   /// its photo) to come back - same pop-with-result pattern as
   /// [openSignboardCapture]. Price starts unset - the tourist enters it on
-  /// this food's card, same as the primary food.
+  /// this food's card, same as the primary food. The first food's capture
+  /// spot is handed over as the reference location so the camera can block a
+  /// capture taken more than 50 m away; the check is repeated here.
   Future<void> openAddMoreFood() async {
     LandmarkDraftHandoff().pendingPurpose =
         FoodRecognitionPurpose.additionalFood;
+    LandmarkDraftHandoff().pendingReferenceLocation = baseLocation.isKnown
+        ? baseLocation
+        : null;
     final AdditionalFoodCaptureResult? result =
         await AppNavigator.push<AdditionalFoodCaptureResult>(
           AppRoutes.foodRecognition,
         );
     if (result == null) return; // Tourist backed out without confirming.
+    if (!_acceptCaptureLocation(result.captureLocation, 'This food')) return;
     addAdditionalFood(
       result.food,
       image: result.image,
       priceMin: result.priceMin,
       priceMax: result.priceMax,
+      captureLocation: result.captureLocation,
+      variant: result.variant,
+      dietaryRestrictions: result.dietaryRestrictions,
     );
   }
 
   /// Add additional food directly (used when the food is already in hand -
   /// prefer [openAddMoreFood] from the View).
+  ///
+  /// A dish that is ALREADY on this form with the SAME variant is rejected
+  /// ([takeDuplicateFoodNotice] reports it so the View can say why) - one
+  /// form cannot hold the same food twice. A different variant is a
+  /// different thing to add and is accepted.
   void addAdditionalFood(
     LocalFood food, {
     XFile? image,
     double priceMin = 0,
     double priceMax = 0,
+    TouristLocation captureLocation = TouristLocation.unknown,
+    String variant = '',
+    List<String> dietaryRestrictions = const <String>[],
   }) {
+    if (_isAlreadyOnForm(food, variant)) {
+      _duplicateFoodRejected = true;
+      safeNotifyListeners();
+      return;
+    }
     _additionalFoods = <LandmarkFoodEntry>[
       ..._additionalFoods,
       LandmarkFoodEntry.newEntry(
@@ -882,9 +1507,40 @@ class AddLandmarkViewModel extends BaseViewModel
         image: image,
         priceMin: priceMin,
         priceMax: priceMax,
+        captureLocation: captureLocation,
+        variant: variant,
+        dietaryRestrictions: dietaryRestrictions,
       ),
     ];
     safeNotifyListeners();
+  }
+
+  /// Whether [food] + [variant] is already on this form - the primary food or
+  /// any additional food holding the SAME dish and variant (see
+  /// `LandmarkSubmissionLogic.isSameDishAndVariant`). A different variant is
+  /// not a duplicate.
+  bool _isAlreadyOnForm(LocalFood food, String variant) {
+    final LandmarkFoodEntry? primary = _primaryFood;
+    if (primary != null &&
+        landmarkLogic.isSameDishAndVariant(
+          primary.food,
+          primary.variant,
+          food,
+          variant,
+        )) {
+      return true;
+    }
+    for (final LandmarkFoodEntry entry in _additionalFoods) {
+      if (landmarkLogic.isSameDishAndVariant(
+        entry.food,
+        entry.variant,
+        food,
+        variant,
+      )) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Set the price for one additional food, by its form-local [entryId] -
@@ -980,6 +1636,257 @@ class AddLandmarkViewModel extends BaseViewModel
     return landmarkLogic.validateOperatingHours(_operatingHours);
   }
 
+  // --- DRAFT (INCOMPLETE SUBMISSION) COMMANDS ---
+
+  /// Whether the form holds anything worth keeping as an incomplete
+  /// submission - a recognized food, a captured photo, or a typed name.
+  bool get hasDraftContent =>
+      _primaryFood != null ||
+      _capturedImage != null ||
+      _capturedImageRef != null ||
+      _restaurantName.trim().isNotEmpty ||
+      _additionalFoods.isNotEmpty;
+
+  /// Restores a saved draft onto this form - everything the tourist had
+  /// entered: names/contact details, the landmark photo, every food with its
+  /// price and photo, the opening hours, and the location (the first food's
+  /// captured spot, plus a hand-moved pin if there was one). Called from
+  /// `AddLandmarkView.initState` when the form was opened to continue a
+  /// draft.
+  void restoreDraft(LandmarkDraft draft) {
+    _draftId = draft.id;
+    _restaurantConfirmed = draft.restaurantConfirmed;
+    _restaurantName = draft.restaurantName;
+    _phone = draft.phone;
+    _website = draft.website;
+    _address = draft.address;
+    // A stored draft is not probed until something changes or submit runs.
+    _websiteLinkDebounce?.cancel();
+    _websiteLinkChecking = false;
+    _websiteLinkUnreachable = false;
+    _captureLocation = draft.baseLocation;
+    _adjustedLocation = draft.adjustedLocation;
+
+    final LandmarkDraftPhoto? landmarkPhoto = draft.landmarkPhoto;
+    if (landmarkPhoto != null) {
+      _capturedImageRef = landmarkPhoto;
+      _capturedImageType = landmarkPhoto.type;
+      _capturedImageLocation = landmarkPhoto.captureLocation;
+      _isSignboardDisabled = _capturedImageType == 'stall';
+      _isStallDisabled = _capturedImageType == 'signboard';
+    }
+
+    if (draft.foods.isNotEmpty) {
+      final LandmarkDraftFood primary = draft.foods.first;
+      _recognizedFoodConfidence = primary.confidence;
+      _recognizedFoodDietaryRestrictions = primary.dietaryRestrictions;
+      _recognizedFoodVariant = primary.variant;
+      _recognizedFoodImageRef = primary.photo;
+      _primaryFood = LandmarkFoodEntry.newEntry(
+        food: primary.food,
+        price: primary.price,
+        priceMin: primary.priceMin,
+        priceMax: primary.priceMax,
+        captureLocation: primary.captureLocation.isKnown
+            ? primary.captureLocation
+            : draft.baseLocation,
+        variant: primary.variant,
+      );
+      for (final LandmarkDraftFood food in draft.foods.skip(1)) {
+        _additionalFoods = <LandmarkFoodEntry>[
+          ..._additionalFoods,
+          LandmarkFoodEntry.newEntry(
+            food: food.food,
+            photoRef: food.photo,
+            price: food.price,
+            priceMin: food.priceMin,
+            priceMax: food.priceMax,
+            captureLocation: food.captureLocation,
+            variant: food.variant,
+            dietaryRestrictions: food.dietaryRestrictions,
+          ),
+        ];
+      }
+    }
+    if (draft.operatingHours.isNotEmpty) {
+      _operatingHours = draft.operatingHours;
+    }
+    safeNotifyListeners();
+  }
+
+  /// Snapshots the form as a [LandmarkDraft]. Null when there is nothing
+  /// worth keeping. `expiresAt`/`updatedAt` are placeholders here - the
+  /// logic layer stamps the real 24-hour expiry on save.
+  LandmarkDraft? _buildDraft() {
+    if (!hasDraftContent) return null;
+    final DateTime now = DateTime.now();
+    return LandmarkDraft(
+      id: _draftId,
+      restaurantName: _restaurantName,
+      phone: _phone,
+      website: _website,
+      address: _address,
+      category: _primaryFood?.food.category ?? '',
+      restaurantConfirmed: _restaurantConfirmed,
+      baseLocation: baseLocation,
+      adjustedLocation: _adjustedLocation,
+      landmarkPhoto: _capturedImageRef,
+      foods: <LandmarkDraftFood>[
+        if (_primaryFood != null)
+          LandmarkDraftFood(
+            food: _primaryFood!.food,
+            price: _primaryFood!.price,
+            priceMin: _primaryFood!.priceMin,
+            priceMax: _primaryFood!.priceMax,
+            confidence: _recognizedFoodConfidence,
+            dietaryRestrictions: _recognizedFoodDietaryRestrictions,
+            variant: _recognizedFoodVariant,
+            captureLocation: _captureLocation,
+            photo: _recognizedFoodImageRef,
+          ),
+        for (final LandmarkFoodEntry entry in _additionalFoods)
+          LandmarkDraftFood(
+            food: entry.food,
+            price: entry.price,
+            priceMin: entry.priceMin,
+            priceMax: entry.priceMax,
+            dietaryRestrictions: entry.dietaryRestrictions,
+            variant: entry.variant,
+            captureLocation: entry.captureLocation,
+            photo: entry.photoRef,
+          ),
+      ],
+      operatingHours: _operatingHours,
+      expiresAt: now,
+      updatedAt: now,
+    );
+  }
+
+  /// Saves the form as an incomplete submission (draft) - uploads any photos
+  /// that were only captured on this device, then writes/updates the draft
+  /// row. Kept for 24 hours from this save; the tourist can continue it from
+  /// the camera's "continue" prompt or the profile's incomplete-submission
+  /// list. A second save updates the SAME row.
+  ///
+  /// [background] marks a save triggered by the app going to the background:
+  /// the tourist is not looking, so a failure stays quiet and a success is
+  /// reported through [takeAutoDraftSavedNotice] when they return.
+  /// Returns whether anything was written.
+  Future<bool> saveDraft({bool background = false}) async {
+    if (_draftSaving) return false;
+    if (!hasDraftContent) return false;
+    _draftSaving = true;
+    try {
+      await _uploadOutstandingPhotos();
+      final LandmarkDraft? draft = _buildDraft();
+      if (draft == null) return false;
+      final int id = await landmarkLogic.saveLandmarkDraft(draft);
+      if (id == 0) return false; // Not signed in - nothing was written.
+      _draftId = id;
+      // The combined-away drafts' rows go with this save - their dishes are
+      // now on THIS form (see [mergeExistingDraft]).
+      await _deleteAbsorbedDrafts();
+      if (background) _autoDraftSaved = true;
+      return true;
+    } catch (_) {
+      // Saving a draft must never block leaving the form - report the
+      // failure only while the tourist is still looking at it. Never the
+      // raw error: the same friendly line the View shows for this failure.
+      if (!background) {
+        _submitError =
+            'Could not save the incomplete submission. '
+            'Check your connection and try again.';
+      }
+      return false;
+    } finally {
+      _draftSaving = false;
+      safeNotifyListeners();
+    }
+  }
+
+  /// Discards the form AND any saved draft row for it, including the photos
+  /// already uploaded for it. Used when the tourist chooses not to keep an
+  /// incomplete submission.
+  Future<void> discardDraft() async {
+    final LandmarkDraft? draft = _buildDraft();
+    if (draft == null) return;
+    try {
+      await landmarkLogic.discardLandmarkDraft(draft);
+    } catch (_) {
+      // Best-effort - the tourist leaves the form regardless.
+    }
+    _draftId = 0;
+    // Discarding THIS form must not delete a draft it had combined with -
+    // that submission stays exactly where it was.
+    _absorbedDraftIds.clear();
+    safeNotifyListeners();
+  }
+
+  /// Removes the draft row after a SUCCESSFUL submission. Its photos are
+  /// NOT deleted - the submitted landmark now stores those same objects.
+  Future<void> clearSubmittedDraft() async {
+    if (_draftId == 0) return;
+    try {
+      await landmarkLogic.clearSubmittedLandmarkDraft(_draftId);
+    } catch (_) {
+      // Best-effort - an orphaned draft row is harmless (it expires).
+    }
+    _draftId = 0;
+    // Any combined-away drafts are part of this submission now.
+    await _deleteAbsorbedDrafts();
+  }
+
+  /// Uploads every photo that exists only on this device (a local capture
+  /// with no stored reference yet), so the draft can be resumed with those
+  /// photos on any device. Already-uploaded photos are skipped.
+  Future<void> _uploadOutstandingPhotos() async {
+    final XFile? landmarkImage = _capturedImage;
+    if (landmarkImage != null && _capturedImageRef == null) {
+      final List<int> bytes = await landmarkImage.readAsBytes();
+      final ({String id, String url}) uploaded = await landmarkLogic
+          .uploadImage(bytes);
+      _capturedImageRef = LandmarkDraftPhoto(
+        id: uploaded.id,
+        url: uploaded.url,
+        type: _capturedImageType,
+        // The signboard/stall photo's OWN fix - restored with the draft so a
+        // resumed form still knows where the photo was taken.
+        captureLocation: _capturedImageLocation,
+      );
+    }
+
+    final XFile? primaryImage = _recognizedFoodImage;
+    if (primaryImage != null && _recognizedFoodImageRef == null) {
+      final List<int> bytes = await primaryImage.readAsBytes();
+      final ({String id, String url}) uploaded = await landmarkLogic
+          .uploadImage(bytes);
+      _recognizedFoodImageRef = LandmarkDraftPhoto(
+        id: uploaded.id,
+        url: uploaded.url,
+      );
+    }
+
+    bool changed = false;
+    final List<LandmarkFoodEntry> updated = <LandmarkFoodEntry>[];
+    for (final LandmarkFoodEntry entry in _additionalFoods) {
+      final XFile? image = entry.image;
+      if (image != null && entry.photoRef == null) {
+        final List<int> bytes = await image.readAsBytes();
+        final ({String id, String url}) uploaded = await landmarkLogic
+            .uploadImage(bytes);
+        updated.add(
+          entry.withPhotoRef(
+            LandmarkDraftPhoto(id: uploaded.id, url: uploaded.url),
+          ),
+        );
+        changed = true;
+      } else {
+        updated.add(entry);
+      }
+    }
+    if (changed) _additionalFoods = updated;
+  }
+
   /// Uploads [image] to Supabase Storage and returns what the row stores for
   /// it - the object name (`image_id`) and public URL (`image_url`) - or
   /// null when there's no photo to upload. Used for both the landmark's own
@@ -991,6 +1898,19 @@ class AddLandmarkViewModel extends BaseViewModel
     if (image == null) return null;
     final List<int> bytes = await image.readAsBytes();
     return landmarkLogic.uploadImage(bytes);
+  }
+
+  /// The stored reference a row should carry for a photo: a fresh local
+  /// capture is uploaded, while a resumed draft's already-uploaded photo is
+  /// reused as-is (no duplicate objects). Null when there is no photo.
+  Future<({String id, String url})?> _photoFor(
+    XFile? image,
+    LandmarkDraftPhoto? stored,
+  ) async {
+    final ({String id, String url})? uploaded = await _uploadPhoto(image);
+    if (uploaded != null) return uploaded;
+    if (stored == null) return null;
+    return (id: stored.id, url: stored.url);
   }
 
   /// Submit landmark to database
@@ -1040,12 +1960,6 @@ class AddLandmarkViewModel extends BaseViewModel
       safeNotifyListeners();
       return;
     }
-    final String? websiteWarning = restaurantWebsiteWarning;
-    if (websiteWarning != null) {
-      _submitError = websiteWarning;
-      safeNotifyListeners();
-      return;
-    }
 
     final double? primaryPrice = _primaryFood?.price;
     if (primaryPrice == null || !landmarkLogic.isValidPrice(primaryPrice)) {
@@ -1055,12 +1969,13 @@ class AddLandmarkViewModel extends BaseViewModel
     }
 
     // The landmark's coordinates are the pin if the tourist moved it, else
-    // the raw GPS fix. A new landmark must be on Malaysian land (A9) - reject
-    // before any spinner/network work, same fail-fast style as the other
-    // checks above.
+    // the capture-time location (falling back to the live fix when the
+    // capture carried none). A new landmark must be on Malaysian land (A9) -
+    // reject before any spinner/network work, same fail-fast style as the
+    // other checks above.
     final TouristLocation location = _adjustedLocation.isKnown
         ? _adjustedLocation
-        : currentLocation;
+        : baseLocation;
     if (location.isKnown &&
         !landmarkLogic.isOnLand(location.latitude, location.longitude)) {
       _submitError = 'New landmarks must be within Malaysia and on land.';
@@ -1085,6 +2000,15 @@ class AddLandmarkViewModel extends BaseViewModel
       return;
     }
 
+    // The restaurant details must have been confirmed ("Confirm" under the
+    // Restaurant Name) - it is what checked the photo + name, and what
+    // looked for another unfinished submission for this restaurant.
+    if (!_restaurantConfirmed) {
+      _submitError = _confirmRestaurantReason;
+      safeNotifyListeners();
+      return;
+    }
+
     _isSubmitting = true;
     _submitError = null;
     safeNotifyListeners();
@@ -1096,7 +2020,11 @@ class AddLandmarkViewModel extends BaseViewModel
       // the backend (SSRF).
       if (_website.trim().isNotEmpty &&
           !await landmarkLogic.isWebsiteReachable(_website)) {
-        _submitError = 'Website is not reachable. Check the URL and try again.';
+        // Surface the finding under the field as well, so the submit error
+        // and the live status agree.
+        _websiteLinkUnreachable = true;
+        _submitError =
+            "We couldn't open this website. Check the address and try again.";
         _isSubmitting = false;
         safeNotifyListeners();
         return;
@@ -1106,27 +2034,30 @@ class AddLandmarkViewModel extends BaseViewModel
       // here).
       final String? touristId = await landmarkLogic.currentTouristId();
       if (touristId == null || touristId.isEmpty) {
-        throw StateError('Sign in to submit a landmark.');
+        throw StateError(_signInRequiredMessage);
       }
 
       // Upload the landmark's own signboard/stall photo FIRST - it is stored
       // on the `submitted_landmark` row (`image_url` / `image_id` /
-      // `image_category`), same bucket as the food photos.
-      final ({String id, String url})? landmarkPhoto = _capturedImage == null
-          ? null
-          : await _uploadPhoto(_capturedImage);
+      // `image_category`), same bucket as the food photos. A photo carried
+      // over from a resumed draft is reused, not re-uploaded.
+      final ({String id, String url})? landmarkPhoto = await _photoFor(
+        _capturedImage,
+        _capturedImageRef,
+      );
 
       // Upload each food's photo to Supabase Storage NEXT - the resulting
       // object name + public URL are what `landmark_item.image_id` /
       // `landmark_item.image_url` store. A food without a photo stays null
       // in those columns.
-      final ({String id, String url})? primaryPhoto = await _uploadPhoto(
+      final ({String id, String url})? primaryPhoto = await _photoFor(
         _recognizedFoodImage,
+        _recognizedFoodImageRef,
       );
       final List<({String id, String url})?> additionalPhotos =
           <({String id, String url})?>[];
       for (final LandmarkFoodEntry entry in _additionalFoods) {
-        additionalPhotos.add(await _uploadPhoto(entry.image));
+        additionalPhotos.add(await _photoFor(entry.image, entry.photoRef));
       }
 
       // Everything below is raw, already-validated form data - building the
@@ -1157,6 +2088,7 @@ class AddLandmarkViewModel extends BaseViewModel
             imageId: primaryPhoto?.id,
             confidence: _recognizedFoodConfidence,
             isLocalFood: true,
+            variant: _recognizedFoodVariant,
             dietaryRestrictions: _recognizedFoodDietaryRestrictions,
           ),
           for (int i = 0; i < _additionalFoods.length; i++)
@@ -1168,6 +2100,8 @@ class AddLandmarkViewModel extends BaseViewModel
               priceMax: _additionalFoods[i].priceMax,
               imageUrl: additionalPhotos[i]?.url,
               imageId: additionalPhotos[i]?.id,
+              variant: _additionalFoods[i].variant,
+              dietaryRestrictions: _additionalFoods[i].dietaryRestrictions,
             ),
         ],
         operatingHours: _operatingHours,
@@ -1177,17 +2111,39 @@ class AddLandmarkViewModel extends BaseViewModel
       _submitAddedDishNames = List<String>.of(result.addedDishNames);
       _submitExistingDishNames = List<String>.of(result.existingDishNames);
 
+      // The landmark is saved - the incomplete submission it may have come
+      // from is done. Only the draft ROW is removed; its photos stay because
+      // the landmark now stores those same objects.
+      await clearSubmittedDraft();
+
       _isSubmitting = false;
       safeNotifyListeners();
-    } catch (e) {
-      _submitError = e.toString();
+    } catch (error) {
+      _submitError = _submitFailureMessage(error);
       _isSubmitting = false;
       safeNotifyListeners();
     }
   }
 
+  /// User-safe copy for a failed submit. Raw exception text
+  /// (`PostgrestException(...)`, `Bad state: ...`, socket errors) must never
+  /// reach the form; only messages the APP itself authors pass through -
+  /// the sign-in requirement and the local-food origin verifier's verdict
+  /// (see [LandmarkLogicFacade.landmarkVerificationRejectionMessage]).
+  String _submitFailureMessage(Object error) {
+    if (error is StateError && error.message == _signInRequiredMessage) {
+      return _signInRequiredMessage;
+    }
+    final String? rejection = landmarkLogic
+        .landmarkVerificationRejectionMessage(error);
+    if (rejection != null && rejection.isNotEmpty) return rejection;
+    return 'Something went wrong while submitting. Please check your '
+        'connection and try again.';
+  }
+
   @override
   void dispose() {
+    _websiteLinkDebounce?.cancel();
     locationFacade.unregister(this);
     super.dispose();
   }

@@ -61,6 +61,10 @@ abstract final class AppRoutes {
   // --- Landmark --------------------------------------------------------------
 
   static const String landmarkHistory = '/landmark-history';
+
+  /// The tourist's saved (incomplete) Add-New-Landmark forms - reached from
+  /// the profile's "Incomplete Submissions" link.
+  static const String incompleteLandmarks = '/incomplete-landmarks';
   static const String addLandmark = '/add-landmark';
   static const String restaurantSignboard = '/restaurant-signboard';
   static const String landmarkDetail = '/landmark-detail';
@@ -103,6 +107,7 @@ abstract final class AppRoutes {
     restaurantDetail,
     restaurantItemList,
     landmarkHistory,
+    incompleteLandmarks,
     addLandmark,
     restaurantSignboard,
     landmarkDetail,

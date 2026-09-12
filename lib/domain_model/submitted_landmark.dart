@@ -90,6 +90,8 @@ class LandmarkItem {
     required this.description,
     required this.origin,
     required this.culturalBackground,
+    this.ingredients = '',
+    this.dietaryRestrictions = const <String>[],
     this.imageUrl,
     this.imageId,
     this.price,
@@ -114,11 +116,39 @@ class LandmarkItem {
   final int localFoodId;
 
   final String dish;
+
+  /// The name this dish was actually recognised/typed as, when it EXTENDS
+  /// the dictionary dish name into an unlisted variant - e.g. dish `Cendol`
+  /// with variant `Cendol Jagung`. Empty when the name IS the dish (its
+  /// name/synonym/same words reordered). This is the landmark's record of
+  /// the VARIANT; `local_food` keeps only the canonical dish.
   final String variant;
+
+  /// The name to SHOW for this item: the [variant] the tourist actually
+  /// photographed/typed when one was recorded ("Cendol Jagung"), else the
+  /// dictionary [dish]. The landmark lists what was captured, not the
+  /// canonical row it links to - the same label rule the draft list and the
+  /// continue prompt use.
+  String get displayName => variant.trim().isNotEmpty ? variant.trim() : dish;
+
   final String foodCategory;
   final String description;
   final String origin;
   final String culturalBackground;
+
+  /// The item's ingredients: the dictionary row's own ingredients with the
+  /// recognition's observation merged in - so a variant ("Cendol Jagung")
+  /// keeps the dish's canonical facts AND gains what makes it that variant
+  /// ("..., sweet corn"). Whichever side has text stands alone when the
+  /// other has none; empty when neither has anything.
+  final String ingredients;
+
+  /// Canonical dietary-restriction names that apply to THIS item (e.g.
+  /// `['Contains Coconut']`). For a matched dictionary dish with a fresh
+  /// observation these are the OBSERVED tags; otherwise the dictionary
+  /// row's own links. Persisted as one comma-separated `text` column
+  /// (`landmark_item.dietary_restrictions`).
+  final List<String> dietaryRestrictions;
 
   /// The food's own photo (as captured on `FoodRecognitionView`), stored in
   /// Supabase Storage (`landmark-images` bucket) by
@@ -172,6 +202,7 @@ class FoodSubmission {
     this.imageId,
     this.confidence = 0,
     this.isLocalFood = false,
+    this.variant = '',
     this.dietaryRestrictions = const <String>[],
   });
 
@@ -201,6 +232,13 @@ class FoodSubmission {
   /// Whether Gemini judged this dish Malaysian local food. Only true dishes
   /// may be added to the shared `local_food` catalogue.
   final bool isLocalFood;
+
+  /// The name the dish was actually recognised/typed as when it EXTENDS the
+  /// dictionary [food]'s name into an unlisted variant (`Cendol Jagung`
+  /// linking to the curated `Cendol`) - written to `landmark_item.variant`.
+  /// Empty when the name IS the dish (its name/synonym/same words
+  /// reordered).
+  final String variant;
 
   /// Dietary restrictions that apply to this dish (canonical
   /// `dietary_restriction.restriction_name` strings), from Gemini's full

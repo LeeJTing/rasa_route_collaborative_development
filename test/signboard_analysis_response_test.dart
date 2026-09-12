@@ -11,6 +11,7 @@ void main() {
       );
       expect(latin.languageScript, 'latin');
       expect(latin.nameOriginalScript, isNull);
+      expect(latin.scriptVariant, 'n/a');
     });
 
     test('carries the original-script name and script for non-Latin signs', () {
@@ -18,12 +19,14 @@ void main() {
         signboardStatus: 'detected',
         textDetected: 'Hai Tian Lou',
         nameOriginalScript: '海天楼',
+        scriptVariant: 'simplified',
         languageScript: 'chinese',
         signboardImageStatus: 'complete',
         confidence: 0.95,
       );
       expect(chinese.textDetected, 'Hai Tian Lou');
       expect(chinese.nameOriginalScript, '海天楼');
+      expect(chinese.scriptVariant, 'simplified');
       expect(chinese.languageScript, 'chinese');
       expect(chinese.confidence, 0.95);
     });
@@ -37,6 +40,7 @@ void main() {
         signboardImageStatus: 'complete',
       );
       expect(jawi.toJson()['nameOriginalScript'], 'واروڠ مكن كيت');
+      expect(jawi.toJson()['scriptVariant'], 'n/a');
       expect(jawi.toJson()['languageScript'], 'jawi');
       expect(jawi.toJson()['textDetected'], 'Warung Makan Kita');
     });
@@ -50,10 +54,12 @@ void main() {
       final SignboardAnalysisResponse updated = original.copyWith(
         textDetected: 'Ah Kow Kopitiam',
         nameOriginalScript: '阿狗咖啡店',
+        scriptVariant: 'traditional',
         languageScript: 'mixed',
       );
       expect(updated.textDetected, 'Ah Kow Kopitiam');
       expect(updated.nameOriginalScript, '阿狗咖啡店');
+      expect(updated.scriptVariant, 'traditional');
       expect(updated.languageScript, 'mixed');
       // Untouched fields keep their original values.
       expect(updated.signboardStatus, 'detected');

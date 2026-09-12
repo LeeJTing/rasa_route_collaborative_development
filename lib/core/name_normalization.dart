@@ -150,3 +150,177 @@ String toSimplifiedChinese(String value) {
 /// where a Gemini dish name is fuzzy-matched anyway.
 String placeNameKey(String value) =>
     toSimplifiedChinese(value.trim()).toLowerCase();
+
+/// Glyphs that appear ONLY in Traditional Chinese (OpenCC maps them to a
+/// different Simplified glyph) and glyphs that appear ONLY in Simplified
+/// Chinese (the targets of those mappings). Glyphs on both sides - e.g. 干,
+/// which simplified both 乾 and 幹 - prove nothing about the style and are
+/// deliberately in neither set; so do Simplified TARGETS that are legitimate
+/// Traditional glyphs in their own right (后 in 皇后 - see
+/// [_dualRoleSimplified]). Built once, lazily.
+final ({Set<String> traditionalOnly, Set<String> simplifiedOnly})
+_scriptGlyphs = _buildScriptGlyphs();
+
+({Set<String> traditionalOnly, Set<String> simplifiedOnly})
+_buildScriptGlyphs() {
+  final Set<String> traditional = <String>{};
+  final Set<String> simplified = <String>{};
+  for (final Map<String, String> map in <Map<String, String>>[
+    opencc.traditionalToSimplified,
+    traditionalToSimplified,
+  ]) {
+    for (final MapEntry<String, String> entry in map.entries) {
+      if (entry.key == entry.value) continue;
+      traditional.add(entry.key);
+      simplified.add(entry.value);
+    }
+  }
+  return (
+    traditionalOnly: traditional.difference(simplified),
+    // Simplified glyphs that are ALSO legitimate Traditional forms prove
+    // nothing either - a Traditional sign may legally paint them (皇后).
+    simplifiedOnly: simplified
+        .difference(traditional)
+        .difference(_dualRoleSimplified),
+  );
+}
+
+/// The Chinese script STYLE of [value]:
+///  * "traditional" - at least one Traditional-only glyph;
+///  * "simplified" - at least one Simplified-only glyph;
+///  * "mixed" - both styles appear;
+///  * "unknown" - no style-specific glyph at all (shared by both styles, or
+///    not Chinese - "海天" looks the same in either style).
+///
+/// Callers use this to check a signboard transcription against the style
+/// reported as PAINTED on the sign: a name that carries the other style's
+/// glyphs cannot be an exact copy of the signboard.
+String chineseScriptStyleOf(String value) {
+  bool hasTraditional = false;
+  bool hasSimplified = false;
+  for (final int rune in value.runes) {
+    final String character = String.fromCharCode(rune);
+    if (_scriptGlyphs.traditionalOnly.contains(character)) {
+      hasTraditional = true;
+    } else if (_scriptGlyphs.simplifiedOnly.contains(character)) {
+      hasSimplified = true;
+    }
+    if (hasTraditional && hasSimplified) return 'mixed';
+  }
+  if (hasTraditional) return 'traditional';
+  if (hasSimplified) return 'simplified';
+  return 'unknown';
+}
+
+/// Simplified glyphs with exactly ONE provable Traditional origin, used to
+/// RESTORE a transcription that contradicts the Chinese style reported for
+/// the sign ("义" can only have been painted as "義"). A glyph qualifies
+/// only when both sides are provably style-specific - the sets already
+/// exclude dual-role glyphs (see [_dualRoleSimplified]). Built once, lazily,
+/// from the same maps as [_scriptGlyphs].
+final Map<String, String> _traditionalForSimplified =
+    _buildTraditionalForSimplified();
+
+Map<String, String> _buildTraditionalForSimplified() {
+  final ({Set<String> traditionalOnly, Set<String> simplifiedOnly}) glyphs =
+      _scriptGlyphs;
+  final Map<String, Set<String>> origins = <String, Set<String>>{};
+  for (final Map<String, String> map in <Map<String, String>>[
+    opencc.traditionalToSimplified,
+    traditionalToSimplified,
+  ]) {
+    for (final MapEntry<String, String> entry in map.entries) {
+      if (entry.key == entry.value) continue;
+      if (!glyphs.simplifiedOnly.contains(entry.value)) continue;
+      if (!glyphs.traditionalOnly.contains(entry.key)) continue;
+      (origins[entry.value] ??= <String>{}).add(entry.key);
+    }
+  }
+  return <String, String>{
+    for (final MapEntry<String, Set<String>> entry in origins.entries)
+      if (entry.value.length == 1) entry.key: entry.value.single,
+  };
+}
+
+/// Simplified glyphs that are ALSO legitimate Traditional glyphs in their
+/// own right - "后" is 皇后 in both styles, "只", "系", "表" and friends are
+/// normal Traditional characters as well. Restoring them to their complex
+/// sibling could invent a character the sign never painted, so they are
+/// never converted.
+const Set<String> _dualRoleSimplified = <String>{
+  '后',
+  '台',
+  '里',
+  '面',
+  '干',
+  '布',
+  '只',
+  '系',
+  '制',
+  '表',
+  '冲',
+  '才',
+  '划',
+  '舍',
+  '采',
+  '叶',
+  '丑',
+  '准',
+  '胡',
+  '须',
+  '余',
+  '谷',
+  '于',
+  '与',
+  '云',
+  '斗',
+  '丰',
+  '万',
+  '宁',
+  '郁',
+  '泄',
+  '游',
+  '志',
+  '彩',
+  '卷',
+  '蒙',
+  '昆',
+  '挂',
+};
+
+/// [value] RESTORED to [scriptVariant], the Chinese style the model reported
+/// as painted on the signboard: with a "traditional" claim, Simplified-only
+/// glyphs with a provable origin become Traditional again ("义" -> "義");
+/// with a "simplified" claim, Traditional-only glyphs fold ("樓" -> "楼").
+/// This is how the app enforces "return the form you detected" - a
+/// transcription that contradicts its own style report is corrected to the
+/// reported style instead of being thrown away.
+///
+/// Glyphs that cannot be converted with certainty pass through untouched:
+/// "发" is the Simplified form of both 發 and 髮, and "后" is valid in both
+/// styles. A partial conversion is visible by comparing the result with
+/// [value]. Any claim other than the two styles ("mixed", "n/a") returns
+/// [value] unchanged.
+String correctChineseScriptStyle(String value, String scriptVariant) {
+  if (scriptVariant != 'traditional' && scriptVariant != 'simplified') {
+    return value;
+  }
+  if (value.isEmpty) return value;
+  final StringBuffer buffer = StringBuffer();
+  for (final int rune in value.runes) {
+    final String character = String.fromCharCode(rune);
+    String written = character;
+    if (scriptVariant == 'traditional') {
+      if (_scriptGlyphs.simplifiedOnly.contains(character)) {
+        written = _traditionalForSimplified[character] ?? character;
+      }
+    } else if (_scriptGlyphs.traditionalOnly.contains(character)) {
+      written =
+          opencc.traditionalToSimplified[character] ??
+          traditionalToSimplified[character] ??
+          character;
+    }
+    buffer.write(written);
+  }
+  return buffer.toString();
+}

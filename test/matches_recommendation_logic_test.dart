@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/food_distribution.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
+import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
 import 'package:rasa_route_collaborative_development/domain_model/region.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
@@ -43,6 +44,21 @@ void main() {
           result.groups.single.submittedLandmarks.single.foodNames,
           containsAll(<String>['Liked Food', 'Not Liked Food']),
         );
+        // Each dish carries its OWN price, and the landmark's headline price
+        // is their AVERAGE (8 and 12 -> 10), not one dish's price.
+        final SubmittedLandmarkRecommendation landmark =
+            result.groups.single.submittedLandmarks.single;
+        expect(
+          landmark.dishes
+              .map((SubmittedLandmarkDish dish) => dish.name)
+              .toList(),
+          orderedEquals(<String>['Liked Food', 'Not Liked Food']),
+        );
+        expect(landmark.dishes.first.price, 8);
+        expect(landmark.dishes.last.price, 12);
+        expect(landmark.price, 10);
+        expect(landmark.dishes.first.ingredients, 'Rice, sambal');
+        expect(landmark.dishes.last.ingredients, isNull);
       },
     );
 
@@ -73,6 +89,65 @@ void main() {
       expect(result.groups.single.restaurants.single.id, 10);
       expect(result.groups.single.restaurants.single.name, 'Actual Restaurant');
     });
+
+    test(
+      'uses occurrence prices when catalogue summaries omit menu items',
+      () async {
+        final _MatchesRepository summaryRepository = _MatchesRepository()
+          ..catalogueIncludesItems = false;
+        final MatchesRecommendationLogic summaryLogic =
+            _TestMatchesRecommendationLogic(summaryRepository);
+
+        final MatchesRecommendationResult result = await summaryLogic
+            .recommendations(
+              const MatchesRecommendationRequest(
+                stateCode: 'TST',
+                origin: TouristLocation(latitude: 1, longitude: 1),
+              ),
+            );
+
+        final List<RestaurantItem> items =
+            result.groups.single.restaurants.single.items;
+        expect(items, hasLength(1));
+        expect(items.single.price, 9.5);
+      },
+    );
+
+    test('excludes a recommendation confidently closed now', () async {
+      repository.hoursByPlace = const <String, List<OpeningHour>>{
+        'restaurant:10': <OpeningHour>[
+          OpeningHour(id: 1, day: Weekday.monday, status: DayStatus.closed),
+        ],
+      };
+
+      final MatchesRecommendationResult result = await logic.recommendations(
+        const MatchesRecommendationRequest(
+          stateCode: 'TST',
+          origin: TouristLocation(latitude: 1, longitude: 1),
+        ),
+      );
+
+      expect(result.groups.single.restaurants, isEmpty);
+      expect(result.groups.single.submittedLandmarks, isNotEmpty);
+    });
+
+    test(
+      'does not substitute the explored state centre for missing GPS',
+      () async {
+        final MatchesRecommendationResult result = await logic.recommendations(
+          const MatchesRecommendationRequest(
+            stateCode: 'TST',
+            origin: TouristLocation.unknown,
+          ),
+        );
+
+        expect(result.groups.single.restaurants.single.distanceMetres, isNull);
+        expect(
+          result.groups.single.submittedLandmarks.single.distanceMetres,
+          double.infinity,
+        );
+      },
+    );
   });
 }
 
@@ -83,6 +158,9 @@ class _TestMatchesRecommendationLogic extends MatchesRecommendationLogic {
 
   @override
   DiscoveryRepositoryFacade createRepository() => repository;
+
+  @override
+  DateTime currentTime() => DateTime(2026, 9, 7, 12);
 }
 
 class _MissingCatalogueRestaurantRepository extends _MatchesRepository {
@@ -102,6 +180,9 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
     dislikedFoodIds: <int>[],
   );
   SwipeSession? savedSession;
+  Map<String, List<OpeningHour>> hoursByPlace =
+      const <String, List<OpeningHour>>{};
+  bool catalogueIncludesItems = true;
 
   @override
   Future<String?> currentTouristId() async => 'tourist';
@@ -159,7 +240,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
   ];
 
   @override
-  Future<List<Restaurant>> getRestaurants() async => const <Restaurant>[
+  Future<List<Restaurant>> getRestaurants() async => <Restaurant>[
     Restaurant(
       id: 10,
       name: 'Actual Restaurant',
@@ -168,28 +249,35 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
       phone: '',
       website: '',
       openingHours: [],
-      items: <RestaurantItem>[
-        RestaurantItem(
-          id: 101,
-          restaurantId: 10,
-          localFoodId: 1,
-          foodName: 'Liked Food',
-          currency: 'RM',
-          foodCategory: 'Local',
-          price: 10,
-        ),
-        RestaurantItem(
-          id: 102,
-          restaurantId: 10,
-          localFoodId: 2,
-          foodName: 'Not Liked Food',
-          currency: 'RM',
-          foodCategory: 'Local',
-          price: 12,
-        ),
-      ],
+      items: catalogueIncludesItems
+          ? const <RestaurantItem>[
+              RestaurantItem(
+                id: 101,
+                restaurantId: 10,
+                localFoodId: 1,
+                foodName: 'Liked Food',
+                currency: 'RM',
+                foodCategory: 'Local',
+                price: 10,
+              ),
+              RestaurantItem(
+                id: 102,
+                restaurantId: 10,
+                localFoodId: 2,
+                foodName: 'Not Liked Food',
+                currency: 'RM',
+                foodCategory: 'Local',
+                price: 12,
+              ),
+            ]
+          : const <RestaurantItem>[],
     ),
   ];
+
+  @override
+  Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
+    Set<String>? placeKeys,
+  }) async => hoursByPlace;
 
   @override
   Future<List<FoodOccurrence>> foodOccurrences() async =>
@@ -202,6 +290,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           foodName: 'Liked Food',
           latitude: 1,
           longitude: 1.001,
+          itemPrice: 9.5,
         ),
         FoodOccurrence(
           sourceId: '20',
@@ -212,6 +301,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           latitude: 1,
           longitude: 1.002,
           itemPrice: 8,
+          itemIngredients: 'Rice, sambal',
         ),
         FoodOccurrence(
           sourceId: '20',
@@ -221,6 +311,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           foodName: 'Not Liked Food',
           latitude: 1,
           longitude: 1.002,
+          itemPrice: 12,
         ),
       ];
   @override

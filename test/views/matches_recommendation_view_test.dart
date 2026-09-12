@@ -70,6 +70,10 @@ void main() {
 
     expect(find.text('Uncle Lim Prawn Noodle Stall'), findsOneWidget);
     expect(find.text('User Submitted Landmark'), findsWidgets);
+    // Restaurant-card furniture: the price/serves bar and the full-width
+    // action, so both tabs read the same.
+    expect(find.text('Serves Prawn Noodle'), findsOneWidget);
+    expect(find.text('RM 12.00'), findsOneWidget);
     expect(find.text('Halal'), findsNothing);
     expect(find.text('Name'), findsOneWidget);
 

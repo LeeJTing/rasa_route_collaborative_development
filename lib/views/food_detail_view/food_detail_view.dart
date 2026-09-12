@@ -58,6 +58,15 @@ class _FoodDetailViewState extends State<FoodDetailView> {
             appBar: AppTopBar(
               title: vm.food?.name ?? 'Food Details',
               showBackButton: true,
+              onBack: () {
+                Navigator.pop(
+                  context,
+                  {
+                    'id': vm.food?.id,
+                    'isFavourite': vm.isLiked,
+                  },
+                );
+              },
             ),
             body: _body(context, vm),
           );
@@ -118,16 +127,21 @@ class _FoodDetailViewState extends State<FoodDetailView> {
                 _InformationItem(label: 'Description', body: food.description),
                 _InformationItem(label: 'Origin', body: food.origin),
                 _InformationItem(label: 'Ingredients', body: food.ingredients),
-                if (vm.isFoodInformationExpanded)
+                if (vm.isFoodInformationExpanded) ...[
+                  _InformationItem(
+                    label: 'Cooking Styles',
+                    body: food.cookingStyle,
+                  ),
                   _InformationItem(
                     label: 'Cultural Background',
                     body: food.culturalBackground,
                   ),
+                ],
                 Center(
                   child: IconButton(
                     tooltip: vm.isFoodInformationExpanded
-                        ? 'Hide cultural background'
-                        : 'Show cultural background',
+                        ? 'Hide more details'
+                        : 'Show more details',
                     onPressed: vm.toggleFoodInformation,
                     icon: Icon(
                       vm.isFoodInformationExpanded

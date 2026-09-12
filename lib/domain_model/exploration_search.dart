@@ -13,6 +13,8 @@ class PlaceSuggestion {
     required this.latitude,
     required this.longitude,
     required this.zoom,
+    this.referenceId,
+    this.isRestaurant = false,
   });
 
   /// What the tourist typed against, e.g. `Penang` or `George Town`.
@@ -29,6 +31,22 @@ class PlaceSuggestion {
   /// Where the map should settle when this entry is picked (REQ102_22). A
   /// city zooms past the detailed-view threshold; a state stops short of it.
   final double zoom;
+
+  /// `restaurant_id` or `landmark_id` for a [PlaceKind.address] result, `null`
+  /// for a state, city, town or area.
+  ///
+  /// Carried so that picking a restaurant out of the search results can open
+  /// **that** restaurant, rather than dropping the tourist on a map full of
+  /// pins and leaving them to work out which one they just searched for.
+  final String? referenceId;
+
+  /// Which table [referenceId] belongs to. Meaningless when it is null; the
+  /// two id spaces overlap, so this is what tells them apart (C21).
+  final bool isRestaurant;
+
+  /// Whether picking this result can open a place's detail sheet.
+  bool get isPlaceOnTheMap =>
+      referenceId != null && referenceId!.trim().isNotEmpty;
 }
 
 /// One place name matched by Postgres, with the score it earned.

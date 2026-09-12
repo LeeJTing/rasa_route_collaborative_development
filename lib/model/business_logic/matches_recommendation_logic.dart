@@ -5,11 +5,13 @@ import 'package:meta/meta.dart' show protected;
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/matches_recommendation.dart';
+import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/swipe_session.dart';
 import '../repositories/discovery_repository_facade.dart';
+import 'opening_hours_logic.dart';
 
 /// Builds Matches from one state's persisted Swipe Mode likes and real places.
 class MatchesRecommendationLogic {
@@ -18,11 +20,14 @@ class MatchesRecommendationLogic {
   @protected
   DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
 
+  @protected
+  DateTime currentTime() => DateTime.now();
+
   late final DiscoveryRepositoryFacade _repository = createRepository();
 
   Future<MatchesRecommendationResult> recommendations(
-    MatchesRecommendationRequest request,
-  ) async {
+      MatchesRecommendationRequest request,
+      ) async {
     final String touristId = await _repository.currentTouristId() ?? '';
     if (touristId.isEmpty) throw Exception('Sign in to view Matches.');
 
@@ -49,22 +54,39 @@ class MatchesRecommendationLogic {
     final Map<int, LocalFood> foodsById = <int, LocalFood>{
       for (final LocalFood food in foods) food.id: food,
     };
+    final List<Object> placeData = await Future.wait(<Future<Object>>[
+      _repository.foodOccurrences(),
+      _repository.openingHoursByPlace(),
+      _repository.getRestaurants(),
+    ]);
+    final Map<String, List<OpeningHour>> hoursByPlace =
+        placeData[1] as Map<String, List<OpeningHour>>;
+    final DateTime malaysiaNow = currentTime().toUtc().add(
+      const Duration(hours: 8),
+    );
     final List<FoodOccurrence> occurrences =
-        (await _repository.foodOccurrences())
+        (placeData[0] as List<FoodOccurrence>)
             .map((FoodOccurrence value) => _resolveFood(value, foods))
             .where((FoodOccurrence value) => value.localFoodId != 0)
             .where(
               (FoodOccurrence value) =>
                   _contains(region.boundary, value.latitude, value.longitude),
             )
+            .where(
+              (FoodOccurrence value) =>
+                  !OpeningHoursLogic.isConfidentlyClosedAt(
+                    hoursByPlace[_placeKey(value)],
+                    malaysiaNow,
+                  ),
+            )
             .toList(growable: false);
     final Map<int, Restaurant> restaurantsById = <int, Restaurant>{
-      for (final Restaurant restaurant in await _repository.getRestaurants())
+      for (final Restaurant restaurant in placeData[2] as List<Restaurant>)
         restaurant.id: restaurant,
     };
 
     final List<MatchedFoodRecommendations> groups =
-        <MatchedFoodRecommendations>[];
+    <MatchedFoodRecommendations>[];
     for (final int foodId in session.likedFoodIds) {
       final LocalFood? food = foodsById[foodId];
       if (food == null) continue;
@@ -98,6 +120,11 @@ class MatchesRecommendationLogic {
     );
   }
 
+  static String _placeKey(FoodOccurrence occurrence) =>
+      occurrence.source == FoodOccurrenceSource.restaurant
+      ? 'restaurant:${occurrence.sourceId}'
+      : 'submittedLandmark:${occurrence.sourceId}';
+
   /// A filled heart removes that food from the device-local state match list.
   Future<SwipeSession> removeLike(SwipeSession session, int foodId) async {
     if (!session.likedFoodIds.contains(foodId)) return session;
@@ -116,43 +143,56 @@ class MatchesRecommendationLogic {
     Map<int, Restaurant> restaurantsById,
     MatchesRecommendationRequest request,
   ) {
-    final Map<int, FoodOccurrence> serving = <int, FoodOccurrence>{};
+    final Map<int, List<FoodOccurrence>> serving =
+        <int, List<FoodOccurrence>>{};
     for (final FoodOccurrence occurrence in occurrences) {
       if (occurrence.source != FoodOccurrenceSource.restaurant) continue;
       final int? id = int.tryParse(occurrence.sourceId);
-      if (id != null) serving.putIfAbsent(id, () => occurrence);
+      if (id != null) {
+        serving.putIfAbsent(id, () => <FoodOccurrence>[]).add(occurrence);
+      }
     }
     final List<Restaurant> recommendations = <Restaurant>[];
-    for (final MapEntry<int, FoodOccurrence> entry in serving.entries) {
+    for (final MapEntry<int, List<FoodOccurrence>> entry in serving.entries) {
+      final FoodOccurrence occurrence = entry.value.first;
       final Restaurant? catalogueRestaurant = restaurantsById[entry.key];
-      final List<RestaurantItem> matchedItems =
+      final List<RestaurantItem> catalogueItems =
           catalogueRestaurant?.items
               .where((RestaurantItem item) => item.localFoodId == foodId)
               .toList(growable: false) ??
-          <RestaurantItem>[
-            RestaurantItem(
-              id: 0,
-              restaurantId: entry.key,
-              localFoodId: foodId,
-              foodName: entry.value.foodName,
-              price: entry.value.itemPrice,
-              currency: 'RM',
-              foodCategory: '',
-            ),
-          ];
+          const <RestaurantItem>[];
+      // `getRestaurants()` intentionally returns lightweight summaries, so
+      // its Restaurant objects normally have no menu items. The occurrence
+      // query already carries every matching restaurant-item price; use those
+      // rows instead of incorrectly presenting a real price as unavailable.
+      final List<RestaurantItem> matchedItems = catalogueItems.isNotEmpty
+          ? catalogueItems
+          : entry.value
+                .map(
+                  (FoodOccurrence item) => RestaurantItem(
+                    id: 0,
+                    restaurantId: entry.key,
+                    localFoodId: foodId,
+                    foodName: item.foodName,
+                    price: item.itemPrice,
+                    currency: 'RM',
+                    foodCategory: '',
+                  ),
+                )
+                .toList(growable: false);
       final Restaurant restaurant =
           catalogueRestaurant ??
           Restaurant(
             id: entry.key,
-            name: entry.value.placeName,
-            category: entry.value.placeCategory ?? '',
+            name: occurrence.placeName,
+            category: occurrence.placeCategory ?? '',
             address: '',
-            rating: entry.value.placeRating,
-            latitude: entry.value.latitude,
-            longitude: entry.value.longitude,
+            rating: occurrence.placeRating,
+            latitude: occurrence.latitude,
+            longitude: occurrence.longitude,
             phone: '',
             website: '',
-            imageUrl: entry.value.placeImageUrl,
+            imageUrl: occurrence.placeImageUrl,
             openingHours: const [],
             items: matchedItems,
           );
@@ -163,8 +203,8 @@ class MatchesRecommendationLogic {
           distanceMetres: _distanceMetres(
             request.origin.latitude,
             request.origin.longitude,
-            entry.value.latitude,
-            entry.value.longitude,
+            occurrence.latitude,
+            occurrence.longitude,
           ),
           items: matchedItems,
         ),
@@ -176,7 +216,7 @@ class MatchesRecommendationLogic {
   Restaurant _withRecommendationDetails(
     Restaurant restaurant, {
     required String category,
-    required double distanceMetres,
+    required double? distanceMetres,
     required List<RestaurantItem> items,
   }) => Restaurant(
     id: restaurant.id,
@@ -196,11 +236,11 @@ class MatchesRecommendationLogic {
   );
 
   List<SubmittedLandmarkRecommendation> _landmarksFor(
-    List<FoodOccurrence> foodOccurrences,
-    List<FoodOccurrence> allOccurrences,
-    Map<int, LocalFood> foodsById,
-    MatchesRecommendationRequest request,
-  ) {
+      List<FoodOccurrence> foodOccurrences,
+      List<FoodOccurrence> allOccurrences,
+      Map<int, LocalFood> foodsById,
+      MatchesRecommendationRequest request,
+      ) {
     final Map<String, FoodOccurrence> serving = <String, FoodOccurrence>{};
     for (final FoodOccurrence occurrence in foodOccurrences) {
       if (occurrence.source != FoodOccurrenceSource.submittedLandmark) continue;
@@ -209,42 +249,79 @@ class MatchesRecommendationLogic {
     return serving.entries
         .map((MapEntry<String, FoodOccurrence> entry) {
           final FoodOccurrence occurrence = entry.value;
-          final List<String> foodNames = allOccurrences
-              .where(
-                (FoodOccurrence value) =>
-                    value.source == FoodOccurrenceSource.submittedLandmark &&
-                    value.sourceId == entry.key,
-              )
-              .map(
-                (FoodOccurrence value) =>
-                    foodsById[value.localFoodId]?.name ?? value.foodName,
-              )
-              .toSet()
-              .toList(growable: false);
+          final List<SubmittedLandmarkDish> dishes = _dishesOf(
+            allOccurrences.where(
+              (FoodOccurrence value) =>
+                  value.source == FoodOccurrenceSource.submittedLandmark &&
+                  value.sourceId == entry.key,
+            ),
+            foodsById,
+          );
           return SubmittedLandmarkRecommendation(
             id: int.tryParse(entry.key) ?? 0,
             name: occurrence.placeName,
             category: occurrence.placeCategory?.trim().isNotEmpty == true
                 ? occurrence.placeCategory!
                 : 'Submitted Landmark',
-            distanceMetres: _distanceMetres(
-              request.origin.latitude,
-              request.origin.longitude,
-              occurrence.latitude,
-              occurrence.longitude,
-            ),
-            foodNames: foodNames,
+            distanceMetres:
+                _distanceMetres(
+                  request.origin.latitude,
+                  request.origin.longitude,
+                  occurrence.latitude,
+                  occurrence.longitude,
+                ) ??
+                double.infinity,
+            dishes: dishes,
             imageUrl: occurrence.placeImageUrl,
-            price: occurrence.itemPrice,
+            // The landmark's headline price is the AVERAGE of its dishes'
+            // known prices - one dish's price would misread a stall with a
+            // menu.
+            price: _averageDishPrice(dishes),
           );
         })
         .toList(growable: false);
   }
 
-  Region? _resolveRegion(
-    List<Region> regions,
-    MatchesRecommendationRequest request,
+  /// The landmark's dishes as the cards list them: the catalogue name when
+  /// the dish links to one, else the recorded text, trimmed and de-duplicated
+  /// by name (first occurrence wins), each with its own price and photo.
+  List<SubmittedLandmarkDish> _dishesOf(
+    Iterable<FoodOccurrence> items,
+    Map<int, LocalFood> foodsById,
   ) {
+    final List<SubmittedLandmarkDish> dishes = <SubmittedLandmarkDish>[];
+    final Set<String> seen = <String>{};
+    for (final FoodOccurrence item in items) {
+      final String name = (foodsById[item.localFoodId]?.name ?? item.foodName)
+          .trim();
+      if (name.isEmpty || !seen.add(name)) continue;
+      dishes.add(
+        SubmittedLandmarkDish(
+          name: name,
+          price: item.itemPrice,
+          imageUrl: item.itemImageUrl,
+          ingredients: item.itemIngredients,
+        ),
+      );
+    }
+    return dishes;
+  }
+
+  /// The AVERAGE of the dishes' known prices - null while none is known.
+  double? _averageDishPrice(List<SubmittedLandmarkDish> dishes) {
+    final List<double> prices = dishes
+        .map((SubmittedLandmarkDish dish) => dish.price)
+        .whereType<double>()
+        .toList(growable: false);
+    if (prices.isEmpty) return null;
+    return prices.fold<double>(0, (double sum, double price) => sum + price) /
+        prices.length;
+  }
+
+  Region? _resolveRegion(
+      List<Region> regions,
+      MatchesRecommendationRequest request,
+      ) {
     if (request.stateCode.isNotEmpty) {
       for (final Region region in regions) {
         if (region.code == request.stateCode) return region;
@@ -264,9 +341,9 @@ class MatchesRecommendationLogic {
   }
 
   static FoodOccurrence _resolveFood(
-    FoodOccurrence occurrence,
-    List<LocalFood> foods,
-  ) {
+      FoodOccurrence occurrence,
+      List<LocalFood> foods,
+      ) {
     if (occurrence.localFoodId != 0) return occurrence;
     final String dish = _normalise(occurrence.foodName);
     for (final LocalFood food in foods) {
@@ -280,28 +357,33 @@ class MatchesRecommendationLogic {
         placeName: occurrence.placeName,
         localFoodId: food.id,
         foodName: occurrence.foodName,
+        foodType: food.foodType,
         latitude: occurrence.latitude,
         longitude: occurrence.longitude,
         placeImageUrl: occurrence.placeImageUrl,
         placeCategory: occurrence.placeCategory,
         placeRating: occurrence.placeRating,
         itemPrice: occurrence.itemPrice,
+        // The per-dish extras must survive the id resolution - the cards
+        // show this dish's own photo and ingredients.
+        itemImageUrl: occurrence.itemImageUrl,
+        itemIngredients: occurrence.itemIngredients,
       );
     }
     return occurrence;
   }
 
   static bool _contains(
-    List<GeoPoint> polygon,
-    double latitude,
-    double longitude,
-  ) {
+      List<GeoPoint> polygon,
+      double latitude,
+      double longitude,
+      ) {
     if (polygon.length < 3) return false;
     bool inside = false;
     for (
-      int current = 0, previous = polygon.length - 1;
-      current < polygon.length;
-      previous = current++
+    int current = 0, previous = polygon.length - 1;
+    current < polygon.length;
+    previous = current++
     ) {
       final GeoPoint a = polygon[current];
       final GeoPoint b = polygon[previous];
@@ -310,28 +392,28 @@ class MatchesRecommendationLogic {
           (b.longitude - a.longitude) *
               (latitude - a.latitude) /
               (b.latitude - a.latitude) +
-          a.longitude;
+              a.longitude;
       if (longitude < intersection) inside = !inside;
     }
     return inside;
   }
 
   static double _distanceMetres(
-    double fromLatitude,
-    double fromLongitude,
-    double toLatitude,
-    double toLongitude,
-  ) {
+      double fromLatitude,
+      double fromLongitude,
+      double toLatitude,
+      double toLongitude,
+      ) {
     if (fromLatitude == 0 && fromLongitude == 0) return 0;
     const double earthRadiusMetres = 6371000;
     final double latitudeDelta = _radians(toLatitude - fromLatitude);
     final double longitudeDelta = _radians(toLongitude - fromLongitude);
     final double value =
         math.sin(latitudeDelta / 2) * math.sin(latitudeDelta / 2) +
-        math.cos(_radians(fromLatitude)) *
-            math.cos(_radians(toLatitude)) *
-            math.sin(longitudeDelta / 2) *
-            math.sin(longitudeDelta / 2);
+            math.cos(_radians(fromLatitude)) *
+                math.cos(_radians(toLatitude)) *
+                math.sin(longitudeDelta / 2) *
+                math.sin(longitudeDelta / 2);
     return earthRadiusMetres *
         2 *
         math.atan2(math.sqrt(value), math.sqrt(1 - value));
@@ -342,7 +424,7 @@ class MatchesRecommendationLogic {
       .map((String value) => value.trim())
       .where(
         (String value) => !value.toLowerCase().contains(RegExp(r'\bhalal\b')),
-      )
+  )
       .where((String value) => value.isNotEmpty)
       .join(', ');
 

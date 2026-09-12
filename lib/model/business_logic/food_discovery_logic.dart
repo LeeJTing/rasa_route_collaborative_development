@@ -4,11 +4,15 @@ import 'package:meta/meta.dart' show protected;
 
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
+import '../../domain_model/food_preference.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/swipe_mode.dart';
 import '../../domain_model/swipe_session.dart';
+import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
+import 'opening_hours_logic.dart';
 
 /// REQ103 business rules for the state-localised Swipe Mode queue.
 ///
@@ -21,12 +25,16 @@ class FoodDiscoveryLogic {
   @protected
   DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
 
+  @protected
+  DateTime currentTime() => DateTime.now();
+
   late final DiscoveryRepositoryFacade _repository = createRepository();
 
   /// Builds the real queue for the Malaysian state under the map centre.
   Future<SwipeModePreparation> prepareSwipeMode({
     required double latitude,
     required double longitude,
+    TouristLocation distanceOrigin = TouristLocation.unknown,
   }) async {
     final String touristId = await _repository.currentTouristId() ?? '';
     if (touristId.isEmpty) {
@@ -44,25 +52,34 @@ class FoodDiscoveryLogic {
       for (final LocalFood food in foods) food.id: food,
     };
     final List<FoodOccurrence> occurrences =
-        (await _repository.foodOccurrences())
-            .map((FoodOccurrence occurrence) => _resolveFood(occurrence, foods))
-            .where((FoodOccurrence occurrence) => occurrence.localFoodId != 0)
-            .where(
-              (FoodOccurrence occurrence) => _contains(
-                activeRegion.boundary,
-                occurrence.latitude,
-                occurrence.longitude,
-              ),
-            )
-            .toList(growable: false);
+    (await _repository.foodOccurrences())
+        .map((FoodOccurrence occurrence) => _resolveFood(occurrence, foods))
+        .where((FoodOccurrence occurrence) => occurrence.localFoodId != 0)
+        .where(
+          (FoodOccurrence occurrence) => _contains(
+        activeRegion.boundary,
+        occurrence.latitude,
+        occurrence.longitude,
+      ),
+    )
+        .toList(growable: false);
 
     // Swipe Mode recommends foods backed by at least one real restaurant in
     // the active state. Submitted landmarks are additional Matches results;
     // they do not make a food eligible for the swipe queue by themselves.
+    final Map<String, List<OpeningHour>> hoursByPlace = await _repository
+        .openingHoursByPlace();
+    final DateTime malaysiaNow = currentTime().toUtc().add(
+      const Duration(hours: 8),
+    );
     final List<FoodOccurrence> restaurantOccurrences = occurrences
         .where(
           (FoodOccurrence occurrence) =>
-              occurrence.source == FoodOccurrenceSource.restaurant,
+              occurrence.source == FoodOccurrenceSource.restaurant &&
+              !OpeningHoursLogic.isConfidentlyClosedAt(
+                hoursByPlace['restaurant:${occurrence.sourceId}'],
+                malaysiaNow,
+              ),
         )
         .toList(growable: false);
     final Set<int> availableIds = restaurantOccurrences
@@ -71,24 +88,35 @@ class FoodDiscoveryLogic {
         .toSet();
     final Map<int, double> nearestDistance = <int, double>{};
     for (final FoodOccurrence occurrence in restaurantOccurrences) {
+      if (!distanceOrigin.isKnown) continue;
       final double distance = _distanceKm(
-        latitude,
-        longitude,
+        distanceOrigin.latitude,
+        distanceOrigin.longitude,
         occurrence.latitude,
         occurrence.longitude,
       );
       nearestDistance.update(
         occurrence.localFoodId,
-        (double current) => math.min(current, distance),
+            (double current) => math.min(current, distance),
         ifAbsent: () => distance,
       );
     }
 
-    final Set<int> favouriteIds = await _safeFavouriteIds(touristId);
-    final Set<String> preferredTastes = foods
-        .where((LocalFood food) => favouriteIds.contains(food.id))
-        .expand((LocalFood food) => <String>[food.mainTaste, ...food.tastes])
-        .map(_normalise)
+    final List<FoodPreference> preferences = await _safePreferences(touristId);
+    final Set<String> preferredTastes = preferences
+        .where(
+          (FoodPreference preference) =>
+              preference.kind == FoodPreferenceKind.taste,
+        )
+        .map((FoodPreference preference) => _normalise(preference.name))
+        .where((String value) => value.isNotEmpty)
+        .toSet();
+    final Set<String> preferredCategories = preferences
+        .where(
+          (FoodPreference preference) =>
+              preference.kind == FoodPreferenceKind.category,
+        )
+        .map((FoodPreference preference) => _normalise(preference.name))
         .where((String value) => value.isNotEmpty)
         .toSet();
 
@@ -96,7 +124,7 @@ class FoodDiscoveryLogic {
       touristId,
     )).map((DietaryRestriction restriction) => restriction.id).toSet();
     final Map<int, Set<int>> restrictionsByFood =
-        await _safeRestrictionIdsByFood();
+    await _safeRestrictionIdsByFood();
     final Set<int> restrictedFoodIds = availableIds.where((int foodId) {
       final Set<int> foodRestrictions =
           restrictionsByFood[foodId] ?? const <int>{};
@@ -112,11 +140,19 @@ class FoodDiscoveryLogic {
           .compareTo(restrictedFoodIds.contains(right.id) ? 1 : 0);
       if (restrictionOrder != 0) return restrictionOrder;
 
-      final int tasteOrder = _preferenceScore(
-        right,
-        preferredTastes,
-      ).compareTo(_preferenceScore(left, preferredTastes));
-      if (tasteOrder != 0) return tasteOrder;
+      final int preferenceOrder =
+          _preferenceTier(
+            left,
+            preferredTastes: preferredTastes,
+            preferredCategories: preferredCategories,
+          ).compareTo(
+            _preferenceTier(
+              right,
+              preferredTastes: preferredTastes,
+              preferredCategories: preferredCategories,
+            ),
+          );
+      if (preferenceOrder != 0) return preferenceOrder;
 
       final int distanceOrder = (nearestDistance[left.id] ?? double.infinity)
           .compareTo(nearestDistance[right.id] ?? double.infinity);
@@ -132,9 +168,9 @@ class FoodDiscoveryLogic {
     final int savedRestaurantCount = occurrences
         .where(
           (FoodOccurrence occurrence) =>
-              occurrence.source == FoodOccurrenceSource.restaurant &&
-              savedLikes.contains(occurrence.localFoodId),
-        )
+      occurrence.source == FoodOccurrenceSource.restaurant &&
+          savedLikes.contains(occurrence.localFoodId),
+    )
         .map((FoodOccurrence occurrence) => occurrence.sourceId)
         .toSet()
         .length;
@@ -158,7 +194,7 @@ class FoodDiscoveryLogic {
     final DateTime now = DateTime.now().toUtc();
     final SwipeSession session = SwipeSession(
       sessionId:
-          '${preparation.touristId}:${preparation.stateCode}:${now.microsecondsSinceEpoch}',
+      '${preparation.touristId}:${preparation.stateCode}:${now.microsecondsSinceEpoch}',
       touristId: preparation.touristId,
       stateCode: preparation.stateCode,
       startedAt: now,
@@ -200,10 +236,91 @@ class FoodDiscoveryLogic {
     return reconciled;
   }
 
+  /// Re-ranks an existing device-local session after the tourist changes
+  /// profile preferences or dietary restrictions.
+  ///
+  /// The card currently in the Target Frame and every card already visited
+  /// stay in place. Only the unvisited tail adopts the newly prepared order,
+  /// so a restriction warning can update immediately without making the
+  /// visible card jump. Likes and dislikes remain part of the same session.
+  Future<SwipeModePreparation> refreshAfterProfileChange({
+    required double latitude,
+    required double longitude,
+    TouristLocation distanceOrigin = TouristLocation.unknown,
+  }) async {
+    final SwipeModePreparation preparation = await prepareSwipeMode(
+      latitude: latitude,
+      longitude: longitude,
+      distanceOrigin: distanceOrigin,
+    );
+    final SwipeSession? saved = preparation.savedSession;
+    if (saved == null) return preparation;
+
+    final List<int> rankedIds = preparation.queue
+        .map((LocalFood food) => food.id)
+        .toList(growable: false);
+    final Set<int> availableIds = rankedIds.toSet();
+    final int oldIndex = saved.candidateFoodIds.isEmpty
+        ? 0
+        : saved.currentIndex.clamp(0, saved.candidateFoodIds.length - 1);
+    final int? currentFoodId = saved.candidateFoodIds.isEmpty
+        ? null
+        : saved.candidateFoodIds[oldIndex];
+
+    final List<int> retainedPrefix = saved.candidateFoodIds
+        .take(oldIndex)
+        .where(availableIds.contains)
+        .toList(growable: true);
+    if (currentFoodId != null && availableIds.contains(currentFoodId)) {
+      retainedPrefix.add(currentFoodId);
+    }
+    final Set<int> retainedIds = retainedPrefix.toSet();
+    final List<int> candidates = <int>[
+      ...retainedPrefix,
+      ...rankedIds.where((int id) => !retainedIds.contains(id)),
+    ];
+
+    final int currentIndex = candidates.isEmpty
+        ? 0
+        : currentFoodId != null && availableIds.contains(currentFoodId)
+        ? retainedPrefix.length - 1
+        : oldIndex.clamp(0, candidates.length - 1);
+    final SwipeSession reconciled = saved.copyWith(
+      candidateFoodIds: List<int>.unmodifiable(candidates),
+      likedFoodIds: saved.likedFoodIds
+          .where(availableIds.contains)
+          .toList(growable: false),
+      dislikedFoodIds: saved.dislikedFoodIds
+          .where(availableIds.contains)
+          .toList(growable: false),
+      currentIndex: currentIndex,
+    );
+    await _repository.saveSwipeSession(reconciled);
+
+    return SwipeModePreparation(
+      stateCode: preparation.stateCode,
+      stateName: preparation.stateName,
+      touristId: preparation.touristId,
+      queue: preparation.queue,
+      restrictedFoodIds: preparation.restrictedFoodIds,
+      savedSession: reconciled,
+      savedRestaurantCount: preparation.savedRestaurantCount,
+    );
+  }
+
+  /// Re-reads the device-local session after another screen edits it. This is
+  /// intentionally different from [continueSession], which resumes the saved
+  /// snapshot presented in the Continue/New prompt.
+  Future<SwipeSession?> reloadSession(SwipeModePreparation preparation) =>
+      _repository.getSwipeSession(
+        touristId: preparation.touristId,
+        stateCode: preparation.stateCode,
+      );
+
   Future<SwipeSession> moveToIndex(
-    SwipeSession session,
-    int requestedIndex,
-  ) async {
+      SwipeSession session,
+      int requestedIndex,
+      ) async {
     if (session.candidateFoodIds.isEmpty) return session;
     final SwipeSession moved = session.copyWith(
       currentIndex: requestedIndex.clamp(
@@ -243,11 +360,11 @@ class FoodDiscoveryLogic {
     return updated;
   }
 
-  Future<Set<int>> _safeFavouriteIds(String touristId) async {
+  Future<List<FoodPreference>> _safePreferences(String touristId) async {
     try {
-      return await _repository.favouriteFoodIdsForTourist(touristId);
+      return await _repository.foodPreferencesForTourist(touristId);
     } catch (_) {
-      return <int>{};
+      return const <FoodPreference>[];
     }
   }
 
@@ -267,24 +384,39 @@ class FoodDiscoveryLogic {
     }
   }
 
-  static int _preferenceScore(LocalFood food, Set<String> preferredTastes) {
-    if (preferredTastes.isEmpty) return 0;
-    return <String>[
-      food.mainTaste,
-      ...food.tastes,
-    ].map(_normalise).where(preferredTastes.contains).toSet().length;
+  static int _preferenceTier(
+    LocalFood food, {
+    required Set<String> preferredTastes,
+    required Set<String> preferredCategories,
+  }) {
+    final bool categoryMatch = preferredCategories.contains(
+      _normalise(food.category),
+    );
+    final bool mainTasteMatch = preferredTastes.contains(
+      _normalise(food.mainTaste),
+    );
+    final bool secondaryTasteMatch = food.tastes
+        .map(_normalise)
+        .where((String taste) => taste != _normalise(food.mainTaste))
+        .any(preferredTastes.contains);
+
+    if (categoryMatch && (mainTasteMatch || secondaryTasteMatch)) return 0;
+    if (categoryMatch) return 1;
+    if (mainTasteMatch) return 2;
+    if (secondaryTasteMatch) return 3;
+    return 4;
   }
 
   static FoodOccurrence _resolveFood(
-    FoodOccurrence occurrence,
-    List<LocalFood> foods,
-  ) {
+      FoodOccurrence occurrence,
+      List<LocalFood> foods,
+      ) {
     if (occurrence.localFoodId != 0) return occurrence;
     final String dish = _normalise(occurrence.foodName);
     for (final LocalFood food in foods) {
       final bool matches =
           _normalise(food.name) == dish ||
-          food.synonyms.any((String synonym) => _normalise(synonym) == dish);
+              food.synonyms.any((String synonym) => _normalise(synonym) == dish);
       if (!matches) continue;
       return FoodOccurrence(
         sourceId: occurrence.sourceId,
@@ -292,6 +424,7 @@ class FoodDiscoveryLogic {
         placeName: occurrence.placeName,
         localFoodId: food.id,
         foodName: occurrence.foodName,
+        foodType: food.foodType,
         latitude: occurrence.latitude,
         longitude: occurrence.longitude,
         placeImageUrl: occurrence.placeImageUrl,
@@ -304,10 +437,10 @@ class FoodDiscoveryLogic {
   }
 
   static Region? _regionAt(
-    List<Region> regions,
-    double latitude,
-    double longitude,
-  ) {
+      List<Region> regions,
+      double latitude,
+      double longitude,
+      ) {
     for (final Region region in regions) {
       if (_contains(region.boundary, latitude, longitude)) return region;
     }
@@ -315,16 +448,16 @@ class FoodDiscoveryLogic {
   }
 
   static bool _contains(
-    List<GeoPoint> polygon,
-    double latitude,
-    double longitude,
-  ) {
+      List<GeoPoint> polygon,
+      double latitude,
+      double longitude,
+      ) {
     if (polygon.length < 3) return false;
     bool inside = false;
     for (
-      int current = 0, previous = polygon.length - 1;
-      current < polygon.length;
-      previous = current++
+    int current = 0, previous = polygon.length - 1;
+    current < polygon.length;
+    previous = current++
     ) {
       final GeoPoint a = polygon[current];
       final GeoPoint b = polygon[previous];
@@ -334,26 +467,26 @@ class FoodDiscoveryLogic {
           (b.longitude - a.longitude) *
               (latitude - a.latitude) /
               (b.latitude - a.latitude) +
-          a.longitude;
+              a.longitude;
       if (longitude < intersection) inside = !inside;
     }
     return inside;
   }
 
   static double _distanceKm(
-    double fromLatitude,
-    double fromLongitude,
-    double toLatitude,
-    double toLongitude,
-  ) {
+      double fromLatitude,
+      double fromLongitude,
+      double toLatitude,
+      double toLongitude,
+      ) {
     const double earthRadiusKm = 6371;
     final double latitudeDelta = _radians(toLatitude - fromLatitude);
     final double longitudeDelta = _radians(toLongitude - fromLongitude);
     final double haversine =
         math.pow(math.sin(latitudeDelta / 2), 2).toDouble() +
-        math.cos(_radians(fromLatitude)) *
-            math.cos(_radians(toLatitude)) *
-            math.pow(math.sin(longitudeDelta / 2), 2).toDouble();
+            math.cos(_radians(fromLatitude)) *
+                math.cos(_radians(toLatitude)) *
+                math.pow(math.sin(longitudeDelta / 2), 2).toDouble();
     return earthRadiusKm *
         2 *
         math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine));
