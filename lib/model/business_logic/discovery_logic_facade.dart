@@ -67,10 +67,18 @@ class DiscoveryLogicFacade {
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
   }) => foodDiscovery.prepareSwipeMode(
     latitude: latitude,
     longitude: longitude,
     distanceOrigin: distanceOrigin,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
   );
 
   Future<SwipeSession> startNewSwipeSession(SwipeModePreparation preparation) =>
@@ -83,10 +91,20 @@ class DiscoveryLogicFacade {
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
+    bool rebuildWholeQueue = false,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
   }) => foodDiscovery.refreshAfterProfileChange(
     latitude: latitude,
     longitude: longitude,
     distanceOrigin: distanceOrigin,
+    rebuildWholeQueue: rebuildWholeQueue,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
   );
 
   Future<SwipeSession?> reloadSwipeSession(SwipeModePreparation preparation) =>
