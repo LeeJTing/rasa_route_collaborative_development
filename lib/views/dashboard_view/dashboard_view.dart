@@ -582,6 +582,10 @@ class _DashboardViewState extends State<DashboardView> {
                           viewModel.selectedPin?.referenceId ==
                               pin.referenceId &&
                           viewModel.selectedPin?.kind == pin.kind,
+                      // Drawn from the same layer as everything else, marked
+                      // so the tourist can tell which of these the keyword
+                      // put there.
+                      searchResult: viewModel.isSearchPin(pin),
                       onTap: () => viewModel.selectPin(pin),
                     ),
                   ),
@@ -692,31 +696,53 @@ class _PinMarker extends StatelessWidget {
     required this.pin,
     required this.selected,
     required this.onTap,
+    this.searchResult = false,
   });
 
   final MapPin pin;
   final bool selected;
+
+  /// Whether the current keyword is what put this marker on the map.
+  ///
+  /// Marked with a ring rather than a colour of its own: the two pin colours
+  /// say where a place came from, and a search result is still a restaurant or
+  /// still somebody's landmark.
+  final bool searchResult;
+
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final bool userSubmitted = pin.kind == MapPinKind.landmark;
+    final Widget marker = Icon(
+      Icons.location_on,
+      size: selected || searchResult
+          ? AppSizes.mapPinSize
+          : AppSizes.mapPinSize - 6,
+      color: userSubmitted
+          ? AppColors.pinUserLandmark
+          : AppColors.pinSystemRestaurant,
+      shadows: <Shadow>[
+        const Shadow(color: AppColors.surface, blurRadius: 3),
+        Shadow(
+          color: selected ? AppColors.pinSelectedRing : AppColors.surface,
+          blurRadius: selected ? 6 : 4,
+        ),
+      ],
+    );
+
     return GestureDetector(
       onTap: onTap,
-      child: Icon(
-        Icons.location_on,
-        size: selected ? AppSizes.mapPinSize : AppSizes.mapPinSize - 6,
-        color: userSubmitted
-            ? AppColors.pinUserLandmark
-            : AppColors.pinSystemRestaurant,
-        shadows: <Shadow>[
-          const Shadow(color: AppColors.surface, blurRadius: 3),
-          Shadow(
-            color: selected ? AppColors.pinSelectedRing : AppColors.surface,
-            blurRadius: selected ? 6 : 4,
-          ),
-        ],
-      ),
+      child: searchResult
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.pinSearchHalo,
+                border: Border.all(color: AppColors.pinSearchRing, width: 2),
+              ),
+              child: marker,
+            )
+          : marker,
     );
   }
 }
