@@ -382,6 +382,7 @@ class RestaurantRepository {
           final List<Map<String, dynamic>> rows = await api.selectAll(
             APIManager.tableRestaurantItem,
             columns: _itemSummaryColumns,
+            eq: const <String, Object?>{'is_removed': false},
             inFilter: <String, List<Object?>>{
               'restaurant_id': batch.cast<Object?>(),
             },
@@ -825,14 +826,15 @@ class RestaurantRepository {
     for (final Map<String, dynamic> row in rows) {
       final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
       final Weekday? day = _weekday(data.day);
-      final DayStatus? status = _dayStatus(data.status);
-      if (day == null || status == null) continue;
+      final DayStatus? storedStatus = _dayStatus(data.status);
+      if (day == null || storedStatus == null) continue;
       int? opensAt = _minutesOfDay(data.openingTime);
       int? closesAt = _minutesOfDay(data.closingTime);
-      if (status == DayStatus.open && opensAt == null && closesAt == null) {
-        opensAt = 0;
-        closesAt = 1440;
-      } else if (status == DayStatus.open &&
+      final DayStatus status =
+          storedStatus == DayStatus.open && opensAt == null && closesAt == null
+          ? DayStatus.unknown
+          : storedStatus;
+      if (status == DayStatus.open &&
           opensAt == 0 &&
           data.closingTime?.startsWith('23:59') == true) {
         closesAt = 1440;
@@ -936,7 +938,8 @@ class RestaurantRepository {
       foodName: data.restaurantItemName.isEmpty
           ? localFood?.foodName ?? 'Local food'
           : data.restaurantItemName,
-      ingredients: data.ingredients ?? localFood?.description,
+      description: localFood?.description,
+      ingredients: data.ingredients,
       imageUrl: api.resolveImageUrl(
         imageName,
         bucket: APIManager.storageBucketFoodImages,
@@ -987,6 +990,7 @@ class RestaurantRepository {
   List<RestaurantItem> _deduplicateRestaurantItems(List<RestaurantItem> items) {
     final Map<String, RestaurantItem> byMenuEntry = <String, RestaurantItem>{};
     for (final RestaurantItem item in items) {
+      if (item.isRemoved) continue;
       final String key = <String>[
         item.restaurantId.toString(),
         _normaliseMenuEntryName(item.foodName),
