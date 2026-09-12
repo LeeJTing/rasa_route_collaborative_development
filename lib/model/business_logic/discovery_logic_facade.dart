@@ -294,7 +294,9 @@ class DiscoveryLogicFacade {
   /// not inherit the filter chips: the chips drive the map, a keyword is the
   /// other way in. It still obeys the base rule - `available` only - and the
   /// viewport it is given.
-  Future<List<MapPin>> searchPins({
+  /// Pins **and clusters**, because the search layer groups by the same grid
+  /// the filtered map does. Only the colour tells the two apart.
+  Future<MapPinPage> searchMarkers({
     required ExplorationSearchResults results,
     double? south,
     double? west,
@@ -302,8 +304,9 @@ class DiscoveryLogicFacade {
     double? east,
     double? fromLatitude,
     double? fromLongitude,
+    double zoom = detailedViewZoom,
     int? limit,
-  }) => mapExploration.searchLayerPins(
+  }) => mapExploration.searchLayerMarkers(
     results: results,
     south: south,
     west: west,
@@ -311,6 +314,7 @@ class DiscoveryLogicFacade {
     east: east,
     fromLatitude: fromLatitude,
     fromLongitude: fromLongitude,
+    zoom: zoom,
     limit: limit,
   );
 
@@ -330,16 +334,20 @@ class DiscoveryLogicFacade {
 
   /// REQ102_41 - what a tap on [cluster] should do: the zoom that visibly
   /// breaks it up, or its members when no zoom ever separates them.
+  /// [foodIds] is for a cluster on the search layer: it must be opened against
+  /// the dishes the keyword matched, not the filter chips.
   Future<ClusterExpansion> expandMapCluster(
     MapCluster cluster, {
     required double zoom,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
+    List<int>? foodIds,
   }) => mapExploration.expandCluster(
     cluster,
     zoom: zoom,
     filter: filter,
     localFoodId: localFoodId,
+    foodIds: foodIds,
   );
 
   /// REQ102_47 - the full detail behind one tapped marker, fetched by id.
