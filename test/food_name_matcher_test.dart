@@ -139,6 +139,111 @@ void main() {
       );
     });
 
+    test('a "Cendol Jagung" variant resolves to the curated Cendol row '
+        '(so no new food row is created)', () {
+      // The live catalogue shape: 'Cendol' (375), 'Nyonya Cendol' (58) and
+      // 'Durian Cendol' (86) coexist. Only the plain 'Cendol' row prefixes
+      // the variant name, so "cendol jagung" links to it - and
+      // `FoodRecognitionLogic.registerNewDishes` skips the insert for any
+      // dish `bestMatch` already resolves.
+      final cendol = _food(
+        375,
+        'Cendol',
+        synonyms: <String>['chendol', 'cendol pulut', 'cendol gula Melaka'],
+      );
+      final nyonya = _food(58, 'Nyonya Cendol', synonyms: <String>['chendol']);
+      final durian = _food(
+        86,
+        'Durian Cendol',
+        synonyms: <String>['cendol durian'],
+      );
+      final catalogue = <LocalFood>[cendol, nyonya, durian];
+
+      expect(
+        FoodNameMatcher.bestMatch('Cendol Jagung', catalogue),
+        same(cendol),
+      );
+      // An exact variant synonym still beats the plain prefix.
+      expect(
+        FoodNameMatcher.bestMatch('cendol durian', catalogue),
+        same(durian),
+      );
+    });
+
+    test('a "nasi kukus ..." variant resolves to the merged curated row', () {
+      final nasiKukus = _food(
+        19,
+        'Nasi Kukus Ayam Goreng Berempah',
+        synonyms: <String>['nasi kukus', 'nasi kukus ayam berempah'],
+      );
+      final catalogue = <LocalFood>[nasiKukus];
+
+      expect(
+        FoodNameMatcher.bestMatch('nasi kukus', catalogue),
+        same(nasiKukus),
+      );
+      expect(
+        FoodNameMatcher.bestMatch('nasi kukus ayam berempah', catalogue),
+        same(nasiKukus),
+      );
+      expect(
+        FoodNameMatcher.bestMatch('nasi kukus special', catalogue),
+        same(nasiKukus),
+      );
+    });
+
+    test('a spelling shared by several rows resolves to the basest row', () {
+      // 'chendol' and 煎蕊 sit on both the plain and the Nyonya row - the
+      // plain base row (fewest words in its name) must win, so a generic
+      // spelling never lands on a specific dessert.
+      final nyonya = _food(
+        58,
+        'Nyonya Cendol',
+        synonyms: <String>['chendol', '煎蕊'],
+      );
+      final cendol = _food(375, 'Cendol', synonyms: <String>['chendol', '煎蕊']);
+      final catalogue = <LocalFood>[nyonya, cendol];
+
+      expect(FoodNameMatcher.bestMatch('chendol', catalogue), same(cendol));
+      expect(FoodNameMatcher.bestMatch('煎蕊', catalogue), same(cendol));
+    });
+
+    test('a word-order spelling is the SAME dish, not a variant', () {
+      final cendol = _food(
+        375,
+        'Cendol',
+        synonyms: <String>['chendol', 'cendol pulut'],
+      );
+      final nyonya = _food(
+        58,
+        'Nyonya Cendol',
+        synonyms: <String>['Melaka cendol'],
+      );
+      final catalogue = <LocalFood>[cendol, nyonya];
+
+      // "cendol nyonya" is "Nyonya Cendol" written back-to-front; without
+      // this tier the plain 'Cendol' prefix would wrongly claim it.
+      expect(
+        FoodNameMatcher.bestMatch('cendol nyonya', catalogue),
+        same(nyonya),
+      );
+      // Same for a reversed synonym ("cendol melaka" / "Melaka cendol").
+      expect(
+        FoodNameMatcher.bestMatch('cendol melaka', catalogue),
+        same(nyonya),
+      );
+      // The tier reports WHY the match happened: same dish, any order...
+      expect(
+        FoodNameMatcher.bestMatchDetailed('cendol nyonya', catalogue)?.tier,
+        FoodMatchTier.sameWords,
+      );
+      // ...while a genuinely unlisted extension reports the prefix tier.
+      expect(
+        FoodNameMatcher.bestMatchDetailed('cendol jagung', catalogue)?.tier,
+        FoodMatchTier.prefix,
+      );
+    });
+
     test('no match returns null', () {
       final nasiLemak = _food(1, 'Nasi Lemak');
       expect(

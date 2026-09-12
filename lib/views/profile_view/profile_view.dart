@@ -131,6 +131,13 @@ class _ProfileViewState extends State<ProfileView> {
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       ProfileLinkItem(
+                        icon: Icons.assignment_outlined,
+                        iconColor: AppColors.textPrimary,
+                        label: 'Incomplete Submissions',
+                        onTap: viewModel.openIncompleteLandmarks,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      ProfileLinkItem(
                         icon: Icons.logout,
                         iconColor: AppColors.textPrimary,
                         label: 'Log Out',

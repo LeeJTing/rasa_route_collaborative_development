@@ -32,8 +32,7 @@ class LandmarkItemDetailView extends StatefulWidget {
   const LandmarkItemDetailView({super.key});
 
   @override
-  State<LandmarkItemDetailView> createState() =>
-      _LandmarkItemDetailViewState();
+  State<LandmarkItemDetailView> createState() => _LandmarkItemDetailViewState();
 }
 
 class _LandmarkItemDetailViewState extends State<LandmarkItemDetailView> {
@@ -99,18 +98,9 @@ class _ItemDetails extends StatelessWidget {
         _Photo(item: item),
         const SizedBox(height: AppSpacing.md),
         Text(
-          item.dish.isEmpty ? 'Unnamed dish' : item.dish,
+          item.displayName.isEmpty ? 'Unnamed dish' : item.displayName,
           style: AppTextStyles.headlineSmall,
         ),
-        if (item.variant.isNotEmpty) ...<Widget>[
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Variant: ${item.variant}',
-            style: AppTextStyles.bodyMedium.copyWith(
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
         const SizedBox(height: AppSpacing.sm),
         Wrap(
           spacing: AppSpacing.sm,
@@ -197,7 +187,7 @@ class _Photo extends StatelessWidget {
         source: url,
         fit: BoxFit.contain,
         borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
-        semanticLabel: item.dish,
+        semanticLabel: item.displayName,
         fallback: _placeholder('Couldn’t load'),
       ),
     );
@@ -298,7 +288,11 @@ class _IconSection extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Icon(icon, size: AppSizes.iconSmall, color: AppColors.accentBrown),
+              Icon(
+                icon,
+                size: AppSizes.iconSmall,
+                color: AppColors.accentBrown,
+              ),
               const SizedBox(width: AppSpacing.xs),
               Text(
                 label,
