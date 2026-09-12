@@ -30,6 +30,12 @@ void main() {
       scrollable: find.byType(Scrollable).last,
     );
     expect(find.text('Local Foods Served (1)'), findsOneWidget);
+    await tester.tap(find.text('Local Foods Served (1)'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('A comforting local noodle dish in a rich prawn broth.'),
+      findsOneWidget,
+    );
 
     // Reporting now lives on a separate full-screen page that this button
     // opens (AppRoutes.reportPlace / ReportPlaceView). The button simply
