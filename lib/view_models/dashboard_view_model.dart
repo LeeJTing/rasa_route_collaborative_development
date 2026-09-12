@@ -1042,15 +1042,18 @@ class DashboardViewModel extends BaseViewModel {
   /// fetch, fired shortly after the map settles.
   void _schedulePinRefresh() {
     _pinRefreshTimer?.cancel();
-    _pinRefreshTimer = Timer(_pinRefreshDelay, () {
+    _pinRefreshTimer = Timer(_pinRefreshDelay, () async {
       if (_mode != DashboardMapMode.detailed) return;
-      _refreshSwipeModeRegion();
-      if (!_viewportChangedSinceLastPinLoad()) return;
-      _loadPins();
+      // Moving the map changes the visible pins, not the active Swipe deck.
+      // Re-localising an expanded deck here would replace its state-scoped
+      // session and reopen the Continue/New prompt while the tourist pans.
+      if (!_swipePanelExpanded) await _refreshSwipeModeRegion();
+      if (_mode != DashboardMapMode.detailed) return;
+      if (_viewportChangedSinceLastPinLoad()) await _loadPins();
       // The search layer is viewport-scoped too. Only its food half actually
       // costs a request - the name half is already in hand - so this is skipped
       // entirely when the keyword matched no dish.
-      if (_searchLayerFor.foods.isNotEmpty) _loadSearchPins();
+      if (_searchLayerFor.foods.isNotEmpty) await _loadSearchPins();
     });
   }
 
@@ -1624,11 +1627,68 @@ class DashboardViewModel extends BaseViewModel {
       MatchesRecommendationRequest(
         stateCode: _swipePreparation?.stateCode ?? '',
         stateName: _swipePreparation?.stateName ?? '',
-        origin: TouristLocation(
-          latitude: _centreLatitude,
-          longitude: _centreLongitude,
-        ),
+        origin: _sharedLocation,
       );
+
+  /// Matches edits the same device-local Swipe session. Reload it when that
+  /// page closes so this in-memory Dashboard copy cannot overwrite a removed
+  /// like the next time the tourist moves or likes a card.
+  Future<void> refreshSwipeSessionAfterMatches() async {
+    final SwipeModePreparation? preparation = _swipePreparation;
+    if (preparation == null) return;
+    await _runSwipeCommand(() async {
+      final SwipeSession? refreshed = await discoveryLogic.reloadSwipeSession(
+        preparation,
+      );
+      if (refreshed != null) _swipeSession = refreshed;
+      _showSwipeResumePrompt = false;
+      _swipeLikeRevision++;
+    }, showLoading: false);
+  }
+
+  /// Opens Profile and applies saved preference or dietary changes when the
+  /// tourist returns to this still-mounted Dashboard.
+  Future<void> openProfile() async {
+    await AppNavigator.push(AppRoutes.profile);
+    await refreshSwipeQueueAfterProfileChange();
+  }
+
+  /// Re-reads preferences and restrictions, then reconciles the active local
+  /// Swipe session without reopening its Continue/New prompt.
+  Future<void> refreshSwipeQueueAfterProfileChange() async {
+    if (!isDetailedView || _swipePreparation == null) return;
+
+    final bool wasShowingResumePrompt = _showSwipeResumePrompt;
+    final int? previousFoodId = currentSwipeFood?.id;
+    await _runSwipeCommand(() async {
+      final SwipeModePreparation refreshed = await discoveryLogic
+          .refreshSwipeModeAfterProfileChange(
+            latitude: _centreLatitude,
+            longitude: _centreLongitude,
+            distanceOrigin: _sharedLocation,
+          );
+      _swipePreparation = refreshed;
+
+      if (wasShowingResumePrompt) {
+        _swipeSession = null;
+        _showSwipeResumePrompt = refreshed.savedSession != null;
+        if (!_showSwipeResumePrompt) {
+          _swipeSession = await discoveryLogic.startNewSwipeSession(refreshed);
+        }
+      } else {
+        _swipeSession = refreshed.savedSession;
+        _showSwipeResumePrompt = false;
+        _swipeSession ??= await discoveryLogic.startNewSwipeSession(refreshed);
+      }
+
+      if (_swipePanelExpanded && !_showSwipeResumePrompt) {
+        final LocalFood? refreshedFood = currentSwipeFood;
+        if (refreshedFood?.id != previousFoodId) {
+          showFoodInTargetFrame(refreshedFood);
+        }
+      }
+    });
+  }
 
   // ===========================================================================
   // Retry
@@ -1694,6 +1754,7 @@ class DashboardViewModel extends BaseViewModel {
           .prepareSwipeMode(
             latitude: _centreLatitude,
             longitude: _centreLongitude,
+            distanceOrigin: _sharedLocation,
           );
       if (revision != _swipePrepareRevision || !isDetailedView) return;
       _swipePreparation = preparation;
