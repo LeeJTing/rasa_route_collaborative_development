@@ -58,6 +58,11 @@ class TouristRepositoryFacade {
 
   Future<String?> currentTouristId() => auth.currentTouristId();
 
+  /// True when the sign-in that just completed CREATED the account's `tourist`
+  /// row - its first ever authentication, and the only moment the first-run
+  /// set-up screen is shown (see `UserProfileLogic.needsProfileSetup`).
+  bool get accountJustCreated => auth.accountJustCreated;
+
   /// Returns the [Tourist] row for [session]'s auth user, auto-creating it on
   /// first sign-in - the "register" half of the login/register UX.
   Future<Tourist?> getOrCreateTourist(AuthSession session) =>
