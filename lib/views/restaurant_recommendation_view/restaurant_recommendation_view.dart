@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:rasa_route_collaborative_development/views/restaurant_recommendation_view/widgets/submmitted_landmark_card.dart';
 
 import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
@@ -67,13 +68,12 @@ class _RestaurantRecommendationViewState
 
                     _SourceTabs(source: vm.source, onChanged: vm.selectSource),
 
-                    if (vm.source == RestaurantSource.google)
-                      RestaurantFoodTypeFilter(
-                        options:
-                            RestaurantRecommendationViewModel.foodTypeOptions,
-                        selected: vm.selectedFoodType,
-                        onSelected: vm.selectFoodType,
-                      ),
+                    RestaurantFoodTypeFilter(
+                      options:
+                          RestaurantRecommendationViewModel.foodTypeOptions,
+                      selected: vm.selectedFoodType,
+                      onSelected: vm.selectFoodType,
+                    ),
 
                     Expanded(
                       child: vm.isLoadingResult
@@ -131,7 +131,7 @@ class _RestaurantRecommendationViewState
                                 final SubmittedLandmarkRecommendation landmark =
                                     vm.landmarks[index];
 
-                                return _SubmittedLandmarkCard(
+                                return SubmittedLandmarkCard(
                                   landmark: landmark,
                                   expanded: vm.isLandmarkExpanded(landmark.id),
                                   onExpand: () =>
