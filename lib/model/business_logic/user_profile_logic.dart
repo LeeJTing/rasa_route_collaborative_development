@@ -73,23 +73,8 @@ class UserProfileLogic {
   /// Every dietary restriction a tourist can pick.
   Future<List<DietaryRestriction>> dietaryRestrictionOptions() =>
       repository.dietaryRestrictionOptions();
-
-  /// C3 gate: true while the signed-in tourist has not configured a profile
-  /// yet (no food preference AND no dietary restriction rows) - the app routes
-  /// them to the set-up screen before the dashboard.
-  ///
-  /// Failures are treated as "already set up" so a backend hiccup never traps
-  /// the tourist on the set-up screen.
-  Future<bool> needsProfileSetup() async {
-    try {
-      final List<FoodPreference> preferences = await getFoodPreferences();
-      final List<DietaryRestriction> restrictions =
-          await getDietaryRestrictions();
-      return preferences.isEmpty && restrictions.isEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
+  
+  Future<bool> needsProfileSetup() async => repository.accountJustCreated;
 
   /// Persists the signed-in tourist's dietary-restriction selection.
   Future<void> saveDietaryRestrictions(List<int> restrictionIds) async {

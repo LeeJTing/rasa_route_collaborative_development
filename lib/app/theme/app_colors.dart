@@ -283,4 +283,9 @@ abstract final class AppColors {
 
   /// The wash inside that ring, so the marker reads as lifted off the map.
   static const Color pinSearchHalo = Color(0x3300897B);
+
+  /// A cluster badge on the search layer. The same teal as the pin ring, so
+  /// "this came from what you typed" is one colour whether it is drawn as a
+  /// marker or as a count.
+  static const Color clusterSearchFill = Color(0xFF00897B);
 }

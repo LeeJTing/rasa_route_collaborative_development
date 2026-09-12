@@ -76,13 +76,6 @@ class HeatmapLegend extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.xs),
-        Text(
-          maximumPlaceCount == 0
-              ? 'No places mapped yet'
-              : 'Best-served state: $maximumPlaceCount places',
-          style: AppTextStyles.mapMicroLabel,
-        ),
       ],
     );
   }

@@ -70,6 +70,18 @@ class AuthRepository {
   // `TouristDataModel`.
   // ==========================================================================
 
+  /// True when the sign-in that just completed CREATED the `tourist` row -
+  /// that account's first ever authentication. Set by [getOrCreateTourist] and
+  /// cleared on sign-out; read by the first-run set-up gate, which must not ask
+  /// an account that already exists (see `UserProfileLogic.needsProfileSetup`).
+  ///
+  /// STATIC like the pending-OTP marker: every logic facade builds its own
+  /// `AuthRepository`, so the sign-in path (which sets it) and the profile path
+  /// (which reads it) must share one value.
+  static bool _accountJustCreated = false;
+
+  bool get accountJustCreated => _accountJustCreated;
+
   /// The signed-in tourist's id, or null if nobody is signed in.
   ///
   /// Resolves through the authenticated session to the real `tourist_id`,
@@ -108,6 +120,9 @@ class AuthRepository {
       <String, dynamic>{'tourist_id': _newUuid(), 'id': session.userId},
     );
     if (inserted == null) return null;
+    // The row was CREATED, so this authentication is the account's first ever -
+    // the one moment the first-run set-up screen belongs to.
+    _accountJustCreated = true;
     return _toTouristDomain(TouristDataModel.fromJson(inserted), session.email);
   }
 
@@ -255,6 +270,8 @@ class AuthRepository {
   Future<void> signOut() async {
     await api.signOut();
     await clearStoredSession();
+    // The "account was just created" mark belongs to the session that left.
+    _accountJustCreated = false;
   }
 
   /// Returns the authenticated Supabase user id, or an empty string.

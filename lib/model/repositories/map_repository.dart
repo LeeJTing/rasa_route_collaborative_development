@@ -416,8 +416,15 @@ class MapRepository {
     required double zoom,
     List<int>? foodIds,
     int limit = 400,
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
-    if (foodIds != null && foodIds.isEmpty) return MapMarkerSet.empty;
+    // An empty id list means "a filter is on and nothing survived it", which is
+    // a real answer - every cell empty - rather than a reason to query. It only
+    // holds while nothing else is asking, though: a keyword is a second way in,
+    // and its results do not have to survive the chips.
+    if (foodIds != null && foodIds.isEmpty && search.isEmpty) {
+      return MapMarkerSet.empty;
+    }
 
     final String key = _markerKey(
       south: southLatitude,
@@ -427,6 +434,7 @@ class MapRepository {
       zoom: zoom,
       foodIds: foodIds,
       limit: limit,
+      search: search,
     );
     final _CachedMarkers? cached = _markerCache[key];
     if (cached != null &&
@@ -446,6 +454,16 @@ class MapRepository {
           'p_zoom': zoom,
           'p_food_ids': foodIds,
           'p_limit': limit,
+          // Null rather than an empty array when nothing is searched: the
+          // function tests `is not null` to decide whether a search is running
+          // at all, and an empty array is not null.
+          'p_search_food_ids': search.foodIds.isEmpty ? null : search.foodIds,
+          'p_search_restaurant_ids': search.restaurantIds.isEmpty
+              ? null
+              : search.restaurantIds,
+          'p_search_landmark_ids': search.landmarkIds.isEmpty
+              ? null
+              : search.landmarkIds,
         },
       );
     } catch (_) {
@@ -465,6 +483,7 @@ class MapRepository {
             latitude: data.latitude,
             longitude: data.longitude,
             count: data.pointCount,
+            searchCount: data.searchCount,
           ),
         );
         continue;
@@ -500,8 +519,9 @@ class MapRepository {
     required double zoom,
     required double maximumZoom,
     List<int>? foodIds,
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
-    if (foodIds != null && foodIds.isEmpty) {
+    if (foodIds != null && foodIds.isEmpty && search.isEmpty) {
       return (splitZoom: null, memberCount: 0);
     }
     final List<Map<String, dynamic>> rows;
@@ -514,6 +534,15 @@ class MapRepository {
           'p_zoom': zoom,
           'p_food_ids': foodIds,
           'p_max_zoom': maximumZoom,
+          // The probe has to see the same set the badge was drawn from, or it
+          // answers with a zoom that does not split this badge.
+          'p_search_food_ids': search.foodIds.isEmpty ? null : search.foodIds,
+          'p_search_restaurant_ids': search.restaurantIds.isEmpty
+              ? null
+              : search.restaurantIds,
+          'p_search_landmark_ids': search.landmarkIds.isEmpty
+              ? null
+              : search.landmarkIds,
         },
       );
     } catch (_) {
@@ -539,8 +568,11 @@ class MapRepository {
     required double zoom,
     List<int>? foodIds,
     int limit = 200,
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
-    if (foodIds != null && foodIds.isEmpty) return const <MapPin>[];
+    if (foodIds != null && foodIds.isEmpty && search.isEmpty) {
+      return const <MapPin>[];
+    }
     final List<Map<String, dynamic>> rows;
     try {
       rows = await api.callFunction(
@@ -551,6 +583,13 @@ class MapRepository {
           'p_zoom': zoom,
           'p_food_ids': foodIds,
           'p_limit': limit,
+          'p_search_food_ids': search.foodIds.isEmpty ? null : search.foodIds,
+          'p_search_restaurant_ids': search.restaurantIds.isEmpty
+              ? null
+              : search.restaurantIds,
+          'p_search_landmark_ids': search.landmarkIds.isEmpty
+              ? null
+              : search.landmarkIds,
         },
       );
     } catch (_) {
@@ -580,6 +619,9 @@ class MapRepository {
       // ~306px and Google is serving 426x240 to every marker that gets tapped.
       thumbnailUrl: APIManager.thumbnailUrl(full, width: pinThumbnailWidth),
       rating: data.rating,
+      // Postgres decided this, not the client: one grid over both sets, and
+      // `search_count` on a single marker says which set it came from.
+      isSearchResult: data.isSearchResult,
     );
   }
 
@@ -600,6 +642,7 @@ class MapRepository {
     required double zoom,
     required List<int>? foodIds,
     required int limit,
+    required MapSearchSelection search,
   }) {
     final String box =
         '${south.toStringAsFixed(3)},${west.toStringAsFixed(3)},'
@@ -607,7 +650,10 @@ class MapRepository {
     final String foods = foodIds == null
         ? 'all'
         : (List<int>.of(foodIds)..sort()).join('.');
-    return '$box|${zoom.toStringAsFixed(1)}|$foods|$limit';
+    // The search half is part of the question, so it is part of the key.
+    // Without it, typing a keyword would be answered from the cached markers
+    // of the same viewport with nothing flagged.
+    return '$box|${zoom.toStringAsFixed(1)}|$foods|$limit|${search.cacheKey}';
   }
 
   /// How much map data exists right now - polled by `RestaurantMonitor` to

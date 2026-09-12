@@ -78,4 +78,9 @@ class OpeningHoursLogic {
     List<OpeningHour>? hours,
     DateTime malaysiaTime,
   ) => availabilityAt(hours, malaysiaTime) == OpeningHoursAvailability.closed;
+
+  static bool isConfidentlyOpenAt(
+    List<OpeningHour>? hours,
+    DateTime malaysiaTime,
+  ) => availabilityAt(hours, malaysiaTime) == OpeningHoursAvailability.open;
 }

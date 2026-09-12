@@ -9,6 +9,8 @@ import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/tourist_location.dart';
+import 'package:string_similarity/string_similarity.dart';
+
 import '../repositories/discovery_repository_facade.dart';
 import 'dart:math' as math;
 
@@ -123,6 +125,40 @@ class MapExplorationLogic {
   /// How many location results the list shows. Enough to find what you meant,
   /// short enough to scan.
   static const int maximumPlaceResults = 12;
+
+  /// The same, for the "Local Food" half - and the same ids the search layer
+  /// asks the map about, so a keyword can never turn into an open-ended query.
+  static const int maximumFoodResults = 12;
+
+  /// How close a dish's name has to be before the keyword is taken to mean it.
+  ///
+  /// **Measured, not guessed.** Every name in the live catalogue was scored
+  /// against a set of real typos and the number chosen from what it did to
+  /// them:
+  ///
+  /// | keyword | intended dish | score |
+  /// |---|---|---|
+  /// | `teh tarikk` | Teh Tarik | 0.93 |
+  /// | `rendag daging` | Rendang Daging | 0.87 |
+  /// | `murtabk` | Murtabak | 0.77 |
+  /// | `nasi lemka` | Nasi Lemak | 0.75 |
+  /// | `cendl` | Cendol | 0.67 |
+  /// | `chiken rice` | Hainanese Chicken Rice | 0.57 |
+  ///
+  /// Each of those ranks first for its keyword, or first among equals -
+  /// `chiken rice` puts Chicken Rice Ball and Claypot Chicken Rice above the
+  /// Hainanese one, which is three right answers rather than a wrong one.
+  ///
+  /// 0.55 sits just under the weakest of them and just over what has to go.
+  /// Raising it to 0.6 loses that Hainanese Chicken Rice at 0.57. Lowering it
+  /// to 0.5 admits the band between - Kuih Talam and Kuih Lopes for a search
+  /// for `kuih lapis`, Gulai Kambing for `gulai ayam` - which are other dishes,
+  /// not other spellings.
+  ///
+  /// Pure nonsense needs no threshold at all: `asdfghjkl` and `qwerty` score 0
+  /// against every name, because two strings with no bigram in common share
+  /// nothing for Dice to count.
+  static const double foodMatchThreshold = 0.55;
 
   /// Where Find Me and the initial GPS centring settle the map
   /// (REQ102_8, REQ102_9).
@@ -473,6 +509,9 @@ class MapExplorationLogic {
     double? fromLongitude,
     double zoom = detailedViewZoom,
     int? limit,
+    /// What a keyword is asking about, grouped into the same grid as the
+    /// filter's answer rather than queried separately.
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
     // Without a box there is nothing to ask about. The detailed map always has
     // one; this is the guard for anyone calling before the first camera event.
@@ -504,6 +543,7 @@ class MapExplorationLogic {
       zoom: zoom,
       foodIds: resolvedFoodIds,
       limit: cap,
+      search: search,
     );
 
     // Distance to the tourist is the one thing Postgres was not asked for: it
@@ -535,102 +575,53 @@ class MapExplorationLogic {
     );
   }
 
-  /// Ceiling on the temporary search layer.
+  /// The search half of a marker query, built from what a keyword matched.
   ///
-  /// Smaller than [maximumMarkers], because this is drawn *on top of* a map
-  /// that already has its own markers and is meant to answer "where is what I
-  /// asked for", not to repaint the country.
-  static const int maximumSearchPins = 60;
-
-  /// The markers a keyword adds to the map, on top of whatever the filters are
-  /// already drawing.
+  /// **There is no second query any more.** The search layer used to be its own
+  /// call to `map_food_markers`, which meant two grids over overlapping sets of
+  /// places and two badges landing on top of each other - 100 here, 5 there,
+  /// for places standing in the same street. Postgres now groups the filtered
+  /// map and the search results together, once, and this is what tells it which
+  /// places the keyword is asking about.
   ///
-  /// **Search is the other way in.** The filter chips drive the map; a keyword
-  /// is an independent question, so this deliberately takes no
-  /// [ExplorationFilter] - a place the tourist has named by hand appears
-  /// whether or not it serves something the chips are asking for. What it does
-  /// *not* relax is the base rule or the geography: everything here is
-  /// `available` (`map_place_search` and `map_food_markers` both apply
-  /// `is_place_visible`) and everything here is inside the viewport it was
-  /// asked for.
+  /// Two ways in, because a keyword can name two different things:
   ///
-  /// Two halves, because a keyword can name two different things:
+  ///  * a **place**, by name - `map_place_search` has already answered, so the
+  ///    ids cost nothing to collect;
+  ///  * a **dish**, by name - Restaurant/Landmark -> Local Food, the same
+  ///    relationship the filters use, which is why "nasi lemak" reaches the
+  ///    stalls that sell it.
   ///
-  /// * a **place**, answered by the names `map_place_search` already returned -
-  ///   coordinates included, so this half costs nothing at all;
-  /// * a **dish**, answered by asking for the places serving it. That is
-  ///   Restaurant/Landmark -> Local Food, the same relationship the filters
-  ///   use, and it is why "nasi lemak" pins the stalls that sell it rather than
-  ///   pinning nothing.
-  ///
-  /// Deduplicated by place, so a restaurant matched by both its name and its
-  /// menu is one marker. The name half wins, because it is the more direct
-  /// answer to what was typed.
-  Future<List<MapPin>> searchLayerPins({
-    required ExplorationSearchResults results,
-    double? south,
-    double? west,
-    double? north,
-    double? east,
-    double? fromLatitude,
-    double? fromLongitude,
-    int? limit,
-  }) async {
-    final Map<String, MapPin> byPlace = <String, MapPin>{};
-
-    for (final PlaceSuggestion place in results.places) {
-      if (!place.isPlaceOnTheMap) continue;
-      final MapPinKind kind = place.isRestaurant
-          ? MapPinKind.restaurant
-          : MapPinKind.landmark;
-      byPlace['${kind.name}:${place.referenceId}'] = MapPin(
-        referenceId: place.referenceId!,
-        kind: kind,
-        latitude: place.latitude,
-        longitude: place.longitude,
-        label: place.name,
-        weight: 1,
-      );
-    }
-
+  /// Empty when the keyword matched nothing, and then the marker query behaves
+  /// exactly as it did before search existed.
+  static MapSearchSelection searchSelectionFor(
+    ExplorationSearchResults results,
+  ) {
     final List<int> foodIds = <int>[
       for (final LocalFood food in results.foods) food.id,
     ];
+    final List<int> restaurantIds = <int>[];
+    final List<int> landmarkIds = <int>[];
 
-    if (foodIds.isNotEmpty &&
-        south != null &&
-        west != null &&
-        north != null &&
-        east != null) {
-      // Asked at the top of the zoom ladder on purpose. `map_food_markers`
-      // folds each grid cell into one marker and the cell is sized from the
-      // zoom it is given; at the screen's own zoom a search result two streets
-      // from another would come back as a cluster badge, which is not an answer
-      // to "where is the thing I searched for". At [maximumZoom] a cell is a
-      // few metres across, so all but co-located places survive as pins.
-      //
-      // The cap, not the cell, is what bounds this: [maximumSearchPins] rows
-      // for one viewport, which is the whole reason the box is required.
-      final MapPinPage page = await pins(
-        foodIds: foodIds,
-        south: south,
-        west: west,
-        north: north,
-        east: east,
-        fromLatitude: fromLatitude,
-        fromLongitude: fromLongitude,
-        zoom: maximumZoom,
-        limit: limit ?? maximumSearchPins,
-      );
-      for (final MapPin pin in page.pins) {
-        byPlace.putIfAbsent(
-          '${pin.kind.name}:${pin.referenceId}',
-          () => pin,
-        );
+    for (final PlaceSuggestion place in results.places) {
+      if (!place.isPlaceOnTheMap) continue;
+      final int? id = int.tryParse(place.referenceId!);
+      if (id == null) continue;
+      if (place.isRestaurant) {
+        restaurantIds.add(id);
+      } else {
+        landmarkIds.add(id);
       }
     }
 
-    return List<MapPin>.unmodifiable(byPlace.values);
+    if (foodIds.isEmpty && restaurantIds.isEmpty && landmarkIds.isEmpty) {
+      return MapSearchSelection.none;
+    }
+    return MapSearchSelection(
+      foodIds: List<int>.unmodifiable(foodIds),
+      restaurantIds: List<int>.unmodifiable(restaurantIds),
+      landmarkIds: List<int>.unmodifiable(landmarkIds),
+    );
   }
 
   /// REQ102_41 - what a tap on [cluster] should do.
@@ -644,16 +635,22 @@ class MapExplorationLogic {
   /// circle so each is separately tappable. That moves the **drawn** position by
   /// a few metres at maximum zoom; `referenceId` is untouched, so tapping still
   /// opens the right restaurant.
+  /// [foodIds] overrides [filter] and [localFoodId], for a cluster that belongs
+  /// to the search layer: it was drawn from the dishes a keyword matched, and
+  /// it has to be opened by asking about those same dishes. Opening it against
+  /// the filter chips instead would probe a different set of places and hand
+  /// back a split zoom that does not split *this* badge.
   Future<ClusterExpansion> expandCluster(
     MapCluster cluster, {
     required double zoom,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
+    List<int>? foodIds,
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
-    final List<int>? foodIds = await _foodIdsFor(
-      filter: filter,
-      localFoodId: localFoodId,
-    );
+    final List<int>? resolvedFoodIds =
+        foodIds ??
+        await _foodIdsFor(filter: filter, localFoodId: localFoodId);
 
     final ({double? splitZoom, int memberCount}) probe = await repository.map
         .clusterSplitZoom(
@@ -661,7 +658,8 @@ class MapExplorationLogic {
           longitude: cluster.longitude,
           zoom: zoom,
           maximumZoom: maximumZoom,
-          foodIds: foodIds,
+          foodIds: resolvedFoodIds,
+          search: search,
         );
 
     if (probe.splitZoom != null) {
@@ -675,7 +673,8 @@ class MapExplorationLogic {
       latitude: cluster.latitude,
       longitude: cluster.longitude,
       zoom: zoom,
-      foodIds: foodIds,
+      foodIds: resolvedFoodIds,
+      search: search,
     );
     return ClusterExpansion(
       splitZoom: null,
@@ -895,6 +894,9 @@ class MapExplorationLogic {
     priceRange: pin.priceRange,
     openNow: pin.openNow,
     distanceMetres: distanceMetres,
+    // Carried, or every search result would lose its colour the moment the
+    // tourist's position is known and distances are filled in.
+    isSearchResult: pin.isSearchResult,
   );
 
   /// "RM20-40", or "RM20" when everything costs the same. Null when no dish
@@ -1076,20 +1078,29 @@ class MapExplorationLogic {
     //
     // Deciding that "ckt" and "Char Kuey Teow" are the same dish is a rule,
     // and rules live in this layer. The catalogue itself is the same cached
-    // 368 rows either way, so this costs nothing extra to read.
+    // 368 rows either way, so this costs nothing extra to read - and 368 names
+    // is small enough that fuzzy matching them on the phone is cheaper than
+    // asking Postgres would be.
+    //
+    // Threshold, then sort, then cap: a keyword that means a dish produces a
+    // handful of ids, best first, and those are the ids the map is asked about.
     final List<_ScoredFood> scoredFoods = <_ScoredFood>[];
     for (final LocalFood food in allFoods) {
-      final int score = _score(needle, <String>[food.name]);
-      if (score == 0) continue;
+      final double score = foodMatchScore(needle, food.name);
+      if (score < foodMatchThreshold) continue;
       scoredFoods.add(_ScoredFood(score, food));
     }
     scoredFoods.sort((_ScoredFood a, _ScoredFood b) {
       final int byScore = b.score.compareTo(a.score);
       if (byScore != 0) return byScore;
+      // Same closeness: the shorter name is the more direct answer, then
+      // alphabetically so the order never depends on catalogue order.
+      final int byLength = a.food.name.length.compareTo(b.food.name.length);
+      if (byLength != 0) return byLength;
       return a.food.name.compareTo(b.food.name);
     });
     final List<LocalFood> foods = List<LocalFood>.unmodifiable(
-      scoredFoods.map((_ScoredFood entry) => entry.food),
+      scoredFoods.take(maximumFoodResults).map((_ScoredFood e) => e.food),
     );
 
     final List<_ScoredPlace> scored = <_ScoredPlace>[];
@@ -1338,6 +1349,12 @@ class MapExplorationLogic {
     'satey': 'satay',
     'wonton': 'wantan',
     'wanton': 'wantan',
+    'maggie': 'maggi',
+    'bihun': 'bee hoon',
+    'mihun': 'bee hoon',
+    'kwetiau': 'kway teow',
+    'kuetiau': 'kway teow',
+    'kari': 'curry',
   };
 
   /// [value] as every spelling the synonym tables can reach from it.
@@ -1345,8 +1362,18 @@ class MapExplorationLogic {
   /// Always contains the normalised original first, so nothing a plain reading
   /// would have matched is lost by expanding it.
   static List<String> searchVariants(String value) {
+    // The same catalogue names are normalised against every keyword, and the
+    // normalisation is regex work. Cached, each name is folded once for the
+    // life of the app rather than once per name per search - measured at a
+    // little under half the cost of a full-catalogue sweep.
+    final List<String>? cached = _variantCache[value];
+    if (cached != null) return cached;
+
     final String base = searchNormalise(value);
-    if (base.isEmpty) return const <String>[];
+    if (base.isEmpty) {
+      _remember(value, const <String>[]);
+      return const <String>[];
+    }
 
     final List<String> variants = <String>[base];
 
@@ -1371,7 +1398,150 @@ class MapExplorationLogic {
     final String? foldedWhole = foodSynonyms[folded.join(' ')];
     if (foldedWhole != null) add(searchNormalise(foldedWhole));
 
-    return List<String>.unmodifiable(variants);
+    final List<String> result = List<String>.unmodifiable(variants);
+    _remember(value, result);
+    return result;
+  }
+
+  static void _remember(String value, List<String> variants) {
+    // Room for the whole food catalogue plus a long session's keywords. Past
+    // that the keywords are the growth, so the whole thing goes and the
+    // catalogue pays to be folded once more.
+    if (_variantCache.length > 512) _variantCache.clear();
+    _variantCache[value] = variants;
+  }
+
+  static final Map<String, List<String>> _variantCache = <String, List<String>>{};
+
+  /// How alike two dish names are, 0..1, over every spelling of both.
+  ///
+  /// Dice coefficient on bigrams, from `string_similarity`. Two characters
+  /// swapped costs a couple of bigrams rather than everything, which is what a
+  /// typo actually is - `nasi lemka` keeps six of Nasi Lemak's eight.
+  ///
+  /// **Both sides go through [searchVariants] first**, and that is not
+  /// optional: `compareTwoStrings` strips whitespace but does **not** fold case
+  /// or punctuation, so `Nasi Lemak` against `nasi-lemak` would score short of
+  /// 1 on nothing but capital letters. Normalising first also means the synonym
+  /// tables reach the fuzzy stage - `ckt` is compared as `char kway teow`.
+  ///
+  /// Asked of the **368-row cached catalogue only**. Restaurant and landmark
+  /// names are matched in Postgres, by a trigram index over 15,018 rows, and
+  /// are never downloaded to do it.
+  /// Two readings of "alike", and the better one wins.
+  ///
+  /// **Whole name against whole name** is the plain comparison, and it is the
+  /// right one for a keyword that names the dish. It has one failure, and it is
+  /// systematic: a short keyword is punished for the length of the name it is
+  /// looking for. `maggie` against `Maggi Goreng` scores 0.53 - under the
+  /// threshold - purely because `goreng` is in the name and not in the keyword.
+  /// That is not a weak match, it is a match against the wrong unit.
+  ///
+  /// **Word against word** is the second reading, and it fixes exactly that:
+  /// `maggie` against `maggi` is 0.89. See [_wordAlignedSimilarity] for what
+  /// keeps it honest.
+  static double foodSimilarity(String needle, String name) {
+    double best = 0;
+    for (final String typed in searchVariants(needle)) {
+      for (final String candidate in searchVariants(name)) {
+        final double whole = StringSimilarity.compareTwoStrings(
+          typed,
+          candidate,
+        );
+        if (whole > best) best = whole;
+
+        final double aligned =
+            _wordAlignedSimilarity(typed, candidate) * _wordAlignedWeight;
+        if (aligned > best) best = aligned;
+      }
+    }
+    return best;
+  }
+
+  /// Every word of the keyword against its best word in the name, scored by the
+  /// **worst** of those matches.
+  ///
+  /// The worst, not the average, because an average lets one strong word carry
+  /// a weak one: `nasi lemak` against `Gulai Lemak Itik` averages 0.65 on the
+  /// strength of `lemak` alone, and that is not a dish anybody searching for
+  /// nasi lemak wants to be shown. The worst match asks "did every word of the
+  /// keyword find a home in this name", which is the question.
+  ///
+  /// Returns 0 unless every word cleared [foodWordMatchFloor]. A word that only
+  /// half-matches is not an alignment, and reading it as one is how `nasilemak`
+  /// starts finding `Gulai Lemak Itik` through `lemak` at 0.67.
+  ///
+  /// One word against one word returns 0 as well: that *is* the whole-name
+  /// comparison, [foodSimilarity] has already counted it, and counting it again
+  /// here would only apply the discount below to it.
+  static double _wordAlignedSimilarity(String typed, String candidate) {
+    final List<String> typedWords = typed.split(' ')
+      ..removeWhere((String word) => word.isEmpty);
+    final List<String> nameWords = candidate.split(' ')
+      ..removeWhere((String word) => word.isEmpty);
+    if (typedWords.isEmpty || nameWords.isEmpty) return 0;
+    if (typedWords.length == 1 && nameWords.length == 1) return 0;
+
+    double worst = 1;
+    for (final String word in typedWords) {
+      double best = 0;
+      for (final String other in nameWords) {
+        // `compareTwoStrings` answers 0 for anything under two characters
+        // unless the two are equal, and the catalogue has words that short -
+        // `Kopi O`, `Teh C Peng Special`. Equality is checked first so those
+        // still count as the perfect matches they are.
+        final double score = word == other
+            ? 1
+            : StringSimilarity.compareTwoStrings(word, other);
+        if (score > best) best = score;
+      }
+      if (best < worst) worst = best;
+      if (worst < foodWordMatchFloor) return 0;
+    }
+    return worst;
+  }
+
+  /// How well a single word has to match before word-by-word alignment counts
+  /// as an alignment at all.
+  ///
+  /// Measured on the live catalogue. Without it, `nasilemak` reaches
+  /// `Gulai Lemak Itik`, `Udang Masak Lemak Nenas` and four more: the word
+  /// `lemak` matches at 0.67, and nothing else in those names has to match at
+  /// all. 0.75 sits above that and below every genuine word-level match in the
+  /// test set - `maggie`/`maggi` 0.89, `canaii`/`canai` 0.89,
+  /// `hokien`/`hokkien` 0.91.
+  static const double foodWordMatchFloor = 0.75;
+
+  /// A word-by-word match is worth a little less than the same closeness across
+  /// the whole name, so a dish that answers the keyword outright always sorts
+  /// above one that only answers it a word at a time.
+  static const double _wordAlignedWeight = 0.95;
+
+  /// How well [name] answers [needle], 0..1. Below [foodMatchThreshold] the
+  /// keyword is taken not to mean this dish at all.
+  ///
+  /// **Exact and synonym matching first, similarity second.** The ladder runs
+  /// before the fuzzy stage and sets a floor under whatever it found, so a
+  /// dish the tourist spelled correctly can never be beaten by one they did
+  /// not: an exact name is 1.0, a prefix 0.90, a word 0.80, a substring 0.70.
+  /// Everything the ladder scored 0 falls through to [foodSimilarity].
+  ///
+  /// A ladder hit still takes the *higher* of its floor and its own similarity,
+  /// so two dishes that both contain the keyword order by how close they are
+  /// rather than tying forever - `Cendol` beats `Durian Cendol` for `cendol`.
+  ///
+  /// The floors sit above the threshold by construction, so filtering never
+  /// removes a literal match. It only ever removes a guess.
+  static double foodMatchScore(String needle, String name) {
+    final double floor = switch (_score(needle, <String>[name])) {
+      _scoreExact => 1.0,
+      _scorePrefix => 0.90,
+      _scoreWord => 0.80,
+      _scoreContains => 0.70,
+      _ => 0.0,
+    };
+    final double similarity = foodSimilarity(needle, name);
+    return similarity > floor ? similarity : floor;
   }
 
   static bool _startsAWord(String value, String needle) {
@@ -1588,6 +1758,8 @@ class _ScoredPlace {
 class _ScoredFood {
   const _ScoredFood(this.score, this.food);
 
-  final int score;
+  /// 0..1. Not the place ladder's 0/20/40/100 - see
+  /// `MapExplorationLogic.foodMatchScore` for how the two relate.
+  final double score;
   final LocalFood food;
 }
