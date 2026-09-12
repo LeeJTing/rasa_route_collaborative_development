@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -256,8 +258,7 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumPlaceCount:
-                  viewModel.distribution.maximumPlaceCount,
+              maximumPlaceCount: viewModel.distribution.maximumPlaceCount,
             ),
           ),
 
@@ -513,6 +514,22 @@ class _DashboardViewState extends State<DashboardView> {
             final LatLng centre = camera.center;
             final double zoom = camera.zoom;
             final LatLngBounds bounds = camera.visibleBounds;
+            // Swipe Mode deliberately never moves the camera. Its fixed
+            // discovery area is the unobstructed top half of this map, above
+            // the expanded card panel. Convert that screen rectangle here,
+            // where the Flutter Map geometry belongs, and pass only plain
+            // coordinates into the ViewModel.
+            final double mapWidth = camera.nonRotatedSize.x;
+            final double topHalfHeight = camera.nonRotatedSize.y / 2;
+            final bool hasMeasuredMap = mapWidth > 0 && topHalfHeight > 0;
+            final LatLng swipeNorthWest = hasMeasuredMap
+                ? camera.pointToLatLng(const math.Point<double>(0, 0))
+                : bounds.northWest;
+            final LatLng swipeSouthEast = hasMeasuredMap
+                ? camera.pointToLatLng(
+                    math.Point<double>(mapWidth, topHalfHeight),
+                  )
+                : bounds.southEast;
             Future<void>.microtask(() {
               if (!mounted) return;
               viewModel.onCameraChanged(
@@ -523,6 +540,10 @@ class _DashboardViewState extends State<DashboardView> {
                 west: bounds.west,
                 north: bounds.north,
                 east: bounds.east,
+                swipeSouth: swipeSouthEast.latitude,
+                swipeWest: swipeNorthWest.longitude,
+                swipeNorth: swipeNorthWest.latitude,
+                swipeEast: swipeSouthEast.longitude,
               );
             });
           },

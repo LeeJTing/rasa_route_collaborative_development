@@ -994,6 +994,10 @@ class DashboardViewModel extends BaseViewModel {
     required double west,
     required double north,
     required double east,
+    double? swipeSouth,
+    double? swipeWest,
+    double? swipeNorth,
+    double? swipeEast,
   }) {
     final bool previousCanZoomIn = canZoomIn;
     final bool previousCanZoomOut = canZoomOut;
@@ -1005,6 +1009,10 @@ class DashboardViewModel extends BaseViewModel {
     _viewportWest = west;
     _viewportNorth = north;
     _viewportEast = east;
+    _swipeViewportSouth = swipeSouth;
+    _swipeViewportWest = swipeWest;
+    _swipeViewportNorth = swipeNorth;
+    _swipeViewportEast = swipeEast;
 
     final DashboardMapMode next = zoom >= DiscoveryLogicFacade.detailedViewZoom
         ? DashboardMapMode.detailed
@@ -1702,10 +1710,10 @@ class DashboardViewModel extends BaseViewModel {
             longitude: _centreLongitude,
             distanceOrigin: _sharedLocation,
             rebuildWholeQueue: rebuildWholeQueue,
-            south: _viewportSouth,
-            west: _viewportWest,
-            north: _viewportNorth,
-            east: _viewportEast,
+            south: _swipeViewportSouth,
+            west: _swipeViewportWest,
+            north: _swipeViewportNorth,
+            east: _swipeViewportEast,
           );
       _swipePreparation = refreshed;
       _rememberSwipeQueueViewport();
@@ -1748,6 +1756,10 @@ class DashboardViewModel extends BaseViewModel {
   double? _viewportWest;
   double? _viewportNorth;
   double? _viewportEast;
+  double? _swipeViewportSouth;
+  double? _swipeViewportWest;
+  double? _swipeViewportNorth;
+  double? _swipeViewportEast;
 
   double? _lastPinLatitude;
   double? _lastPinLongitude;
@@ -1796,10 +1808,10 @@ class DashboardViewModel extends BaseViewModel {
             latitude: _centreLatitude,
             longitude: _centreLongitude,
             distanceOrigin: _sharedLocation,
-            south: _viewportSouth,
-            west: _viewportWest,
-            north: _viewportNorth,
-            east: _viewportEast,
+            south: _swipeViewportSouth,
+            west: _swipeViewportWest,
+            north: _swipeViewportNorth,
+            east: _swipeViewportEast,
           );
       if (revision != _swipePrepareRevision || !isDetailedView) return;
       _swipePreparation = preparation;
@@ -1830,32 +1842,32 @@ class DashboardViewModel extends BaseViewModel {
   }
 
   void _rememberSwipeQueueViewport() {
-    _swipeQueueSouth = _viewportSouth;
-    _swipeQueueWest = _viewportWest;
-    _swipeQueueNorth = _viewportNorth;
-    _swipeQueueEast = _viewportEast;
+    _swipeQueueSouth = _swipeViewportSouth;
+    _swipeQueueWest = _swipeViewportWest;
+    _swipeQueueNorth = _swipeViewportNorth;
+    _swipeQueueEast = _swipeViewportEast;
   }
 
   void _offerSwipeQueueUpdateIfViewportChanged() {
-    if (_swipePreparation == null || !_hasViewportBounds) return;
+    if (_swipePreparation == null || !_hasSwipeViewportBounds) return;
     const double tolerance = 0.001;
     final bool changed =
         _swipeQueueSouth == null ||
-        (_viewportSouth! - _swipeQueueSouth!).abs() > tolerance ||
-        (_viewportWest! - _swipeQueueWest!).abs() > tolerance ||
-        (_viewportNorth! - _swipeQueueNorth!).abs() > tolerance ||
-        (_viewportEast! - _swipeQueueEast!).abs() > tolerance;
+        (_swipeViewportSouth! - _swipeQueueSouth!).abs() > tolerance ||
+        (_swipeViewportWest! - _swipeQueueWest!).abs() > tolerance ||
+        (_swipeViewportNorth! - _swipeQueueNorth!).abs() > tolerance ||
+        (_swipeViewportEast! - _swipeQueueEast!).abs() > tolerance;
     if (!changed || _swipeQueueUpdatePending) return;
     _swipeQueueUpdatePending = true;
     _swipeQueueProfileChanged = false;
     safeNotifyListeners();
   }
 
-  bool get _hasViewportBounds =>
-      _viewportSouth != null &&
-      _viewportWest != null &&
-      _viewportNorth != null &&
-      _viewportEast != null;
+  bool get _hasSwipeViewportBounds =>
+      _swipeViewportSouth != null &&
+      _swipeViewportWest != null &&
+      _swipeViewportNorth != null &&
+      _swipeViewportEast != null;
 
   Future<void> _runSwipeCommand(
     Future<void> Function() command, {
@@ -1935,6 +1947,8 @@ class DashboardViewModel extends BaseViewModel {
   Future<void> _loadPins({bool clearFirst = false}) => runGuarded(() async {
     final int revision = ++_pinLoadRevision;
     final int? requestedFoodId = _activePinFoodId;
+    final bool useSwipeViewport =
+        requestedFoodId != null && _hasSwipeViewportBounds;
 
     if (clearFirst && (_pins.isNotEmpty || _clusters.isNotEmpty)) {
       _pins = const <MapPin>[];
@@ -1958,10 +1972,10 @@ class DashboardViewModel extends BaseViewModel {
     final MapPinPage page = await discoveryLogic.mapPins(
       filter: _filter,
       localFoodId: requestedFoodId,
-      south: _viewportSouth,
-      west: _viewportWest,
-      north: _viewportNorth,
-      east: _viewportEast,
+      south: useSwipeViewport ? _swipeViewportSouth : _viewportSouth,
+      west: useSwipeViewport ? _swipeViewportWest : _viewportWest,
+      north: useSwipeViewport ? _swipeViewportNorth : _viewportNorth,
+      east: useSwipeViewport ? _swipeViewportEast : _viewportEast,
       fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
       fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
       zoom: _zoom,
