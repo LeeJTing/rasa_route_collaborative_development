@@ -272,4 +272,15 @@ abstract final class AppColors {
 
   /// Darker edge of whichever pin colour, for the selected pin.
   static const Color pinSelectedRing = Color(0xFF2B2B2B);
+
+  // A search result keeps its source colour - a restaurant found by name is
+  // still a restaurant - and is marked by a ring around it instead. Colouring
+  // it differently would have cost the one thing the two pin colours exist to
+  // say.
+
+  /// Ring drawn around a marker the current keyword matched.
+  static const Color pinSearchRing = Color(0xFF00897B);
+
+  /// The wash inside that ring, so the marker reads as lifted off the map.
+  static const Color pinSearchHalo = Color(0x3300897B);
 }
