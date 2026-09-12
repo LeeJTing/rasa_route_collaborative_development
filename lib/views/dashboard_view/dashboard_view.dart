@@ -376,6 +376,15 @@ class _DashboardViewState extends State<DashboardView> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
+              if (viewModel.swipeQueueUpdateAvailable) ...<Widget>[
+                MapUpdateBanner(
+                  message: viewModel.swipeQueueUpdateMessage,
+                  onUpdate: viewModel.applySwipeQueueUpdate,
+                  onDismiss: viewModel.dismissSwipeQueueUpdate,
+                  busy: viewModel.swipeLoading,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
               if (viewModel.notice != null) ...<Widget>[
                 _NoticeBanner(
                   message: viewModel.notice!,

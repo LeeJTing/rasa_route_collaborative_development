@@ -426,7 +426,8 @@ class DashboardViewModel extends BaseViewModel {
     if (availability == null || !isDetailedView) return null;
     final int count = availability.placeCount;
     if (count == 0) return null;
-    final bool narrowed = _filter.selectionCount > 0 || _activePinFoodId != null;
+    final bool narrowed =
+        _filter.selectionCount > 0 || _activePinFoodId != null;
     return '${availability.region.name} - $count '
         '${narrowed ? 'matching ' : ''}'
         '${count == 1 ? 'place' : 'places'} in this state';
@@ -592,12 +593,23 @@ class DashboardViewModel extends BaseViewModel {
   bool _showSwipeResumePrompt = false;
   int _swipeLikeRevision = 0;
   int _swipePrepareRevision = 0;
+  bool _swipeQueueUpdatePending = false;
+  bool _swipeQueueProfileChanged = false;
+  double? _swipeQueueSouth;
+  double? _swipeQueueWest;
+  double? _swipeQueueNorth;
+  double? _swipeQueueEast;
 
   bool get swipeLoading => _swipeLoading;
   String? get swipeError => _swipeError;
   bool get showSwipeResumePrompt => _showSwipeResumePrompt;
   String get swipeStateName => _swipePreparation?.stateName ?? 'this state';
   int get swipeLikeRevision => _swipeLikeRevision;
+  bool get swipeQueueUpdateAvailable =>
+      _swipePanelExpanded && _swipeQueueUpdatePending;
+  String get swipeQueueUpdateMessage => _swipeQueueProfileChanged
+      ? 'Your preferences changed. Update the food queue?'
+      : 'The map area changed. Update foods for this view?';
 
   int get savedSwipeCardCount {
     final SwipeSession? saved = _swipePreparation?.savedSession;
@@ -667,6 +679,7 @@ class DashboardViewModel extends BaseViewModel {
         _prepareSwipeModeForActiveState();
       } else if (!_showSwipeResumePrompt) {
         showFoodInTargetFrame(currentSwipeFood);
+        _offerSwipeQueueUpdateIfViewportChanged();
       }
     } else {
       showFoodInTargetFrame(null);
@@ -1048,6 +1061,7 @@ class DashboardViewModel extends BaseViewModel {
       // Re-localising an expanded deck here would replace its state-scoped
       // session and reopen the Continue/New prompt while the tourist pans.
       if (!_swipePanelExpanded) await _refreshSwipeModeRegion();
+      if (_swipePanelExpanded) _offerSwipeQueueUpdateIfViewportChanged();
       if (_mode != DashboardMapMode.detailed) return;
       if (_viewportChangedSinceLastPinLoad()) await _loadPins();
       // The search layer is viewport-scoped too. Only its food half actually
@@ -1489,9 +1503,7 @@ class DashboardViewModel extends BaseViewModel {
     selectPin(
       MapPin(
         referenceId: place.referenceId!,
-        kind: place.isRestaurant
-            ? MapPinKind.restaurant
-            : MapPinKind.landmark,
+        kind: place.isRestaurant ? MapPinKind.restaurant : MapPinKind.landmark,
         latitude: place.latitude,
         longitude: place.longitude,
         label: place.name,
@@ -1649,13 +1661,36 @@ class DashboardViewModel extends BaseViewModel {
   /// Opens Profile and applies saved preference or dietary changes when the
   /// tourist returns to this still-mounted Dashboard.
   Future<void> openProfile() async {
-    await AppNavigator.push(AppRoutes.profile);
-    await refreshSwipeQueueAfterProfileChange();
+    final bool changed =
+        await AppNavigator.push<bool>(AppRoutes.profile) ?? false;
+    if (!changed || !isDetailedView || _swipePreparation == null) return;
+    _swipeQueueUpdatePending = true;
+    _swipeQueueProfileChanged = true;
+    safeNotifyListeners();
+  }
+
+  Future<void> applySwipeQueueUpdate() async {
+    final bool rebuildWholeQueue = _swipeQueueProfileChanged;
+    _swipeQueueUpdatePending = false;
+    _swipeQueueProfileChanged = false;
+    safeNotifyListeners();
+    await refreshSwipeQueueAfterProfileChange(
+      rebuildWholeQueue: rebuildWholeQueue,
+    );
+  }
+
+  void dismissSwipeQueueUpdate() {
+    if (!_swipeQueueUpdatePending) return;
+    _swipeQueueUpdatePending = false;
+    _swipeQueueProfileChanged = false;
+    safeNotifyListeners();
   }
 
   /// Re-reads preferences and restrictions, then reconciles the active local
   /// Swipe session without reopening its Continue/New prompt.
-  Future<void> refreshSwipeQueueAfterProfileChange() async {
+  Future<void> refreshSwipeQueueAfterProfileChange({
+    bool rebuildWholeQueue = false,
+  }) async {
     if (!isDetailedView || _swipePreparation == null) return;
 
     final bool wasShowingResumePrompt = _showSwipeResumePrompt;
@@ -1666,8 +1701,14 @@ class DashboardViewModel extends BaseViewModel {
             latitude: _centreLatitude,
             longitude: _centreLongitude,
             distanceOrigin: _sharedLocation,
+            rebuildWholeQueue: rebuildWholeQueue,
+            south: _viewportSouth,
+            west: _viewportWest,
+            north: _viewportNorth,
+            east: _viewportEast,
           );
       _swipePreparation = refreshed;
+      _rememberSwipeQueueViewport();
 
       if (wasShowingResumePrompt) {
         _swipeSession = null;
@@ -1755,9 +1796,16 @@ class DashboardViewModel extends BaseViewModel {
             latitude: _centreLatitude,
             longitude: _centreLongitude,
             distanceOrigin: _sharedLocation,
+            south: _viewportSouth,
+            west: _viewportWest,
+            north: _viewportNorth,
+            east: _viewportEast,
           );
       if (revision != _swipePrepareRevision || !isDetailedView) return;
       _swipePreparation = preparation;
+      _rememberSwipeQueueViewport();
+      _swipeQueueUpdatePending = false;
+      _swipeQueueProfileChanged = false;
       _swipeSession = null;
       _showSwipeResumePrompt = preparation.savedSession != null;
       if (!_showSwipeResumePrompt) {
@@ -1780,6 +1828,34 @@ class DashboardViewModel extends BaseViewModel {
       }
     }
   }
+
+  void _rememberSwipeQueueViewport() {
+    _swipeQueueSouth = _viewportSouth;
+    _swipeQueueWest = _viewportWest;
+    _swipeQueueNorth = _viewportNorth;
+    _swipeQueueEast = _viewportEast;
+  }
+
+  void _offerSwipeQueueUpdateIfViewportChanged() {
+    if (_swipePreparation == null || !_hasViewportBounds) return;
+    const double tolerance = 0.001;
+    final bool changed =
+        _swipeQueueSouth == null ||
+        (_viewportSouth! - _swipeQueueSouth!).abs() > tolerance ||
+        (_viewportWest! - _swipeQueueWest!).abs() > tolerance ||
+        (_viewportNorth! - _swipeQueueNorth!).abs() > tolerance ||
+        (_viewportEast! - _swipeQueueEast!).abs() > tolerance;
+    if (!changed || _swipeQueueUpdatePending) return;
+    _swipeQueueUpdatePending = true;
+    _swipeQueueProfileChanged = false;
+    safeNotifyListeners();
+  }
+
+  bool get _hasViewportBounds =>
+      _viewportSouth != null &&
+      _viewportWest != null &&
+      _viewportNorth != null &&
+      _viewportEast != null;
 
   Future<void> _runSwipeCommand(
     Future<void> Function() command, {
@@ -1813,6 +1889,12 @@ class DashboardViewModel extends BaseViewModel {
     _swipeLoading = false;
     _swipeError = null;
     _showSwipeResumePrompt = false;
+    _swipeQueueUpdatePending = false;
+    _swipeQueueProfileChanged = false;
+    _swipeQueueSouth = null;
+    _swipeQueueWest = null;
+    _swipeQueueNorth = null;
+    _swipeQueueEast = null;
     if (_targetFrameOwnsSelection) {
       _selectedFood = null;
       _targetFrameOwnsSelection = false;
@@ -1974,8 +2056,7 @@ class DashboardViewModel extends BaseViewModel {
   /// layer on top instead, so the chips keep their answer and the keyword gets
   /// its own. Swipe Mode is unchanged: it owns the map while its panel is open,
   /// which is the whole point of a Target Frame.
-  int? get _activePinFoodId =>
-      _targetFrameOwnsSelection && _swipePanelExpanded
+  int? get _activePinFoodId => _targetFrameOwnsSelection && _swipePanelExpanded
       ? _selectedFood?.id
       : null;
 
@@ -2013,9 +2094,7 @@ class DashboardViewModel extends BaseViewModel {
   void _applySearchPins(List<MapPin> found, int revision) {
     if (revision != _searchPinRevision) return;
     _searchPins = found;
-    _searchPinKeys = <String>{
-      for (final MapPin pin in found) _pinKey(pin),
-    };
+    _searchPinKeys = <String>{for (final MapPin pin in found) _pinKey(pin)};
     _rebuildVisibleMarkers();
 
     // Same bargain as `_loadPins`: redraw only when the screen would differ,
