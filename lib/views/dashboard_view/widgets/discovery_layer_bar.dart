@@ -412,9 +412,7 @@ class _TargetFoodCard extends StatelessWidget {
                         style: AppTextStyles.titleSmall,
                       ),
                       Text(
-                        restricted
-                            ? 'Dietary caution • placed last'
-                            : 'Double tap to match',
+                        restricted ? 'Dietary caution' : 'Double tap to match',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.labelSmall.copyWith(
