@@ -200,12 +200,14 @@ class MatchesRecommendationLogic {
         _withRecommendationDetails(
           restaurant,
           category: _visibleCategory(restaurant.category),
-          distanceMetres: _distanceMetres(
-            request.origin.latitude,
-            request.origin.longitude,
-            occurrence.latitude,
-            occurrence.longitude,
-          ),
+          distanceMetres: request.origin.isKnown
+              ? _distanceMetres(
+                  request.origin.latitude,
+                  request.origin.longitude,
+                  occurrence.latitude,
+                  occurrence.longitude,
+                )
+              : null,
           items: matchedItems,
         ),
       );
@@ -263,14 +265,17 @@ class MatchesRecommendationLogic {
             category: occurrence.placeCategory?.trim().isNotEmpty == true
                 ? occurrence.placeCategory!
                 : 'Submitted Landmark',
-            distanceMetres:
-                _distanceMetres(
-                  request.origin.latitude,
-                  request.origin.longitude,
-                  occurrence.latitude,
-                  occurrence.longitude,
-                ) ??
-                double.infinity,
+            // The landmark presentation model uses infinity as its sortable
+            // "distance unavailable" value, whereas Restaurant can retain
+            // null directly. Never calculate from the 0,0 unknown sentinel.
+            distanceMetres: request.origin.isKnown
+                ? _distanceMetres(
+                    request.origin.latitude,
+                    request.origin.longitude,
+                    occurrence.latitude,
+                    occurrence.longitude,
+                  )
+                : double.infinity,
             dishes: dishes,
             imageUrl: occurrence.placeImageUrl,
             // The landmark's headline price is the AVERAGE of its dishes'

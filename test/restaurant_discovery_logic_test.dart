@@ -454,6 +454,7 @@ FoodOccurrence _landmarkOccurrence(
   placeName: 'Landmark $landmarkId',
   localFoodId: localFoodId,
   foodName: foodName,
+  foodType: 'Food',
   latitude: _testLocation.latitude + distanceKm / 111.2,
   longitude: _testLocation.longitude,
   placeCategory: 'Food stall',
