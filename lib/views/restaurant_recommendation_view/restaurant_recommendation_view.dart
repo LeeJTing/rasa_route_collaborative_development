@@ -52,115 +52,115 @@ class _RestaurantRecommendationViewState
           showBackButton: true,
           onProfileTap: () async {
             await Navigator.pushNamed(context, AppRoutes.profile);
-            await _viewModel.loadNearbyRestaurants();
+            await _viewModel.refreshAfterProfileChange();
           },
         ),
         body: Consumer<RestaurantRecommendationViewModel>(
           builder:
               (
-                BuildContext context,
-                RestaurantRecommendationViewModel vm,
-                Widget? child,
+              BuildContext context,
+              RestaurantRecommendationViewModel vm,
+              Widget? child,
               ) {
-                return Column(
-                  children: <Widget>[
-                    const _NearbyBanner(),
+            return Column(
+              children: <Widget>[
+                const _NearbyBanner(),
 
-                    _SourceTabs(source: vm.source, onChanged: vm.selectSource),
+                _SourceTabs(source: vm.source, onChanged: vm.selectSource),
 
-                    RestaurantFoodTypeFilter(
-                      options:
-                          RestaurantRecommendationViewModel.foodTypeOptions,
-                      selected: vm.selectedFoodType,
-                      onSelected: vm.selectFoodType,
+                RestaurantFoodTypeFilter(
+                  options:
+                  RestaurantRecommendationViewModel.foodTypeOptions,
+                  selected: vm.selectedFoodType,
+                  onSelected: vm.selectFoodType,
+                ),
+
+                Expanded(
+                  child: vm.isLoadingResult
+                      ? const Center(child: CircularProgressIndicator())
+                      : vm.state == ViewState.error &&
+                      vm.selectedSourceIsEmpty
+                      ? AsyncMessage(
+                    icon: Icons.location_off_outlined,
+                    title: 'Unable to load nearby places',
+                    message:
+                    vm.errorMessage ??
+                        'Check your connection and location, then try again.',
+                    actionLabel: 'Try again',
+                    onAction: vm.loadNearbyRestaurants,
+                  )
+                      : vm.selectedSourceIsEmpty
+                      ? _EmptySource(source: vm.source)
+                      : ListView.separated(
+                    padding: AppSpacing.screenPadding.copyWith(
+                      bottom: AppSpacing.xl,
                     ),
+                    itemCount: vm.source == RestaurantSource.google
+                        ? vm.visibleRestaurants.length
+                        : vm.landmarks.length,
+                    separatorBuilder: (_, _) =>
+                    const SizedBox(height: AppSpacing.md),
+                    itemBuilder: (BuildContext context, int index) {
+                      if (vm.source == RestaurantSource.google) {
+                        final Restaurant restaurant =
+                        vm.visibleRestaurants[index];
 
-                    Expanded(
-                      child: vm.isLoadingResult
-                          ? const Center(child: CircularProgressIndicator())
-                          : vm.state == ViewState.error &&
-                                vm.selectedSourceIsEmpty
-                          ? AsyncMessage(
-                              icon: Icons.location_off_outlined,
-                              title: 'Unable to load nearby places',
-                              message:
-                                  vm.errorMessage ??
-                                  'Check your connection and location, then try again.',
-                              actionLabel: 'Try again',
-                              onAction: vm.loadNearbyRestaurants,
-                            )
-                          : vm.selectedSourceIsEmpty
-                          ? _EmptySource(source: vm.source)
-                          : ListView.separated(
-                              padding: AppSpacing.screenPadding.copyWith(
-                                bottom: AppSpacing.xl,
+                        return RestaurantCard(
+                          restaurant: restaurant,
+                          distanceLabel: vm.distanceLabel(restaurant),
+                          expanded: vm.isRestaurantExpanded(
+                            restaurant.id,
+                          ),
+                          onExpand: () => vm.toggleRestaurantExpanded(
+                            restaurant.id,
+                          ),
+                          onTap: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.restaurantDetail,
+                            arguments: restaurant.id,
+                          ),
+                          onFoodImageTap: (RestaurantItem item) =>
+                              _showEnlargedImage(
+                                context,
+                                item.imageUrl,
+                                item.foodName,
                               ),
-                              itemCount: vm.source == RestaurantSource.google
-                                  ? vm.visibleRestaurants.length
-                                  : vm.landmarks.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: AppSpacing.md),
-                              itemBuilder: (BuildContext context, int index) {
-                                if (vm.source == RestaurantSource.google) {
-                                  final Restaurant restaurant =
-                                      vm.visibleRestaurants[index];
+                        );
+                      }
 
-                                  return RestaurantCard(
-                                    restaurant: restaurant,
-                                    distanceLabel: vm.distanceLabel(restaurant),
-                                    expanded: vm.isRestaurantExpanded(
-                                      restaurant.id,
-                                    ),
-                                    onExpand: () => vm.toggleRestaurantExpanded(
-                                      restaurant.id,
-                                    ),
-                                    onTap: () => Navigator.pushNamed(
-                                      context,
-                                      AppRoutes.restaurantDetail,
-                                      arguments: restaurant.id,
-                                    ),
-                                    onFoodImageTap: (RestaurantItem item) =>
-                                        _showEnlargedImage(
-                                          context,
-                                          item.imageUrl,
-                                          item.foodName,
-                                        ),
-                                  );
-                                }
+                      final SubmittedLandmarkRecommendation landmark =
+                      vm.landmarks[index];
 
-                                final SubmittedLandmarkRecommendation landmark =
-                                    vm.landmarks[index];
-
-                                return SubmittedLandmarkCard(
-                                  landmark: landmark,
-                                  expanded: vm.isLandmarkExpanded(landmark.id),
-                                  onExpand: () =>
-                                      vm.toggleLandmarkExpanded(landmark.id),
-                                  onTap: () =>
-                                      _openLandmarkDetails(context, landmark),
-                                  onImageTap:
-                                      (String? source, String semanticLabel) =>
-                                          _showEnlargedImage(
-                                            context,
-                                            source,
-                                            semanticLabel,
-                                          ),
-                                );
-                              },
+                      return SubmittedLandmarkCard(
+                        landmark: landmark,
+                        expanded: vm.isLandmarkExpanded(landmark.id),
+                        onExpand: () =>
+                            vm.toggleLandmarkExpanded(landmark.id),
+                        onTap: () =>
+                            _openLandmarkDetails(context, landmark),
+                        onImageTap:
+                            (String? source, String semanticLabel) =>
+                            _showEnlargedImage(
+                              context,
+                              source,
+                              semanticLabel,
                             ),
-                    ),
-                  ],
-                );
-              },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
   void _openLandmarkDetails(
-    BuildContext context,
-    SubmittedLandmarkRecommendation landmark,
-  ) {
+      BuildContext context,
+      SubmittedLandmarkRecommendation landmark,
+      ) {
     if (landmark.id <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Landmark details are unavailable.')),
@@ -172,10 +172,10 @@ class _RestaurantRecommendationViewState
   }
 
   Future<void> _showEnlargedImage(
-    BuildContext context,
-    String? source,
-    String semanticLabel,
-  ) {
+      BuildContext context,
+      String? source,
+      String semanticLabel,
+      ) {
     if (source?.trim().isNotEmpty != true) return Future<void>.value();
     return showDialog<void>(
       context: context,
@@ -431,7 +431,7 @@ class _SubmittedLandmarkCard extends StatelessWidget {
                     )
                   else
                     ...preview.map(
-                      (SubmittedLandmarkDish dish) =>
+                          (SubmittedLandmarkDish dish) =>
                           _LandmarkDishRow(dish: dish, onImageTap: onImageTap),
                     ),
                   if (landmark.dishes.length > _previewLimit)
@@ -545,3 +545,4 @@ class _LandmarkDishRow extends StatelessWidget {
     ),
   );
 }
+
