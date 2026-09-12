@@ -1049,9 +1049,6 @@ class MapRepository {
   }
 
   List<Future<List<Map<String, dynamic>>>> _chunkedRequests(
-    String column,
-    List<Object?> ids,
-  ) {
       String column,
       List<Object?> ids,
       ) {
