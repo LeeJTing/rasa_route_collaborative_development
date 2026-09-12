@@ -571,6 +571,32 @@ class _DashboardViewState extends State<DashboardView> {
                   .toList(growable: false),
             ),
 
+          // The same badges for the search layer, in its own colour and its own
+          // layer - drawn after the filtered ones so a search count is never
+          // hidden underneath a count the chips produced. Tapping behaves
+          // identically; only the dishes it is opened against differ.
+          if (viewModel.searchClusters.isNotEmpty)
+            MarkerLayer(
+              markers: viewModel.searchClusters
+                  .map(
+                    (MapCluster cluster) => Marker(
+                      key: ValueKey<String>('search:${cluster.key}'),
+                      point: LatLng(cluster.latitude, cluster.longitude),
+                      width: _clusterDiameter(cluster.count),
+                      height: _clusterDiameter(cluster.count),
+                      child: _ClusterMarker(
+                        count: cluster.count,
+                        searchResult: true,
+                        onTap: () => viewModel.zoomIntoCluster(
+                          cluster,
+                          searchLayer: true,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+
           // REQ102_32 - restaurant and submitted-landmark pins.
           MarkerLayer(
             markers: viewModel.pins
@@ -629,22 +655,34 @@ double _clusterDiameter(int count) {
 
 /// "1,200 places here", drawn as one tappable circle.
 class _ClusterMarker extends StatelessWidget {
-  const _ClusterMarker({required this.count, required this.onTap});
+  const _ClusterMarker({
+    required this.count,
+    required this.onTap,
+    this.searchResult = false,
+  });
 
   final int count;
+
+  /// Whether this badge belongs to the search layer. Same shape, same size,
+  /// same tap - a different fill, so a count the keyword produced is not read
+  /// as one the filter chips did.
+  final bool searchResult;
+
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: AppColors.primary,
-        border: Border.fromBorderSide(
+        color: searchResult
+            ? AppColors.clusterSearchFill
+            : AppColors.primary,
+        border: const Border.fromBorderSide(
           BorderSide(color: AppColors.surface, width: 2),
         ),
-        boxShadow: <BoxShadow>[
+        boxShadow: const <BoxShadow>[
           BoxShadow(
             color: AppColors.shadow,
             blurRadius: 4,
