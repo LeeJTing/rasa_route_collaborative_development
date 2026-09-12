@@ -24,6 +24,7 @@ class MapMarkerRowDataModel {
     required this.rating,
     required this.imageUrl,
     required this.pointCount,
+    this.searchCount = 0,
   });
 
   factory MapMarkerRowDataModel.fromJson(Map<String, dynamic> json) =>
@@ -36,6 +37,7 @@ class MapMarkerRowDataModel {
         rating: _asDoubleOrNull(json['rating']),
         imageUrl: _asStringOrNull(json['image_url']),
         pointCount: _asIntOrNull(json['point_count']) ?? 1,
+        searchCount: _asIntOrNull(json['search_count']) ?? 0,
       );
 
   final String source;
@@ -47,8 +49,17 @@ class MapMarkerRowDataModel {
   final String? imageUrl;
   final int pointCount;
 
+  /// How many of [pointCount] are search results, from `map_food_markers`'s
+  /// `search_count`. 0 on a row the keyword had nothing to do with, and 0 from
+  /// any caller that does not select the column, which is why it defaults
+  /// rather than being required.
+  final int searchCount;
+
   /// A cluster row carries no id and stands for more than itself.
   bool get isCluster => source == 'cluster';
+
+  /// A single marker that the keyword is what put on the map.
+  bool get isSearchResult => !isCluster && searchCount > 0;
 
   // PostgREST hands numerics back as String on some drivers, so every read goes
   // through one of these rather than a raw cast.
