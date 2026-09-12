@@ -36,18 +36,77 @@ class ExplorationMap {
 /// clustering never stops - it just gets finer. A cell holding one place comes
 /// back as a real [MapPin] instead, which is why clusters and pins arrive
 /// together and both are drawn.
+/// What a keyword contributes to the marker query, alongside the filter.
+///
+/// Three lists because a keyword can reach a place two ways - by naming it, or
+/// by naming a dish it serves - and the two id spaces are separate (C21). All
+/// empty means no search is active, and the marker query then answers exactly
+/// as it did before search existed.
+///
+/// A plain data type, so the repository, the logic and the ViewModel can all
+/// say "the search half of this query" without three more parameters each.
+class MapSearchSelection {
+  const MapSearchSelection({
+    this.foodIds = const <int>[],
+    this.restaurantIds = const <int>[],
+    this.landmarkIds = const <int>[],
+  });
+
+  static const MapSearchSelection none = MapSearchSelection();
+
+  /// Dishes the keyword matched. Every available place serving one of them is
+  /// a search result.
+  final List<int> foodIds;
+
+  /// Restaurants the keyword named outright.
+  final List<int> restaurantIds;
+
+  /// Landmarks the keyword named outright.
+  final List<int> landmarkIds;
+
+  bool get isEmpty =>
+      foodIds.isEmpty && restaurantIds.isEmpty && landmarkIds.isEmpty;
+
+  bool get isNotEmpty => !isEmpty;
+
+  /// Stable across two selections that hold the same ids in a different order,
+  /// so a cache keyed on this does not miss on tick order.
+  String get cacheKey {
+    if (isEmpty) return 'none';
+    String sorted(List<int> ids) => (List<int>.of(ids)..sort()).join('.');
+    return '${sorted(foodIds)}/${sorted(restaurantIds)}/${sorted(landmarkIds)}';
+  }
+}
+
 class MapCluster {
   const MapCluster({
     required this.latitude,
     required this.longitude,
     required this.count,
+    this.searchCount = 0,
   });
 
   final double latitude;
   final double longitude;
 
-  /// How many places this marker stands for. Always at least 1.
+  /// How many places this marker stands for. Always at least 1, and it counts
+  /// **every** place in the cell - the filtered map's and the keyword's alike.
+  /// There is one grid over both, so there is one number.
   final int count;
+
+  /// How many of [count] are search results. Grouping happens once over both
+  /// sets, so a cell is not one thing or the other; it is a proportion.
+  final int searchCount;
+
+  /// Any search result in here at all.
+  bool get hasSearchResults => searchCount > 0;
+
+  /// Every place in here is a search result.
+  bool get isAllSearchResults => searchCount >= count;
+
+  /// Some are, some are not - the case a separate search layer used to draw as
+  /// two badges on top of each other.
+  bool get isMixed => searchCount > 0 && searchCount < count;
 
   /// Stable enough to key a widget by, and to compare two loads for equality.
   String get key =>
@@ -191,12 +250,21 @@ class MapPin {
     this.priceRange,
     this.openNow,
     this.distanceMetres,
+    this.isSearchResult = false,
   });
 
   final String referenceId;
   final MapPinKind kind;
   final double latitude;
   final double longitude;
+
+  /// Whether the current keyword is what put this marker on the map.
+  ///
+  /// The marker's **type**, carried on the marker itself rather than held in a
+  /// set beside it, because one query now answers for the filtered map and the
+  /// search together and Postgres is what knows which is which. `false` for
+  /// every marker while no search is active.
+  final bool isSearchResult;
 
   /// The place's name.
   final String label;
