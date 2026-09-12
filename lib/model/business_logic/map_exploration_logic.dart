@@ -458,6 +458,13 @@ class MapExplorationLogic {
   Future<MapPinPage> pins({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
+    /// The dishes to constrain to, when the caller has already worked them out.
+    ///
+    /// Overrides [filter] and [localFoodId] rather than narrowing them - the
+    /// search layer asks for "places serving any of these dishes" and must not
+    /// inherit the filter chips, because a keyword is a different question from
+    /// the one the chips are asking.
+    List<int>? foodIds,
     double? south,
     double? west,
     double? north,
@@ -478,10 +485,9 @@ class MapExplorationLogic {
     // Which foods count. `null` is "no constraint" and is not the same as an
     // empty list, which is "a filter is on and nothing matches it" - the first
     // skips the menu lookup, the second is an empty map.
-    final List<int>? foodIds = await _foodIdsFor(
-      filter: filter,
-      localFoodId: localFoodId,
-    );
+    final List<int>? resolvedFoodIds =
+        foodIds ??
+        await _foodIdsFor(filter: filter, localFoodId: localFoodId);
 
     // REQ102_41 - a little wider than the screen, so panning a short way finds
     // its markers already loaded instead of flashing an empty edge.
@@ -496,7 +502,7 @@ class MapExplorationLogic {
       northLatitude: north + latitudePad,
       eastLongitude: east + longitudePad,
       zoom: zoom,
-      foodIds: foodIds,
+      foodIds: resolvedFoodIds,
       limit: cap,
     );
 
@@ -527,6 +533,104 @@ class MapExplorationLogic {
       totalInView: withDistance.length + markers.clusters.length,
       limit: cap,
     );
+  }
+
+  /// Ceiling on the temporary search layer.
+  ///
+  /// Smaller than [maximumMarkers], because this is drawn *on top of* a map
+  /// that already has its own markers and is meant to answer "where is what I
+  /// asked for", not to repaint the country.
+  static const int maximumSearchPins = 60;
+
+  /// The markers a keyword adds to the map, on top of whatever the filters are
+  /// already drawing.
+  ///
+  /// **Search is the other way in.** The filter chips drive the map; a keyword
+  /// is an independent question, so this deliberately takes no
+  /// [ExplorationFilter] - a place the tourist has named by hand appears
+  /// whether or not it serves something the chips are asking for. What it does
+  /// *not* relax is the base rule or the geography: everything here is
+  /// `available` (`map_place_search` and `map_food_markers` both apply
+  /// `is_place_visible`) and everything here is inside the viewport it was
+  /// asked for.
+  ///
+  /// Two halves, because a keyword can name two different things:
+  ///
+  /// * a **place**, answered by the names `map_place_search` already returned -
+  ///   coordinates included, so this half costs nothing at all;
+  /// * a **dish**, answered by asking for the places serving it. That is
+  ///   Restaurant/Landmark -> Local Food, the same relationship the filters
+  ///   use, and it is why "nasi lemak" pins the stalls that sell it rather than
+  ///   pinning nothing.
+  ///
+  /// Deduplicated by place, so a restaurant matched by both its name and its
+  /// menu is one marker. The name half wins, because it is the more direct
+  /// answer to what was typed.
+  Future<List<MapPin>> searchLayerPins({
+    required ExplorationSearchResults results,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
+    double? fromLatitude,
+    double? fromLongitude,
+    int? limit,
+  }) async {
+    final Map<String, MapPin> byPlace = <String, MapPin>{};
+
+    for (final PlaceSuggestion place in results.places) {
+      if (!place.isPlaceOnTheMap) continue;
+      final MapPinKind kind = place.isRestaurant
+          ? MapPinKind.restaurant
+          : MapPinKind.landmark;
+      byPlace['${kind.name}:${place.referenceId}'] = MapPin(
+        referenceId: place.referenceId!,
+        kind: kind,
+        latitude: place.latitude,
+        longitude: place.longitude,
+        label: place.name,
+        weight: 1,
+      );
+    }
+
+    final List<int> foodIds = <int>[
+      for (final LocalFood food in results.foods) food.id,
+    ];
+
+    if (foodIds.isNotEmpty &&
+        south != null &&
+        west != null &&
+        north != null &&
+        east != null) {
+      // Asked at the top of the zoom ladder on purpose. `map_food_markers`
+      // folds each grid cell into one marker and the cell is sized from the
+      // zoom it is given; at the screen's own zoom a search result two streets
+      // from another would come back as a cluster badge, which is not an answer
+      // to "where is the thing I searched for". At [maximumZoom] a cell is a
+      // few metres across, so all but co-located places survive as pins.
+      //
+      // The cap, not the cell, is what bounds this: [maximumSearchPins] rows
+      // for one viewport, which is the whole reason the box is required.
+      final MapPinPage page = await pins(
+        foodIds: foodIds,
+        south: south,
+        west: west,
+        north: north,
+        east: east,
+        fromLatitude: fromLatitude,
+        fromLongitude: fromLongitude,
+        zoom: maximumZoom,
+        limit: limit ?? maximumSearchPins,
+      );
+      for (final MapPin pin in page.pins) {
+        byPlace.putIfAbsent(
+          '${pin.kind.name}:${pin.referenceId}',
+          () => pin,
+        );
+      }
+    }
+
+    return List<MapPin>.unmodifiable(byPlace.values);
   }
 
   /// REQ102_41 - what a tap on [cluster] should do.
