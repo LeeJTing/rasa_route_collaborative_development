@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
-import '/../app/theme/app_colors.dart';
-import '/../app/theme/app_dimensions.dart';
-import '/../domain_model/matches_recommendation.dart';
+import '../../../app/theme/app_colors.dart';
+import '../../../app/theme/app_dimensions.dart';
+import '../../../domain_model/matches_recommendation.dart';
 import '../../common_widgets/app_image.dart';
+import '../../common_widgets/food_image_fallback.dart';
 
 class SubmittedLandmarkCard extends StatelessWidget {
   const SubmittedLandmarkCard({
+    super.key,
     required this.landmark,
     required this.expanded,
     required this.onExpand,
@@ -18,15 +20,18 @@ class SubmittedLandmarkCard extends StatelessWidget {
   final bool expanded;
   final VoidCallback onExpand;
   final VoidCallback onTap;
-  final VoidCallback onImageTap;
+
+  /// Opens either the landmark image or an individual dish image.
+  final void Function(String? source, String semanticLabel) onImageTap;
 
   static const int _previewLimit = 4;
 
   @override
   Widget build(BuildContext context) {
-    final List<String> preview = landmark.foodNames
+    final List<SubmittedLandmarkDish> preview = landmark.dishes
         .take(_previewLimit)
         .toList(growable: false);
+
     return Material(
       color: AppColors.surface,
       shape: RoundedRectangleBorder(
@@ -43,7 +48,10 @@ class SubmittedLandmarkCard extends StatelessWidget {
               children: <Widget>[
                 InkWell(
                   onTap: landmark.imageUrl?.trim().isNotEmpty == true
-                      ? onImageTap
+                      ? () => onImageTap(
+                    landmark.imageUrl,
+                    landmark.name,
+                  )
                       : null,
                   borderRadius: AppRadius.cardRadius,
                   child: SizedBox.square(
@@ -69,16 +77,11 @@ class SubmittedLandmarkCard extends StatelessWidget {
                         children: <Widget>[
                           Text(
                             landmark.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
-                          if (landmark.category.isNotEmpty) ...<Widget>[
-                            const SizedBox(height: AppSpacing.xs),
-                            Text(
-                              landmark.category,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                          const SizedBox(height: AppSpacing.sm),
+                          const SizedBox(height: AppSpacing.xs),
                           Row(
                             children: <Widget>[
                               const Icon(
@@ -86,9 +89,24 @@ class SubmittedLandmarkCard extends StatelessWidget {
                                 size: AppSizes.iconCompact,
                               ),
                               const SizedBox(width: AppSpacing.xs),
-                              Text(_distanceLabel(landmark.distanceMetres)),
+                              Expanded(
+                                child: Text(
+                                  _distanceLabel(landmark.distanceMetres),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ],
                           ),
+                          if (landmark.category.isNotEmpty) ...<Widget>[
+                            const SizedBox(height: AppSpacing.sm),
+                            Text(
+                              landmark.category,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -100,7 +118,9 @@ class SubmittedLandmarkCard extends StatelessWidget {
           if (expanded)
             Container(
               width: double.infinity,
-              margin: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              margin: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm,
+              ),
               padding: AppSpacing.cardPadding,
               decoration: BoxDecoration(
                 color: AppColors.insetSurface,
@@ -116,20 +136,22 @@ class SubmittedLandmarkCard extends StatelessWidget {
                     )
                   else
                     ...preview.map(
-                          (String foodName) => Padding(
-                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                        child: Text(
-                          foodName,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
+                          (SubmittedLandmarkDish dish) => _LandmarkDishRow(
+                        dish: dish,
+                        onImageTap: onImageTap,
                       ),
                     ),
-                  if (landmark.foodNames.length > _previewLimit)
+                  if (landmark.dishes.length > _previewLimit)
                     Center(
                       child: Text(
-                        'Showing $_previewLimit of ${landmark.foodNames.length} local foods · Tap the landmark for all',
+                        'Showing $_previewLimit of '
+                            '${landmark.dishes.length} local foods · '
+                            'Tap the landmark for all',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
                           color: AppColors.textSecondary,
                         ),
                       ),
@@ -137,11 +159,15 @@ class SubmittedLandmarkCard extends StatelessWidget {
                 ],
               ),
             ),
-          IconButton(
-            tooltip: expanded ? 'Hide local food' : 'Show local food',
-            onPressed: onExpand,
-            icon: Icon(
-              expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+          Center(
+            child: IconButton(
+              tooltip: expanded ? 'Hide local food' : 'Show local food',
+              onPressed: onExpand,
+              icon: Icon(
+                expanded
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
+              ),
             ),
           ),
         ],
@@ -150,7 +176,95 @@ class SubmittedLandmarkCard extends StatelessWidget {
   }
 
   static String _distanceLabel(double metres) {
-    if (metres < 1000) return '${metres.round()} m';
+    if (metres < 1000) {
+      return '${metres.round()} m';
+    }
+
     return '${(metres / 1000).toStringAsFixed(1)} km';
+  }
+}
+
+class _LandmarkDishRow extends StatelessWidget {
+  const _LandmarkDishRow({
+    required this.dish,
+    required this.onImageTap,
+  });
+
+  final SubmittedLandmarkDish dish;
+  final void Function(String? source, String semanticLabel) onImageTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          InkWell(
+            onTap: dish.imageUrl?.trim().isNotEmpty == true
+                ? () => onImageTap(
+              dish.imageUrl,
+              dish.name,
+            )
+                : null,
+            borderRadius: AppRadius.cardRadius,
+            child: SizedBox.square(
+              dimension: AppSizes.pairingImage,
+              child: AppImage(
+                source: dish.imageUrl,
+                borderRadius: AppRadius.cardRadius,
+                semanticLabel: dish.name,
+                fallback: const FoodImageFallback(),
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        dish.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    if (dish.price != null)
+                      Flexible(
+                        child: Text(
+                          'RM ${dish.price!.toStringAsFixed(2)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(
+                            color: AppColors.accentRust,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                if (dish.ingredients?.trim().isNotEmpty == true) ...<Widget>[
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    dish.ingredients!,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
