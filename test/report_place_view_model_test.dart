@@ -124,6 +124,7 @@ void main() {
       await viewModel.submit();
       expect(logic.submittedClaims, isEmpty);
       expect(viewModel.formError, isNotNull);
+      expect(viewModel.itemError, isNotNull);
 
       viewModel.selectItem(
         const ReportableMenuItem(
@@ -163,6 +164,7 @@ void main() {
       await viewModel.submit();
       expect(logic.submittedClaims, isEmpty);
       expect(viewModel.formError, isNotNull);
+      expect(viewModel.closureError, isNotNull);
 
       viewModel.setClosureAmountText('3');
       viewModel.setClosureUnit(ClosureUnit.days);
@@ -170,6 +172,27 @@ void main() {
       expect(logic.submittedClaims.single.payload, 'closed-temporarily:3:days');
       viewModel.dispose();
     });
+
+    test(
+      'invalid address and incomplete hours stay out of the repository',
+      () async {
+        final _FakeReportLogicFacade logic = _FakeReportLogicFacade();
+        final ReportPlaceViewModel viewModel = build(logic);
+
+        viewModel.selectCategory(ReportCategory.address);
+        viewModel.setAddressText('---');
+        await viewModel.submit();
+        expect(viewModel.addressError, isNotNull);
+        expect(logic.submittedClaims, isEmpty);
+
+        viewModel.selectCategory(ReportCategory.operatingHours);
+        viewModel.setDayStatus(Weekday.monday, DayStatus.open);
+        await viewModel.submit();
+        expect(viewModel.hoursError, isNotNull);
+        expect(logic.submittedClaims, isEmpty);
+        viewModel.dispose();
+      },
+    );
   });
 
   group('submit - outcome handling', () {

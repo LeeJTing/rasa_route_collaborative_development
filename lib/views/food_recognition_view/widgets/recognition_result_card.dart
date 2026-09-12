@@ -7,6 +7,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../app/theme/app_text_styles.dart';
 import '../../../domain_model/local_food.dart';
+import 'manual_food_name_entry.dart';
 
 /// Reusable piece of `FoodRecognitionView`: the "Local Food Recognised"
 /// result content shown inside the popup after a successful food-photo
@@ -34,6 +35,7 @@ class RecognitionResultCard extends StatelessWidget {
   const RecognitionResultCard({
     super.key,
     required this.food,
+    this.variant = '',
     this.capturedImage,
     this.onViewDetails,
     this.onAddLandmark,
@@ -41,17 +43,25 @@ class RecognitionResultCard extends StatelessWidget {
     this.fitsCatalogueCategory = true,
     this.isLowConfidence = false,
     this.onEnterName,
+    required this.foodNameMaxLength,
+    required this.foodNameWarning,
     this.isProcessing = false,
     this.addLandmarkLabel = 'Add New Landmark',
     this.promptText = 'Would you like to add this as a new landmark?',
     this.nameMismatch = false,
-    this.observedFoodName,
     this.typedName,
     this.onDismissNameMismatch,
     this.dietaryConflicts = const <String>[],
+    this.blockMessage,
   });
 
   final LocalFood food;
+
+  /// The VARIANT name the dish was actually seen/typed as when it EXTENDS
+  /// the dictionary [food] into an unlisted variant (`Cendol Jagung` ->
+  /// `Cendol`) - shown as the card's "Variant" row; empty hides the row.
+  /// Carried from `FoodRecognitionViewModel.variant`.
+  final String variant;
 
   /// The photo the tourist just took, shown as a small thumbnail next to the
   /// recognised details.
@@ -85,15 +95,16 @@ class RecognitionResultCard extends StatelessWidget {
   /// food can be kept).
   final bool nameMismatch;
 
-  /// What the photo actually shows, in Gemini's words, when [nameMismatch].
-  final String? observedFoodName;
-
-  /// The name the tourist typed, shown as the alternative in the mismatch
-  /// warning ("This looks more like X than `<typedName>`.").
+  /// The name the tourist typed, shown in the mismatch warning ("This
+  /// photo doesn't look like `<typed>`...", with the card's own dish as what
+  /// it looks like instead).
   final String? typedName;
 
   /// "Keep the detected food" - the only action on a mismatch warning; the
-  /// typed name (which Gemini could not confirm) is never applied.
+  /// typed name (which Gemini could not confirm) is never applied. The
+  /// button names the food being KEPT (this card's own dish), never the
+  /// verification call's observation - the observation names a third dish
+  /// that the app does not switch to.
   final VoidCallback? onDismissNameMismatch;
 
   /// The signed-in tourist's dietary restrictions this recognised food
@@ -101,10 +112,26 @@ class RecognitionResultCard extends StatelessWidget {
   /// the food can still be added.
   final List<String> dietaryConflicts;
 
+  /// Why this capture cannot join the landmark at all (e.g. it was taken
+  /// more than 50 m from the first food, so it is not the same restaurant -
+  /// see `FoodRecognitionViewModel.captureRangeError`). When non-null the
+  /// reason is shown and [onAddLandmark] must be null: the only way forward
+  /// is capturing again on site.
+  final String? blockMessage;
+
   /// Manual fallback when Gemini got the dish wrong - called with the food
   /// name the tourist typed (see `FoodRecognitionViewModel.enterFoodName`).
   /// Null hides the "type the name" option.
   final ValueChanged<String>? onEnterName;
+
+  /// Hard input cap for the manual name field (50) - the shared
+  /// `LandmarkSubmissionLogic.maxFoodNameLength` rule, surfaced by
+  /// `FoodRecognitionViewModel.foodNameMaxLength`.
+  final int foodNameMaxLength;
+
+  /// Live amber warning for the typed name (null while it is a normal
+  /// length) - `FoodRecognitionViewModel.foodNameWarning`.
+  final String? Function(String name) foodNameWarning;
 
   /// Disables the manual-entry field/button while a name is being resolved.
   final bool isProcessing;
@@ -114,7 +141,10 @@ class RecognitionResultCard extends StatelessWidget {
   final String addLandmarkLabel;
 
   /// Text shown above the confirm button, matching whichever label is used.
-  final String promptText;
+  /// Null hides the line entirely - used when a blocked capture's warning
+  /// box already carries both the reason and the action, so nothing is
+  /// repeated.
+  final String? promptText;
 
   @override
   Widget build(BuildContext context) {
@@ -181,8 +211,8 @@ class RecognitionResultCard extends StatelessWidget {
                   ),
                 ],
                 if (nameMismatch &&
-                    observedFoodName != null &&
-                    observedFoodName!.isNotEmpty) ...<Widget>[
+                    typedName != null &&
+                    typedName!.isNotEmpty) ...<Widget>[
                   const SizedBox(height: AppSpacing.xs),
                   Container(
                     padding: const EdgeInsets.all(AppSpacing.sm),
@@ -203,11 +233,16 @@ class RecognitionResultCard extends StatelessWidget {
                             const SizedBox(width: AppSpacing.xs),
                             Expanded(
                               child: Text(
+                                // Two names only: what was typed, and the
+                                // recognised dish that stays - never the
+                                // verification call's raw observation (a
+                                // third name that made the warning
+                                // contradict the keep button).
                                 "This photo doesn't look like "
-                                "'${typedName ?? food.name}' - it looks more "
-                                "like '${observedFoodName ?? food.name}', so "
+                                "'${typedName!}' - it looks more "
+                                "like '${food.name}', so "
                                 "it can't be added as "
-                                "'${typedName ?? food.name}'.",
+                                "'${typedName!}'.",
                                 style: AppTextStyles.bodySmall.copyWith(
                                   color: AppColors.warning,
                                 ),
@@ -221,9 +256,12 @@ class RecognitionResultCard extends StatelessWidget {
                             children: <Widget>[
                               TextButton(
                                 onPressed: onDismissNameMismatch,
-                                child: Text(
-                                  "Keep '${observedFoodName ?? food.name}'",
-                                ),
+                                // The dish that is actually kept - never
+                                // [observedFoodName] (the fresh observation
+                                // the app does NOT switch to; naming it here
+                                // made the app look like it forgot the
+                                // detected dish).
+                                child: Text("Keep '${food.name}'"),
                               ),
                             ],
                           ),
@@ -234,6 +272,10 @@ class RecognitionResultCard extends StatelessWidget {
                 if (dietaryConflicts.isNotEmpty) ...<Widget>[
                   const SizedBox(height: AppSpacing.sm),
                   _DietaryConflictWarning(conflicts: dietaryConflicts),
+                ],
+                if (blockMessage != null) ...<Widget>[
+                  const SizedBox(height: AppSpacing.sm),
+                  _BlockedCaptureWarning(message: blockMessage!),
                 ],
                 const SizedBox(height: AppSpacing.md),
                 Row(
@@ -248,11 +290,8 @@ class RecognitionResultCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           _InfoRow(label: 'Dish', value: food.name),
-                          if (food.synonyms.isNotEmpty)
-                            _InfoRow(
-                              label: 'Variant',
-                              value: food.synonyms.first,
-                            ),
+                          if (variant.isNotEmpty)
+                            _InfoRow(label: 'Variant', value: variant),
                           if (food.description.isNotEmpty) ...<Widget>[
                             const SizedBox(height: AppSpacing.xs),
                             Text(
@@ -274,12 +313,14 @@ class RecognitionResultCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            promptText,
-            textAlign: TextAlign.center,
-            style: AppTextStyles.bodyMedium,
-          ),
+          if (promptText != null) ...<Widget>[
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              promptText!,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.bodyMedium,
+            ),
+          ],
           const SizedBox(height: AppSpacing.lg),
           if (onAddLandmark != null)
             SizedBox(
@@ -291,9 +332,11 @@ class RecognitionResultCard extends StatelessWidget {
             ),
           if (onEnterName != null) ...<Widget>[
             const SizedBox(height: AppSpacing.md),
-            _ManualNameEntryField(
+            ManualFoodNameEntry(
               onEnterName: onEnterName!,
               isProcessing: isProcessing,
+              maxNameLength: foodNameMaxLength,
+              nameWarning: foodNameWarning,
             ),
           ],
         ],
@@ -328,9 +371,49 @@ class _DietaryConflictWarning extends StatelessWidget {
           Expanded(
             child: Text(
               'Your profile avoids: ${conflicts.join(', ')}. '
-              "This dish may not suit you - you can still add it.",
+              "This dish may not suit you.",
               style: AppTextStyles.bodySmall.copyWith(
                 color: AppColors.warning,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Warning box: this capture cannot join the landmark at all - it was taken
+/// too far from the first food, so it is not the same restaurant (blocking,
+/// unlike the dietary warning). The only way forward is capturing again on
+/// site.
+class _BlockedCaptureWarning extends StatelessWidget {
+  const _BlockedCaptureWarning({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.bannerCautionBackground,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(
+            Icons.location_off,
+            size: AppSizes.inlineNoticeIconSize,
+            color: AppColors.bannerCautionText,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              message,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.bannerCautionText,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -435,89 +518,6 @@ class _InfoRow extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// "Wrong dish? Type the name" - a small, collapsible manual-entry field
-/// appended to the single-result card. Lets the tourist override Gemini's
-/// answer by typing the food name (see
-/// `FoodRecognitionViewModel.enterFoodName`).
-class _ManualNameEntryField extends StatefulWidget {
-  const _ManualNameEntryField({
-    required this.onEnterName,
-    required this.isProcessing,
-  });
-
-  final ValueChanged<String> onEnterName;
-  final bool isProcessing;
-
-  @override
-  State<_ManualNameEntryField> createState() => _ManualNameEntryFieldState();
-}
-
-class _ManualNameEntryFieldState extends State<_ManualNameEntryField> {
-  final TextEditingController _controller = TextEditingController();
-  bool _show = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final String name = _controller.text.trim();
-    if (name.isEmpty || widget.isProcessing) return;
-    widget.onEnterName(name);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_show) {
-      return Align(
-        alignment: Alignment.center,
-        child: TextButton.icon(
-          onPressed: widget.isProcessing
-              ? null
-              : () => setState(() => _show = true),
-          icon: const Icon(Icons.edit_outlined, size: 16),
-          label: const Text('Wrong dish? Type the name'),
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        TextField(
-          controller: _controller,
-          enabled: !widget.isProcessing,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => _submit(),
-          decoration: const InputDecoration(
-            hintText: 'e.g. Murtabak',
-            isDense: true,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: <Widget>[
-            TextButton(
-              onPressed: widget.isProcessing
-                  ? null
-                  : () => setState(() => _show = false),
-              child: const Text('Cancel'),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            FilledButton(
-              onPressed: widget.isProcessing ? null : _submit,
-              child: const Text('Show this food'),
-            ),
-          ],
-        ),
-      ],
     );
   }
 }

@@ -1,7 +1,9 @@
 import 'package:image_picker/image_picker.dart';
 
 import '../app/routing/app_navigator.dart';
+import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
+import '../domain_model/landmark_draft.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
@@ -87,6 +89,12 @@ class LandmarkDetailViewModel extends BaseViewModel
   /// new catalogue row.
   List<String> _dietaryRestrictions = const <String>[];
 
+  /// The VARIANT name the food was seen/typed as when it EXTENDS the
+  /// dictionary dish into an unlisted variant (`Cendol Jagung` -> `Cendol`) -
+  /// written to `landmark_item.variant`; empty when the name IS the dish. Set
+  /// from `LandmarkDraftHandoff` in the View's `initState`.
+  String _variant = '';
+
   /// The signed-in tourist's restrictions this recognised food conflicts
   /// with - shown as a warning on the card (adding is still allowed).
   List<String> _dietaryConflicts = const <String>[];
@@ -98,6 +106,48 @@ class LandmarkDetailViewModel extends BaseViewModel
   /// `LandmarkDraftHandoff.pendingReturnToFormAsAdditionalFood`.
   bool _returnToFormAsAdditionalFood = false;
 
+  /// True once the additional-food flow has popped back to the form. A
+  /// second "Add to Landmark" tap must not pop again - that extra pop would
+  /// land on the form itself and raise its "Leave this form?" question.
+  bool _returnedToForm = false;
+
+  /// Where the food was captured - carried through, so the form this screen
+  /// opens (or returns to) knows the landmark's location without waiting for
+  /// a live fix.
+  TouristLocation _captureLocation = TouristLocation.unknown;
+  TouristLocation get captureLocation => _captureLocation;
+
+  /// Set from `LandmarkDraftHandoff` in the View's `initState`.
+  void setCaptureLocation(TouristLocation location) {
+    _captureLocation = location;
+  }
+
+  /// Where the FIRST food of the landmark was captured - carried from the
+  /// capture screen (see [setReferenceLocation]) so this screen re-checks
+  /// the 50 m same-restaurant rule. Unknown for the primary flow (nothing to
+  /// compare against yet).
+  TouristLocation _referenceLocation = TouristLocation.unknown;
+
+  /// Set from `LandmarkDraftHandoff` in the View's `initState` - see
+  /// [LandmarkDraftHandoff.pendingReferenceLocation].
+  void setReferenceLocation(TouristLocation location) {
+    _referenceLocation = location;
+  }
+
+  /// Whether this food was captured more than 50 m from the first food, so
+  /// it is not the same restaurant. False when either spot is unknown -
+  /// the same fail-open rule the capture screen applies.
+  bool get isCaptureOutOfRange => !landmarkLogic.isSameRestaurantCaptureRange(
+    _referenceLocation,
+    _captureLocation,
+  );
+
+  /// Why this food cannot join the landmark - the same message the capture
+  /// screen shows for the same rejection. Null when the capture is in range.
+  String? get captureRangeBlockMessage => isCaptureOutOfRange
+      ? landmarkLogic.captureTooFarMessage('This food')
+      : null;
+
   LocalFood? get recognizedFood => _recognizedFood;
   XFile? get capturedImage => _capturedImage;
   bool get isLocalFood => _isLocalFood;
@@ -106,6 +156,11 @@ class LandmarkDetailViewModel extends BaseViewModel
   double get priceMin => _priceMin;
   double get priceMax => _priceMax;
   List<String> get dietaryRestrictions => _dietaryRestrictions;
+
+  /// The VARIANT name the food was seen/typed as when it EXTENDS the
+  /// dictionary dish into an unlisted variant (`Cendol Jagung` -> `Cendol`) -
+  /// shown on the Recognised Food card; empty when the name IS the dish.
+  String get variant => _variant;
   List<String> get dietaryConflicts => _dietaryConflicts;
 
   /// Whether the current fix makes adding a landmark impossible (A9) - a new
@@ -145,6 +200,10 @@ class LandmarkDetailViewModel extends BaseViewModel
     _dietaryRestrictions = dietaryRestrictions;
   }
 
+  void setVariant(String variant) {
+    _variant = variant;
+  }
+
   void setDietaryRestrictionConflicts(List<String> conflicts) {
     _dietaryConflicts = conflicts;
   }
@@ -173,7 +232,11 @@ class LandmarkDetailViewModel extends BaseViewModel
   /// detail screen and the camera screen back to the *existing* form, handing
   /// the food back through [AdditionalFoodCaptureResult] (see
   /// [_returnToFormAsAdditionalFood]).
-  void proceedToAddLandmark() {
+  ///
+  /// Like the camera screen, the primary flow first checks the saved
+  /// incomplete submissions: this dish at this spot continuing an existing
+  /// form beats stacking a second draft of the same visit.
+  Future<void> proceedToAddLandmark() async {
     final LocalFood? food = _recognizedFood;
     if (food == null) return;
     // A non-local food - or a Malaysian product that isn't a catalogue dish
@@ -181,9 +244,17 @@ class LandmarkDetailViewModel extends BaseViewModel
     // landmark - the UI hides the button, this guard is the second line of
     // defence.
     if (!_isLocalFood || !_fitsCatalogueCategory) return;
+    // Captured more than 50 m from the first food (50 m same-restaurant
+    // rule) - not this restaurant's food. The capture screen already
+    // withholds its add button; this screen must withhold BOTH of its
+    // paths - the additional-food return below AND opening a new form -
+    // otherwise opening "View Details" would be a way around the block.
+    if (isCaptureOutOfRange) return;
     if (_returnToFormAsAdditionalFood) {
       final XFile? image = _capturedImage;
       if (image == null) return;
+      if (_returnedToForm) return;
+      _returnedToForm = true;
       // Pop LandmarkDetailView, then pop the FoodRecognitionView below it
       // WITH the result - which completes `AddLandmarkViewModel.openAddMoreFood`'s
       // await, so the food lands in the existing form's additional-foods list.
@@ -193,6 +264,9 @@ class LandmarkDetailViewModel extends BaseViewModel
         image: image,
         priceMin: _priceMin,
         priceMax: _priceMax,
+        captureLocation: _captureLocation,
+        variant: _variant,
+        dietaryRestrictions: _dietaryRestrictions,
       ));
       return;
     }
@@ -210,6 +284,38 @@ class LandmarkDetailViewModel extends BaseViewModel
       priceMax: _priceMax,
       dietaryRestrictions: _dietaryRestrictions,
       dietaryConflicts: _dietaryConflicts,
+      variant: _variant,
+      captureLocation: _captureLocation,
     );
+  }
+
+  /// The saved submission the current capture could CONTINUE, or null - the
+  /// same rule as the camera screen's (`FoodRecognitionViewModel
+  /// .draftToContinue`): the SAME dish + variant + capture spot (50 m). The
+  /// View asks "continue your unfinished submission?" when this returns a
+  /// draft.
+  Future<LandmarkDraft?> draftToContinue() async {
+    final LocalFood? food = _recognizedFood;
+    if (food == null) return null;
+    try {
+      final List<LandmarkDraft> drafts = await landmarkLogic
+          .pendingLandmarkDrafts();
+      return landmarkLogic.matchingLandmarkDraft(
+        drafts: drafts,
+        food: food,
+        captureLocation: _captureLocation,
+        variant: _variant,
+      );
+    } catch (_) {
+      // Best-effort - a fresh form is always a safe fallback.
+      return null;
+    }
+  }
+
+  /// Reopens [draft] pre-filled - the tourist chose "Continue submission" in
+  /// the continue prompt.
+  void openDraft(LandmarkDraft draft) {
+    LandmarkDraftHandoff().pendingDraft = draft;
+    AppNavigator.push(AppRoutes.addLandmark);
   }
 }

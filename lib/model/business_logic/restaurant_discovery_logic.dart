@@ -11,6 +11,7 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
+import 'opening_hours_logic.dart';
 
 /// Finding and filtering restaurants.
 ///
@@ -32,8 +33,16 @@ class RestaurantDiscoveryLogic {
 
   late final DiscoveryRepositoryFacade repository = createRepository();
 
-  Future<Restaurant?> findById(int restaurantId) =>
-      repository.getRestaurantById(restaurantId);
+  Future<Restaurant?> findById(
+    int restaurantId, {
+    TouristLocation origin = TouristLocation.unknown,
+  }) async {
+    final Restaurant? restaurant = await repository.getRestaurantById(
+      restaurantId,
+    );
+    if (restaurant == null) return null;
+    return _measure(<Restaurant>[restaurant], origin).single;
+  }
 
   Future<List<Restaurant>> nearby({
     required TouristLocation location,
@@ -247,6 +256,7 @@ class RestaurantDiscoveryLogic {
         continue;
       }
       final FoodOccurrence place = entry.value.first;
+      final List<SubmittedLandmarkDish> dishes = _dishesOf(entry.value);
       measured.add(
         SubmittedLandmarkRecommendation(
           id: int.tryParse(entry.key) ?? 0,
@@ -260,18 +270,12 @@ class RestaurantDiscoveryLogic {
             place.latitude,
             place.longitude,
           ),
-          foodNames: entry.value
-              .map((FoodOccurrence item) => item.foodName.trim())
-              .where((String name) => name.isNotEmpty)
-              .toSet()
-              .toList(growable: false),
+          dishes: dishes,
           imageUrl: place.placeImageUrl,
-          price: entry.value
-              .map((FoodOccurrence item) => item.itemPrice)
-              .whereType<double>()
-              .fold<double?>(null, (double? lowest, double price) {
-            return lowest == null || price < lowest ? price : lowest;
-          }),
+          // The headline price is the AVERAGE of the landmark's known dish
+          // prices (one dish's price would misread a stall with a menu);
+          // null while none is known.
+          price: _averageDishPrice(dishes),
         ),
       );
     }
@@ -295,6 +299,38 @@ class RestaurantDiscoveryLogic {
       radiusKm += _quickModeRadiusStepKm;
     }
     return available;
+  }
+
+  /// The landmark's dishes as the quick-mode rows list them: the recorded
+  /// dish text, trimmed and de-duplicated by name (first occurrence wins),
+  /// each with its own price and photo.
+  List<SubmittedLandmarkDish> _dishesOf(List<FoodOccurrence> items) {
+    final List<SubmittedLandmarkDish> dishes = <SubmittedLandmarkDish>[];
+    final Set<String> seen = <String>{};
+    for (final FoodOccurrence item in items) {
+      final String name = item.foodName.trim();
+      if (name.isEmpty || !seen.add(name)) continue;
+      dishes.add(
+        SubmittedLandmarkDish(
+          name: name,
+          price: item.itemPrice,
+          imageUrl: item.itemImageUrl,
+          ingredients: item.itemIngredients,
+        ),
+      );
+    }
+    return dishes;
+  }
+
+  /// The AVERAGE of the dishes' known prices - null while none is known.
+  double? _averageDishPrice(List<SubmittedLandmarkDish> dishes) {
+    final List<double> prices = dishes
+        .map((SubmittedLandmarkDish dish) => dish.price)
+        .whereType<double>()
+        .toList(growable: false);
+    if (prices.isEmpty) return null;
+    return prices.fold<double>(0, (double sum, double price) => sum + price) /
+        prices.length;
   }
 
   Future<List<Restaurant>> _hydrateSelected(List<Restaurant> selected) async {
@@ -373,52 +409,9 @@ class RestaurantDiscoveryLogic {
   }
 
   bool _isConfidentlyClosedHours(
-      List<OpeningHour> hours,
-      DateTime now,
-      ) {
-    if (hours.isEmpty) return false;
-    final Weekday today = Weekday.values[now.weekday - 1];
-    final int minute = now.hour * 60 + now.minute;
-
-    // Check if a shift from yesterday is still running (past midnight).
-    final Weekday yesterday = Weekday.values[(now.weekday + 5) % 7];
-    final bool stillOpenFromYesterday = hours.any((OpeningHour h) {
-      return h.day == yesterday &&
-          h.status == DayStatus.open &&
-          h.opensAt != null &&
-          h.closesAt != null &&
-          h.closesAt! < h.opensAt! &&
-          minute < h.closesAt!;
-    });
-    if (stillOpenFromYesterday) return false; // Found an open period, so not closed.
-
-    final List<OpeningHour> todayRows = hours
-        .where((OpeningHour row) => row.day == today)
-        .toList(growable: false);
-
-    // If no records for today, or any record is Unknown, it's not "confidently" closed.
-    if (todayRows.isEmpty ||
-        todayRows.any((OpeningHour row) => row.status == DayStatus.unknown)) {
-      return false;
-    }
-
-    for (final OpeningHour row in todayRows) {
-      if (row.status == DayStatus.open) {
-        final int? opens = row.opensAt;
-        final int? closes = row.closesAt;
-        if (opens == null || closes == null) continue;
-
-        // Also handles "starts today ends tomorrow" (closes < opens)
-        final bool openNow = closes >= opens
-            ? minute >= opens && minute < closes
-            : minute >= opens || minute < closes;
-        if (openNow) return false; // Found an open period, so not closed.
-      }
-    }
-
-    // If today is explicitly marked as Closed, or we have open periods but none cover "now".
-    return true;
-  }
+    List<OpeningHour> hours,
+    DateTime malaysiaNow,
+  ) => OpeningHoursLogic.isConfidentlyClosedAt(hours, malaysiaNow);
 
   Future<List<Restaurant>> _eligibleRestaurants(
       List<Restaurant> candidates, {

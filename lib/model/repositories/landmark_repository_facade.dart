@@ -1,4 +1,5 @@
 import 'auth_repository.dart';
+import 'landmark_draft_repository.dart';
 import 'link_check_repository.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
@@ -38,4 +39,7 @@ class LandmarkRepositoryFacade {
 
   /// Website reachability checks for the Add-Landmark website field.
   final LinkCheckRepository links = LinkCheckRepository();
+
+  /// Saved (incomplete) Add-New-Landmark forms.
+  final LandmarkDraftRepository drafts = LandmarkDraftRepository();
 }

@@ -6,9 +6,18 @@ import '../../../domain_model/restaurant.dart';
 import 'opening_hours_table.dart';
 
 class RestaurantInformationSection extends StatelessWidget {
-  const RestaurantInformationSection({super.key, required this.restaurant});
+  const RestaurantInformationSection({
+    super.key,
+    required this.restaurant,
+    this.onAddressTap,
+    this.onPhoneTap,
+    this.onWebsiteTap,
+  });
 
   final Restaurant restaurant;
+  final VoidCallback? onAddressTap;
+  final VoidCallback? onPhoneTap;
+  final VoidCallback? onWebsiteTap;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +39,7 @@ class RestaurantInformationSection extends StatelessWidget {
             label: restaurant.address.isEmpty
                 ? 'Address unavailable'
                 : restaurant.address,
+            onTap: restaurant.address.isEmpty ? null : onAddressTap,
           ),
           const SizedBox(height: AppSpacing.md),
           _InformationRow(
@@ -37,6 +47,7 @@ class RestaurantInformationSection extends StatelessWidget {
             label: restaurant.phone.isEmpty
                 ? 'Phone unavailable'
                 : restaurant.phone,
+            onTap: restaurant.phone.isEmpty ? null : onPhoneTap,
           ),
           const SizedBox(height: AppSpacing.md),
           _InformationRow(
@@ -44,11 +55,26 @@ class RestaurantInformationSection extends StatelessWidget {
             label: restaurant.website.isEmpty
                 ? 'Website unavailable'
                 : restaurant.website,
+            onTap: restaurant.website.isEmpty ? null : onWebsiteTap,
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Text('Opening Hours', style: _sectionStyle(context)),
-          const SizedBox(height: AppSpacing.md),
-          OpeningHoursTable(openingHours: restaurant.openingHours),
+          const SizedBox(height: AppSpacing.sm),
+          Material(
+            color: Colors.transparent,
+            child: Theme(
+              data: Theme.of(
+                context,
+              ).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                initiallyExpanded: true,
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(top: AppSpacing.sm),
+                title: Text('Opening Hours', style: _sectionStyle(context)),
+                children: <Widget>[
+                  OpeningHoursTable(openingHours: restaurant.openingHours),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -60,20 +86,46 @@ class RestaurantInformationSection extends StatelessWidget {
 }
 
 class _InformationRow extends StatelessWidget {
-  const _InformationRow({required this.icon, required this.label});
+  const _InformationRow({required this.icon, required this.label, this.onTap});
 
   final IconData icon;
   final String label;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Icon(icon, color: AppColors.accentBrown),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(child: Text(label)),
-      ],
+    return InkWell(
+      onTap: onTap,
+      borderRadius: AppRadius.buttonRadius,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icon, color: AppColors.accentBrown),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                label,
+                style: onTap == null
+                    ? null
+                    : const TextStyle(
+                        color: AppColors.info,
+                        decoration: TextDecoration.underline,
+                      ),
+              ),
+            ),
+            if (onTap != null) ...<Widget>[
+              const SizedBox(width: AppSpacing.sm),
+              const Icon(
+                Icons.open_in_new,
+                size: AppSizes.iconSmall,
+                color: AppColors.info,
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

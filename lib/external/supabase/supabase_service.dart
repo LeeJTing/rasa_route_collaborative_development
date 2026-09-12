@@ -82,6 +82,22 @@ class SupabaseService {
         );
   }
 
+  /// Deletes storage objects from a bucket - used to clean up the photos of
+  /// a discarded / expired landmark draft. [paths] are the bare object names
+  /// (`image_id` values), not public URLs. Best-effort: an object that is
+  /// already gone is simply not reported back, the call does not throw.
+  Future<void> removeObjects({
+    required String bucket,
+    required List<String> paths,
+  }) async {
+    final List<String> clean = paths
+        .map((String path) => path.trim())
+        .where((String path) => path.isNotEmpty)
+        .toList(growable: false);
+    if (clean.isEmpty) return;
+    await _client.storage.from(bucket).remove(clean);
+  }
+
   // ---------------------------------------------------------------------------
   // Generic row access. Every repository goes through these - table names and
   // select strings live in the repository, error translation lives here.

@@ -58,6 +58,15 @@ class FoodRepositoryFacade {
   /// saved row (with its assigned id) or null when a duplicate exists.
   Future<LocalFood?> insertFood(LocalFood food) => knowledge.insertFood(food);
 
+  /// Attaches a photo to a catalogue dish (`local_food_image`) - used when a
+  /// new dish is added from a landmark submission, so the dish carries the
+  /// tourist's own photo. [imageName] is either a food-images object name or
+  /// a full public URL (the already-uploaded `landmark-images` URL).
+  Future<void> addFoodImage({
+    required int localFoodId,
+    required String imageName,
+  }) => knowledge.addFoodImage(localFoodId: localFoodId, imageName: imageName);
+
   /// Taste/category name -> id lookups (lowercased) for normalising a
   /// recognized food's tags against `food_preference` before writing links.
   Future<({Map<String, int> tastes, Map<String, int> categories})>

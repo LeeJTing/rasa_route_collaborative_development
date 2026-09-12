@@ -14,11 +14,7 @@ import '../../common_widgets/app_image.dart';
 /// parameters and callbacks - they never read a ViewModel themselves, and they
 /// style from the theme rather than raw values.
 class LandmarkHistoryTile extends StatelessWidget {
-  const LandmarkHistoryTile({
-    super.key,
-    required this.landmark,
-    this.onTap,
-  });
+  const LandmarkHistoryTile({super.key, required this.landmark, this.onTap});
 
   final SubmittedLandmark landmark;
   final VoidCallback? onTap;
@@ -66,10 +62,7 @@ class LandmarkHistoryTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              const Icon(
-                Icons.chevron_right,
-                color: AppColors.textSecondary,
-              ),
+              const Icon(Icons.chevron_right, color: AppColors.textSecondary),
             ],
           ),
         ),
@@ -95,10 +88,7 @@ class _Thumbnail extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.sm),
       ),
       alignment: Alignment.center,
-      child: const Icon(
-        Icons.location_on,
-        color: AppColors.textSecondary,
-      ),
+      child: const Icon(Icons.location_on, color: AppColors.textSecondary),
     );
     if (url == null || url.isEmpty) return placeholder;
     return SizedBox(
@@ -128,9 +118,9 @@ class _StatusAndDishes extends StatelessWidget {
     final String dishLine = items.isEmpty
         ? 'No dishes recorded'
         : items.length == 1
-        ? 'Serves: ${items.first.dish}'
+        ? 'Serves: ${items.first.displayName}'
         : 'Serves ${items.length} dishes: '
-              '${items.take(3).map((LandmarkItem i) => i.dish).join(', ')}';
+              '${items.take(3).map((LandmarkItem i) => i.displayName).join(', ')}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[

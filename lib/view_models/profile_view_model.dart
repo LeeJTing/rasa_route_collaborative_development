@@ -95,6 +95,12 @@ class ProfileViewModel extends BaseViewModel {
     AppNavigator.push(AppRoutes.landmarkHistory);
   }
 
+  /// "Incomplete Submissions" - the saved (incomplete) Add-New-Landmark
+  /// forms the tourist can continue (implemented by the landmark module).
+  void openIncompleteLandmarks() {
+    AppNavigator.push(AppRoutes.incompleteLandmarks);
+  }
+
   /// Signs the tourist out and returns to the entry screen, clearing the
   /// whole navigation stack.
   Future<void> signOut() => runGuarded(() async {

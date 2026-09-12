@@ -100,7 +100,9 @@ const SubmittedLandmarkRecommendation testLandmarkRecommendation =
       name: 'Uncle Lim Prawn Noodle Stall',
       category: 'Hawker Stall',
       distanceMetres: 620,
-      foodNames: <String>['Prawn Noodle'],
+      dishes: <SubmittedLandmarkDish>[
+        SubmittedLandmarkDish(name: 'Prawn Noodle', price: 12),
+      ],
       price: 12,
     );
 
@@ -148,8 +150,10 @@ class FakeDiscoveryLogicFacade extends DiscoveryLogicFacade {
   }) async => restaurants.take(limit).toList(growable: false);
 
   @override
-  Future<Restaurant?> getRestaurantById(int restaurantId) async =>
-      restaurant?.id == restaurantId ? restaurant : null;
+  Future<Restaurant?> getRestaurantById(
+    int restaurantId, {
+    TouristLocation origin = TouristLocation.unknown,
+  }) async => restaurant?.id == restaurantId ? restaurant : null;
 
   @override
   Future<MatchesRecommendationResult> getMatchesRecommendations(

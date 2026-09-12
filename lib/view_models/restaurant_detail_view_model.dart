@@ -3,6 +3,7 @@ import 'package:meta/meta.dart' show protected;
 import '../core/base_view_model.dart';
 import '../domain_model/restaurant.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
+import 'current_location_facade.dart';
 
 /// ViewModel for `RestaurantDetailView`.
 ///
@@ -24,6 +25,7 @@ class RestaurantDetailViewModel extends BaseViewModel {
   DiscoveryLogicFacade createDiscoveryLogic() => DiscoveryLogicFacade();
 
   late final DiscoveryLogicFacade discoveryLogic = createDiscoveryLogic();
+  final CurrentLocationFacade locationFacade = CurrentLocationFacade();
 
   Restaurant? _restaurant;
   int? _restaurantId;
@@ -44,7 +46,10 @@ class RestaurantDetailViewModel extends BaseViewModel {
 
   Future<void> loadRestaurant(int restaurantId) => runGuarded(() async {
     _restaurantId = restaurantId;
-    _restaurant = await discoveryLogic.getRestaurantById(restaurantId);
+    _restaurant = await discoveryLogic.getRestaurantById(
+      restaurantId,
+      origin: locationFacade.latest,
+    );
     if (_restaurant == null) {
       throw Exception('Restaurant details are unavailable.');
     }
