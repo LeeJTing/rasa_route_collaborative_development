@@ -26,8 +26,8 @@ class MatchesRecommendationLogic {
   late final DiscoveryRepositoryFacade _repository = createRepository();
 
   Future<MatchesRecommendationResult> recommendations(
-    MatchesRecommendationRequest request,
-  ) async {
+      MatchesRecommendationRequest request,
+      ) async {
     final String touristId = await _repository.currentTouristId() ?? '';
     if (touristId.isEmpty) throw Exception('Sign in to view Matches.');
 
@@ -86,7 +86,7 @@ class MatchesRecommendationLogic {
     };
 
     final List<MatchedFoodRecommendations> groups =
-        <MatchedFoodRecommendations>[];
+    <MatchedFoodRecommendations>[];
     for (final int foodId in session.likedFoodIds) {
       final LocalFood? food = foodsById[foodId];
       if (food == null) continue;
@@ -200,12 +200,14 @@ class MatchesRecommendationLogic {
         _withRecommendationDetails(
           restaurant,
           category: _visibleCategory(restaurant.category),
-          distanceMetres: _distanceMetres(
-            request.origin.latitude,
-            request.origin.longitude,
-            occurrence.latitude,
-            occurrence.longitude,
-          ),
+          distanceMetres: request.origin.isKnown
+              ? _distanceMetres(
+                  request.origin.latitude,
+                  request.origin.longitude,
+                  occurrence.latitude,
+                  occurrence.longitude,
+                )
+              : null,
           items: matchedItems,
         ),
       );
@@ -236,11 +238,11 @@ class MatchesRecommendationLogic {
   );
 
   List<SubmittedLandmarkRecommendation> _landmarksFor(
-    List<FoodOccurrence> foodOccurrences,
-    List<FoodOccurrence> allOccurrences,
-    Map<int, LocalFood> foodsById,
-    MatchesRecommendationRequest request,
-  ) {
+      List<FoodOccurrence> foodOccurrences,
+      List<FoodOccurrence> allOccurrences,
+      Map<int, LocalFood> foodsById,
+      MatchesRecommendationRequest request,
+      ) {
     final Map<String, FoodOccurrence> serving = <String, FoodOccurrence>{};
     for (final FoodOccurrence occurrence in foodOccurrences) {
       if (occurrence.source != FoodOccurrenceSource.submittedLandmark) continue;
@@ -263,14 +265,17 @@ class MatchesRecommendationLogic {
             category: occurrence.placeCategory?.trim().isNotEmpty == true
                 ? occurrence.placeCategory!
                 : 'Submitted Landmark',
-            distanceMetres:
-                _distanceMetres(
-                  request.origin.latitude,
-                  request.origin.longitude,
-                  occurrence.latitude,
-                  occurrence.longitude,
-                ) ??
-                double.infinity,
+            // The landmark presentation model uses infinity as its sortable
+            // "distance unavailable" value, whereas Restaurant can retain
+            // null directly. Never calculate from the 0,0 unknown sentinel.
+            distanceMetres: request.origin.isKnown
+                ? _distanceMetres(
+                    request.origin.latitude,
+                    request.origin.longitude,
+                    occurrence.latitude,
+                    occurrence.longitude,
+                  )
+                : double.infinity,
             dishes: dishes,
             imageUrl: occurrence.placeImageUrl,
             // The landmark's headline price is the AVERAGE of its dishes'
@@ -319,9 +324,9 @@ class MatchesRecommendationLogic {
   }
 
   Region? _resolveRegion(
-    List<Region> regions,
-    MatchesRecommendationRequest request,
-  ) {
+      List<Region> regions,
+      MatchesRecommendationRequest request,
+      ) {
     if (request.stateCode.isNotEmpty) {
       for (final Region region in regions) {
         if (region.code == request.stateCode) return region;
@@ -341,9 +346,9 @@ class MatchesRecommendationLogic {
   }
 
   static FoodOccurrence _resolveFood(
-    FoodOccurrence occurrence,
-    List<LocalFood> foods,
-  ) {
+      FoodOccurrence occurrence,
+      List<LocalFood> foods,
+      ) {
     if (occurrence.localFoodId != 0) return occurrence;
     final String dish = _normalise(occurrence.foodName);
     for (final LocalFood food in foods) {
@@ -357,6 +362,7 @@ class MatchesRecommendationLogic {
         placeName: occurrence.placeName,
         localFoodId: food.id,
         foodName: occurrence.foodName,
+        foodType: food.foodType,
         latitude: occurrence.latitude,
         longitude: occurrence.longitude,
         placeImageUrl: occurrence.placeImageUrl,
@@ -373,16 +379,16 @@ class MatchesRecommendationLogic {
   }
 
   static bool _contains(
-    List<GeoPoint> polygon,
-    double latitude,
-    double longitude,
-  ) {
+      List<GeoPoint> polygon,
+      double latitude,
+      double longitude,
+      ) {
     if (polygon.length < 3) return false;
     bool inside = false;
     for (
-      int current = 0, previous = polygon.length - 1;
-      current < polygon.length;
-      previous = current++
+    int current = 0, previous = polygon.length - 1;
+    current < polygon.length;
+    previous = current++
     ) {
       final GeoPoint a = polygon[current];
       final GeoPoint b = polygon[previous];
@@ -391,28 +397,28 @@ class MatchesRecommendationLogic {
           (b.longitude - a.longitude) *
               (latitude - a.latitude) /
               (b.latitude - a.latitude) +
-          a.longitude;
+              a.longitude;
       if (longitude < intersection) inside = !inside;
     }
     return inside;
   }
 
-  static double? _distanceMetres(
-    double fromLatitude,
-    double fromLongitude,
-    double toLatitude,
-    double toLongitude,
-  ) {
-    if (fromLatitude == 0 && fromLongitude == 0) return null;
+  static double _distanceMetres(
+      double fromLatitude,
+      double fromLongitude,
+      double toLatitude,
+      double toLongitude,
+      ) {
+    if (fromLatitude == 0 && fromLongitude == 0) return 0;
     const double earthRadiusMetres = 6371000;
     final double latitudeDelta = _radians(toLatitude - fromLatitude);
     final double longitudeDelta = _radians(toLongitude - fromLongitude);
     final double value =
         math.sin(latitudeDelta / 2) * math.sin(latitudeDelta / 2) +
-        math.cos(_radians(fromLatitude)) *
-            math.cos(_radians(toLatitude)) *
-            math.sin(longitudeDelta / 2) *
-            math.sin(longitudeDelta / 2);
+            math.cos(_radians(fromLatitude)) *
+                math.cos(_radians(toLatitude)) *
+                math.sin(longitudeDelta / 2) *
+                math.sin(longitudeDelta / 2);
     return earthRadiusMetres *
         2 *
         math.atan2(math.sqrt(value), math.sqrt(1 - value));
@@ -423,7 +429,7 @@ class MatchesRecommendationLogic {
       .map((String value) => value.trim())
       .where(
         (String value) => !value.toLowerCase().contains(RegExp(r'\bhalal\b')),
-      )
+  )
       .where((String value) => value.isNotEmpty)
       .join(', ');
 

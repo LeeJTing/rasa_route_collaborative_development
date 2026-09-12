@@ -67,10 +67,18 @@ class DiscoveryLogicFacade {
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
   }) => foodDiscovery.prepareSwipeMode(
     latitude: latitude,
     longitude: longitude,
     distanceOrigin: distanceOrigin,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
   );
 
   Future<SwipeSession> startNewSwipeSession(SwipeModePreparation preparation) =>
@@ -83,10 +91,20 @@ class DiscoveryLogicFacade {
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
+    bool rebuildWholeQueue = false,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
   }) => foodDiscovery.refreshAfterProfileChange(
     latitude: latitude,
     longitude: longitude,
     distanceOrigin: distanceOrigin,
+    rebuildWholeQueue: rebuildWholeQueue,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
   );
 
   Future<SwipeSession?> reloadSwipeSession(SwipeModePreparation preparation) =>
@@ -125,8 +143,10 @@ class DiscoveryLogicFacade {
 
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
+    String? foodType,
   }) => restaurantDiscovery.nearbyLandmarksWithAutomaticExpansion(
     location: location,
+    foodType: foodType,
   );
 
   /// Nearby restaurant data shared by discovery experiences such as Matches.
@@ -268,36 +288,66 @@ class DiscoveryLogicFacade {
     limit: limit,
   );
 
+  /// The temporary markers a keyword adds on top of the filtered map.
+  ///
+  /// Separate from [mapPins] because it answers a different question and must
+  /// not inherit the filter chips: the chips drive the map, a keyword is the
+  /// other way in. It still obeys the base rule - `available` only - and the
+  /// viewport it is given.
+  /// Pins **and clusters**, because the search layer groups by the same grid
+  /// the filtered map does. Only the colour tells the two apart.
+  Future<MapPinPage> searchMarkers({
+    required ExplorationSearchResults results,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
+    double? fromLatitude,
+    double? fromLongitude,
+    double zoom = detailedViewZoom,
+    int? limit,
+  }) => mapExploration.searchLayerMarkers(
+    results: results,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
+    fromLatitude: fromLatitude,
+    fromLongitude: fromLongitude,
+    zoom: zoom,
+    limit: limit,
+  );
+
   /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
   static const int maximumMarkers = MapExplorationLogic.maximumMarkers;
-  static const int swipeFoodMarkerLimit =
-      MapExplorationLogic.swipeFoodMarkerLimit;
-  static const double swipeFoodFocusZoom =
-      MapExplorationLogic.swipeFoodFocusZoom;
 
-  Future<GeoPoint?> nearestFoodLocation({
-    required int localFoodId,
-    required double fromLatitude,
-    required double fromLongitude,
-  }) => mapExploration.nearestFoodLocation(
-    localFoodId: localFoodId,
-    fromLatitude: fromLatitude,
-    fromLongitude: fromLongitude,
-  );
+  /// The same, for the search layer.
+  static const int maximumSearchPins = MapExplorationLogic.maximumSearchPins;
+
+  // `swipeFoodMarkerLimit`, `swipeFoodFocusZoom` and `nearestFoodLocation`
+  // stood here and named three members `MapExplorationLogic` does not have, so
+  // the file could not compile. Nothing read them - not this facade, not a
+  // ViewModel, not a View - so they were left behind by work that went away,
+  // the way the drill-down constants were. Re-exposing a constant is free;
+  // re-exposing one that does not exist is a build error, so they are gone.
 
   /// REQ102_41 - what a tap on [cluster] should do: the zoom that visibly
   /// breaks it up, or its members when no zoom ever separates them.
+  /// [foodIds] is for a cluster on the search layer: it must be opened against
+  /// the dishes the keyword matched, not the filter chips.
   Future<ClusterExpansion> expandMapCluster(
     MapCluster cluster, {
     required double zoom,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
+    List<int>? foodIds,
   }) => mapExploration.expandCluster(
     cluster,
     zoom: zoom,
     filter: filter,
     localFoodId: localFoodId,
+    foodIds: foodIds,
   );
 
   /// REQ102_47 - the full detail behind one tapped marker, fetched by id.

@@ -14,18 +14,24 @@ import '../../../domain_model/exploration_filter.dart';
 /// wrap so every option is reachable - the Taste group alone has 23 of them
 /// (REQ102_26).
 ///
-/// **One option per group.** Picking a different chip replaces the current
-/// choice; picking the chip already chosen clears the group. The "All" chip at
-/// the head of each row does the same thing explicitly, and is selected
-/// whenever the group is unset - so the row behaves like a radio group and
-/// needs no separate reset.
+/// **As many options per group as the tourist wants.** A chip toggles itself
+/// on and off and its neighbours are left alone, so Breakfast *and* Lunch can
+/// both be lit. Within a row that reads as "or"; across rows as "and". The
+/// "All" chip at the head of each row unticks the whole row, and is lit
+/// whenever nothing in the row is.
+///
+/// **Nothing happens until Apply.** The chips edit a draft the ViewModel holds;
+/// Apply hands it to the map in a single request and closes the panel, Cancel
+/// throws it away and leaves the active filter alone. This is why the footer is
+/// pinned rather than scrolled with the rows: it is the only way out that
+/// changes anything, and it has to stay in sight.
 ///
 /// **The panel is capped and scrolls.** Expanded, a row wraps its options onto
 /// as many lines as it needs, and Taste alone has 23 of them - four groups open
 /// at once ran past the bottom of the screen, which took the panel's own
 /// controls with it. The rows now scroll inside
-/// `AppSizes.filterPanelMaxHeight` and the match count stays pinned below
-/// them, so there is always somewhere to read the result and always a way out.
+/// `AppSizes.filterPanelMaxHeight` and the footer stays pinned below them, so
+/// there is always somewhere to finish and always a way out.
 ///
 /// Widgets in a `widgets/` folder are driven entirely by constructor
 /// parameters and callbacks - they never read a ViewModel themselves, and they
@@ -37,20 +43,34 @@ class MapFilterPanel extends StatelessWidget {
     required this.optionsFor,
     required this.selectionFor,
     required this.isExpanded,
+    required this.selectionCount,
     required this.onToggleOption,
     required this.onClearGroup,
     required this.onToggleExpanded,
+    required this.onApply,
+    required this.onCancel,
   });
 
   final String Function(ExplorationFilterGroup group) labelFor;
   final List<String> Function(ExplorationFilterGroup group) optionsFor;
-  final String? Function(ExplorationFilterGroup group) selectionFor;
+
+  /// Everything ticked in a group. Empty is "All".
+  final Set<String> Function(ExplorationFilterGroup group) selectionFor;
   final bool Function(ExplorationFilterGroup group) isExpanded;
+
+  /// Chips ticked across all four groups, for the Apply button's count.
+  final int selectionCount;
 
   final void Function(ExplorationFilterGroup group, String option)
   onToggleOption;
   final ValueChanged<ExplorationFilterGroup> onClearGroup;
   final ValueChanged<ExplorationFilterGroup> onToggleExpanded;
+
+  /// Hand the draft to the map - the only call here that costs a request.
+  final VoidCallback onApply;
+
+  /// Leave without applying; the filter the map already has stays.
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -103,6 +123,27 @@ class MapFilterPanel extends StatelessWidget {
                 ),
               ),
             ),
+            const Divider(height: AppSpacing.md, color: AppColors.outline),
+            Row(
+              children: <Widget>[
+                Text(
+                  selectionCount == 0
+                      ? 'No filters selected'
+                      : '$selectionCount selected',
+                  style: AppTextStyles.labelSmall.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const Spacer(),
+                _PanelButton(
+                  label: 'Cancel',
+                  filled: false,
+                  onTap: onCancel,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                _PanelButton(label: 'Apply', filled: true, onTap: onApply),
+              ],
+            ),
           ],
         ),
         ),
@@ -124,7 +165,7 @@ class _FilterGroupSection extends StatelessWidget {
 
   final String label;
   final List<String> options;
-  final String? selection;
+  final Set<String> selection;
   final bool expanded;
   final ValueChanged<String> onToggleOption;
   final VoidCallback onClearGroup;
@@ -135,13 +176,13 @@ class _FilterGroupSection extends StatelessWidget {
     final List<Widget> chips = <Widget>[
       _FilterChip(
         label: 'All',
-        selected: selection == null,
+        selected: selection.isEmpty,
         onTap: onClearGroup,
       ),
       for (final String option in options)
         _FilterChip(
           label: option,
-          selected: selection == option,
+          selected: selection.contains(option),
           onTap: () => onToggleOption(option),
         ),
     ];
@@ -232,6 +273,46 @@ class _FilterChip extends StatelessWidget {
         style: AppTextStyles.labelSmall.copyWith(
           color: selected ? AppColors.onPrimary : AppColors.textPrimary,
           fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        ),
+      ),
+    ),
+  );
+}
+
+/// Apply and Cancel. Styled like the chips above rather than as Material
+/// buttons, so the footer reads as part of the same panel.
+class _PanelButton extends StatelessWidget {
+  const _PanelButton({
+    required this.label,
+    required this.filled,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool filled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(AppRadius.pill),
+    child: Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: filled ? AppColors.primary : AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(
+          color: filled ? AppColors.primary : AppColors.outline,
+        ),
+      ),
+      child: Text(
+        label,
+        style: AppTextStyles.labelSmall.copyWith(
+          color: filled ? AppColors.onPrimary : AppColors.textPrimary,
+          fontWeight: FontWeight.w600,
         ),
       ),
     ),

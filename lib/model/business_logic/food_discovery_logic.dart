@@ -35,6 +35,10 @@ class FoodDiscoveryLogic {
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
   }) async {
     final String touristId = await _repository.currentTouristId() ?? '';
     if (touristId.isEmpty) {
@@ -56,6 +60,15 @@ class FoodDiscoveryLogic {
             .map((FoodOccurrence occurrence) => _resolveFood(occurrence, foods))
             .where((FoodOccurrence occurrence) => occurrence.localFoodId != 0)
             .where(
+              (FoodOccurrence occurrence) => _insideViewport(
+                occurrence,
+                south: south,
+                west: west,
+                north: north,
+                east: east,
+              ),
+            )
+            .where(
               (FoodOccurrence occurrence) => _contains(
                 activeRegion.boundary,
                 occurrence.latitude,
@@ -67,8 +80,15 @@ class FoodDiscoveryLogic {
     // Swipe Mode recommends foods backed by at least one real restaurant in
     // the active state. Submitted landmarks are additional Matches results;
     // they do not make a food eligible for the swipe queue by themselves.
+    final Set<String> restaurantKeys = occurrences
+        .where(
+          (FoodOccurrence occurrence) =>
+              occurrence.source == FoodOccurrenceSource.restaurant,
+        )
+        .map((FoodOccurrence occurrence) => 'restaurant:${occurrence.sourceId}')
+        .toSet();
     final Map<String, List<OpeningHour>> hoursByPlace = await _repository
-        .openingHoursByPlace();
+        .openingHoursByPlace(placeKeys: restaurantKeys);
     final DateTime malaysiaNow = currentTime().toUtc().add(
       const Duration(hours: 8),
     );
@@ -119,6 +139,29 @@ class FoodDiscoveryLogic {
         .map((FoodPreference preference) => _normalise(preference.name))
         .where((String value) => value.isNotEmpty)
         .toSet();
+    final Set<int> favouriteFoodIds = await _safeFavouriteFoodIds(touristId);
+    final Map<String, int> favouriteMainTasteCounts = <String, int>{};
+    final Map<String, int> favouriteCategoryCounts = <String, int>{};
+    for (final int foodId in favouriteFoodIds) {
+      final LocalFood? favourite = foodsById[foodId];
+      if (favourite == null) continue;
+      final String mainTaste = _normalise(favourite.mainTaste);
+      final String category = _normalise(favourite.category);
+      if (mainTaste.isNotEmpty) {
+        favouriteMainTasteCounts.update(
+          mainTaste,
+          (int count) => count + 1,
+          ifAbsent: () => 1,
+        );
+      }
+      if (category.isNotEmpty) {
+        favouriteCategoryCounts.update(
+          category,
+          (int count) => count + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    }
 
     final Set<int> touristRestrictionIds = (await _safeRestrictions(
       touristId,
@@ -140,19 +183,31 @@ class FoodDiscoveryLogic {
           .compareTo(restrictedFoodIds.contains(right.id) ? 1 : 0);
       if (restrictionOrder != 0) return restrictionOrder;
 
-      final int preferenceOrder =
-          _preferenceTier(
-            left,
+      final int mainTasteOrder =
+          (_hasPreferredMainTaste(right, preferredTastes) ? 1 : 0).compareTo(
+            _hasPreferredMainTaste(left, preferredTastes) ? 1 : 0,
+          );
+      if (mainTasteOrder != 0) return mainTasteOrder;
+
+      final int affinityOrder =
+          _foodAffinityScore(
+            right,
+            favouriteFoodIds: favouriteFoodIds,
             preferredTastes: preferredTastes,
             preferredCategories: preferredCategories,
+            favouriteMainTasteCounts: favouriteMainTasteCounts,
+            favouriteCategoryCounts: favouriteCategoryCounts,
           ).compareTo(
-            _preferenceTier(
-              right,
+            _foodAffinityScore(
+              left,
+              favouriteFoodIds: favouriteFoodIds,
               preferredTastes: preferredTastes,
               preferredCategories: preferredCategories,
+              favouriteMainTasteCounts: favouriteMainTasteCounts,
+              favouriteCategoryCounts: favouriteCategoryCounts,
             ),
           );
-      if (preferenceOrder != 0) return preferenceOrder;
+      if (affinityOrder != 0) return affinityOrder;
 
       final int distanceOrder = (nearestDistance[left.id] ?? double.infinity)
           .compareTo(nearestDistance[right.id] ?? double.infinity);
@@ -247,11 +302,20 @@ class FoodDiscoveryLogic {
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
+    bool rebuildWholeQueue = false,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
   }) async {
     final SwipeModePreparation preparation = await prepareSwipeMode(
       latitude: latitude,
       longitude: longitude,
       distanceOrigin: distanceOrigin,
+      south: south,
+      west: west,
+      north: north,
+      east: east,
     );
     final SwipeSession? saved = preparation.savedSession;
     if (saved == null) return preparation;
@@ -260,6 +324,26 @@ class FoodDiscoveryLogic {
         .map((LocalFood food) => food.id)
         .toList(growable: false);
     final Set<int> availableIds = rankedIds.toSet();
+
+    if (rebuildWholeQueue) {
+      final SwipeSession rebuilt = saved.copyWith(
+        candidateFoodIds: List<int>.unmodifiable(rankedIds),
+        likedFoodIds: saved.likedFoodIds,
+        dislikedFoodIds: saved.dislikedFoodIds,
+        currentIndex: 0,
+      );
+      await _repository.saveSwipeSession(rebuilt);
+      return SwipeModePreparation(
+        stateCode: preparation.stateCode,
+        stateName: preparation.stateName,
+        touristId: preparation.touristId,
+        queue: preparation.queue,
+        restrictedFoodIds: preparation.restrictedFoodIds,
+        savedSession: rebuilt,
+        savedRestaurantCount: preparation.savedRestaurantCount,
+      );
+    }
+
     final int oldIndex = saved.candidateFoodIds.isEmpty
         ? 0
         : saved.currentIndex.clamp(0, saved.candidateFoodIds.length - 1);
@@ -287,12 +371,8 @@ class FoodDiscoveryLogic {
         : oldIndex.clamp(0, candidates.length - 1);
     final SwipeSession reconciled = saved.copyWith(
       candidateFoodIds: List<int>.unmodifiable(candidates),
-      likedFoodIds: saved.likedFoodIds
-          .where(availableIds.contains)
-          .toList(growable: false),
-      dislikedFoodIds: saved.dislikedFoodIds
-          .where(availableIds.contains)
-          .toList(growable: false),
+      likedFoodIds: saved.likedFoodIds,
+      dislikedFoodIds: saved.dislikedFoodIds,
       currentIndex: currentIndex,
     );
     await _repository.saveSwipeSession(reconciled);
@@ -376,6 +456,14 @@ class FoodDiscoveryLogic {
     }
   }
 
+  Future<Set<int>> _safeFavouriteFoodIds(String touristId) async {
+    try {
+      return await _repository.favouriteFoodIdsForTourist(touristId);
+    } catch (_) {
+      return const <int>{};
+    }
+  }
+
   Future<Map<int, Set<int>>> _safeRestrictionIdsByFood() async {
     try {
       return await _repository.dietaryRestrictionIdsByFood();
@@ -384,27 +472,39 @@ class FoodDiscoveryLogic {
     }
   }
 
-  static int _preferenceTier(
+  static bool _hasPreferredMainTaste(
+    LocalFood food,
+    Set<String> preferredTastes,
+  ) => preferredTastes.contains(_normalise(food.mainTaste));
+
+  static int _foodAffinityScore(
     LocalFood food, {
+    required Set<int> favouriteFoodIds,
     required Set<String> preferredTastes,
     required Set<String> preferredCategories,
+    required Map<String, int> favouriteMainTasteCounts,
+    required Map<String, int> favouriteCategoryCounts,
   }) {
-    final bool categoryMatch = preferredCategories.contains(
-      _normalise(food.category),
-    );
-    final bool mainTasteMatch = preferredTastes.contains(
-      _normalise(food.mainTaste),
-    );
+    final String category = _normalise(food.category);
+    final String mainTaste = _normalise(food.mainTaste);
     final bool secondaryTasteMatch = food.tastes
         .map(_normalise)
-        .where((String taste) => taste != _normalise(food.mainTaste))
+        .where((String taste) => taste != mainTaste)
         .any(preferredTastes.contains);
+    final int favouriteTasteBonus = math.min(
+      (favouriteMainTasteCounts[mainTaste] ?? 0) * 15,
+      45,
+    );
+    final int favouriteCategoryBonus = math.min(
+      (favouriteCategoryCounts[category] ?? 0) * 10,
+      30,
+    );
 
-    if (categoryMatch && (mainTasteMatch || secondaryTasteMatch)) return 0;
-    if (categoryMatch) return 1;
-    if (mainTasteMatch) return 2;
-    if (secondaryTasteMatch) return 3;
-    return 4;
+    return (favouriteFoodIds.contains(food.id) ? 100 : 0) +
+        favouriteTasteBonus +
+        (preferredCategories.contains(category) ? 40 : 0) +
+        favouriteCategoryBonus +
+        (secondaryTasteMatch ? 25 : 0);
   }
 
   static FoodOccurrence _resolveFood(
@@ -424,6 +524,7 @@ class FoodDiscoveryLogic {
         placeName: occurrence.placeName,
         localFoodId: food.id,
         foodName: occurrence.foodName,
+        foodType: food.foodType,
         latitude: occurrence.latitude,
         longitude: occurrence.longitude,
         placeImageUrl: occurrence.placeImageUrl,
@@ -444,6 +545,22 @@ class FoodDiscoveryLogic {
       if (_contains(region.boundary, latitude, longitude)) return region;
     }
     return null;
+  }
+
+  static bool _insideViewport(
+    FoodOccurrence occurrence, {
+    required double? south,
+    required double? west,
+    required double? north,
+    required double? east,
+  }) {
+    if (south == null || west == null || north == null || east == null) {
+      return true;
+    }
+    return occurrence.latitude >= south &&
+        occurrence.latitude <= north &&
+        occurrence.longitude >= west &&
+        occurrence.longitude <= east;
   }
 
   static bool _contains(

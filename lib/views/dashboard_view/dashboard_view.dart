@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -146,14 +148,16 @@ class _DashboardViewState extends State<DashboardView> {
       child: MapSearchBar(
         controller: _searchController,
         onChanged: viewModel.updateSearchKeyword,
-        onSubmitted: viewModel.submitSearch,
         onClear: viewModel.clearSearch,
         onTap: viewModel.openSearchPanel,
+        onSubmitted: viewModel.submitSearch,
         // Offered on both surfaces. The filter narrows the same food selection
         // either way - the heatmap's scores on one, the pins on the other - and
-        // `_applyFilter` already reloads whichever view is showing, so gating
+        // `applyFilter` already reloads whichever view is showing, so gating
         // it to the heatmap only hid a control that worked.
         onFilterTap: viewModel.toggleFilterPanel,
+        // The *applied* count, not the draft's: this badge says what the map is
+        // showing, and half-ticked chips have not reached it yet.
         filterCount: viewModel.filter.selectionCount,
         filterPanelOpen: viewModel.filterPanelOpen,
       ),
@@ -373,6 +377,15 @@ class _DashboardViewState extends State<DashboardView> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
+              if (viewModel.swipeQueueUpdateAvailable) ...<Widget>[
+                MapUpdateBanner(
+                  message: viewModel.swipeQueueUpdateMessage,
+                  onUpdate: viewModel.applySwipeQueueUpdate,
+                  onDismiss: viewModel.dismissSwipeQueueUpdate,
+                  busy: viewModel.swipeLoading,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
               if (viewModel.notice != null) ...<Widget>[
                 _NoticeBanner(
                   message: viewModel.notice!,
@@ -393,9 +406,12 @@ class _DashboardViewState extends State<DashboardView> {
                   optionsFor: viewModel.optionsFor,
                   selectionFor: viewModel.selectionFor,
                   isExpanded: viewModel.isGroupExpanded,
+                  selectionCount: viewModel.draftSelectionCount,
                   onToggleOption: viewModel.toggleFilterOption,
                   onClearGroup: viewModel.clearFilterGroup,
                   onToggleExpanded: viewModel.toggleGroupExpanded,
+                  onApply: viewModel.applyFilter,
+                  onCancel: viewModel.cancelFilter,
                 ),
               if (viewModel.searchPanelOpen &&
                   viewModel.searchKeyword.isNotEmpty)
@@ -498,6 +514,22 @@ class _DashboardViewState extends State<DashboardView> {
             final LatLng centre = camera.center;
             final double zoom = camera.zoom;
             final LatLngBounds bounds = camera.visibleBounds;
+            // Swipe Mode deliberately never moves the camera. Its fixed
+            // discovery area is the unobstructed top half of this map, above
+            // the expanded card panel. Convert that screen rectangle here,
+            // where the Flutter Map geometry belongs, and pass only plain
+            // coordinates into the ViewModel.
+            final double mapWidth = camera.nonRotatedSize.x;
+            final double topHalfHeight = camera.nonRotatedSize.y / 2;
+            final bool hasMeasuredMap = mapWidth > 0 && topHalfHeight > 0;
+            final LatLng swipeNorthWest = hasMeasuredMap
+                ? camera.pointToLatLng(const math.Point<double>(0, 0))
+                : bounds.northWest;
+            final LatLng swipeSouthEast = hasMeasuredMap
+                ? camera.pointToLatLng(
+                    math.Point<double>(mapWidth, topHalfHeight),
+                  )
+                : bounds.southEast;
             Future<void>.microtask(() {
               if (!mounted) return;
               viewModel.onCameraChanged(
@@ -508,6 +540,10 @@ class _DashboardViewState extends State<DashboardView> {
                 west: bounds.west,
                 north: bounds.north,
                 east: bounds.east,
+                swipeSouth: swipeSouthEast.latitude,
+                swipeWest: swipeNorthWest.longitude,
+                swipeNorth: swipeNorthWest.latitude,
+                swipeEast: swipeSouthEast.longitude,
               );
             });
           },
@@ -565,6 +601,32 @@ class _DashboardViewState extends State<DashboardView> {
                   .toList(growable: false),
             ),
 
+          // The same badges for the search layer, in its own colour and its own
+          // layer - drawn after the filtered ones so a search count is never
+          // hidden underneath a count the chips produced. Tapping behaves
+          // identically; only the dishes it is opened against differ.
+          if (viewModel.searchClusters.isNotEmpty)
+            MarkerLayer(
+              markers: viewModel.searchClusters
+                  .map(
+                    (MapCluster cluster) => Marker(
+                      key: ValueKey<String>('search:${cluster.key}'),
+                      point: LatLng(cluster.latitude, cluster.longitude),
+                      width: _clusterDiameter(cluster.count),
+                      height: _clusterDiameter(cluster.count),
+                      child: _ClusterMarker(
+                        count: cluster.count,
+                        searchResult: true,
+                        onTap: () => viewModel.zoomIntoCluster(
+                          cluster,
+                          searchLayer: true,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+
           // REQ102_32 - restaurant and submitted-landmark pins.
           MarkerLayer(
             markers: viewModel.pins
@@ -579,6 +641,10 @@ class _DashboardViewState extends State<DashboardView> {
                           viewModel.selectedPin?.referenceId ==
                               pin.referenceId &&
                           viewModel.selectedPin?.kind == pin.kind,
+                      // Drawn from the same layer as everything else, marked
+                      // so the tourist can tell which of these the keyword
+                      // put there.
+                      searchResult: viewModel.isSearchPin(pin),
                       onTap: () => viewModel.selectPin(pin),
                     ),
                   ),
@@ -619,22 +685,34 @@ double _clusterDiameter(int count) {
 
 /// "1,200 places here", drawn as one tappable circle.
 class _ClusterMarker extends StatelessWidget {
-  const _ClusterMarker({required this.count, required this.onTap});
+  const _ClusterMarker({
+    required this.count,
+    required this.onTap,
+    this.searchResult = false,
+  });
 
   final int count;
+
+  /// Whether this badge belongs to the search layer. Same shape, same size,
+  /// same tap - a different fill, so a count the keyword produced is not read
+  /// as one the filter chips did.
+  final bool searchResult;
+
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: AppColors.primary,
-        border: Border.fromBorderSide(
+        color: searchResult
+            ? AppColors.clusterSearchFill
+            : AppColors.primary,
+        border: const Border.fromBorderSide(
           BorderSide(color: AppColors.surface, width: 2),
         ),
-        boxShadow: <BoxShadow>[
+        boxShadow: const <BoxShadow>[
           BoxShadow(
             color: AppColors.shadow,
             blurRadius: 4,
@@ -689,40 +767,53 @@ class _PinMarker extends StatelessWidget {
     required this.pin,
     required this.selected,
     required this.onTap,
+    this.searchResult = false,
   });
 
   final MapPin pin;
   final bool selected;
+
+  /// Whether the current keyword is what put this marker on the map.
+  ///
+  /// Marked with a ring rather than a colour of its own: the two pin colours
+  /// say where a place came from, and a search result is still a restaurant or
+  /// still somebody's landmark.
+  final bool searchResult;
+
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final bool userSubmitted = pin.kind == MapPinKind.landmark;
+    final Widget marker = Icon(
+      Icons.location_on,
+      size: selected || searchResult
+          ? AppSizes.mapPinSize
+          : AppSizes.mapPinSize - 6,
+      color: userSubmitted
+          ? AppColors.pinUserLandmark
+          : AppColors.pinSystemRestaurant,
+      shadows: <Shadow>[
+        const Shadow(color: AppColors.surface, blurRadius: 3),
+        Shadow(
+          color: selected ? AppColors.pinSelectedRing : AppColors.surface,
+          blurRadius: selected ? 6 : 4,
+        ),
+      ],
+    );
+
     return GestureDetector(
       onTap: onTap,
-      child: Icon(
-        Icons.location_on,
-        size: selected ? AppSizes.mapPinSize : AppSizes.mapPinSize - 6,
-        color: userSubmitted
-            ? AppColors.pinUserLandmark
-            : AppColors.pinSystemRestaurant,
-        shadows: <Shadow>[
-          // The white halo/border to make it pop.
-          const Shadow(color: AppColors.surface, blurRadius: 2),
-          const Shadow(color: AppColors.surface, blurRadius: 4),
-          if (selected)
-            const Shadow(
-              color: AppColors.surface,
-              blurRadius: 8,
-            ),
-          // The soft selection glow/ring.
-          Shadow(
-            color: selected ? AppColors.pinSelectedRing : AppColors.shadow,
-            blurRadius: selected ? 8 : 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      child: searchResult
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.pinSearchHalo,
+                border: Border.all(color: AppColors.pinSearchRing, width: 2),
+              ),
+              child: marker,
+            )
+          : marker,
     );
   }
 }
@@ -744,6 +835,64 @@ class _CurrentLocationDot extends StatelessWidget {
 }
 
 /// M3, and the two "showing the whole country instead" explanations.
+/// REQ102_41 - how much of the viewport's answer is on screen.
+///
+/// Deliberately quiet: it reports a limit, it does not ask for anything. The
+/// optional [subtitle] carries the heatmap's own count for the state under the
+/// map, so the number of pins can be read against the state total rather than
+/// mistaken for it.
+class _PinCoverageChip extends StatelessWidget {
+  const _PinCoverageChip({required this.message, this.subtitle});
+
+  final String message;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    child: Material(
+      color: AppColors.surface,
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.pill)),
+      elevation: 1,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xs,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(
+              Icons.place_outlined,
+              size: 14,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  message,
+                  style: AppTextStyles.labelSmall.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    style: AppTextStyles.labelSmall.copyWith(
+                      color: AppColors.textDisabled,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _NoticeBanner extends StatelessWidget {
   const _NoticeBanner({required this.message, required this.onDismiss});
 

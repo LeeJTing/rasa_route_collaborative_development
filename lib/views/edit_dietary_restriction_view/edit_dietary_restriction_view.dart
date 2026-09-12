@@ -58,7 +58,7 @@ class _EditDietaryRestrictionViewState
       );
       return;
     }
-    Navigator.pop(context);
+    Navigator.pop(context, true);
   }
 
   @override
