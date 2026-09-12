@@ -54,7 +54,7 @@ class MapRepository {
   /// moving between filters and back does not cost a round trip. Cleared by
   /// [clearMapCache] along with everything else.
   static final Map<String, List<RegionTallyDataModel>> _tallyCache =
-      <String, List<RegionTallyDataModel>>{};
+  <String, List<RegionTallyDataModel>>{};
 
   /// REQ102_15 - the counts behind the heatmap, worked out by Postgres against
   /// the real administrative boundaries in `region_boundary`.
@@ -70,13 +70,13 @@ class MapRepository {
       return areas
           .map(
             (Region region) => RegionTally(
-              region: region,
-              placeCount: 0,
-              foodCount: 0,
-              restaurantCount: 0,
-              landmarkCount: 0,
-            ),
-          )
+          region: region,
+          placeCount: 0,
+          foodCount: 0,
+          restaurantCount: 0,
+          landmarkCount: 0,
+        ),
+      )
           .toList(growable: false);
     }
 
@@ -97,9 +97,9 @@ class MapRepository {
     }
 
     final Map<String, RegionTallyDataModel> byCode =
-        <String, RegionTallyDataModel>{
-          for (final RegionTallyDataModel row in rows) row.code: row,
-        };
+    <String, RegionTallyDataModel>{
+      for (final RegionTallyDataModel row in rows) row.code: row,
+    };
 
     // Driven by the outlines rather than by the rows: an area with nothing in
     // it is still drawn, in grey (REQ102_16), and a row for an area the app has
@@ -171,7 +171,7 @@ class MapRepository {
 
   /// Answers to [searchPlaceNames], keyed by keyword and cap.
   static final Map<String, List<MapPlaceHit>> _placeSearchCache =
-      <String, List<MapPlaceHit>>{};
+  <String, List<MapPlaceHit>>{};
 
   /// A keyword's worth of history is plenty: the tourist types forward, and
   /// backspacing over what they just typed is the case worth having cached.
@@ -190,9 +190,9 @@ class MapRepository {
   /// Repeats are served from memory, so holding a key down or backspacing does
   /// not re-ask.
   Future<List<MapPlaceHit>> searchPlaceNames(
-    String needle, {
-    int limit = 12,
-  }) async {
+      String needle, {
+        int limit = 12,
+      }) async {
     final String trimmed = needle.trim().toLowerCase();
     if (trimmed.isEmpty) return const <MapPlaceHit>[];
 
@@ -208,14 +208,14 @@ class MapRepository {
     final List<MapPlaceHit> hits = rows
         .map(
           (Map<String, dynamic> row) => MapPlaceHit(
-            referenceId: _asString(row['reference_id']),
-            isRestaurant: _asString(row['source']) == 'restaurant',
-            name: _asString(row['name']),
-            latitude: _asDoubleOrNull(row['latitude']) ?? 0,
-            longitude: _asDoubleOrNull(row['longitude']) ?? 0,
-            score: _asInt(row['score']),
-          ),
-        )
+        referenceId: _asString(row['reference_id']),
+        isRestaurant: _asString(row['source']) == 'restaurant',
+        name: _asString(row['name']),
+        latitude: _asDoubleOrNull(row['latitude']) ?? 0,
+        longitude: _asDoubleOrNull(row['longitude']) ?? 0,
+        score: _asInt(row['score']),
+      ),
+    )
         .toList(growable: false);
 
     if (_placeSearchCache.length >= placeSearchCacheEntries) {
@@ -358,7 +358,7 @@ class MapRepository {
   static const int markerCacheEntries = 48;
 
   static final Map<String, _CachedMarkers> _markerCache =
-      <String, _CachedMarkers>{};
+  <String, _CachedMarkers>{};
 
   static bool _isFresh(DateTime? at) =>
       at != null && DateTime.now().difference(at) < cacheTtl;
@@ -450,7 +450,7 @@ class MapRepository {
     } catch (_) {
       throw Exception(
         'Unable to load the map for this area. '
-        'Check your connection and try again.',
+            'Check your connection and try again.',
       );
     }
 
@@ -525,8 +525,8 @@ class MapRepository {
     if (rows.isEmpty) return (splitZoom: null, memberCount: 0);
     final Map<String, dynamic> row = rows.first;
     return (
-      splitZoom: _asDoubleOrNull(row['split_zoom']),
-      memberCount: _asInt(row['member_count']),
+    splitZoom: _asDoubleOrNull(row['split_zoom']),
+    memberCount: _asInt(row['member_count']),
     );
   }
 
@@ -652,10 +652,10 @@ class MapRepository {
     }
     return _placesRequest ??= _fetchPlaces()
         .then((List<MapPlace> value) {
-          _cachedPlaces = value;
-          _cachedPlacesAt = DateTime.now();
-          return value;
-        })
+      _cachedPlaces = value;
+      _cachedPlacesAt = DateTime.now();
+      return value;
+    })
         .whenComplete(() => _placesRequest = null);
   }
 
@@ -665,7 +665,7 @@ class MapRepository {
         APIManager.tablePlace,
         orderBy: 'place_id',
         columns:
-            'place_id, name, kind, state_name, latitude, longitude, '
+        'place_id, name, kind, state_name, latitude, longitude, '
             'zoom, aliases',
       );
       return rows
@@ -696,20 +696,33 @@ class MapRepository {
     }
     return _occurrencesRequest ??= _fetchOccurrences()
         .then((List<FoodOccurrence> value) {
-          _cachedOccurrences = value;
-          _cachedOccurrencesAt = DateTime.now();
-          return value;
-        })
+      _cachedOccurrences = value;
+      _cachedOccurrencesAt = DateTime.now();
+      return value;
+    })
         .whenComplete(() => _occurrencesRequest = null);
   }
 
   Future<List<FoodOccurrence>> _fetchOccurrences() async {
+    // Resolve food types once, then share the same lookup with both occurrence
+    // sources. This keeps FoodOccurrence self-contained for Quick Mode filters
+    // without making each restaurant/landmark item query embed local_food.
+    final List<Map<String, dynamic>> foodRows = await api.selectEvery(
+      APIManager.tableLocalFood,
+      orderBy: 'local_food_id',
+      columns: 'local_food_id, food_type',
+    );
+    final Map<int, String> foodTypeById = <int, String>{
+      for (final Map<String, dynamic> row in foodRows)
+        _asInt(row['local_food_id']): _asString(row['food_type']),
+    };
+
     // The two sources are independent, so they go together rather than one
     // after the other.
     final List<List<FoodOccurrence>> both = await Future.wait(
       <Future<List<FoodOccurrence>>>[
-        _restaurantOccurrences(),
-        _landmarkOccurrences(),
+        _restaurantOccurrences(foodTypeById),
+        _landmarkOccurrences(foodTypeById),
       ],
     );
     return List<FoodOccurrence>.unmodifiable(
@@ -717,37 +730,39 @@ class MapRepository {
     );
   }
 
-  Future<List<FoodOccurrence>> _restaurantOccurrences() async {
+  Future<List<FoodOccurrence>> _restaurantOccurrences(
+      Map<int, String> foodTypeById,
+      ) async {
     final List<Map<String, dynamic>> restaurants;
     final List<Map<String, dynamic>> items;
     try {
       // Neither select depends on the other.
       final List<List<Map<String, dynamic>>> rows =
-          await Future.wait(<Future<List<Map<String, dynamic>>>>[
-            // Paged, not `selectAll`: both tables are far past PostgREST's
-            // 1000-row ceiling, and a truncated read here is what makes a
-            // fully seeded database look like an almost empty map.
-            api.selectEvery(
-              APIManager.tableRestaurant,
-              orderBy: 'restaurant_id',
-              columns:
-                  'restaurant_id, restaurant_name, latitude, longitude, '
-                  'category, rating, restaurant_image_url, status',
-            ),
-            api.selectEvery(
-              APIManager.tableRestaurantItem,
-              orderBy: 'restaurant_item_id',
-              columns:
-                  'restaurant_id, local_food_id, restaurant_item_name, '
-                  'restaurant_item_price',
-            ),
-          ]);
+      await Future.wait(<Future<List<Map<String, dynamic>>>>[
+        // Paged, not `selectAll`: both tables are far past PostgREST's
+        // 1000-row ceiling, and a truncated read here is what makes a
+        // fully seeded database look like an almost empty map.
+        api.selectEvery(
+          APIManager.tableRestaurant,
+          orderBy: 'restaurant_id',
+          columns:
+          'restaurant_id, restaurant_name, latitude, longitude, '
+              'category, rating, restaurant_image_url, status',
+        ),
+        api.selectEvery(
+          APIManager.tableRestaurantItem,
+          orderBy: 'restaurant_item_id',
+          columns:
+          'restaurant_id, local_food_id, restaurant_item_name, '
+              'restaurant_item_price',
+        ),
+      ]);
       restaurants = rows[0];
       items = rows[1];
     } catch (_) {
       throw Exception(
         'Unable to load the local food distribution. '
-        'Check your connection and try again.',
+            'Check your connection and try again.',
       );
     }
 
@@ -781,6 +796,7 @@ class MapRepository {
           placeName: _asString(place['restaurant_name']),
           localFoodId: _asInt(item['local_food_id']),
           foodName: _asString(item['restaurant_item_name']),
+          foodType: foodTypeById[_asInt(item['local_food_id'])] ?? '',
           latitude: latitude,
           longitude: longitude,
           placeImageUrl: _asStringOrNull(place['restaurant_image_url']),
@@ -793,33 +809,35 @@ class MapRepository {
     return out;
   }
 
-  Future<List<FoodOccurrence>> _landmarkOccurrences() async {
+  Future<List<FoodOccurrence>> _landmarkOccurrences(
+      Map<int, String> foodTypeById,
+      ) async {
     final List<Map<String, dynamic>> landmarks;
     final List<Map<String, dynamic>> items;
     try {
       final List<List<Map<String, dynamic>>> rows =
-          await Future.wait(<Future<List<Map<String, dynamic>>>>[
-            api.selectEvery(
-              APIManager.tableSubmittedLandmark,
-              orderBy: 'landmark_id',
-              columns:
-                  'landmark_id, landmark_name, latitude, longitude, status, '
-                  'image_url, category',
-            ),
-            api.selectEvery(
-              APIManager.tableLandmarkItem,
-              orderBy: 'landmark_item_id',
-              columns:
-                  'landmark_id, local_food_id, dish, image_url, item_price, '
-                  'food_category',
-            ),
-          ]);
+      await Future.wait(<Future<List<Map<String, dynamic>>>>[
+        api.selectEvery(
+          APIManager.tableSubmittedLandmark,
+          orderBy: 'landmark_id',
+          columns:
+          'landmark_id, landmark_name, latitude, longitude, status, '
+              'image_url, category',
+        ),
+        api.selectEvery(
+          APIManager.tableLandmarkItem,
+          orderBy: 'landmark_item_id',
+          columns:
+          'landmark_id, local_food_id, dish, image_url, item_price, '
+              'food_category',
+        ),
+      ]);
       landmarks = rows[0];
       items = rows[1];
     } catch (_) {
       throw Exception(
         'Unable to load submitted landmarks. '
-        'Check your connection and try again.',
+            'Check your connection and try again.',
       );
     }
 
@@ -851,6 +869,7 @@ class MapRepository {
           placeName: _asString(place['landmark_name']),
           localFoodId: _asInt(item['local_food_id']),
           foodName: _asString(item['dish']),
+          foodType: foodTypeById[_asInt(item['local_food_id'])] ?? '',
           latitude: latitude,
           longitude: longitude,
           // The tourist's own signboard/stall photo is the landmark's "place
@@ -858,7 +877,7 @@ class MapRepository {
           // photo when it is missing. URLs are normalized so legacy rows that
           // doubled the bucket segment still display.
           placeImageUrl:
-              _normalizeLandmarkImageUrl(place['image_url']) ??
+          _normalizeLandmarkImageUrl(place['image_url']) ??
               _normalizeLandmarkImageUrl(item['image_url']),
           placeCategory: _asStringOrNull(place['category']),
           itemPrice: _asDoubleOrNull(item['item_price']),
@@ -912,10 +931,10 @@ class MapRepository {
     }
     return _hoursRequest ??= _fetchOpeningHours()
         .then((Map<String, List<OpeningHour>> value) {
-          _cachedHours = value;
-          _cachedHoursAt = DateTime.now();
-          return value;
-        })
+      _cachedHours = value;
+      _cachedHoursAt = DateTime.now();
+      return value;
+    })
         .whenComplete(() => _hoursRequest = null);
   }
 
@@ -935,10 +954,10 @@ class MapRepository {
     try {
       rows = placeKeys == null
           ? await api.selectEvery(
-              APIManager.tableOpeningHours,
-              orderBy: 'opening_hours_id',
-              columns: _openingHoursColumns,
-            )
+        APIManager.tableOpeningHours,
+        orderBy: 'opening_hours_id',
+        columns: _openingHoursColumns,
+      )
           : await _openingHoursFor(placeKeys);
     } catch (_) {
       // Hours are a nice-to-have on a map pin; losing them must not take the
@@ -947,7 +966,7 @@ class MapRepository {
     }
 
     final Map<String, List<OpeningHour>> byPlace =
-        <String, List<OpeningHour>>{};
+    <String, List<OpeningHour>>{};
     for (final Map<String, dynamic> row in rows) {
       final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
       final int? restaurantId = data.restaurantId;
@@ -977,14 +996,14 @@ class MapRepository {
       byPlace
           .putIfAbsent(key, () => <OpeningHour>[])
           .add(
-            OpeningHour(
-              id: data.openingHoursId,
-              day: day,
-              status: status,
-              opensAt: status == DayStatus.open ? opensAt : null,
-              closesAt: status == DayStatus.open ? closesAt : null,
-            ),
-          );
+        OpeningHour(
+          id: data.openingHoursId,
+          day: day,
+          status: status,
+          opensAt: status == DayStatus.open ? opensAt : null,
+          closesAt: status == DayStatus.open ? closesAt : null,
+        ),
+      );
     }
     return byPlace;
   }
@@ -1000,8 +1019,8 @@ class MapRepository {
   /// Opening hours for a bounded set of place keys, one request per column per
   /// chunk of ids, all in flight together.
   Future<List<Map<String, dynamic>>> _openingHoursFor(
-    Set<String> placeKeys,
-  ) async {
+      Set<String> placeKeys,
+      ) async {
     final List<Object?> restaurantIds = <Object?>[];
     final List<Object?> landmarkIds = <Object?>[];
     for (final String key in placeKeys) {
@@ -1017,10 +1036,10 @@ class MapRepository {
     }
 
     final List<Future<List<Map<String, dynamic>>>> requests =
-        <Future<List<Map<String, dynamic>>>>[
-          ..._chunkedRequests('restaurant_id', restaurantIds),
-          ..._chunkedRequests('landmark_id', landmarkIds),
-        ];
+    <Future<List<Map<String, dynamic>>>>[
+      ..._chunkedRequests('restaurant_id', restaurantIds),
+      ..._chunkedRequests('landmark_id', landmarkIds),
+    ];
     if (requests.isEmpty) return const <Map<String, dynamic>>[];
 
     final List<List<Map<String, dynamic>>> pages = await Future.wait(requests);
@@ -1033,6 +1052,9 @@ class MapRepository {
     String column,
     List<Object?> ids,
   ) {
+      String column,
+      List<Object?> ids,
+      ) {
     final List<Future<List<Map<String, dynamic>>>> out =
         <Future<List<Map<String, dynamic>>>>[];
     for (int start = 0; start < ids.length; start += _idsPerRequest) {

@@ -17,6 +17,7 @@ class FoodOccurrence {
     required this.placeName,
     required this.localFoodId,
     required this.foodName,
+    required this.foodType,
     required this.latitude,
     required this.longitude,
     this.placeImageUrl,
@@ -41,6 +42,10 @@ class FoodOccurrence {
   /// The dish as the source spells it. For a submitted landmark this is
   /// `landmark_item.dish`, which is how the catalogue match is made.
   final String foodName;
+
+  /// Type from the linked `local_food` row: Food, Beverage, Fruit, Dessert or
+  /// Kuih. Empty only while an unresolved submitted dish has no catalogue id.
+  final String foodType;
 
   final double latitude;
   final double longitude;

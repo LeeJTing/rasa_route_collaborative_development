@@ -44,17 +44,17 @@ class FoodDiscoveryLogic {
       for (final LocalFood food in foods) food.id: food,
     };
     final List<FoodOccurrence> occurrences =
-        (await _repository.foodOccurrences())
-            .map((FoodOccurrence occurrence) => _resolveFood(occurrence, foods))
-            .where((FoodOccurrence occurrence) => occurrence.localFoodId != 0)
-            .where(
-              (FoodOccurrence occurrence) => _contains(
-                activeRegion.boundary,
-                occurrence.latitude,
-                occurrence.longitude,
-              ),
-            )
-            .toList(growable: false);
+    (await _repository.foodOccurrences())
+        .map((FoodOccurrence occurrence) => _resolveFood(occurrence, foods))
+        .where((FoodOccurrence occurrence) => occurrence.localFoodId != 0)
+        .where(
+          (FoodOccurrence occurrence) => _contains(
+        activeRegion.boundary,
+        occurrence.latitude,
+        occurrence.longitude,
+      ),
+    )
+        .toList(growable: false);
 
     // Swipe Mode recommends foods backed by at least one real restaurant in
     // the active state. Submitted landmarks are additional Matches results;
@@ -62,8 +62,8 @@ class FoodDiscoveryLogic {
     final List<FoodOccurrence> restaurantOccurrences = occurrences
         .where(
           (FoodOccurrence occurrence) =>
-              occurrence.source == FoodOccurrenceSource.restaurant,
-        )
+      occurrence.source == FoodOccurrenceSource.restaurant,
+    )
         .toList(growable: false);
     final Set<int> availableIds = restaurantOccurrences
         .map((FoodOccurrence occurrence) => occurrence.localFoodId)
@@ -79,7 +79,7 @@ class FoodDiscoveryLogic {
       );
       nearestDistance.update(
         occurrence.localFoodId,
-        (double current) => math.min(current, distance),
+            (double current) => math.min(current, distance),
         ifAbsent: () => distance,
       );
     }
@@ -96,7 +96,7 @@ class FoodDiscoveryLogic {
       touristId,
     )).map((DietaryRestriction restriction) => restriction.id).toSet();
     final Map<int, Set<int>> restrictionsByFood =
-        await _safeRestrictionIdsByFood();
+    await _safeRestrictionIdsByFood();
     final Set<int> restrictedFoodIds = availableIds.where((int foodId) {
       final Set<int> foodRestrictions =
           restrictionsByFood[foodId] ?? const <int>{};
@@ -132,9 +132,9 @@ class FoodDiscoveryLogic {
     final int savedRestaurantCount = occurrences
         .where(
           (FoodOccurrence occurrence) =>
-              occurrence.source == FoodOccurrenceSource.restaurant &&
-              savedLikes.contains(occurrence.localFoodId),
-        )
+      occurrence.source == FoodOccurrenceSource.restaurant &&
+          savedLikes.contains(occurrence.localFoodId),
+    )
         .map((FoodOccurrence occurrence) => occurrence.sourceId)
         .toSet()
         .length;
@@ -158,7 +158,7 @@ class FoodDiscoveryLogic {
     final DateTime now = DateTime.now().toUtc();
     final SwipeSession session = SwipeSession(
       sessionId:
-          '${preparation.touristId}:${preparation.stateCode}:${now.microsecondsSinceEpoch}',
+      '${preparation.touristId}:${preparation.stateCode}:${now.microsecondsSinceEpoch}',
       touristId: preparation.touristId,
       stateCode: preparation.stateCode,
       startedAt: now,
@@ -201,9 +201,9 @@ class FoodDiscoveryLogic {
   }
 
   Future<SwipeSession> moveToIndex(
-    SwipeSession session,
-    int requestedIndex,
-  ) async {
+      SwipeSession session,
+      int requestedIndex,
+      ) async {
     if (session.candidateFoodIds.isEmpty) return session;
     final SwipeSession moved = session.copyWith(
       currentIndex: requestedIndex.clamp(
@@ -276,15 +276,15 @@ class FoodDiscoveryLogic {
   }
 
   static FoodOccurrence _resolveFood(
-    FoodOccurrence occurrence,
-    List<LocalFood> foods,
-  ) {
+      FoodOccurrence occurrence,
+      List<LocalFood> foods,
+      ) {
     if (occurrence.localFoodId != 0) return occurrence;
     final String dish = _normalise(occurrence.foodName);
     for (final LocalFood food in foods) {
       final bool matches =
           _normalise(food.name) == dish ||
-          food.synonyms.any((String synonym) => _normalise(synonym) == dish);
+              food.synonyms.any((String synonym) => _normalise(synonym) == dish);
       if (!matches) continue;
       return FoodOccurrence(
         sourceId: occurrence.sourceId,
@@ -292,6 +292,7 @@ class FoodDiscoveryLogic {
         placeName: occurrence.placeName,
         localFoodId: food.id,
         foodName: occurrence.foodName,
+        foodType: food.foodType,
         latitude: occurrence.latitude,
         longitude: occurrence.longitude,
         placeImageUrl: occurrence.placeImageUrl,
@@ -304,10 +305,10 @@ class FoodDiscoveryLogic {
   }
 
   static Region? _regionAt(
-    List<Region> regions,
-    double latitude,
-    double longitude,
-  ) {
+      List<Region> regions,
+      double latitude,
+      double longitude,
+      ) {
     for (final Region region in regions) {
       if (_contains(region.boundary, latitude, longitude)) return region;
     }
@@ -315,16 +316,16 @@ class FoodDiscoveryLogic {
   }
 
   static bool _contains(
-    List<GeoPoint> polygon,
-    double latitude,
-    double longitude,
-  ) {
+      List<GeoPoint> polygon,
+      double latitude,
+      double longitude,
+      ) {
     if (polygon.length < 3) return false;
     bool inside = false;
     for (
-      int current = 0, previous = polygon.length - 1;
-      current < polygon.length;
-      previous = current++
+    int current = 0, previous = polygon.length - 1;
+    current < polygon.length;
+    previous = current++
     ) {
       final GeoPoint a = polygon[current];
       final GeoPoint b = polygon[previous];
@@ -334,26 +335,26 @@ class FoodDiscoveryLogic {
           (b.longitude - a.longitude) *
               (latitude - a.latitude) /
               (b.latitude - a.latitude) +
-          a.longitude;
+              a.longitude;
       if (longitude < intersection) inside = !inside;
     }
     return inside;
   }
 
   static double _distanceKm(
-    double fromLatitude,
-    double fromLongitude,
-    double toLatitude,
-    double toLongitude,
-  ) {
+      double fromLatitude,
+      double fromLongitude,
+      double toLatitude,
+      double toLongitude,
+      ) {
     const double earthRadiusKm = 6371;
     final double latitudeDelta = _radians(toLatitude - fromLatitude);
     final double longitudeDelta = _radians(toLongitude - fromLongitude);
     final double haversine =
         math.pow(math.sin(latitudeDelta / 2), 2).toDouble() +
-        math.cos(_radians(fromLatitude)) *
-            math.cos(_radians(toLatitude)) *
-            math.pow(math.sin(longitudeDelta / 2), 2).toDouble();
+            math.cos(_radians(fromLatitude)) *
+                math.cos(_radians(toLatitude)) *
+                math.pow(math.sin(longitudeDelta / 2), 2).toDouble();
     return earthRadiusKm *
         2 *
         math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine));

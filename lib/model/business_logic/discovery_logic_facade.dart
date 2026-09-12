@@ -106,8 +106,10 @@ class DiscoveryLogicFacade {
 
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
+    String? foodType,
   }) => restaurantDiscovery.nearbyLandmarksWithAutomaticExpansion(
     location: location,
+    foodType: foodType,
   );
 
   /// Nearby restaurant data shared by discovery experiences such as Matches.

@@ -137,7 +137,7 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
           localFoodId: 1,
           foodName: 'Nasi Lemak',
           latitude: 1,
-          longitude: 1.01,
+          longitude: 1.01, foodType: '',
         ),
         FoodOccurrence(
           sourceId: '20',
@@ -146,7 +146,7 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
           localFoodId: 2,
           foodName: 'Curry Mee',
           latitude: 1,
-          longitude: 1.02,
+          longitude: 1.02, foodType: '',
         ),
         FoodOccurrence(
           sourceId: '30',
@@ -155,7 +155,7 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
           localFoodId: 3,
           foodName: 'Cendol',
           latitude: 1,
-          longitude: 1.005,
+          longitude: 1.005, foodType: '',
         ),
         FoodOccurrence(
           sourceId: '40',
@@ -164,7 +164,7 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
           localFoodId: 4,
           foodName: 'Outside Dish',
           latitude: 4,
-          longitude: 4,
+          longitude: 4, foodType: '',
         ),
       ];
 
