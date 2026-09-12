@@ -123,6 +123,7 @@ class RestaurantRecommendationViewModel extends BaseViewModel
             ),
             discoveryLogic.getQuickModeLandmarks(
               location: requestedLocation,
+              foodType: requestedFoodType,
             ),
           ]);
 
