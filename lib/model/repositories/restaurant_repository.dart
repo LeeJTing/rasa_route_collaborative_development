@@ -101,7 +101,8 @@ class RestaurantRepository {
     food_img_url,
     food_category,
     restaurant_item_price,
-    is_removed
+    is_removed,
+    local_food(food_type)
   ''';
 
   static const String _detailColumns =
@@ -357,6 +358,10 @@ class RestaurantRepository {
 
   /// Loads the menu facts needed to decide Quick Mode eligibility without
   /// downloading nested catalogue images for every restaurant in 10 km.
+  ///
+  /// Includes each item's `local_food.food_type` (Food, Beverage, Fruit,
+  /// Dessert, Kuih) so a food-type search can decide eligibility itself,
+  /// rather than the caller filtering an already-fetched batch afterwards.
   Future<List<RestaurantItem>> getRestaurantItemsByRestaurantIds(
     List<int> restaurantIds,
   ) async {
@@ -386,8 +391,12 @@ class RestaurantRepository {
           );
           items.addAll(
             rows.map(
-              (Map<String, dynamic> row) =>
-                  _itemDataToDomain(RestaurantItemDataModel.fromJson(row)),
+              (Map<String, dynamic> row) => _itemDataToDomain(
+                RestaurantItemDataModel.fromJson(row),
+                foodType: JsonReader.asStringOrNull(
+                  JsonReader.asMapOrNull(row['local_food'])?['food_type'],
+                ),
+              ),
             ),
           );
           if (rows.length < _cataloguePageSize) break;
@@ -434,7 +443,9 @@ class RestaurantRepository {
         // A bulk/wholesale line (e.g. "Air Katira (30 botol) RM540") prices a
         // multi-unit pack, not a single serve - it would inflate the range the
         // comparison shows, so it is excluded from the min/max aggregation.
-        final String itemName = JsonReader.asString(row['restaurant_item_name']);
+        final String itemName = JsonReader.asString(
+          row['restaurant_item_name'],
+        );
         if (foodId == null ||
             price == null ||
             price <= 0 ||
@@ -470,9 +481,8 @@ class RestaurantRepository {
   /// the comparison's "Time and Price" list. Kept verbatim (no min/max, no
   /// bulk filtering) so a pack line like "BOTOL 30" keeps its unit text and
   /// is shown to the tourist as-is.
-  Future<Map<int, List<({String name, double price})>>> restaurantMenuItemsByFood(
-    Set<int> localFoodIds,
-  ) async {
+  Future<Map<int, List<({String name, double price})>>>
+  restaurantMenuItemsByFood(Set<int> localFoodIds) async {
     if (localFoodIds.isEmpty) {
       return const <int, List<({String name, double price})>>{};
     }
@@ -497,15 +507,12 @@ class RestaurantRepository {
         if (foodId == null || price == null || price <= 0 || name.isEmpty) {
           continue;
         }
-        byFood.putIfAbsent(
-          foodId,
-          () => <({String name, double price})>[],
-        ).add((name: name, price: price));
+        byFood.putIfAbsent(foodId, () => <({String name, double price})>[]).add(
+          (name: name, price: price),
+        );
       }
       for (final List<({String name, double price})> entries in byFood.values) {
-        entries.sort(
-          (a, b) => a.price.compareTo(b.price),
-        );
+        entries.sort((a, b) => a.price.compareTo(b.price));
       }
       return byFood;
     } catch (error, stackTrace) {
@@ -870,25 +877,32 @@ class RestaurantRepository {
     if (parts.length < 2) return null;
     final int? hour = int.tryParse(parts[0]);
     final int? minute = int.tryParse(parts[1]);
-    if (hour == null || minute == null || hour > 23 || minute > 59) {
+    if (hour == null || minute == null || minute > 59) {
       return null;
     }
+    // The imported catalogue uses 24:00:00 to mean the end of the day. It is
+    // distinct from 00:00:00 (the start of the day) in the domain model.
+    if (hour == 24) return minute == 0 ? 1440 : null;
+    if (hour < 0 || hour > 23) return null;
     return hour * 60 + minute;
   }
 
-  RestaurantItem _itemDataToDomain(RestaurantItemDataModel data) =>
-      RestaurantItem(
-        id: data.restaurantItemId,
-        restaurantId: data.restaurantId,
-        localFoodId: data.localFoodId,
-        foodName: data.restaurantItemName,
-        ingredients: data.ingredients,
-        imageUrl: data.foodImgUrl,
-        price: data.restaurantItemPrice,
-        currency: 'RM',
-        foodCategory: data.foodCategory ?? '',
-        isRemoved: data.isRemoved,
-      );
+  RestaurantItem _itemDataToDomain(
+    RestaurantItemDataModel data, {
+    String? foodType,
+  }) => RestaurantItem(
+    id: data.restaurantItemId,
+    restaurantId: data.restaurantId,
+    localFoodId: data.localFoodId,
+    foodName: data.restaurantItemName,
+    ingredients: data.ingredients,
+    imageUrl: data.foodImgUrl,
+    price: data.restaurantItemPrice,
+    currency: 'RM',
+    foodCategory: data.foodCategory ?? '',
+    foodType: foodType ?? '',
+    isRemoved: data.isRemoved,
+  );
 
   RestaurantItem _itemToDomain(Map<String, dynamic> row) {
     final RestaurantItemDataModel data = RestaurantItemDataModel.fromJson(row);

@@ -34,7 +34,7 @@ class RestaurantDetailHeader extends StatelessWidget {
             Text(
               restaurant.rating == null
                   ? 'No rating yet'
-                  : '${restaurant.rating!.toStringAsFixed(1)} (${restaurant.reviewCount ?? 0} reviews)',
+                  : restaurant.rating!.toStringAsFixed(1),
             ),
             const Spacer(),
             const Icon(Icons.location_on_outlined),

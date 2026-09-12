@@ -50,6 +50,11 @@ class APIManager {
   static const String tableLocalFoodPreference = 'local_food_preference';
   static const String tableReport = 'report';
 
+  /// Saved (incomplete) Add-New-Landmark form snapshots - see
+  /// `LandmarkDraftRepository`. One row per draft, expiring 24 hours after
+  /// its last save.
+  static const String tableLandmarkDraft = 'landmark_draft';
+
   /// Searchable geography for the dashboard: cities, towns, areas and notable
   /// locations (REQ102_19). Read-only - seeded by migration.
   static const String tablePlace = 'place';
@@ -213,6 +218,12 @@ class APIManager {
     path: path,
     bytes: bytes,
   );
+
+  /// Deletes landmark-image objects by their storage object names
+  /// (`image_id` values) - used when a landmark draft is discarded or
+  /// expires, so its uploaded photos do not linger. Best-effort.
+  Future<void> deleteLandmarkImages(List<String> objectIds) => _supabase
+      .removeObjects(bucket: storageBucketLandmarkImages, paths: objectIds);
 
   /// The signed-in user's id, or `''` when nobody is signed in.
   String get currentUserId => _supabase.currentUserId;

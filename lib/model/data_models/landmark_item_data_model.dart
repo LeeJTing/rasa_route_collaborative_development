@@ -14,6 +14,8 @@ class LandmarkItemDataModel implements JsonModel {
     this.description,
     this.origin,
     this.culturalBackground,
+    this.ingredients,
+    this.dietaryRestrictions,
     this.imageUrl,
     this.imageId,
     this.itemPrice,
@@ -46,6 +48,14 @@ class LandmarkItemDataModel implements JsonModel {
   final String? description;
   final String? origin;
   final String? culturalBackground;
+
+  /// The item's ingredients text - the dictionary row's own list with the
+  /// recognition's observed extras merged in (see `LandmarkItem.ingredients`).
+  final String? ingredients;
+
+  /// Comma-separated canonical dietary-restriction names for this item (see
+  /// `LandmarkItem.dietaryRestrictions`).
+  final String? dietaryRestrictions;
 
   /// Public URL of the image in Supabase Storage.
   final String? imageUrl;
@@ -83,6 +93,10 @@ class LandmarkItemDataModel implements JsonModel {
       culturalBackground: JsonReader.asStringOrNull(
         json['cultural_background'],
       ),
+      ingredients: JsonReader.asStringOrNull(json['ingredients']),
+      dietaryRestrictions: JsonReader.asStringOrNull(
+        json['dietary_restrictions'],
+      ),
       imageUrl: JsonReader.asStringOrNull(json['image_url']),
       imageId: JsonReader.asStringOrNull(json['image_id']),
       itemPrice: JsonReader.asDoubleOrNull(json['item_price']),
@@ -107,6 +121,8 @@ class LandmarkItemDataModel implements JsonModel {
     'description': description,
     'origin': origin,
     'cultural_background': culturalBackground,
+    'ingredients': ingredients,
+    'dietary_restrictions': dietaryRestrictions,
     'image_url': imageUrl,
     'image_id': imageId,
     'item_price': itemPrice,

@@ -21,6 +21,7 @@ class FoodRecognitionResult {
     this.imageQuality = 'good',
     this.imageQualityIssues = const <String>[],
     this.dietaryRestrictions = const <String>[],
+    this.variant = '',
   });
 
   /// Whether the photo shows a Malaysian local food.
@@ -78,4 +79,14 @@ class FoodRecognitionResult {
   ///     "View Details" has real information), which must not be added as a
   ///     landmark.
   final List<LocalFood> candidates;
+
+  /// The name the single recognised food was actually seen (or typed) as,
+  /// when it EXTENDS the dictionary candidate without being one of its names
+  /// - e.g. candidate `Cendol` with variant `Cendol Jagung`. Carried onto
+  /// the submitted `LandmarkItem.variant`; empty for a multi-candidate
+  /// outcome (the picked candidate resolves through
+  /// `FoodRecognitionLogic.enrichCandidate` instead) and for a match that IS
+  /// the dish (its name/synonym/same words reordered). A brand-new dish may
+  /// still carry Gemini's own reported variant.
+  final String variant;
 }

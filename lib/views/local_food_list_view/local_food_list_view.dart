@@ -46,7 +46,16 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
         appBar: AppTopBar(
           title: 'All Local Food',
           showBackButton: Navigator.of(context).canPop(),
-          onProfileTap: () => Navigator.pushNamed(context, AppRoutes.profile),
+          onProfileTap: () async {
+            await Navigator.pushNamed(
+              context,
+              AppRoutes.profile,
+            );
+
+            if (!context.mounted) return;
+
+            await _viewModel.refreshFavourite();
+          },
         ),
         body: Consumer<LocalFoodListViewModel>(
           builder:

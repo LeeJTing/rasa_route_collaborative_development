@@ -61,6 +61,7 @@ abstract final class Env {
   static const String _keyGeminiApiKeyLandmark = 'GEMINI_API_KEY_LANDMARK';
   static const String _keyGeminiModelLandmark = 'GEMINI_MODEL_LANDMARK';
   static const String _keyGeminiFallbackModels = 'GEMINI_FALLBACK_MODELS';
+  static const String _keyGeminiThinkingBudget = 'GEMINI_THINKING_BUDGET';
   static const String _keyOsmBaseUrl = 'OSM_BASE_URL';
   static const String _keyOsmTileUrl = 'OSM_TILE_URL';
   static const String _keyApiTimeoutSeconds = 'API_TIMEOUT_SECONDS';
@@ -83,6 +84,9 @@ abstract final class Env {
       _keyGeminiModelLandmark: String.fromEnvironment('GEMINI_MODEL_LANDMARK'),
       _keyGeminiFallbackModels: String.fromEnvironment(
         'GEMINI_FALLBACK_MODELS',
+      ),
+      _keyGeminiThinkingBudget: String.fromEnvironment(
+        'GEMINI_THINKING_BUDGET',
       ),
       _keyOsmBaseUrl: String.fromEnvironment('OSM_BASE_URL'),
       _keyOsmTileUrl: String.fromEnvironment('OSM_TILE_URL'),
@@ -147,6 +151,13 @@ abstract final class Env {
         .toList(growable: false);
     return parsed.isEmpty ? defaults : parsed;
   }
+
+  /// Optional "thinking" token budget for the UC500 landmark Gemini calls
+  /// (`GEMINI_THINKING_BUDGET`, e.g. `512`). `0`/unset sends NO
+  /// `thinkingConfig` at all. Only thinking-capable models support it: the
+  /// model may reason before answering (better reads on ambiguous photos) at
+  /// the cost of latency. Remove the value if the model/API rejects it.
+  static int get geminiThinkingBudget => _readInt(_keyGeminiThinkingBudget, 0);
 
   static String get osmBaseUrl =>
       _read(_keyOsmBaseUrl, fallback: 'https://overpass-api.de/api');

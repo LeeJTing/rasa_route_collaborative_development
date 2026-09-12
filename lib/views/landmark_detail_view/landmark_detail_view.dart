@@ -5,11 +5,14 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
+import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
 import '../../view_models/food_recognition_view_model.dart'
     show LandmarkDraftHandoff;
 import '../../view_models/landmark_detail_view_model.dart';
+import '../common_widgets/add_landmark_reminder_dialog.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/continue_draft_dialog.dart';
 import '../common_widgets/recognised_food_card.dart';
 
 /// Landmark detail screen (UC500, A6 "View Details").
@@ -75,10 +78,22 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
     _viewModel.setDietaryRestrictions(
       LandmarkDraftHandoff().takeDietaryRestrictions(),
     );
+    // The observed/typed VARIANT name (`Cendol Jagung` -> `Cendol`) - written
+    // to `landmark_item.variant`; empty when it equals the dictionary dish.
+    _viewModel.setVariant(LandmarkDraftHandoff().takeVariant());
     // The tourist's restrictions this food conflicts with - shown as a
     // warning on the card (adding is still allowed).
     _viewModel.setDietaryRestrictionConflicts(
       LandmarkDraftHandoff().takeDietaryConflicts(),
+    );
+    // Where the food was captured - the form this screen opens needs it as
+    // the landmark's location (and as the 50 m reference for later captures).
+    _viewModel.setCaptureLocation(LandmarkDraftHandoff().takeCaptureLocation());
+    // The first food's capture spot (additional-food flow) - lets this
+    // screen re-check the 50 m same-restaurant rule before offering to add
+    // this food, so "View Details" can never bypass the capture-range block.
+    _viewModel.setReferenceLocation(
+      LandmarkDraftHandoff().takeReferenceLocation(),
     );
 
     _viewModel.onInit();
@@ -88,6 +103,36 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
   void dispose() {
     _viewModel.dispose();
     super.dispose();
+  }
+
+  /// "Add New Landmark" (primary flow) - the reminder must be acknowledged
+  /// before the form opens (see [showAddLandmarkReminderDialog]). The
+  /// additional-food return needs no reminder: that food goes back onto an
+  /// already-open form.
+  ///
+  /// A saved draft of the SAME dish (variant included) at this spot is
+  /// offered for continuing first: "Continue submission" reopens it
+  /// pre-filled, "Start a new one" falls through to the fresh form.
+  Future<void> _proceedToAddLandmark(LandmarkDetailViewModel viewModel) async {
+    if (!viewModel.returnToFormAsAdditionalFood) {
+      final bool acknowledged = await showAddLandmarkReminderDialog(context);
+      if (!acknowledged || !mounted) return;
+      final LandmarkDraft? draft = await viewModel.draftToContinue();
+      if (!mounted) return;
+      if (draft != null) {
+        final bool continues = await showContinueDraftDialog(
+          context,
+          dishLabel: continueDraftDishLabel(draft),
+          restaurantName: draft.restaurantName,
+        );
+        if (!mounted) return;
+        if (continues) {
+          viewModel.openDraft(draft);
+          return;
+        }
+      }
+    }
+    viewModel.proceedToAddLandmark();
   }
 
   @override
@@ -122,6 +167,7 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                       // Form-1 price footer.
                       RecognisedFoodCard(
                         food: food,
+                        variant: viewModel.variant,
                         image: viewModel.capturedImage,
                         collapsible: false,
                         dietaryConflicts: viewModel.dietaryConflicts,
@@ -129,7 +175,21 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                       const SizedBox(height: AppSpacing.lg),
                       if (viewModel.isLocalFood &&
                           viewModel.fitsCatalogueCategory) ...<Widget>[
-                        if (viewModel.isAddLandmarkBlockedByLocation &&
+                        if (viewModel.isCaptureOutOfRange) ...<Widget>[
+                          // Captured more than 50 m from the first food (50 m
+                          // same-restaurant rule): the details are still
+                          // worth viewing, but this food must not join the
+                          // landmark from here - the camera screen already
+                          // blocks it, and this screen must not be a way
+                          // around that. Capture it again on site.
+                          Text(
+                            viewModel.captureRangeBlockMessage!,
+                            textAlign: TextAlign.center,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.warning,
+                            ),
+                          ),
+                        ] else if (viewModel.isAddLandmarkBlockedByLocation &&
                             !viewModel
                                 .returnToFormAsAdditionalFood) ...<Widget>[
                           // At sea / outside Malaysia (A9): the food can still
@@ -144,7 +204,7 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                         ] else ...<Widget>[
                           Text(
                             viewModel.returnToFormAsAdditionalFood
-                                ? 'Add this food to the landmark?'
+                                ? '                 Add this food to the landmark?'
                                 : 'Would you like to add this as a new landmark?',
                             textAlign: TextAlign.center,
                             style: AppTextStyles.bodyMedium,
@@ -153,7 +213,7 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
-                              onPressed: viewModel.proceedToAddLandmark,
+                              onPressed: () => _proceedToAddLandmark(viewModel),
                               child: Text(
                                 viewModel.returnToFormAsAdditionalFood
                                     ? 'Add to Landmark'
