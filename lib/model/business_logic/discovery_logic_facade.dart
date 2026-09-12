@@ -270,9 +270,38 @@ class DiscoveryLogicFacade {
     limit: limit,
   );
 
+  /// The temporary markers a keyword adds on top of the filtered map.
+  ///
+  /// Separate from [mapPins] because it answers a different question and must
+  /// not inherit the filter chips: the chips drive the map, a keyword is the
+  /// other way in. It still obeys the base rule - `available` only - and the
+  /// viewport it is given.
+  Future<List<MapPin>> searchPins({
+    required ExplorationSearchResults results,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
+    double? fromLatitude,
+    double? fromLongitude,
+    int? limit,
+  }) => mapExploration.searchLayerPins(
+    results: results,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
+    fromLatitude: fromLatitude,
+    fromLongitude: fromLongitude,
+    limit: limit,
+  );
+
   /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
   static const int maximumMarkers = MapExplorationLogic.maximumMarkers;
+
+  /// The same, for the search layer.
+  static const int maximumSearchPins = MapExplorationLogic.maximumSearchPins;
 
   // `swipeFoodMarkerLimit`, `swipeFoodFocusZoom` and `nearestFoodLocation`
   // stood here and named three members `MapExplorationLogic` does not have, so
