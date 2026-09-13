@@ -54,6 +54,15 @@ class TouristInformationLogicFacade {
   /// code is pending (see `AuthRepository`'s Option B pending-OTP marker).
   DateTime? get pendingOtpSentAt => authenticate.pendingOtpSentAt;
 
+  /// Auth -----
+  /// When this device last sent ANY code, whichever address it was for, or
+  /// null when it has not sent one yet (see `AuthRepository`'s device-wide
+  /// cooldown marker). The OTP screen anchors its resend countdown to this,
+  /// so a refusal shows the wait the send gate will actually enforce.
+  DateTime? get otpLastDeviceSendAt => authenticate.otpLastDeviceSendAt;
+
+  /// Auth end ----
+
   /// Completes a Google OAuth sign-in after the browser returns - picks up
   /// the session and auto-creates the tourist row on first sign-in.
   Future<Tourist?> completeGoogleSignIn() =>

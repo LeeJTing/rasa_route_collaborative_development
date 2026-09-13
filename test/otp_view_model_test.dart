@@ -475,6 +475,58 @@ void main() {
       });
     });
   });
+
+  group('OtpViewModel rejection cooldown', () {
+    test('a refused send shows the true remainder, not a fresh 60', () {
+      fakeAsync((FakeAsync async) {
+        // The device last sent 40s ago: only ~20s of the device-wide gate can
+        // still be running, so the countdown must not claim a fresh 60.
+        final _FakeTouristInformationLogicFacade facade =
+            _FakeTouristInformationLogicFacade(
+              pendingEmail: 'a@b.com',
+              throwOnSend: true,
+              otpLastDeviceSendAtOverride: DateTime.now().subtract(
+                const Duration(seconds: 40),
+              ),
+            );
+        final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+        viewModel.onInit();
+        async.flushMicrotasks();
+
+        expect(viewModel.hasError, isTrue);
+        // ~20s left - allow a second of drift.
+        expect(viewModel.resendCooldown, inInclusiveRange(18, 20));
+
+        // Anchored: the wait ends when the gate ends, not when it began.
+        async.elapse(const Duration(seconds: 20));
+
+        expect(viewModel.canResend, isTrue);
+        viewModel.dispose();
+      });
+    });
+
+    test('a refusal with the gate elapsed keeps the full wait', () {
+      fakeAsync((FakeAsync async) {
+        // Refused by another rule (e.g. the 3-per-10 gate) while the device
+        // gate is long past: the button must not become instantly live.
+        final _FakeTouristInformationLogicFacade facade =
+            _FakeTouristInformationLogicFacade(
+              pendingEmail: 'a@b.com',
+              throwOnSend: true,
+              otpLastDeviceSendAtOverride: DateTime.now().subtract(
+                const Duration(minutes: 5),
+              ),
+            );
+        final OtpViewModel viewModel = OtpViewModel(touristLogic: facade);
+        viewModel.onInit();
+        async.flushMicrotasks();
+
+        expect(viewModel.resendCooldown, OtpViewModel.resendCooldownSeconds);
+        expect(viewModel.canResend, isFalse);
+        viewModel.dispose();
+      });
+    });
+  });
 }
 
 const AuthSession _session = AuthSession(
@@ -489,6 +541,7 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
   _FakeTouristInformationLogicFacade({
     this.pendingEmail = '',
     this.pendingOtpSentAtOverride,
+    this.otpLastDeviceSendAtOverride,
     this.verifyResult,
     this.verifyError,
     this.throwOnSend = false,
@@ -496,6 +549,10 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
 
   final String pendingEmail;
   final DateTime? pendingOtpSentAtOverride;
+
+  /// When set, the fake reports this as the device-wide cooldown's anchor.
+  final DateTime? otpLastDeviceSendAtOverride;
+
   final AuthSession? verifyResult;
 
   /// When set, [verifyEmailOtp] throws this instead of returning.
@@ -512,6 +569,9 @@ class _FakeTouristInformationLogicFacade extends TouristInformationLogicFacade {
 
   @override
   DateTime? get pendingOtpSentAt => pendingOtpSentAtOverride;
+
+  @override
+  DateTime? get otpLastDeviceSendAt => otpLastDeviceSendAtOverride;
 
   @override
   Future<AuthSession?> verifyEmailOtp({

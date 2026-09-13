@@ -176,13 +176,32 @@ class OtpViewModel extends BaseViewModel {
       // Do NOT clear the error: the tourist pressed Resend and must see why it
       // did not go through (e.g. "Too many attempts, please try again later.").
       // Keep telling them the earlier code (if any) is still usable, and run a
-      // cooldown so the button cannot be hammered silently.
+      // cooldown so the button cannot be hammered silently. That cooldown is
+      // anchored to the device-wide gate's own clock: a flat 60 would claim a
+      // fresh minute from whenever this screen opened, disagreeing with the
+      // gate that actually refused the send.
       _reusingExistingCode = _hasReusablePendingCode(_email);
-      _startResendCooldown();
+      _startResendCooldown(_deviceCooldownRemainingSeconds());
       return;
     }
     _reusingExistingCode = false;
     _startResendCooldown();
+  }
+
+  /// Seconds left on the device-wide send cooldown (the gate behind
+  /// `sendEmailOtp`), or the full resend window when it has already elapsed -
+  /// a rejection must never leave the Resend control instantly live again.
+  int _deviceCooldownRemainingSeconds() {
+    final DateTime? last = touristLogic.otpLastDeviceSendAt;
+    if (last == null) return resendCooldownSeconds;
+    final int remaining =
+        resendCooldownSeconds - DateTime.now().difference(last).inSeconds;
+    // Elapsed (the refusal came from another rule, e.g. the 3-per-10 gate) or
+    // the clock moved backwards: fall back to the full wait.
+    if (remaining <= 0 || remaining > resendCooldownSeconds) {
+      return resendCooldownSeconds;
+    }
+    return remaining;
   }
 
   void setToken(String value) {
