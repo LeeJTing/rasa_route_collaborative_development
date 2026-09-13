@@ -12,10 +12,12 @@ import 'food_notice_banner.dart';
 class FoodNameCollisionCard extends StatelessWidget {
   const FoodNameCollisionCard({
     super.key,
+    required this.currentFoodName,
     required this.alternateFood,
     required this.onTap,
   });
 
+  final String currentFoodName;
   final LocalFood alternateFood;
   final VoidCallback onTap;
 
@@ -101,9 +103,9 @@ class FoodNameCollisionCard extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         FoodNoticeBanner(
           message:
-              "Ordering '${alternate.name}' may refer to a different "
-              'dish in some restaurants. Please double-check with the seller '
-              'before placing your order.',
+              'Ordering "$currentFoodName" may refer to '
+              '"${alternate.name}" in some restaurants. Please double-check '
+              'with the seller before placing your order.',
           type: FoodNoticeType.caution,
         ),
       ],

@@ -158,6 +158,7 @@ class _FoodDetailViewState extends State<FoodDetailView> {
             FoodSectionCard(
               title: 'Name Collision',
               child: FoodNameCollisionCard(
+                currentFoodName: food.name,
                 alternateFood: vm.collidedFood!,
                 onTap: () => vm.loadFood(vm.collidedFood!.id),
               ),

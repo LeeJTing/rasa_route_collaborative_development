@@ -65,14 +65,15 @@ class RestaurantCard extends StatelessWidget {
                         const SizedBox(height: AppSpacing.xs),
                         Row(
                           children: <Widget>[
-                            _RestaurantMetric(
-                              icon: Icons.star,
-                              iconColor: AppColors.secondary,
-                              label: restaurant.reviewCount == null
-                                  ? restaurant.rating?.toStringAsFixed(1) ??
-                                        '—'
-                                  : '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount})',
-                              fill: false,
+                            Expanded(
+                              child: _RestaurantMetric(
+                                icon: Icons.star,
+                                iconColor: AppColors.secondary,
+                                label: restaurant.reviewCount == null
+                                    ? restaurant.rating?.toStringAsFixed(1) ??
+                                          '—'
+                                    : '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount})',
+                              ),
                             ),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
@@ -126,7 +127,6 @@ class _RestaurantMetric extends StatelessWidget {
     required this.label,
     this.iconColor,
     this.alignment = MainAxisAlignment.start,
-    this.fill = true,
   });
 
   final IconData icon;
@@ -135,8 +135,6 @@ class _RestaurantMetric extends StatelessWidget {
 
   /// Where the icon + label sit inside the width they are given.
   final MainAxisAlignment alignment;
-  final bool fill;
-
   @override
   Widget build(BuildContext context) {
     final Widget labelText = Text(
@@ -146,11 +144,10 @@ class _RestaurantMetric extends StatelessWidget {
     );
     return Row(
       mainAxisAlignment: alignment,
-      mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
       children: <Widget>[
         Icon(icon, size: AppSizes.iconCompact, color: iconColor),
         const SizedBox(width: AppSpacing.xs),
-        if (fill) Flexible(child: labelText) else labelText,
+        Flexible(child: labelText),
       ],
     );
   }
