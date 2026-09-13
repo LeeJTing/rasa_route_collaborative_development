@@ -39,6 +39,76 @@ void main() {
     });
   });
 
+  group('FoodNameMatcher.variantDistinction', () {
+    const List<String> aisKacangSynonyms = <String>[
+      'ABC',
+      'air batu campur',
+      'ice kacang',
+      'mixed shaved ice',
+      '红豆冰',
+    ];
+
+    test(
+      'a spelling that only repeats the dish or its synonyms adds nothing',
+      () {
+        // The reported duplication: "Ais Kacang (ABC)" - 'ABC' IS a curated
+        // synonym of "Ais Kacang" (the live row lists it), so there is no
+        // variant here at all.
+        expect(
+          FoodNameMatcher.variantDistinction(
+            'Ais Kacang',
+            'Ais Kacang (ABC)',
+            aisKacangSynonyms,
+          ),
+          '',
+        );
+        expect(
+          FoodNameMatcher.variantDistinction(
+            'Ais Kacang',
+            'Ais Kacang',
+            aisKacangSynonyms,
+          ),
+          '',
+        );
+        expect(
+          FoodNameMatcher.variantDistinction(
+            'Ais Kacang',
+            'Ais Kacang (ice kacang)',
+            aisKacangSynonyms,
+          ),
+          '',
+        );
+      },
+    );
+
+    test('a real variant keeps its distinguishing words', () {
+      expect(
+        FoodNameMatcher.variantDistinction('Cendol', 'Cendol Jagung', <String>[
+          'Chendol',
+          '煎蕊',
+        ]),
+        'jagung',
+      );
+      expect(
+        FoodNameMatcher.variantDistinction(
+          'Ais Kacang',
+          'Ais Kacang Special',
+          aisKacangSynonyms,
+        ),
+        'special',
+      );
+      // Case and punctuation never split a word.
+      expect(
+        FoodNameMatcher.variantDistinction(
+          'Cendol',
+          'CENDOL - Jagung!',
+          const <String>[],
+        ),
+        'jagung',
+      );
+    });
+  });
+
   group('FoodNameMatcher.bestMatch', () {
     test('exact name match wins', () {
       final nasiLemak = _food(1, 'Nasi Lemak');

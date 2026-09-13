@@ -18,7 +18,11 @@ class ReportModerationRules {
   ReportModerationRules._();
 
   static const double minimumPrice = 0.01;
-  static const double maximumPrice = 1000;
+
+  /// The same band the Add-Landmark form's prices use (see
+  /// `LandmarkSubmissionLogic.maxPrice`) - a claim about a RM2,500 dish must
+  /// be expressible.
+  static const double maximumPrice = 9999.99;
   static const int maximumAddressLength = 150;
   static const int maximumClosureDays = 365;
   static const int maximumClosureMonths = 12;
@@ -43,7 +47,7 @@ class ReportModerationRules {
     }
     final double? price = double.tryParse(value);
     if (price == null || price < minimumPrice || price > maximumPrice) {
-      return 'Price must be between RM0.01 and RM1,000.';
+      return 'Price must be between RM0.01 and RM9,999.99.';
     }
     return null;
   }
@@ -116,7 +120,44 @@ class ReportModerationRules {
         }
       }
     }
+
+    // An overnight row (a close past midnight, e.g. 600 -> 1560) is still
+    // open into the NEXT day - it must not run into that day's own morning
+    // rows. See `OpeningHoursRows` for the encoding.
+    for (final MapEntry<Weekday, List<OpeningHour>> entry
+        in operatingHours.entries) {
+      final Weekday nextDay =
+          Weekday.values[(entry.key.index + 1) % Weekday.values.length];
+      for (final OpeningHour row in entry.value) {
+        final int? closesAt = row.closesAt;
+        if (row.status != DayStatus.open ||
+            closesAt == null ||
+            closesAt <= 1440) {
+          continue;
+        }
+        final int tailEnd = closesAt - 1440;
+        for (final OpeningHour next
+            in operatingHours[nextDay] ?? const <OpeningHour>[]) {
+          if (next.status != DayStatus.open || next.opensAt == null) continue;
+          if (next.opensAt! < tailEnd) {
+            return "${_dayName(entry.key)}'s overnight hours run until "
+                '${_timeLabel(tailEnd)} the next day, which overlaps '
+                "${_dayName(nextDay)}'s row starting at "
+                '${_timeLabel(next.opensAt!)}.';
+          }
+        }
+      }
+    }
     return null;
+  }
+
+  /// "HH:MM" for a minutes-past-midnight value, used in the overnight
+  /// overlap message.
+  static String _timeLabel(int minutes) {
+    final int hours = (minutes ~/ 60) % 24;
+    final int mins = minutes % 60;
+    return '${hours.toString().padLeft(2, '0')}:'
+        '${mins.toString().padLeft(2, '0')}';
   }
 
   static String _dayName(Weekday day) =>

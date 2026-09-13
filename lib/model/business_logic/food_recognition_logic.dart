@@ -321,6 +321,12 @@ class FoodRecognitionLogic {
   /// nyonya" is "Nyonya Cendol" written back-to-front: the item simply uses
   /// the curated dish.
   ///
+  /// An extension that only repeats the dish's OWN names is no variant
+  /// either: "Ais Kacang (ABC)" adds nothing over "Ais Kacang" while "ABC"
+  /// is a curated synonym of the row, so it records NO variant (see
+  /// `FoodNameMatcher.variantDistinction`) - recording it would list the
+  /// same dish twice on the form.
+  ///
   /// A BRAND-NEW dish (id == 0) has no dictionary row to extend - its dish
   /// name IS the observed name - except Gemini's own reported variant, which
   /// `RecognitionRepository` carries as the single synonym.
@@ -329,7 +335,18 @@ class FoodRecognitionLogic {
     String observedName, {
     required bool extension,
   }) {
-    if (extension) return observedName.trim();
+    if (extension) {
+      final String observed = observedName.trim();
+      if (food.id != 0 &&
+          FoodNameMatcher.variantDistinction(
+            food.name,
+            observed,
+            food.synonyms,
+          ).isEmpty) {
+        return '';
+      }
+      return observed;
+    }
     if (food.id != 0) return '';
     return food.synonyms.isNotEmpty ? food.synonyms.first : '';
   }

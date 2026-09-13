@@ -1,4 +1,5 @@
 import 'auth_repository.dart';
+import 'geocoding_repository.dart';
 import 'landmark_draft_repository.dart';
 import 'link_check_repository.dart';
 import 'location_repository.dart';
@@ -39,6 +40,10 @@ class LandmarkRepositoryFacade {
 
   /// Website reachability checks for the Add-Landmark website field.
   final LinkCheckRepository links = LinkCheckRepository();
+
+  /// OpenStreetMap geocoding for the Add-Landmark address field (suggestions)
+  /// and the composed address behind the map pin.
+  final GeocodingRepository geocoding = GeocodingRepository();
 
   /// Saved (incomplete) Add-New-Landmark forms.
   final LandmarkDraftRepository drafts = LandmarkDraftRepository();

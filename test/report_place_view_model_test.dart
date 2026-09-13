@@ -78,6 +78,16 @@ void main() {
       },
     );
 
+    test('an overnight close is encoded as next-day minutes (+1440)', () {
+      final ReportPlaceViewModel viewModel = build(_FakeReportLogicFacade());
+      viewModel.setDayStatus(Weekday.monday, DayStatus.open);
+      viewModel.setRangeTime(Weekday.monday, 0, true, 22 * 60);
+      viewModel.setRangeTime(Weekday.monday, 0, false, 2 * 60);
+      expect(viewModel.hours[Weekday.monday]!.single.opensAt, 22 * 60);
+      expect(viewModel.hours[Weekday.monday]!.single.closesAt, 26 * 60);
+      viewModel.dispose();
+    });
+
     test('hasHoursCorrection is false while every day stays Unknown', () {
       final ReportPlaceViewModel viewModel = build(_FakeReportLogicFacade());
       expect(viewModel.hasHoursCorrection, isFalse);

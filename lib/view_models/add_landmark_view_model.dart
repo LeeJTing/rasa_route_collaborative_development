@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../app/routing/app_navigator.dart';
 import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
+import '../domain_model/address_suggestion.dart';
 import '../domain_model/landmark_draft.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/opening_hour.dart';
@@ -16,6 +17,7 @@ import 'current_location_facade.dart';
 import 'food_recognition_view_model.dart'
     show
         AdditionalFoodCaptureResult,
+        ExistingFormFood,
         FoodRecognitionPurpose,
         LandmarkDraftHandoff,
         LandmarkImageCaptureResult;
@@ -247,10 +249,81 @@ class AddLandmarkViewModel extends BaseViewModel
   @override
   void onCurrentLocationChanged(TouristLocation location) {
     _currentLocation = location;
+    // The address may still be waiting for its first fix (a name-typed food
+    // carries no capture spot). Fill it as soon as a fix arrives - unless it
+    // was typed or already filled.
+    if (_address.trim().isEmpty && _mapDerivedAddress == null) {
+      _scheduleMapAddressLookup();
+    }
     safeNotifyListeners();
   }
 
   String? _locationError;
+
+  // --- ADDRESS ↔ MAP BINDING (OpenStreetMap) ---
+
+  /// True when the current address text came FROM the map (a pin move or a
+  /// selected suggestion). Only then may a later pin move replace it; the
+  /// moment the tourist types, the text is theirs and map changes leave it
+  /// alone - the two may legitimately disagree (OpenStreetMap does not know
+  /// every address), and [canApplyMapAddress] offers the map's version back.
+  bool _addressFromMap = false;
+  bool get addressFromMap => _addressFromMap;
+
+  /// Bumped by every PROGRAMMATIC address change (map fill, suggestion pick,
+  /// "use the map pin's address"). `AddLandmarkView` watches this to force
+  /// its text field to show the new text - the same pattern as the
+  /// signboard name's extraction version.
+  int _addressVersion = 0;
+  int get addressVersion => _addressVersion;
+
+  /// The last composed address the pinned spot produced - offered by
+  /// [canApplyMapAddress] and applied by [applyMapAddressFromPin].
+  String? _mapDerivedAddress;
+
+  /// True while the pin's reverse lookup runs.
+  bool _mapAddressLookupRunning = false;
+  bool get isLookingUpMapAddress => _mapAddressLookupRunning;
+
+  /// True when the last pin lookup failed or OpenStreetMap has no address
+  /// there. Shown as an inline notice; it never blocks anything.
+  bool _mapAddressUnavailable = false;
+  bool get mapAddressUnavailable => _mapAddressUnavailable;
+
+  Timer? _mapAddressDebounce;
+
+  /// The spot of a just-picked suggestion while its own reverse lookup runs:
+  /// the lookup may refresh the map's copy of the address, but must not
+  /// overwrite the text the tourist picked.
+  TouristLocation? _keepSelectedAddressFor;
+
+  /// Live OpenStreetMap suggestions for the address field, nearest first.
+  List<AddressSuggestion> _addressSuggestions = const <AddressSuggestion>[];
+  List<AddressSuggestion> get addressSuggestions => _addressSuggestions;
+
+  /// True while a suggestion search runs.
+  bool _addressSearchRunning = false;
+  bool get isSearchingAddress => _addressSearchRunning;
+
+  /// True when the search could not run at all (offline / rate-limited).
+  bool _addressSearchUnavailable = false;
+  bool get addressSearchUnavailable => _addressSearchUnavailable;
+
+  /// True when a completed search matched nothing.
+  bool _addressSearchEmpty = false;
+  bool get addressSearchEmpty => _addressSearchEmpty;
+
+  Timer? _addressSearchDebounce;
+
+  /// Guards against out-of-order search responses: only the newest query's
+  /// answer may populate the list.
+  int _addressSearchToken = 0;
+
+  /// The warning shown after picking a suggestion farther than the pin may
+  /// move (100 m): the address text is kept, the pin stays put, submission
+  /// remains allowed.
+  String? _addressPinWarning;
+  String? get addressPinWarning => _addressPinWarning;
 
   // --- FOOD STATE (auto-filled from recognition; price entered per food) ---
   LandmarkFoodEntry? _primaryFood;
@@ -319,7 +392,11 @@ class AddLandmarkViewModel extends BaseViewModel
 
   /// Optional contact/address for the place (validated when provided): a
   /// Malaysian phone number, an http(s) website, and a free-text address.
+  /// The phone field shows a fixed "+60" and edits the national digits; the
+  /// STORED value is the national format the `restaurant` table uses - see
+  /// [setRestaurantPhone].
   String _phone = '';
+
   String _website = '';
   String _address = '';
 
@@ -450,6 +527,10 @@ class AddLandmarkViewModel extends BaseViewModel
         !landmarkLogic.isOnLand(location.latitude, location.longitude);
   }
 
+  /// The pin's correction allowance in metres (A9.1) - drawn around the map
+  /// fix and quoted in the "address is too far from the pin" warning.
+  double get pinRangeMetres => landmarkLogic.pinAdjustmentRangeMetres;
+
   /// Why the form is blocked for the current spot - shown on the Location
   /// card and as the disabled-Submit reason. Null when the location allows
   /// adding.
@@ -482,6 +563,31 @@ class AddLandmarkViewModel extends BaseViewModel
           _primaryFood!.priceMin,
           _primaryFood!.priceMax,
         );
+
+  /// The form's complete price rule set - the inclusive band, the field's
+  /// digit shape, and the two TEXT rules (the leading-zero rewrite while
+  /// typing and the two-decimal format once the field is left). Handed to
+  /// every price field so the field, the submit checks and the report flow
+  /// can never disagree; the rules themselves live in
+  /// `LandmarkSubmissionLogic`.
+  ({
+    double minPrice,
+    double maxPrice,
+    int integralDigits,
+    int decimalDigits,
+    String rangeText,
+    String Function(String text) normaliseEntryText,
+    String Function(String text) formatEntryText,
+  })
+  get priceRules => (
+    minPrice: landmarkLogic.minPrice,
+    maxPrice: landmarkLogic.maxPrice,
+    integralDigits: landmarkLogic.priceIntegralDigits,
+    decimalDigits: landmarkLogic.priceDecimalDigits,
+    rangeText: landmarkLogic.priceBandRangeText,
+    normaliseEntryText: landmarkLogic.normalisePriceEntryText,
+    formatEntryText: landmarkLogic.formatPriceText,
+  );
 
   /// The restrictions the recognized primary dish conflicts with - see
   /// `_recognizedFoodDietaryConflicts`.
@@ -542,50 +648,68 @@ class AddLandmarkViewModel extends BaseViewModel
   String get restaurantWebsite => _website;
   String get restaurantAddress => _address;
 
+  /// The fixed country-code prefix the phone field shows as plain text
+  /// beside it - it is never part of the field's editable text.
+  String get phoneCountryCode => landmarkLogic.phoneCountryCode;
+
+  /// What the phone field's editable text holds: the national digits of
+  /// [restaurantPhone] ("012-684 0922" reads back as "126840922" - the
+  /// fixed "+60" replaces the trunk "0").
+  String get restaurantPhoneLocal => landmarkLogic.phoneNationalPart(_phone);
+
   /// Field caps exposed to the View (TextField maxLength).
   int get restaurantNameMaxLength => landmarkLogic.maxRestaurantNameLength;
   int get phoneMaxLength => landmarkLogic.maxPhoneLength;
+
+  /// The phone field's editable (national) part is capped so the fixed
+  /// "+60 " prefix plus the part still fit [phoneMaxLength].
+  int get phoneLocalMaxLength =>
+      landmarkLogic.maxPhoneLength - phoneCountryCode.length - 1;
+
   int get websiteMaxLength => landmarkLogic.maxWebsiteLength;
   int get addressMaxLength => landmarkLogic.maxAddressLength;
 
   /// Required-name error (empty / invalid characters / hard limit reached).
+  ///
+  /// Plain wording on purpose: the tourist is told their input is invalid or
+  /// too long - never which character class or internal rule rejected it.
   String? get restaurantNameError {
-    if (_restaurantName.isEmpty) return 'Restaurant name is required';
-    if (landmarkLogic.containsControlCharacters(_restaurantName)) {
-      return 'Restaurant name contains invalid characters.';
-    }
-    if (!landmarkLogic.isValidRestaurantNameText(_restaurantName)) {
-      return 'Restaurant name uses unsupported characters.';
+    if (_restaurantName.isEmpty) return 'Restaurant name is required.';
+    if (landmarkLogic.containsControlCharacters(_restaurantName) ||
+        !landmarkLogic.isValidRestaurantNameText(_restaurantName)) {
+      return 'Invalid restaurant name.';
     }
     if (_restaurantName.length >= landmarkLogic.maxRestaurantNameLength) {
-      return 'Restaurant name limit is '
-          '${landmarkLogic.maxRestaurantNameLength} characters.';
+      return 'Restaurant name is too long.';
     }
     return null;
   }
 
-  /// Amber warning while the name is past the submit limit (31-39 chars) but
-  /// still below the hard input stop - the tourist can keep typing but NOT
-  /// submit until it is 30 characters or fewer.
+  /// Amber warning once the name is close to its cap (91-99 characters) -
+  /// typing continues to the cap and a name AT the cap can still be
+  /// submitted. Advisory only, exactly like the website/address "stay
+  /// under" warnings (this one used to gate submission at 30 characters).
   String? get restaurantNameWarning {
     final int length = _restaurantName.length;
-    final int submitMax = landmarkLogic.restaurantNameSubmitMaxLength;
-    if (length >= submitMax + 1 &&
-        length < landmarkLogic.maxRestaurantNameLength) {
-      return 'Restaurant name should be $submitMax characters or fewer '
+    final int maxLength = landmarkLogic.maxRestaurantNameLength;
+    if (length >= landmarkLogic.restaurantNameWarnFromLength &&
+        length < maxLength) {
+      return 'Restaurant name should stay under $maxLength characters '
           '(currently $length).';
     }
     return null;
   }
 
   /// Optional-field errors - null when the field is empty (allowed) or valid.
+  ///
+  /// ONE plain message for every phone failure - a control character or a
+  /// number that is not a Malaysian mobile/landline both read as "that is
+  /// not a phone number", with the expected shape shown as an example.
   String? get restaurantPhoneError {
     if (_phone.isEmpty) return null;
-    if (landmarkLogic.containsControlCharacters(_phone)) {
-      return 'Phone number contains invalid characters.';
-    }
-    if (!landmarkLogic.isValidMalaysianPhone(_phone)) {
-      return 'Enter a valid Malaysian mobile or landline, e.g. +60 12-345 6789.';
+    if (landmarkLogic.containsControlCharacters(_phone) ||
+        !landmarkLogic.isValidMalaysianPhone(_phone)) {
+      return 'Enter a valid Malaysian mobile or landline, e.g. 012-345 6789.';
     }
     return null;
   }
@@ -593,24 +717,19 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Optional website. STRICT (RFC 3986 + XSS rules - see
   /// `LandmarkSubmissionLogic.isValidWebsiteFormat`): exactly ONE full
   /// http(s) link with no spaces and no markup, on a real dotted domain -
-  /// and at most [maxWebsiteLength] characters.
+  /// and at most [maxWebsiteLength] characters. Every SHAPE failure
+  /// (characters, spaces, more than one link, malformed) reports the same
+  /// plain message; only "too long" is called out separately.
   String? get restaurantWebsiteError {
     if (_website.isEmpty) return null;
-    if (landmarkLogic.containsControlCharacters(_website)) {
-      return 'Website contains invalid characters.';
-    }
-    if (landmarkLogic.websiteContainsWhitespace(_website)) {
-      return 'Website links cannot contain spaces.';
-    }
-    if (landmarkLogic.websiteContainsMultipleUrls(_website)) {
-      return 'Enter only one website link, e.g. https://example.com.';
+    if (landmarkLogic.containsControlCharacters(_website) ||
+        landmarkLogic.websiteContainsWhitespace(_website) ||
+        landmarkLogic.websiteContainsMultipleUrls(_website) ||
+        !landmarkLogic.isValidWebsiteFormat(_website)) {
+      return 'Invalid website link, e.g. https://example.com.';
     }
     if (_website.length > landmarkLogic.maxWebsiteLength) {
-      return 'Website limit is ${landmarkLogic.maxWebsiteLength} characters.';
-    }
-    if (!landmarkLogic.isValidWebsiteFormat(_website)) {
-      return 'Enter a valid link starting with http:// or https://, '
-          'e.g. https://example.com.';
+      return 'Website link is too long.';
     }
     return null;
   }
@@ -646,19 +765,25 @@ class AddLandmarkViewModel extends BaseViewModel
     return null;
   }
 
+  /// Optional address. Every SHAPE rule in `LandmarkSubmissionLogic` is still
+  /// enforced (allowed characters, no leading/trailing or repeated specials,
+  /// at least one digit and one letter, the minimum length) - but they all
+  /// report ONE plain "Invalid address." The tourist is told their input is
+  /// invalid, not which internal rule fired; only "too long" is separate.
   String? get restaurantAddressError {
     if (_address.isEmpty) return null;
-    if (landmarkLogic.containsControlCharacters(_address)) {
-      return 'Address contains invalid characters.';
-    }
-    if (_address.length < 5) {
-      return 'Address is too short (at least 5 characters).';
-    }
-    if (!landmarkLogic.isValidAddressText(_address)) {
-      return 'Address uses unsupported characters.';
+    final String value = _address.trim();
+    if (landmarkLogic.containsControlCharacters(_address) ||
+        value.length < landmarkLogic.minAddressLength ||
+        !landmarkLogic.addressHasAllowedCharacters(value) ||
+        landmarkLogic.addressStartsOrEndsWithSpecialChar(value) ||
+        landmarkLogic.addressHasRepeatedSpecialChar(value) ||
+        !landmarkLogic.addressContainsDigit(value) ||
+        !landmarkLogic.addressContainsLetter(value)) {
+      return 'Invalid address.';
     }
     if (_address.length >= landmarkLogic.maxAddressLength) {
-      return 'Address limit is ${landmarkLogic.maxAddressLength} characters.';
+      return 'Address is too long.';
     }
     return null;
   }
@@ -685,32 +810,22 @@ class AddLandmarkViewModel extends BaseViewModel
   /// instead of creating a new landmark.
   bool get submitMerged => _submitMerged;
 
-  /// Confirmation copy for a MERGED submit (A13) - says which dishes were
-  /// added and which already existed on the target, so the tourist sees
-  /// "item exists" honestly. Null when a new landmark was created (the View
-  /// shows the default success message instead). Name lists are capped so an
-  /// open-ended number of dishes can never overflow the snackbar.
+  /// Confirmation copy for a MERGED submit (A13) - the place already existed
+  /// on the map, so the dishes joined it instead of creating a new pin. Says
+  /// which dishes were added and which the place already had, in full
+  /// sentences (see `LandmarkSubmissionLogic.mergeConfirmation`). Null when a
+  /// new landmark was created (the View shows the default success message
+  /// instead). Name lists are capped so an open-ended number of dishes can
+  /// never overflow the snackbar.
   String? get submitConfirmation {
     if (!_submitMerged) return null;
-    final String rawTarget =
-        (_submitTargetName == null || _submitTargetName!.isEmpty)
-        ? 'this place'
-        : '"${_truncate(_submitTargetName!)}"';
-    final List<String> added = _previewNames(_submitAddedDishNames);
-    final List<String> existing = _previewNames(_submitExistingDishNames);
-    final String head;
-    if (added.isNotEmpty && existing.isNotEmpty) {
-      head =
-          'Added ${added.join(', ')}. '
-          'Already exists: ${existing.join(', ')}.';
-    } else if (existing.isNotEmpty) {
-      head = '${existing.join(', ')} already exists - nothing new added.';
-    } else if (added.isNotEmpty) {
-      head = 'Added ${added.join(', ')}.';
-    } else {
-      head = 'Dishes added.';
-    }
-    return '$head ($rawTarget)'.replaceAll('  ', ' ');
+    return landmarkLogic.mergeConfirmation(
+      targetName: _submitTargetName == null
+          ? ''
+          : _truncate(_submitTargetName!),
+      addedDishNames: _previewNames(_submitAddedDishNames),
+      existingDishNames: _previewNames(_submitExistingDishNames),
+    );
   }
 
   /// Caps a dish-name list for the confirmation message - never more than
@@ -738,7 +853,6 @@ class AddLandmarkViewModel extends BaseViewModel
       restaurantPhoneError == null &&
       restaurantWebsiteError == null &&
       restaurantAddressError == null &&
-      restaurantNameWarning == null &&
       _primaryFood != null &&
       _primaryFood!.price != null &&
       _additionalFoods.every(
@@ -757,13 +871,14 @@ class AddLandmarkViewModel extends BaseViewModel
       return addLocationBlockMessage;
     }
     if (!hasImageCaptured) {
-      return 'Please capture either signboard or stall image';
+      return 'Please capture a signboard or stall image.';
     }
-    if (_restaurantName.isEmpty) {
-      return 'Restaurant name is required';
-    }
-    if (!landmarkLogic.isValidRestaurantNameText(_restaurantName)) {
-      return 'Restaurant name uses unsupported characters.';
+    // Empty / invalid / over-long all come from the field's own error, so
+    // the reason under the Submit bar can never drift from the field's
+    // message.
+    final String? nameError = restaurantNameError;
+    if (nameError != null) {
+      return nameError;
     }
     if (_primaryFood == null) {
       return 'Recognise a food first (capture and add your food)';
@@ -782,8 +897,6 @@ class AddLandmarkViewModel extends BaseViewModel
     if (websiteError != null) return websiteError;
     final String? addressError = restaurantAddressError;
     if (addressError != null) return addressError;
-    final String? nameWarning = restaurantNameWarning;
-    if (nameWarning != null) return nameWarning;
     final String? hoursError = _operatingHoursError();
     if (hoursError != null) return hoursError;
     // Checked LAST: everything else being filled in but the tourist never
@@ -795,7 +908,7 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Shown when the tourist tries to submit without pressing "Confirm" under
   /// the Restaurant Name - they must verify the name first.
   static const String _confirmRestaurantReason =
-      'Please click Confirm to check the restaurant name first.';
+      'Please press Confirm to check the restaurant name first.';
 
   // --- COMMANDS ---
 
@@ -857,7 +970,8 @@ class AddLandmarkViewModel extends BaseViewModel
   void setPrimaryFoodPrice(double price) {
     if (_primaryFood == null) return;
     if (!landmarkLogic.isValidPrice(price)) {
-      _submitError = 'Price must be between 0.01 and 1000 MYR';
+      _submitError =
+          'Price must be between ${landmarkLogic.priceBandRangeText}.';
       safeNotifyListeners();
       return;
     }
@@ -882,7 +996,10 @@ class AddLandmarkViewModel extends BaseViewModel
       latitude,
       longitude,
     )) {
-      _locationError = 'The adjusted landmark exceeds 100 meters range.'; // M9
+      // M9 - plain wording; the allowance itself lives in `pinRangeMetres`.
+      _locationError =
+          'The pin can only move ${pinRangeMetres.round()} m from the '
+          'captured location.';
       safeNotifyListeners();
       return; // Revert: _adjustedLocation is left unchanged.
     }
@@ -903,6 +1020,21 @@ class AddLandmarkViewModel extends BaseViewModel
       accuracyMeters: currentLocation.accuracyMeters,
       capturedAt: DateTime.now(),
     );
+    // The pin moved: its address follows (or waits on the "use the map
+    // pin's address" button when the field was typed by hand).
+    _scheduleMapAddressLookup();
+    safeNotifyListeners();
+  }
+
+  /// Puts the pin back on the first food's captured spot - the "Recover to
+  /// captured location" button, shown once the pin has been moved. The
+  /// address follows the same rules as any other pin move: a map-sourced
+  /// address is refreshed from the captured spot, a hand-typed one stays.
+  void resetLandmarkLocation() {
+    if (!_adjustedLocation.isKnown) return;
+    _adjustedLocation = TouristLocation.unknown;
+    _locationError = null;
+    _scheduleMapAddressLookup();
     safeNotifyListeners();
   }
 
@@ -1073,7 +1205,7 @@ class AddLandmarkViewModel extends BaseViewModel
   /// [mergeExistingDraft]); a new name wants its OWN check.
   String? confirmRestaurant() {
     if (!hasImageCaptured) {
-      return 'Please capture either signboard or stall image first.';
+      return 'Please capture a signboard or stall image.';
     }
     if (_restaurantName.trim().isEmpty) {
       return 'Enter the restaurant name before confirming.';
@@ -1194,13 +1326,16 @@ class AddLandmarkViewModel extends BaseViewModel
 
     // Other fields: this form's value wins; the draft only fills blanks.
     if (_phone.trim().isEmpty && draft.phone.trim().isNotEmpty) {
-      _phone = draft.phone;
+      _phone = landmarkLogic.formatMalaysianPhone(draft.phone);
     }
     if (_website.trim().isEmpty && draft.website.trim().isNotEmpty) {
       _website = draft.website;
     }
     if (_address.trim().isEmpty && draft.address.trim().isNotEmpty) {
       _address = draft.address;
+      // A draft does not record where its address came from; treating it as
+      // hand-entered keeps it safe (map moves leave it alone).
+      _addressFromMap = false;
     }
     if (!_adjustedLocation.isKnown && draft.adjustedLocation.isKnown) {
       _adjustedLocation = draft.adjustedLocation;
@@ -1252,8 +1387,18 @@ class AddLandmarkViewModel extends BaseViewModel
 
   /// Optional contact/address setters - capped to their field limits while
   /// typing (the View's TextField maxLength enforces the same cap).
+  ///
+  /// The phone field is digits-only and shows a fixed "+60" beside it (see
+  /// `_ContactDetailsSection`), but the STORED value matches the `restaurant`
+  /// table's own style: national digits with the trunk "0", grouped by
+  /// number type - "0126840922" and "126840922" both store "012-684 0922".
+  /// An incomplete entry (or one with nothing to dial) stays as its digits,
+  /// so nothing is mangled while the tourist is still typing.
   void setRestaurantPhone(String value) {
-    _phone = _clampTo(value, landmarkLogic.maxPhoneLength);
+    _phone = _clampTo(
+      landmarkLogic.formatMalaysianPhone(value),
+      landmarkLogic.maxPhoneLength,
+    );
     safeNotifyListeners();
   }
 
@@ -1304,7 +1449,16 @@ class AddLandmarkViewModel extends BaseViewModel
   }
 
   void setRestaurantAddress(String value) {
-    _address = _clampTo(value, landmarkLogic.maxAddressLength);
+    final String next = _clampTo(value, landmarkLogic.maxAddressLength);
+    final bool changed = next != _address;
+    _address = next;
+    if (changed) {
+      // The tourist's own words from here on: map moves leave them alone,
+      // and a previous "too far from the pin" warning no longer applies.
+      _addressFromMap = false;
+      _addressPinWarning = null;
+      _scheduleAddressSearch();
+    }
     safeNotifyListeners();
   }
 
@@ -1312,6 +1466,264 @@ class AddLandmarkViewModel extends BaseViewModel
   /// exceed a field's limit (belt-and-suspenders behind TextField maxLength).
   static String _clampTo(String value, int maxLength) =>
       value.length <= maxLength ? value : value.substring(0, maxLength);
+
+  // ===========================================================================
+  // Address ↔ map binding (OpenStreetMap / Nominatim)
+  // ===========================================================================
+
+  /// Typing must pause this long before the address search fires (Nominatim
+  /// allows ~1 request/second; the repository throttles as well).
+  static const Duration addressSearchDebounce = Duration(milliseconds: 600);
+
+  /// How long a pin move waits before its address lookup fires - a dropped
+  /// pin must not storm the geocoder while it settles.
+  static const Duration mapAddressLookupDelay = Duration(milliseconds: 500);
+
+  /// Whether the "Use the map pin's address" button has something to offer:
+  /// the pin produced an address, it differs from the field, and the field
+  /// holds the tourist's own text.
+  bool get canApplyMapAddress =>
+      !_addressFromMap &&
+      _mapDerivedAddress != null &&
+      _mapDerivedAddress!.isNotEmpty &&
+      _mapDerivedAddress != _address;
+
+  /// The address section's status line: the pin lookup running, or the
+  /// inline notice when the spot has no address to give. Null while idle or
+  /// after a successful lookup.
+  String? get mapAddressStatus {
+    if (_mapAddressLookupRunning) return 'Looking up the address…';
+    if (_mapAddressUnavailable) {
+      return "We couldn't find an address for this spot. Drag the pin "
+          'again, or type the address yourself.';
+    }
+    return null;
+  }
+
+  /// The address search's status line: running, unavailable, or nothing
+  /// found. Null while idle or when suggestions are shown.
+  String? get addressSearchStatus {
+    if (_addressSearchRunning) return 'Searching for addresses…';
+    if (_addressSearchUnavailable) {
+      return 'Address search is unavailable right now. You can still type '
+          'the address yourself.';
+    }
+    if (_addressSearchEmpty) {
+      return 'No matching addresses found. You can still type the address '
+          'yourself.';
+    }
+    return null;
+  }
+
+  /// How a suggestion's distance is labelled ("350 m", "1.2 km") - flat
+  /// passthrough to the logic rule, so the View never formats numbers itself.
+  String formatDistance(double metres) => landmarkLogic.formatDistance(metres);
+
+  /// Fills an EMPTY address from the pinned spot when the form opens (the
+  /// View calls this after its first frame). Never overwrites a resumed
+  /// draft's address, nor anything typed.
+  void prefillAddressFromMap() {
+    if (_address.trim().isNotEmpty) return;
+    _scheduleMapAddressLookup();
+  }
+
+  /// Picks a suggestion from the dropdown: its text lands in the address
+  /// field, and when the place is within the pin's 100 m range the pin MOVES
+  /// there too. A farther place fills the text only - with an amber warning
+  /// that says so (submission stays allowed; only the pin stays put).
+  void selectAddressSuggestion(AddressSuggestion suggestion) {
+    final String text = _clampTo(
+      suggestion.address,
+      landmarkLogic.maxAddressLength,
+    );
+    _clearAddressSearch();
+    _addressPinWarning = null;
+
+    final TouristLocation spot = TouristLocation(
+      latitude: suggestion.latitude,
+      longitude: suggestion.longitude,
+    );
+    final double distance = baseLocation.isKnown
+        ? landmarkLogic.distanceMetres(baseLocation, spot)
+        : 0;
+
+    if (!landmarkLogic.isWithinAllowedRange(
+      baseLocation,
+      spot.latitude,
+      spot.longitude,
+    )) {
+      // Too far for the pin (A9.1) - keep the chosen text, warn, move nothing.
+      _address = text;
+      _addressFromMap = false;
+      _addressVersion++;
+      _addressPinWarning =
+          'This address is ${landmarkLogic.formatDistance(distance)} from '
+          'your captured location - beyond the '
+          '${landmarkLogic.pinAdjustmentRangeMetres.round()} m pin range, so '
+          'the pin stays where it is. The address is still saved.';
+      safeNotifyListeners();
+      return;
+    }
+
+    _address = text;
+    _addressFromMap = true;
+    _addressVersion++;
+    _keepSelectedAddressFor = spot;
+    // Reuses the pin-move path for its range AND land validation.
+    adjustLandmarkLocation(spot.latitude, spot.longitude);
+    if (_locationError != null) {
+      // The pin refused the move (e.g. the spot is off land): keep the
+      // selected text, but it no longer describes the pin.
+      _keepSelectedAddressFor = null;
+      _addressFromMap = false;
+      _addressPinWarning = _locationError;
+    }
+    safeNotifyListeners();
+  }
+
+  /// Applies the pinned spot's composed address to the field (the "Use the
+  /// map pin's address" button) - the tourist chose the map's wording over
+  /// their typed text.
+  void applyMapAddressFromPin() {
+    final String? address = _mapDerivedAddress;
+    if (address == null || address.isEmpty) return;
+    _address = _clampTo(address, landmarkLogic.maxAddressLength);
+    _addressFromMap = true;
+    _addressPinWarning = null;
+    _addressVersion++;
+    _clearAddressSearch();
+    safeNotifyListeners();
+  }
+
+  /// Drops every suggestion-search state - used when a pick or the map's own
+  /// address settles the field.
+  void _clearAddressSearch() {
+    _addressSearchDebounce?.cancel();
+    _addressSearchToken++;
+    _addressSuggestions = const <AddressSuggestion>[];
+    _addressSearchRunning = false;
+    _addressSearchUnavailable = false;
+    _addressSearchEmpty = false;
+  }
+
+  /// Schedules the pin's reverse lookup (debounced). No listeners means no
+  /// form is watching (pure unit tests must never call the network), and no
+  /// location means there is nothing to look up.
+  void _scheduleMapAddressLookup() {
+    _mapAddressDebounce?.cancel();
+    final TouristLocation target = _adjustedLocation.isKnown
+        ? _adjustedLocation
+        : baseLocation;
+    if (!target.isKnown || !hasListeners) return;
+    _mapAddressDebounce = Timer(
+      mapAddressLookupDelay,
+      () => unawaited(_lookupMapAddress(target)),
+    );
+  }
+
+  Future<void> _lookupMapAddress(TouristLocation target) async {
+    _mapAddressLookupRunning = true;
+    _mapAddressUnavailable = false;
+    safeNotifyListeners();
+
+    String? address;
+    try {
+      address = await landmarkLogic.reverseGeocodeAddress(target);
+    } catch (_) {
+      address = null;
+    }
+
+    // The pin may have moved again while this ran - drop a stale answer.
+    final TouristLocation current = _adjustedLocation.isKnown
+        ? _adjustedLocation
+        : baseLocation;
+    if (!_sameSpot(current, target)) return;
+
+    _mapAddressLookupRunning = false;
+    if (address == null || address.isEmpty) {
+      _mapAddressUnavailable = true;
+      _keepSelectedAddressFor = null;
+      safeNotifyListeners();
+      return;
+    }
+
+    _mapAddressUnavailable = false;
+    _mapDerivedAddress = _clampTo(address, landmarkLogic.maxAddressLength);
+    final bool keepSelected =
+        _keepSelectedAddressFor != null &&
+        _sameSpot(target, _keepSelectedAddressFor!);
+    if (keepSelected) {
+      // He picked those words - the lookup only refreshes the map's copy.
+      _keepSelectedAddressFor = null;
+    } else if (_addressFromMap || _address.trim().isEmpty) {
+      // The field follows the pin from now on (until the tourist types).
+      _address = _mapDerivedAddress!;
+      _addressFromMap = true;
+      _addressPinWarning = null;
+      _addressVersion++;
+    }
+    safeNotifyListeners();
+  }
+
+  /// Schedules the suggestion search for the text just typed (debounced,
+  /// >= [LandmarkSubmissionLogic.minAddressSearchLength] characters).
+  /// Typing alone never moves the pin - only picking a suggestion does.
+  void _scheduleAddressSearch() {
+    _addressSearchDebounce?.cancel();
+    _addressSearchToken++;
+    final String query = _address.trim();
+    if (query.length < landmarkLogic.minAddressSearchLength) {
+      _addressSuggestions = const <AddressSuggestion>[];
+      _addressSearchRunning = false;
+      _addressSearchUnavailable = false;
+      _addressSearchEmpty = false;
+      return;
+    }
+    if (!hasListeners) return;
+    final int token = _addressSearchToken;
+    _addressSearchDebounce = Timer(
+      addressSearchDebounce,
+      () => unawaited(_searchAddresses(query, token)),
+    );
+  }
+
+  Future<void> _searchAddresses(String query, int token) async {
+    if (_address.trim() != query) return;
+    final TouristLocation around = baseLocation.isKnown
+        ? baseLocation
+        : _currentLocation;
+    _addressSearchRunning = true;
+    _addressSearchUnavailable = false;
+    _addressSearchEmpty = false;
+    safeNotifyListeners();
+
+    List<AddressSuggestion>? results;
+    try {
+      results = await landmarkLogic.searchAddresses(
+        query: query,
+        around: around,
+      );
+    } catch (_) {
+      results = null;
+    }
+
+    // A stale response (newer query, or the text changed meanwhile) is
+    // dropped silently.
+    if (token != _addressSearchToken || _address.trim() != query) return;
+
+    _addressSearchRunning = false;
+    if (results == null) {
+      _addressSuggestions = const <AddressSuggestion>[];
+      _addressSearchUnavailable = true;
+    } else {
+      _addressSuggestions = results;
+      _addressSearchEmpty = results.isEmpty;
+    }
+    safeNotifyListeners();
+  }
+
+  static bool _sameSpot(TouristLocation a, TouristLocation b) =>
+      a.latitude == b.latitude && a.longitude == b.longitude;
 
   /// Set a day's status (Open / Unknown / Closed - BF-19..23, A14, A15).
   /// Not a plain open/closed toggle: "Unknown" is a real third answer, not
@@ -1384,18 +1796,19 @@ class AddLandmarkViewModel extends BaseViewModel
     }
     final OpeningHour row = existing[rangeIndex];
     final int? opening = isOpeningTime ? minutes : row.opensAt;
-    final int? closing = isOpeningTime ? row.closesAt : minutes;
+    int? closing = isOpeningTime ? row.closesAt : minutes;
 
-    // If the pick would make this range invalid, ignore it and keep the
-    // previous value - stops a confusing "closing must be after opening"
-    // error from appearing at submit time. The rule itself
-    // (`isValidTimeOrder`) lives in `LandmarkSubmissionLogic`, the same
-    // domain invariant `validateOperatingHours` checks across a whole day -
-    // not reimplemented inline here.
-    if (opening != null &&
-        closing != null &&
-        !landmarkLogic.isValidTimeOrder(opening, closing)) {
-      return;
+    // A closing time at or BEFORE the opening time means the NEXT day
+    // ("10:00 -> 02:00"): encoded as minutes past midnight + 1440, which is
+    // also how it is persisted - split into Monday 10:00-24:00 + Tuesday
+    // 00:00-02:00, see `OpeningHoursRows`. Changing the opening time
+    // re-encodes an existing close against it, so a night period that has
+    // been re-timed into the morning stops being overnight.
+    if (opening != null && closing != null) {
+      closing = landmarkLogic.encodeCloseTime(
+        opensAt: opening,
+        closeMinutes: closing,
+      );
     }
 
     final List<OpeningHour> updated = List<OpeningHour>.of(existing);
@@ -1462,6 +1875,10 @@ class AddLandmarkViewModel extends BaseViewModel
     LandmarkDraftHandoff().pendingReferenceLocation = baseLocation.isKnown
         ? baseLocation
         : null;
+    // The dishes this form already holds ride along, so the camera screen
+    // can withhold its "Add to Landmark" for a re-captured duplicate and say
+    // why THERE - instead of the tourist landing back here with a notice.
+    LandmarkDraftHandoff().pendingExistingFormFoods = formFoodIdentities;
     final AdditionalFoodCaptureResult? result =
         await AppNavigator.push<AdditionalFoodCaptureResult>(
           AppRoutes.foodRecognition,
@@ -1479,13 +1896,31 @@ class AddLandmarkViewModel extends BaseViewModel
     );
   }
 
+  /// The dishes already on this form - the "same thing to add?" identities
+  /// (dish + variant, synonyms included) the additional-food camera screen
+  /// checks a fresh capture against, so a duplicate is blocked THERE (see
+  /// [openAddMoreFood]).
+  List<ExistingFormFood> get formFoodIdentities => <ExistingFormFood>[
+    if (_primaryFood != null)
+      (food: _primaryFood!.food, variant: _primaryFood!.variant),
+    for (final LandmarkFoodEntry entry in _additionalFoods)
+      (food: entry.food, variant: entry.variant),
+  ];
+
+  /// The notice for a duplicate dish - shared with the capture screen's
+  /// blocking message so the two wordings can never drift apart.
+  String get duplicateFoodNotice => landmarkLogic.duplicateFoodNotice;
+
   /// Add additional food directly (used when the food is already in hand -
   /// prefer [openAddMoreFood] from the View).
   ///
   /// A dish that is ALREADY on this form with the SAME variant is rejected
   /// ([takeDuplicateFoodNotice] reports it so the View can say why) - one
   /// form cannot hold the same food twice. A different variant is a
-  /// different thing to add and is accepted.
+  /// different thing to add and is accepted - but a spelling that only
+  /// repeats the dish or one of its curated synonyms ("Ais Kacang (ABC)") is
+  /// NOT a different variant (see
+  /// `LandmarkSubmissionLogic.sameDishAndVariantIdentity`).
   void addAdditionalFood(
     LocalFood food, {
     XFile? image,
@@ -1518,7 +1953,8 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Whether [food] + [variant] is already on this form - the primary food or
   /// any additional food holding the SAME dish and variant (see
   /// `LandmarkSubmissionLogic.isSameDishAndVariant`). A different variant is
-  /// not a duplicate.
+  /// not a duplicate - unless it only repeats the dish or one of its curated
+  /// synonyms, which is the same dish spelled out.
   bool _isAlreadyOnForm(LocalFood food, String variant) {
     final LandmarkFoodEntry? primary = _primaryFood;
     if (primary != null &&
@@ -1547,7 +1983,9 @@ class AddLandmarkViewModel extends BaseViewModel
   /// NOT `LocalFood.id`, which is `0` for every unsaved food. (A16)
   void setAdditionalFoodPrice(int entryId, double price) {
     if (!landmarkLogic.isValidPrice(price)) {
-      _submitError = 'Price must be between 0.01 and 1000 MYR';
+      _submitError =
+          'Price must be between ${landmarkLogic.minPrice} and '
+          '${landmarkLogic.maxPrice} MYR';
       safeNotifyListeners();
       return;
     }
@@ -1657,9 +2095,14 @@ class AddLandmarkViewModel extends BaseViewModel
     _draftId = draft.id;
     _restaurantConfirmed = draft.restaurantConfirmed;
     _restaurantName = draft.restaurantName;
-    _phone = draft.phone;
+    // Stored the way the restaurant table stores phones (see
+    // [setRestaurantPhone]) - a legacy draft's shape is normalised here too.
+    _phone = landmarkLogic.formatMalaysianPhone(draft.phone);
     _website = draft.website;
     _address = draft.address;
+    // See [mergeExistingDraft]: a restored address is treated as the
+    // tourist's own text, never as map-sourced.
+    _addressFromMap = false;
     // A stored draft is not probed until something changes or submit runs.
     _websiteLinkDebounce?.cancel();
     _websiteLinkChecking = false;
@@ -1926,7 +2369,7 @@ class AddLandmarkViewModel extends BaseViewModel
     _submitAddedDishNames = const <String>[];
     _submitExistingDishNames = const <String>[];
     if (!hasImageCaptured) {
-      _submitError = 'Please capture either signboard or stall image';
+      _submitError = 'Please capture a signboard or stall image.';
       safeNotifyListeners();
       return;
     }
@@ -1954,16 +2397,11 @@ class AddLandmarkViewModel extends BaseViewModel
       safeNotifyListeners();
       return;
     }
-    final String? nameWarning = restaurantNameWarning;
-    if (nameWarning != null) {
-      _submitError = nameWarning;
-      safeNotifyListeners();
-      return;
-    }
 
     final double? primaryPrice = _primaryFood?.price;
     if (primaryPrice == null || !landmarkLogic.isValidPrice(primaryPrice)) {
-      _submitError = 'Price must be between 0.01 and 1000 MYR';
+      _submitError =
+          'Price must be between ${landmarkLogic.priceBandRangeText}.';
       safeNotifyListeners();
       return;
     }
@@ -1988,7 +2426,9 @@ class AddLandmarkViewModel extends BaseViewModel
           entry.price == null || !landmarkLogic.isValidPrice(entry.price!),
     );
     if (hasIncompleteAdditionalPrice) {
-      _submitError = 'Every added food needs a price between 0.01 and 1000 MYR';
+      _submitError =
+          'Every added food needs a price between '
+          '${landmarkLogic.priceBandRangeText}.';
       safeNotifyListeners();
       return;
     }
@@ -2144,6 +2584,8 @@ class AddLandmarkViewModel extends BaseViewModel
   @override
   void dispose() {
     _websiteLinkDebounce?.cancel();
+    _mapAddressDebounce?.cancel();
+    _addressSearchDebounce?.cancel();
     locationFacade.unregister(this);
     super.dispose();
   }
