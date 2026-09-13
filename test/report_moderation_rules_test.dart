@@ -142,6 +142,46 @@ void main() {
     });
   });
 
+  group('claim expiry (a report expires after one year)', () {
+    final DateTime now = DateTime.utc(2026, 9, 14);
+
+    test('the lifetime is one year', () {
+      expect(reportClaimLifetime, const Duration(days: 365));
+      expect(ReportModerationRules.claimLifetime, reportClaimLifetime);
+    });
+
+    test('a claim younger than a year still counts', () {
+      expect(
+        ReportModerationRules.isClaimExpired(
+          now.subtract(const Duration(days: 364)),
+          now,
+        ),
+        isFalse,
+      );
+    });
+
+    test('exactly a year is still alive; one day more is expired', () {
+      expect(
+        ReportModerationRules.isClaimExpired(
+          now.subtract(const Duration(days: 365)),
+          now,
+        ),
+        isFalse,
+      );
+      expect(
+        ReportModerationRules.isClaimExpired(
+          now.subtract(const Duration(days: 366)),
+          now,
+        ),
+        isTrue,
+      );
+    });
+
+    test('an unreadable timestamp is never expired', () {
+      expect(ReportModerationRules.isClaimExpired(null, now), isFalse);
+    });
+  });
+
   group('hours payload', () {
     test('serialises a single Open range canonically', () {
       expect(
@@ -440,56 +480,90 @@ void main() {
     });
   });
 
-  group('resolveMostCommonClosure', () {
-    test('returns the most common duration', () {
-      final ProposedClosure? resolved =
-          ReportModerationRules.resolveMostCommonClosure(<String>[
-            ReportModerationRules.temporaryClosurePayload(
-              const ProposedClosure(amount: 3, unit: ClosureUnit.days),
-            ),
-            ReportModerationRules.temporaryClosurePayload(
-              const ProposedClosure(amount: 7, unit: ClosureUnit.days),
-            ),
-            ReportModerationRules.temporaryClosurePayload(
-              const ProposedClosure(amount: 7, unit: ClosureUnit.days),
-            ),
-            ReportModerationRules.temporaryClosurePayload(
-              const ProposedClosure(amount: 7, unit: ClosureUnit.days),
-            ),
+  group('resolveClosureUntil (the agreed END DATE)', () {
+    // 09:00 Malaysia time, so date maths is easy to reason about.
+    final DateTime now = DateTime.utc(2026, 9, 14, 1);
+
+    ClosureClaim claim(
+      DateTime at,
+      int amount, [
+      ClosureUnit unit = ClosureUnit.days,
+    ]) => ClosureClaim(
+      payload: ReportModerationRules.temporaryClosurePayload(
+        ProposedClosure(amount: amount, unit: unit),
+      ),
+      createdAt: at,
+    );
+
+    test('staggered reports meaning the same end date vote together', () {
+      // The user's example: 15/14/13/13/12-day claims filed 3/2/1/1/0 days
+      // ago - all 10 point at the SAME day (today + 12).
+      final DateTime? agreed =
+          ReportModerationRules.resolveClosureUntil(<ClosureClaim>[
+            claim(now.subtract(const Duration(days: 3)), 15),
+            claim(now.subtract(const Duration(days: 2)), 14),
+            claim(now.subtract(const Duration(days: 1)), 13),
+            claim(now.subtract(const Duration(days: 1)), 13),
+            for (int i = 0; i < 6; i++) claim(now, 12),
           ]);
-      expect(resolved!.amount, 7);
-      expect(resolved.unit, ClosureUnit.days);
+
+      expect(agreed, isNotNull);
+      expect(agreed!.difference(now).inDays, 12);
     });
 
-    test(
-      'ties break to the LONGER duration so the place is never re-opened early',
-      () {
-        final ProposedClosure? resolved =
-            ReportModerationRules.resolveMostCommonClosure(<String>[
-              ReportModerationRules.temporaryClosurePayload(
-                const ProposedClosure(amount: 2, unit: ClosureUnit.days),
-              ),
-              ReportModerationRules.temporaryClosurePayload(
-                const ProposedClosure(amount: 2, unit: ClosureUnit.days),
-              ),
-              ReportModerationRules.temporaryClosurePayload(
-                const ProposedClosure(amount: 9, unit: ClosureUnit.days),
-              ),
-              ReportModerationRules.temporaryClosurePayload(
-                const ProposedClosure(amount: 9, unit: ClosureUnit.days),
-              ),
-            ]);
-        expect(resolved!.amount, 9);
-      },
-    );
+    test('the most-voted end date wins even when older claims dominate', () {
+      // 6 claims say 15 days three days ago (end = today+12); 4 say 10 days
+      // today (end = today+10). Votes decide, not the raw day-count.
+      final DateTime? agreed =
+          ReportModerationRules.resolveClosureUntil(<ClosureClaim>[
+            for (int i = 0; i < 6; i++)
+              claim(now.subtract(const Duration(days: 3)), 15),
+            for (int i = 0; i < 4; i++) claim(now, 10),
+          ]);
+
+      expect(agreed!.difference(now).inDays, 12);
+    });
+
+    test('ties between end dates go to the LATER date', () {
+      final DateTime? agreed = ReportModerationRules.resolveClosureUntil(
+        <ClosureClaim>[
+          for (int i = 0; i < 5; i++) claim(now, 2),
+          for (int i = 0; i < 5; i++) claim(now, 9),
+        ],
+      );
+
+      expect(agreed!.difference(now).inDays, 9);
+    });
+
+    test('equivalent durations in different units vote together', () {
+      final DateTime? agreed =
+          ReportModerationRules.resolveClosureUntil(<ClosureClaim>[
+            for (int i = 0; i < 7; i++) claim(now, 30),
+            for (int i = 0; i < 5; i++) claim(now, 1, ClosureUnit.months),
+            for (int i = 0; i < 5; i++) claim(now, 60),
+          ]);
+
+      // 30 days + 1 month (30 days) = 12 votes on the same day.
+      expect(agreed!.difference(now).inDays, 30);
+    });
+
+    test('a winning date already in the past is returned as-is', () {
+      final DateTime? agreed = ReportModerationRules.resolveClosureUntil(
+        <ClosureClaim>[claim(now.subtract(const Duration(days: 10)), 5)],
+      );
+
+      expect(agreed, now.subtract(const Duration(days: 5)));
+    });
 
     test('ignores non-closure payloads and empty input', () {
       expect(
-        ReportModerationRules.resolveMostCommonClosure(const <String>[]),
+        ReportModerationRules.resolveClosureUntil(const <ClosureClaim>[]),
         isNull,
       );
       expect(
-        ReportModerationRules.resolveMostCommonClosure(<String>['price:5.00']),
+        ReportModerationRules.resolveClosureUntil(<ClosureClaim>[
+          ClosureClaim(payload: 'price:5.00', createdAt: now),
+        ]),
         isNull,
       );
     });

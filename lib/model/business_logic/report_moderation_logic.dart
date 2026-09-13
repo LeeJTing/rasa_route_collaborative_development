@@ -169,9 +169,9 @@ class ReportModerationLogic {
 
       // Temporary closure is counted across DIFFERENT durations: ten tourists
       // saying "closed temporarily" (each possibly with its own duration) is
-      // enough - the most-common reported duration is resolved at apply time.
-      // Every other category needs identical payloads (same hours / price /
-      // address / item).
+      // enough - at apply time the claims are resolved into the END DATE they
+      // agree on (see `_applyClosedTemporarily`). Every other category needs
+      // identical payloads (same hours / price / address / item).
       final bool temporaryClosure =
           claim.category == ReportCategory.closedTemporarily;
       final int count = temporaryClosure
@@ -183,9 +183,8 @@ class ReportModerationLogic {
 
       final _ApplyResult result;
       if (temporaryClosure) {
-        final List<String> payloads = await report.payloadsForIssue(claim);
-        result = await _applyClosedTemporarily(claim, payloads);
-        // Every duration contributed to crossing the threshold - clear the
+        result = await _applyClosedTemporarily(claim);
+        // Every claim contributed to crossing the threshold - clear the
         // whole issue so the next report starts a fresh count.
         await report.deleteIssue(claim);
       } else {
@@ -377,20 +376,18 @@ class ReportModerationLogic {
     );
   }
 
-  Future<_ApplyResult> _applyClosedTemporarily(
-    ReportClaim claim,
-    List<String> issuePayloads,
-  ) async {
-    // Ten tourists said "closed temporarily" (durations may differ) - the
-    // MOST COMMON reported duration wins (ties -> longest, so the place is
-    // never re-opened early).
-    final ProposedClosure? closure =
-        ReportModerationRules.resolveMostCommonClosure(issuePayloads);
-    final DateTime? closedUntil = closure == null
-        ? null
-        : DateTime.now().add(
-            Duration(days: ReportModerationRules.closureDurationDays(closure)),
-          );
+  Future<_ApplyResult> _applyClosedTemporarily(ReportClaim claim) async {
+    // The claims may carry different durations - they are normalised to the
+    // END DATE each voter meant (`created_at + duration`), so staggered
+    // reports of the same closure vote together and the most-voted date wins
+    // (ties -> the later date). The date is stored verbatim; one already in
+    // the past just means the place reads as open again immediately.
+    final List<ClosureClaim> issueClaims = await report.closureClaimsForIssue(
+      claim,
+    );
+    final DateTime? closedUntil = ReportModerationRules.resolveClosureUntil(
+      issueClaims,
+    );
     if (claim.placeKind == ReportPlaceKind.restaurant) {
       await restaurant.freezeRestaurant(
         claim.placeId,

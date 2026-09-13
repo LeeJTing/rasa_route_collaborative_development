@@ -645,6 +645,12 @@ class FoodRecognitionViewModel extends BaseViewModel
   /// so no details for it are held.
   String? _typedName;
 
+  /// The typo correction of the last manual entry: what the tourist typed
+  /// and the corrected spelling that replaced it (see
+  /// [typedNameTypoNotice]). Both null when the entry needed no correction.
+  String? _typedNameTypoFrom;
+  String? _typedNameTypoTo;
+
   XFile? get capturedImage => _capturedImage;
   LocalFood? get recognizedFood => _recognizedFood;
   List<LocalFood> get multipleResults => _multipleResults;
@@ -680,6 +686,19 @@ class FoodRecognitionViewModel extends BaseViewModel
   /// The name the tourist typed, kept for the mismatch warning while Gemini
   /// has not confirmed it; null when there is nothing pending.
   String? get typedName => _typedName;
+
+  /// The notice shown when the last manual entry was auto-CORRECTED: the
+  /// typed text was a MISSPELLING of the dish the photo shows, so the
+  /// correctly spelled name is what got applied (user request, 2026-09-14 -
+  /// a typo must never become the recorded dish name). Null when nothing
+  /// was corrected.
+  String? get typedNameTypoNotice {
+    final String? from = _typedNameTypoFrom;
+    final String? to = _typedNameTypoTo;
+    if (from == null || to == null) return null;
+    return "'$from' looks like a typo of '$to' - the correct spelling is "
+        'used instead.';
+  }
 
   /// Whether the current recognition is shaky enough to ask the tourist to
   /// verify it. The threshold itself is a domain rule and lives in
@@ -943,6 +962,9 @@ class FoodRecognitionViewModel extends BaseViewModel
   Future<void> enterFoodName(String name) async {
     final String trimmed = name.trim();
     if (trimmed.isEmpty) return;
+    // A new attempt replaces the previous typo correction.
+    _typedNameTypoFrom = null;
+    _typedNameTypoTo = null;
     _isProcessing = true;
     _recognitionError = null;
     notifyListeners();
@@ -971,6 +993,13 @@ class FoodRecognitionViewModel extends BaseViewModel
           _nameMismatch = false;
           _observedFoodName = null;
           _typedName = null;
+          // A typo the spelling gate corrected: the food above already
+          // carries the corrected spelling (see `resolveByName`); remember
+          // both names so the card can say what happened.
+          if (resolved.typedNameIsTypo) {
+            _typedNameTypoFrom = trimmed;
+            _typedNameTypoTo = resolved.correctedName;
+          }
         } else {
           // Gemini can't confirm the typed name - the detected food stays
           // and the tourist is told the typed dish can't be added. The typed
@@ -1164,6 +1193,8 @@ class FoodRecognitionViewModel extends BaseViewModel
     _nameMismatch = false;
     _observedFoodName = null;
     _typedName = null;
+    _typedNameTypoFrom = null;
+    _typedNameTypoTo = null;
     _extractedRestaurantName = null;
     // The next capture takes its own fix and is checked again.
     _captureRangeError = null;

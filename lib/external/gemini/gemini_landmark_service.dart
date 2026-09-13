@@ -507,14 +507,54 @@ $_lookalikeRules
     );
   }
 
+  /// The STORED CATALOGUE RECORD block for [stored] - empty when the app does
+  /// not know which dish the photo shows (see [StoredDishPrompt]).
+  ///
+  /// This is context, never a verdict: the model still reads the photo itself.
+  /// The point is that the app already HAS the dish's text, so the answer
+  /// either confirms it verbatim or adapts it to the variant actually shown -
+  /// it never re-invents the plain dish from scratch.
+  static String _storedDishRules(StoredDishPrompt? stored) {
+    if (stored == null) return '';
+    return '''
+  STORED CATALOGUE RECORD - the app has already saved this dish:
+    dish: ${stored.name}
+    category: ${stored.category}
+    description: ${stored.description}
+    ingredients: ${stored.ingredients}
+    cultural background: ${stored.culturalBackground}
+
+  Treat the record as the BASE of your answer:
+    - if the photo shows EXACTLY that dish, return its stored category,
+      description, ingredients and cultural background UNCHANGED - never
+      rewrite, shorten or "improve" text that is still true;
+    - if the photo shows a VARIANT the record does not describe ("Siew Yoke
+      Nasi Lemak" over "Nasi Lemak"), ADAPT those fields to the dish
+      actually shown: change what the variant changes (the ingredients gain
+      the variant's own ones, the category/culture move to the tradition it
+      belongs to) and keep every part of the record the variant does not
+      affect;
+    - never turn the record into an answer of its own: it is background, and
+      your own observation of the photo still decides the dish (and, for a
+      typed name, whether the photo matches that name).
+''';
+  }
+
   /// Full call - phase 2, only reached when the dish from [identifyFoodName]
   /// isn't already in the catalogue (REQ106_2, REQ106_7).
   /// Returns: dish, variant, origin, category, meal type, frame status, etc.
+  /// [storedDish] is the curated row the app already matched for this dish
+  /// (when there is one) - it rides the prompt so the answer describes the
+  /// dish AS SHOWN: the stored text echoed where it still holds, adapted where
+  /// the variant changes it (see [_storedDishRules]).
   /// Errors: A2 (timeout), A3 (not local food), A4 (no food), A18 (incomplete)
   Future<FoodAnalysisResponse> analyzeFoodImage({
     required List<int> imageBytes,
+    StoredDishPrompt? storedDish,
   }) async {
-    if (useLiveGemini) return _analyzeFoodImageLive(imageBytes);
+    if (useLiveGemini) {
+      return _analyzeFoodImageLive(imageBytes, storedDish);
+    }
 
     // Stub fallback - only reached while the live call is disabled.
     return const FoodAnalysisResponse(
@@ -544,6 +584,7 @@ $_lookalikeRules
 
   Future<FoodAnalysisResponse> _analyzeFoodImageLive(
     List<int> imageBytes,
+    StoredDishPrompt? storedDish,
   ) async {
     final String prompt =
         '''
@@ -562,7 +603,9 @@ $_lookalikeRules
       egg"). When the photo shows a VARIANT (step 2), the ingredient(s) that
       make it that variant MUST be in the list too (e.g. a "Cendol Jagung"
       photo adds "sweet corn"; a "Nasi Lemak Ayam" photo adds "fried
-      chicken") - the list names what makes it THAT variant.
+      chicken"; a "Siew Yoke Nasi Lemak" photo adds "siew yoke (roast
+      pork)") - the list names what makes it THAT variant. Never list only
+      the base dish's ingredients when the variant adds its own.
 
   3c. aliases: list up to 4 WELL-KNOWN alternative names of the dish you
       identified - genuine other names/scripts/spellings of the SAME dish
@@ -602,7 +645,10 @@ $_lookalikeRules
       Coconut" when it is cooked with coconut milk). NEVER list a restriction
       merely because the dish is free of it - a pork-free or gluten-free or
       egg-free dish is NOT tagged No Pork / No Gluten / No Egg. When in
-      doubt, prefer a shorter list over a longer one.
+      doubt, prefer a shorter list over a longer one. A VARIANT that adds an
+      ingredient adds its restriction too: a "Siew Yoke Nasi Lemak" contains
+      roast pork, so it is tagged "No Pork" even though plain nasi lemak is
+      not - judge the variant actually shown, not the base dish alone.
 
   10. Frame status: Is the ENTIRE food visible within the frame?
       - "complete" if fully visible
@@ -626,6 +672,7 @@ $_lookalikeRules
   12. Suggested selling price range for this dish in MYR (a typical stall /
       restaurant price): "suggestedPriceMin" and "suggestedPriceMax".
 
+${_storedDishRules(storedDish)}
 $_localFoodRules
 
 $_imageQualityRules
@@ -741,12 +788,19 @@ $_lookalikeRules
   /// when the name matches. On a mismatch it reports what it actually sees
   /// ([FoodAnalysisResponse.nameMatchesPhoto] / [..observedFood]) instead of
   /// describing a dish that is not in the photo.
+  /// [storedDish] is the curated row the app already matched for the typed
+  /// dish (when there is one) - it rides the prompt as the STORED CATALOGUE
+  /// RECORD, so a typed VARIANT comes back adapted to the dish actually shown
+  /// while the record itself never decides the match (see [_storedDishRules]).
   /// Errors: A2 (timeout)
   Future<FoodAnalysisResponse> analyzeFoodWithName({
     required List<int> imageBytes,
     required String name,
+    StoredDishPrompt? storedDish,
   }) async {
-    if (useLiveGemini) return _analyzeFoodWithNameLive(imageBytes, name);
+    if (useLiveGemini) {
+      return _analyzeFoodWithNameLive(imageBytes, name, storedDish);
+    }
 
     // Stub fallback - only reached while the live call is disabled.
     return FoodAnalysisResponse(
@@ -774,6 +828,7 @@ $_lookalikeRules
   Future<FoodAnalysisResponse> _analyzeFoodWithNameLive(
     List<int> imageBytes,
     String name,
+    StoredDishPrompt? storedDish,
   ) async {
     final String prompt =
         '''
@@ -812,7 +867,8 @@ $_lookalikeRules
   When "nameMatchesPhoto" is true, provide the details for "$name":
     - variant, a brief description, main ingredients of "$name" (comma-
       separated; include what makes the typed variant that variant - a
-      "Cendol Jagung" adds "sweet corn"), origin/region, cooking style
+      "Cendol Jagung" adds "sweet corn", a "Siew Yoke Nasi Lemak" adds
+      "siew yoke (roast pork)"), origin/region, cooking style
     - meal type - EXACTLY ONE of the catalogue's own values: All-Day Dining,
       Breakfast, Lunch, High Tea, Dinner, Supper, Street Food, Dessert or
       Beverage (Beverage for drinks; never invent another value)
@@ -828,7 +884,9 @@ $_lookalikeRules
       Shellfish, No Mayonnaise, No Mustard, ...); use [] when none apply.
       CRITICAL: list a restriction ONLY when the dish CONTAINS an ingredient
       that restriction forbids; NEVER list one the dish is free of (a
-      gluten-free dish is not tagged No Gluten)
+      gluten-free dish is not tagged No Gluten). A VARIANT that adds an
+      ingredient adds its restriction too - a "Siew Yoke Nasi Lemak"
+      contains roast pork, so it is tagged "No Pork".
     - a suggested selling price range in MYR (suggestedPriceMin and
       suggestedPriceMax)
     - aliases: up to 4 well-known ALTERNATIVE names of the SAME dish (other
@@ -843,6 +901,7 @@ $_lookalikeRules
       Use the dish's common spoken form, not a literal letter-by-letter
       reading. Empty string when the name is already spoken as written.
 
+${_storedDishRules(storedDish)}
 $_localFoodRules
 
 $_lookalikeRules
@@ -933,6 +992,65 @@ $_catalogueFoodTypeRules
       foodCount: 1,
       pronunciation: (json['pronunciation'] as String?) ?? '',
     );
+  }
+
+  /// Whether a MANUALLY TYPED dish name is a MISSPELLING of the dish the
+  /// photo showed - the "Show this food" flow's spelling gate (see
+  /// `FoodRecognitionLogic.resolveByName`). Text-only: by the time it runs,
+  /// Gemini has already confirmed the photo shows [observedFood] and the
+  /// tourist typed [typedName] for it; the only open question is the
+  /// SPELLING.
+  ///
+  /// A regional/alternative spelling of the same dish ("char kuey teow" =
+  /// "char kway teow") is NOT a typo; a misspelling ("prok belly" for
+  /// "Pork Belly") is. The verdict is accepted only TOGETHER with a
+  /// corrected spelling - `isTypo` without a `correctedName` is reported as
+  /// "no typo", so a half-answer can never block or rewrite what the
+  /// tourist typed.
+  Future<({bool isTypo, String correctedName})> checkTypedNameSpelling({
+    required String typedName,
+    required String observedFood,
+  }) async {
+    if (!useLiveGemini) return (isTypo: false, correctedName: '');
+    final String prompt =
+        '''
+  A tourist typed a dish name by hand into a food app. The photo has
+  already been verified to show "$observedFood"; the tourist typed
+  "$typedName" for it.
+
+  Answer ONE question: is "$typedName" a MISSPELLING (a typo) of
+  "$observedFood"?
+
+  - A TYPO is the same name written with wrong letters - "prok belly" for
+    "Pork Belly", "murtabakk" for "Murtabak", "chee cheong funn" for
+    "Chee Cheong Fun". The same dish, misspelled.
+  - An ESTABLISHED alternative name or spelling is NOT a typo: regional
+    spellings ("char kuey teow" = "char kway teow"), other names ("ABC" =
+    "ais kacang"), translations, other languages/scripts for the SAME
+    dish, or a variant of it (nasi lemak with chicken vs with egg). NEVER
+    flag these.
+  - A genuinely DIFFERENT dish is NOT a typo - a different name is not a
+    misspelling.
+  - When in doubt, it is NOT a typo.
+
+  Return ONLY raw JSON, no markdown fences:
+  {
+    "isTypo": boolean,
+    "correctedName": "string"
+  }
+  "correctedName" is the correctly spelled name of the SAME dish when
+  "isTypo" is true, and "" otherwise.
+  ''';
+    final String raw = await _gemini.generateText(
+      prompt,
+      apiKey: Env.geminiApiKeyLandmark,
+      model: Env.geminiModelLandmark,
+      label: 'spelling',
+    );
+    final Map<String, dynamic> json = _decodeJsonObject(raw);
+    final String corrected = (json['correctedName'] as String?)?.trim() ?? '';
+    final bool isTypo = json['isTypo'] == true && corrected.isNotEmpty;
+    return (isTypo: isTypo, correctedName: isTypo ? corrected : '');
   }
 
   /// Analyze signboard image to extract restaurant name (REQ106_31, REQ106_37)
