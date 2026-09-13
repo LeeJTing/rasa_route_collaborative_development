@@ -902,7 +902,7 @@ class _ClusterMarker extends StatelessWidget {
     child: DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: _allSearch ? AppColors.clusterSearchFill : AppColors.primary.withOpacity(0.5),
+        color: _allSearch ? AppColors.clusterSearchFill.withOpacity(0.7) : AppColors.primary.withOpacity(0.7),
         border: Border.fromBorderSide(
           BorderSide(
             // A mixed cell keeps the map's fill and takes the search colour as
