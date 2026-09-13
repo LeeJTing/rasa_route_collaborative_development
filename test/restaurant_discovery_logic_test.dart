@@ -155,7 +155,56 @@ void main() {
       },
     );
 
-    test('averages the landmark dish prices for the headline price', () async {
+    test(
+      'shows the category most dishes carry, worded like a restaurant row',
+      () async {
+        final _FakeDiscoveryRepositoryFacade repository =
+            _FakeDiscoveryRepositoryFacade(
+              const <Restaurant>[],
+              occurrences: <FoodOccurrence>[
+                _landmarkOccurrence(
+                  1,
+                  101,
+                  'Wan Tan Mee',
+                  distanceKm: 0.5,
+                  placeCategory: 'Malay',
+                  itemFoodCategory: 'Chinese',
+                ),
+                _landmarkOccurrence(
+                  1,
+                  102,
+                  'Char Kuey Teow',
+                  distanceKm: 0.5,
+                  placeCategory: 'Malay',
+                  itemFoodCategory: 'Chinese',
+                ),
+                _landmarkOccurrence(
+                  1,
+                  103,
+                  'Nasi Lemak',
+                  distanceKm: 0.5,
+                  placeCategory: 'Malay',
+                  itemFoodCategory: 'Malay',
+                ),
+              ],
+            );
+        final RestaurantDiscoveryLogic logic = _TestRestaurantDiscoveryLogic(
+          repository,
+        );
+
+        final results = await logic.nearbyLandmarksWithAutomaticExpansion(
+          location: _testLocation,
+        );
+
+        // Stored as "Malay" (the first dish's category at submission), but
+        // MOST of the dishes are Chinese - and the card words it exactly like
+        // a restaurant row does.
+        expect(results.single.category, 'Chinese');
+        expect(results.single.categoryLabel, 'Chinese Restaurant');
+      },
+    );
+
+    test('uses the lowest landmark dish price as the starting price', () async {
       final _FakeDiscoveryRepositoryFacade repository =
           _FakeDiscoveryRepositoryFacade(
             const <Restaurant>[],
@@ -176,7 +225,7 @@ void main() {
                 distanceKm: 0.5,
                 itemPrice: 20,
               ),
-              // No price recorded - left out of the average.
+              // No price recorded - left out of the starting price.
               _landmarkOccurrence(1, 103, 'Cendol', distanceKm: 0.5),
             ],
           );
@@ -187,9 +236,9 @@ void main() {
       final List<SubmittedLandmarkRecommendation> results = await logic
           .nearbyLandmarksWithAutomaticExpansion(location: _testLocation);
 
-      // The headline price is the AVERAGE of the known dish prices, not one
-      // dish's own price.
-      expect(results.single.price, 15);
+      // The headline price is the STARTING price - the LOWEST known dish
+      // price - so the card can read "From RM 10.00" like a restaurant's.
+      expect(results.single.price, 10);
       expect(
         results.single.dishes.map((SubmittedLandmarkDish dish) => dish.name),
         orderedEquals(<String>['Chicken Rice', 'Nasi Lemak', 'Cendol']),
@@ -448,6 +497,8 @@ FoodOccurrence _landmarkOccurrence(
   double? itemPrice,
   String? itemImageUrl,
   String? itemIngredients,
+  String placeCategory = 'Food stall',
+  String? itemFoodCategory,
 }) => FoodOccurrence(
   sourceId: '$landmarkId',
   source: FoodOccurrenceSource.submittedLandmark,
@@ -457,10 +508,11 @@ FoodOccurrence _landmarkOccurrence(
   foodType: 'Food',
   latitude: _testLocation.latitude + distanceKm / 111.2,
   longitude: _testLocation.longitude,
-  placeCategory: 'Food stall',
+  placeCategory: placeCategory,
   itemPrice: itemPrice,
   itemImageUrl: itemImageUrl,
   itemIngredients: itemIngredients,
+  itemFoodCategory: itemFoodCategory,
 );
 
 class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {

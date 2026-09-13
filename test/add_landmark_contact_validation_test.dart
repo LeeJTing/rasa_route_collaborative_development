@@ -489,7 +489,7 @@ void main() {
       expect(vm.websiteLinkUnreachable, isTrue);
       expect(
         vm.websiteLinkStatus,
-        "We couldn't open this link. Check the address and try again.",
+        "We couldn't open this website. Check the address and try again.",
       );
 
       // A link that answers clears the note again.

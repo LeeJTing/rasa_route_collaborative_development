@@ -48,7 +48,8 @@ void main() {
           containsAll(<String>['Liked Food', 'Not Liked Food']),
         );
         // Each dish carries its OWN price, and the landmark's headline price
-        // is their AVERAGE (8 and 12 -> 10), not one dish's price.
+        // is the STARTING price - the LOWEST of them (8 and 12 -> 8) - so
+        // the card can read "From RM 8.00" like a restaurant's.
         final SubmittedLandmarkRecommendation landmark =
             result.groups.single.submittedLandmarks.single;
         expect(
@@ -59,9 +60,12 @@ void main() {
         );
         expect(landmark.dishes.first.price, 8);
         expect(landmark.dishes.last.price, 12);
-        expect(landmark.price, 10);
+        expect(landmark.price, 8);
         expect(landmark.dishes.first.ingredients, 'Rice, sambal');
         expect(landmark.dishes.last.ingredients, isNull);
+        // The tourist-supplied address rides along for the card's address
+        // row.
+        expect(landmark.address, 'Jalan Ampang, Kuala Lumpur');
       },
     );
 
@@ -317,6 +321,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           foodType: 'Food',
           latitude: 1,
           longitude: 1.002,
+          placeAddress: 'Jalan Ampang, Kuala Lumpur',
           itemPrice: 8,
           itemIngredients: 'Rice, sambal',
         ),
