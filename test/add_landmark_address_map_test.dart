@@ -324,5 +324,27 @@ void main() {
       expect(vm.restaurantAddressError, isNull);
       vm.dispose();
     });
+
+    test('the 150 hard stop and warn zone match the report page', () async {
+      // Both address fields read ONE shared rule
+      // (`LandmarkSubmissionLogic.addressError` / `addressLengthWarning`), so
+      // these are the numbers and the words the report page's field shows too
+      // (locked from its side in `report_moderation_rules_test.dart`).
+      final _TestAddLandmarkViewModel vm = await _form(
+        _FakeLandmarkLogicFacade(),
+      );
+
+      vm.setRestaurantAddress('12, Jalan A'.padRight(149, 'A')); // 149 chars
+      expect(vm.restaurantAddressError, isNull);
+      expect(
+        vm.restaurantAddressWarning,
+        'Address should stay under 150 characters (currently 149).',
+      );
+
+      vm.setRestaurantAddress('12, Jalan A'.padRight(150, 'A')); // 150 chars
+      expect(vm.restaurantAddressError, 'Address is too long.');
+      expect(vm.restaurantAddressWarning, isNull);
+      vm.dispose();
+    });
   });
 }

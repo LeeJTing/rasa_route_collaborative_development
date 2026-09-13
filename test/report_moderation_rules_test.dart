@@ -310,7 +310,7 @@ void main() {
       );
     });
 
-    test('address must contain meaningful text within the length limit', () {
+    test("address is judged by the Add-Landmark form's own rules", () {
       expect(
         ReportModerationRules.addressError(
           '12 Jalan Merdeka, Kuala Lumpur',
@@ -318,11 +318,74 @@ void main() {
         ),
         isNull,
       );
-      expect(ReportModerationRules.addressError('', required: true), isNotNull);
+      expect(
+        ReportModerationRules.addressError('', required: true),
+        'Enter the corrected address.',
+      );
       expect(
         ReportModerationRules.addressError('---', required: true),
-        isNotNull,
+        'Invalid address.',
       );
+      // No digit - the form rejects this too (a Malaysian address carries a
+      // house/unit/lot number).
+      expect(
+        ReportModerationRules.addressError('Jalan Ampang', required: true),
+        'Invalid address.',
+      );
+      // Shorter than the form's minimum.
+      expect(
+        ReportModerationRules.addressError('12 A', required: true),
+        'Invalid address.',
+      );
+      // Characters the form does not allow in an address.
+      expect(
+        ReportModerationRules.addressError(
+          "12, Jalan O'Brien, KL",
+          required: true,
+        ),
+        'Invalid address.',
+      );
+      // The 150 cap is the form's hard stop: typing is capped there, so 150
+      // itself is "too long" and 149 is the last acceptable length.
+      expect(
+        ReportModerationRules.addressError(
+          '12, Jalan A'.padRight(149, 'A'), // 149 characters
+          required: true,
+        ),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.addressError(
+          '12, Jalan A'.padRight(150, 'A'), // 150 characters
+          required: true,
+        ),
+        'Address is too long.',
+      );
+      // Shape is judged BEFORE the cap, exactly like the form: a long value
+      // with no house number is "Invalid address.", not "too long".
+      expect(
+        ReportModerationRules.addressError(
+          'A'.padRight(200, 'A'),
+          required: true,
+        ),
+        'Invalid address.',
+      );
+      // Control characters are judged on the RAW text, exactly like the form
+      // (a trailing newline is not trimmed away first).
+      expect(
+        ReportModerationRules.addressError(
+          '12, Jalan Merdeka, Kuala Lumpur\n',
+          required: true,
+        ),
+        'Invalid address.',
+      );
+      // Whitespace alone is an empty answer on a required field.
+      expect(
+        ReportModerationRules.addressError('   ', required: true),
+        'Enter the corrected address.',
+      );
+      // Optional field: empty is not an error until it is submitted.
+      expect(ReportModerationRules.addressError(''), isNull);
     });
 
     test('temporary closure respects the selected unit limit', () {

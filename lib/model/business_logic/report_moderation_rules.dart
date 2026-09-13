@@ -4,6 +4,7 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/report_category.dart';
 import '../../domain_model/report_claim.dart';
 import '../../domain_model/tourist_location.dart';
+import 'landmark_submission_logic.dart';
 
 /// Pure rules for the report redesign: claim thresholds, canonical payload
 /// strings (so "identical claim" = exact string equality), issue signatures,
@@ -26,7 +27,14 @@ class ReportModerationRules {
   /// `LandmarkSubmissionLogic.maxPrice`) - a claim about a RM2,500 dish must
   /// be expressible.
   static const double maximumPrice = 9999.99;
-  static const int maximumAddressLength = 150;
+
+  /// The address limits are the Add-New-Landmark form's - the two screens
+  /// accept and reject exactly the same strings, with the same wording (see
+  /// [addressError]).
+  static const int minimumAddressLength =
+      LandmarkSubmissionLogic.minAddressLength;
+  static const int maximumAddressLength =
+      LandmarkSubmissionLogic.maxAddressLength;
   static const int maximumClosureDays = 365;
   static const int maximumClosureMonths = 12;
 
@@ -55,20 +63,27 @@ class ReportModerationRules {
     return null;
   }
 
+  /// The report page's address field, judged by the Add-New-Landmark form's
+  /// rules. The WHOLE judgement - raw control characters, the minimum length,
+  /// every shape rule and the 150 hard stop, in the form's order and its
+  /// words - is `LandmarkSubmissionLogic.addressError`: both fields call the
+  /// same method, so they can never drift apart again.
+  ///
+  /// Only the empty field differs. The form's field is optional; this one is
+  /// required work (you are proposing a replacement), so an empty answer is
+  /// "Enter the corrected address." rather than silence.
   static String? addressError(String raw, {bool required = false}) {
-    final String value = raw.trim();
-    if (value.isEmpty) return required ? 'Enter the corrected address.' : null;
-    if (value.length > maximumAddressLength) {
-      return 'Address must be $maximumAddressLength characters or fewer.';
+    if (raw.trim().isEmpty) {
+      return required ? 'Enter the corrected address.' : null;
     }
-    if (RegExp(r'[\x00-\x1F\x7F]').hasMatch(value)) {
-      return 'Address contains unsupported characters.';
-    }
-    if (!RegExp(r'[A-Za-z0-9]').hasMatch(value)) {
-      return 'Enter a meaningful street or place address.';
-    }
-    return null;
+    return LandmarkSubmissionLogic.addressError(raw);
   }
+
+  /// The field's amber "close to the cap" nudge (141-149), in the same words
+  /// the Add-Landmark form uses - see
+  /// `LandmarkSubmissionLogic.addressLengthWarning`.
+  static String? addressLengthWarning(String raw) =>
+      LandmarkSubmissionLogic.addressLengthWarning(raw);
 
   static String? closureError(
     String raw,

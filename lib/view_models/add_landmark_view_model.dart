@@ -765,40 +765,21 @@ class AddLandmarkViewModel extends BaseViewModel
     return null;
   }
 
-  /// Optional address. Every SHAPE rule in `LandmarkSubmissionLogic` is still
-  /// enforced (allowed characters, no leading/trailing or repeated specials,
-  /// at least one digit and one letter, the minimum length) - but they all
-  /// report ONE plain "Invalid address." The tourist is told their input is
-  /// invalid, not which internal rule fired; only "too long" is separate.
-  String? get restaurantAddressError {
-    if (_address.isEmpty) return null;
-    final String value = _address.trim();
-    if (landmarkLogic.containsControlCharacters(_address) ||
-        value.length < landmarkLogic.minAddressLength ||
-        !landmarkLogic.addressHasAllowedCharacters(value) ||
-        landmarkLogic.addressStartsOrEndsWithSpecialChar(value) ||
-        landmarkLogic.addressHasRepeatedSpecialChar(value) ||
-        !landmarkLogic.addressContainsDigit(value) ||
-        !landmarkLogic.addressContainsLetter(value)) {
-      return 'Invalid address.';
-    }
-    if (_address.length >= landmarkLogic.maxAddressLength) {
-      return 'Address is too long.';
-    }
-    return null;
-  }
+  /// Optional address. The whole judgement - the shape rules (allowed
+  /// characters, no leading/trailing or repeated specials, at least one digit
+  /// and one letter), the minimum length and the 150 hard stop, in the form's
+  /// order and words - is `LandmarkSubmissionLogic.addressError`, ONE rule set
+  /// shared with the report page's address field. Every shape violation
+  /// reports the same plain "Invalid address."; only the cap is called out
+  /// separately.
+  String? get restaurantAddressError => landmarkLogic.addressError(_address);
 
   /// Amber warning while the address is close to its 150 cap (141-149) -
-  /// typing continues to the cap; the hard-stop error shows at 150.
-  String? get restaurantAddressWarning {
-    final int length = _address.length;
-    final int maxLength = landmarkLogic.maxAddressLength;
-    if (length >= maxLength - 9 && length < maxLength) {
-      return 'Address should stay under $maxLength characters '
-          '(currently $length).';
-    }
-    return null;
-  }
+  /// typing continues to the cap; the hard-stop error shows at 150. The
+  /// numbers and words are shared with the report page's address field (see
+  /// `LandmarkSubmissionLogic.addressLengthWarning`).
+  String? get restaurantAddressWarning =>
+      landmarkLogic.addressLengthWarning(_address);
 
   Map<Weekday, List<OpeningHour>> get operatingHours =>
       Map<Weekday, List<OpeningHour>>.unmodifiable(_operatingHours);

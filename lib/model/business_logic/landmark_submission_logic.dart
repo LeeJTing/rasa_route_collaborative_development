@@ -1188,6 +1188,11 @@ class LandmarkSubmissionLogic {
 
   static const int maxAddressLength = 150;
 
+  /// The address's amber "stay under" nudge starts here - the 9 characters
+  /// below the [maxAddressLength] hard stop (141-149), where input is still
+  /// accepted but the cap is close.
+  static const int addressWarnFromLength = maxAddressLength - 9;
+
   /// The shortest acceptable address (typed or auto-filled). Shorter than
   /// this cannot carry a house number AND a street, so it is a typo.
   static const int minAddressLength = 10;
@@ -1437,13 +1442,60 @@ class LandmarkSubmissionLogic {
   ///
   /// Length limits are the form's business ([minAddressLength] and
   /// [maxAddressLength]) - this method judges the content only.
-  bool isValidAddressText(String value) {
+  bool isValidAddressText(String value) => isValidAddressContent(value);
+
+  /// [isValidAddressText] as a STATIC, so the report page's address field can
+  /// accept and reject exactly the same strings the Add-Landmark form does
+  /// (see [addressError]) - one set of rules for one field, wherever it
+  /// appears.
+  static bool isValidAddressContent(String value) {
     if (value.trim().isEmpty) return false;
-    if (!addressHasAllowedCharacters(value)) return false;
-    if (addressStartsOrEndsWithSpecialChar(value)) return false;
-    if (addressHasRepeatedSpecialChar(value)) return false;
-    if (!addressContainsLetter(value)) return false;
-    return addressContainsDigit(value);
+    if (!_addressHasAllowedCharacters(value)) return false;
+    if (_addressStartsOrEndsWithSpecialChar(value)) return false;
+    if (_addressHasRepeatedSpecialChar(value)) return false;
+    if (!_addressContainsLetter(value)) return false;
+    return _addressContainsDigit(value);
+  }
+
+  /// The Add-Landmark form's COMPLETE address judgement, in the form's own
+  /// ORDER and its own words: a raw control character, a value shorter than
+  /// [minAddressLength], or ANY shape violation ([isValidAddressContent])
+  /// reports the one plain "Invalid address."; only something that passes all
+  /// of that at [maxAddressLength] characters or more is called out as
+  /// "Address is too long." (the field caps typing there, so 150 itself is
+  /// the hard stop - see [addressLengthWarning] for the amber nudge below
+  /// it).
+  ///
+  /// Both address fields the app shows - the form's and the report page's -
+  /// call THIS method (via `AddLandmarkViewModel.restaurantAddressError` and
+  /// `ReportModerationRules.addressError`), so the two can never drift
+  /// apart. Length is measured on the RAW text, exactly like the form's.
+  ///
+  /// An EMPTY value returns null: the form's field is optional, so whether
+  /// emptiness is an error is the caller's rule.
+  static String? addressError(String raw) {
+    if (raw.isEmpty) return null;
+    final String value = raw.trim();
+    if (_containsControlCharacters(raw) ||
+        value.length < minAddressLength ||
+        !isValidAddressContent(value)) {
+      return 'Invalid address.';
+    }
+    if (raw.length >= maxAddressLength) return 'Address is too long.';
+    return null;
+  }
+
+  /// The amber "stay under" nudge shown while a value is inside its warn
+  /// zone ([addressWarnFromLength] up to, but not including,
+  /// [maxAddressLength]) - advisory only, it never blocks submission. Shared
+  /// by both address fields so they nag in the same words.
+  static String? addressLengthWarning(String value) {
+    final int length = value.length;
+    if (length >= addressWarnFromLength && length < maxAddressLength) {
+      return 'Address should stay under $maxAddressLength characters '
+          '(currently $length).';
+    }
+    return null;
   }
 
   /// The four characters allowed besides letters, digits and spaces: comma,
@@ -1452,15 +1504,21 @@ class LandmarkSubmissionLogic {
 
   /// Whether [value] uses only letters/digits (any script), spaces and the
   /// allowed address specials.
-  bool addressHasAllowedCharacters(String value) {
-    if (containsControlCharacters(value)) return false;
+  bool addressHasAllowedCharacters(String value) =>
+      _addressHasAllowedCharacters(value);
+
+  static bool _addressHasAllowedCharacters(String value) {
+    if (_containsControlCharacters(value)) return false;
     return RegExp(r'^[\p{L}\p{N}\s.,\-/#]+$', unicode: true).hasMatch(value);
   }
 
   /// Whether [value] starts or ends with one of the address specials
   /// (`.` `,` `-` `/` `#`) - runs on the trimmed value, so stray spaces do
   /// not hide a trailing period.
-  bool addressStartsOrEndsWithSpecialChar(String value) {
+  bool addressStartsOrEndsWithSpecialChar(String value) =>
+      _addressStartsOrEndsWithSpecialChar(value);
+
+  static bool _addressStartsOrEndsWithSpecialChar(String value) {
     final String trimmed = value.trim();
     if (trimmed.isEmpty) return false;
     final String edges = trimmed[0] == trimmed[trimmed.length - 1]
@@ -1473,15 +1531,22 @@ class LandmarkSubmissionLogic {
   /// `12--3`, `A//B`) - a typo, never a real address. A single special
   /// between alphanumerics is fine (`12A/3`, `No. 5-7`).
   bool addressHasRepeatedSpecialChar(String value) =>
+      _addressHasRepeatedSpecialChar(value);
+
+  static bool _addressHasRepeatedSpecialChar(String value) =>
       RegExp(r'[.,\-/#]{2,}').hasMatch(value);
 
   /// Whether [value] contains at least one letter (any script).
-  bool addressContainsLetter(String value) =>
+  bool addressContainsLetter(String value) => _addressContainsLetter(value);
+
+  static bool _addressContainsLetter(String value) =>
       RegExp(r'\p{L}', unicode: true).hasMatch(value);
 
   /// Whether [value] contains at least one digit - a Malaysian address
   /// carries a house/unit/lot number, so "Jalan Melati" alone is rejected.
-  bool addressContainsDigit(String value) =>
+  bool addressContainsDigit(String value) => _addressContainsDigit(value);
+
+  static bool _addressContainsDigit(String value) =>
       RegExp(r'\p{N}', unicode: true).hasMatch(value);
 
   /// Whether [value] is acceptable for the restaurant name. STRICT: letters
@@ -1503,6 +1568,9 @@ class LandmarkSubmissionLogic {
   /// blanket guard applied to every free-text form field so pasted content
   /// can never smuggle in newlines/control bytes.
   bool containsControlCharacters(String value) =>
+      _containsControlCharacters(value);
+
+  static bool _containsControlCharacters(String value) =>
       value.contains(RegExp(r'[\x00-\x1F\x7F]'));
 
   /// Whether [url] answers a GET within 5s with HTTP 200-399 - the website

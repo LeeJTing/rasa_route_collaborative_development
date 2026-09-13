@@ -306,6 +306,20 @@ class LandmarkLogicFacade {
   bool addressContainsDigit(String address) =>
       submission.addressContainsDigit(address);
 
+  /// The COMPLETE address judgement - raw control characters, the minimum
+  /// length, every shape rule and the [maxAddressLength] hard stop - in the
+  /// form's wording ("Invalid address." / "Address is too long."). `null` is
+  /// acceptable (an empty value included - requiredness is the caller's
+  /// rule). See `LandmarkSubmissionLogic.addressError`.
+  String? addressError(String address) =>
+      LandmarkSubmissionLogic.addressError(address);
+
+  /// The amber "close to the cap" nudge (141-149), in the same words the
+  /// report page's address field uses (see
+  /// `LandmarkSubmissionLogic.addressLengthWarning`).
+  String? addressLengthWarning(String address) =>
+      LandmarkSubmissionLogic.addressLengthWarning(address);
+
   /// The shortest acceptable address (see
   /// `LandmarkSubmissionLogic.minAddressLength`).
   int get minAddressLength => LandmarkSubmissionLogic.minAddressLength;

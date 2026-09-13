@@ -178,6 +178,15 @@ class ReportPlaceViewModel extends BaseViewModel
   ClosureUnit get closureUnit => _closureUnit;
   String? get priceError => _priceError;
   String? get addressError => _addressError;
+
+  /// The address cap the field enforces - the Add-Landmark form's own 150.
+  int get addressMaxLength => reportLogic.maxAddressLength;
+
+  /// The amber nudge while the typed address sits in its warn zone (141-149);
+  /// the field hides it whenever [addressError] is showing, exactly like the
+  /// form's field does.
+  String? get addressWarning => reportLogic.addressLengthWarning(_addressText);
+
   String? get closureError => _closureError;
   String? get hoursError => _hoursError;
   String? get itemError => _itemError;
@@ -282,8 +291,10 @@ class ReportPlaceViewModel extends BaseViewModel
   }
 
   void setAddressText(String value) {
-    _addressText = value;
-    _addressError = reportLogic.addressError(value);
+    // Capped exactly like the form's field (belt-and-suspenders behind the
+    // TextField's own maxLength).
+    _addressText = _cappedAddress(value);
+    _addressError = reportLogic.addressError(_addressText);
     // Their own wording: the field stops following the pin, and the map's
     // version is offered back through `canApplyMapAddress` instead.
     _addressFromMap = false;
@@ -375,7 +386,7 @@ class ReportPlaceViewModel extends BaseViewModel
   /// follows it (no range rule here - see the section note above).
   void selectAddressSuggestion(AddressSuggestion suggestion) {
     _clearAddressSearch();
-    _addressText = suggestion.address;
+    _addressText = _cappedAddress(suggestion.address);
     _addressError = null;
     _addressFromMap = true;
     _addressVersion++;
@@ -388,12 +399,20 @@ class ReportPlaceViewModel extends BaseViewModel
   void applyMapAddressFromPin() {
     final String? address = _mapDerivedAddress;
     if (address == null || address.isEmpty) return;
-    _addressText = address;
+    _addressText = _cappedAddress(address);
     _addressError = null;
     _addressFromMap = true;
     _addressVersion++;
     _clearAddressSearch();
     safeNotifyListeners();
+  }
+
+  /// The Add-Landmark form's own ceiling on what the MAP may put in the
+  /// field - a composed OpenStreetMap address can run past the cap (typed
+  /// text is already capped by the field itself, exactly like the form's).
+  String _cappedAddress(String value) {
+    final int maxLength = reportLogic.maxAddressLength;
+    return value.length <= maxLength ? value : value.substring(0, maxLength);
   }
 
   /// Drops every suggestion-search state - used when a pick or the map's own
@@ -443,9 +462,9 @@ class ReportPlaceViewModel extends BaseViewModel
     }
 
     _mapAddressUnavailable = false;
-    _mapDerivedAddress = address;
+    _mapDerivedAddress = _cappedAddress(address);
     if (_addressFromMap || _addressText.trim().isEmpty) {
-      _addressText = address;
+      _addressText = _cappedAddress(address);
       _addressError = null;
       _addressFromMap = true;
       _addressVersion++;
