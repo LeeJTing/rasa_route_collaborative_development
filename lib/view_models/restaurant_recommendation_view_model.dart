@@ -219,8 +219,8 @@ class RestaurantRecommendationViewModel extends BaseViewModel
           List<SubmittedLandmarkRecommendation> landmarks =
           results[1] as List<SubmittedLandmarkRecommendation>;
 
-          restaurants = _sortedRestaurants(restaurants);
-          landmarks = _sortedLandmarks(landmarks);
+          restaurants = _orderedRestaurants(restaurants);
+          landmarks = _orderedLandmarks(landmarks);
 
           final _QuickModeCacheEntry entry = _QuickModeCacheEntry(
             restaurants: restaurants,
@@ -382,31 +382,14 @@ class RestaurantRecommendationViewModel extends BaseViewModel
     _landmarks = entry.landmarks;
   }
 
-  List<Restaurant> _sortedRestaurants(List<Restaurant> restaurants) {
-    final List<Restaurant> sorted = List<Restaurant>.of(restaurants)
-      ..sort((Restaurant a, Restaurant b) {
-        return (a.distanceMetres ?? double.infinity).compareTo(
-          b.distanceMetres ?? double.infinity,
-        );
-      });
 
-    return List<Restaurant>.unmodifiable(sorted);
-  }
+  List<Restaurant> _orderedRestaurants(List<Restaurant> restaurants) =>
+      List<Restaurant>.unmodifiable(restaurants);
 
-  List<SubmittedLandmarkRecommendation> _sortedLandmarks(
-      List<SubmittedLandmarkRecommendation> landmarks,
-      ) {
-    final List<SubmittedLandmarkRecommendation> sorted =
-    List<SubmittedLandmarkRecommendation>.of(landmarks)
-      ..sort(
-            (
-            SubmittedLandmarkRecommendation a,
-            SubmittedLandmarkRecommendation b,
-            ) => a.distanceMetres.compareTo(b.distanceMetres),
-      );
-
-    return List<SubmittedLandmarkRecommendation>.unmodifiable(sorted);
-  }
+  /// Keeps the order the logic layer returned - see [_orderedRestaurants].
+  List<SubmittedLandmarkRecommendation> _orderedLandmarks(
+    List<SubmittedLandmarkRecommendation> landmarks,
+  ) => List<SubmittedLandmarkRecommendation>.unmodifiable(landmarks);
 
   @override
   void onCurrentLocationChanged(TouristLocation location) {

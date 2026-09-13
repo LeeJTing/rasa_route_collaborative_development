@@ -125,6 +125,7 @@ const MatchesRecommendationResult testMatchesResult =
         MatchedFoodRecommendations(
           food: testMatchedFood,
           restaurants: testRestaurants,
+          restaurantStartingPrices: <int, double>{1: 18, 2: 15, 3: 21},
           submittedLandmarks: <SubmittedLandmarkRecommendation>[
             testLandmarkRecommendation,
           ],

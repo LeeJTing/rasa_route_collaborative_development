@@ -108,8 +108,24 @@ class MapExplorationLogic {
   /// Where a city search result settles the map (REQ102_22).
   static const double cityZoom = 13;
 
-  /// Where a restaurant or landmark search result settles - street level.
-  static const double addressZoom = 16;
+  /// Where a restaurant or landmark search result settles.
+  ///
+  /// **The map's maximum**, not a comfortable street zoom. A tourist who typed
+  /// a restaurant's name and picked it out of the list has already said which
+  /// place they mean; what they want next is to see exactly where it is, and
+  /// the card that opens underneath is already telling them the name, the
+  /// photo and the rating - the map does not have to carry the identification
+  /// as well. At 16 the pin arrived among its neighbours and the tourist was
+  /// left picking it out again, which is the question they had just answered.
+  ///
+  /// It is the zoom `expandCluster` already uses for the same reason: it is
+  /// where this module goes when individual places have to be told apart.
+  ///
+  /// A city or a state result is unaffected - see [cityZoom] and
+  /// `Region.defaultZoom`. If this reads too tight on a real device, one step
+  /// back (17) keeps the street and its neighbours in frame and leaves the
+  /// "+" button live; nothing else has to change.
+  static const double addressZoom = maximumZoom;
 
   /// What people type instead of a state's official name.
   ///
@@ -204,15 +220,39 @@ class MapExplorationLogic {
   ///  * zooming in splits cells, and places drop out of their clusters as pins
   ///    exactly when there is room to draw them.
 
+  /// The width of one clustering cell, in screen pixels.
+  ///
+  /// **This number lives twice** - here and in `map_food_markers`, which is
+  /// what actually groups. Postgres owns the grouping; this copy exists so the
+  /// client can answer "is this place inside that badge?" without a round trip,
+  /// and the two must be changed together.
+  static const double clusterCellPixels = 56;
+
+  /// The same cell in degrees at [zoom]. A tile map covers 360 / (256 * 2^z)
+  /// degrees per pixel, so 56 px is 78.75 / 2^z.
+  static double clusterCellDegrees(double zoom) => math.max(
+    clusterCellPixels * 1.40625 / math.pow(2, math.max(zoom, 0)),
+    1e-7,
+  );
+
+  /// Whether [pin] is one of the places [cluster] stands for.
+  ///
+  /// Exact, not a distance guess: both sides are snapped to the same grid the
+  /// function grouped by. The centroid of a cell is a convex combination of
+  /// points inside it, so it always falls in its own cell - which is what
+  /// makes a badge's own position enough to recover the cell it came from.
+  static bool clusterHolds(MapCluster cluster, MapPin pin, double zoom) {
+    final double cell = clusterCellDegrees(zoom);
+    return (cluster.latitude / cell).floor() == (pin.latitude / cell).floor() &&
+        (cluster.longitude / cell).floor() == (pin.longitude / cell).floor();
+  }
+
   /// How far outside the visible box to query, as a fraction of its size.
   ///
   /// REQ102_41 - panning a short way should find its markers already loaded
   /// rather than flashing an empty edge. 25% each way roughly doubles the area
   /// queried, which at these row counts is free.
   static const double viewportBuffer = 0.25;
-
-  /// How many dish names the pin sheet lists before it stops.
-  static const int maximumServedFoods = 8;
 
   /// How many pins the detailed map may draw at [zoom].
   ///
@@ -547,6 +587,7 @@ class MapExplorationLogic {
       northLatitude: north + latitudePad,
       eastLongitude: east + longitudePad,
       zoom: zoom,
+      maximumZoom: maximumZoom,
       foodIds: resolvedFoodIds,
       limit: cap,
       search: search,
@@ -571,12 +612,22 @@ class MapExplorationLogic {
               )
               .toList(growable: false);
 
+    // REQ102_41 - at the deepest zoom Postgres answers with one marker per
+    // place and no clusters at all, which is only half of "individually":
+    // two stalls at the same recorded coordinates would still be two pins on
+    // the same point, and only the last drawn would take a tap. Same spread
+    // an opened cluster already uses - a few metres, drawn position only,
+    // `referenceId` untouched.
+    final List<MapPin> drawable = zoom >= maximumZoom
+        ? _spreadColliding(withDistance, zoom)
+        : withDistance;
+
     return MapPinPage(
-      pins: List<MapPin>.unmodifiable(withDistance),
+      pins: List<MapPin>.unmodifiable(drawable),
       clusters: markers.clusters,
       // Markers produced, not places found - `placesRepresented` is the second
       // number, and it counts what is inside the clusters too.
-      totalInView: withDistance.length + markers.clusters.length,
+      totalInView: drawable.length + markers.clusters.length,
       limit: cap,
     );
   }
@@ -610,13 +661,17 @@ class MapExplorationLogic {
     final List<int> landmarkIds = <int>[];
 
     for (final PlaceSuggestion place in results.places) {
-      if (!place.isPlaceOnTheMap) continue;
-      final int? id = int.tryParse(place.referenceId!);
+      // The id and the table it belongs to, read off the result itself. The
+      // keyword that produced it never enters into which pins are marked.
+      final int? id = place.entityId;
       if (id == null) continue;
-      if (place.isRestaurant) {
-        restaurantIds.add(id);
-      } else {
-        landmarkIds.add(id);
+      switch (place.resultType) {
+        case SearchResultType.restaurant:
+          restaurantIds.add(id);
+        case SearchResultType.landmark:
+          landmarkIds.add(id);
+        case SearchResultType.location:
+          break;
       }
     }
 
@@ -629,6 +684,46 @@ class MapExplorationLogic {
       landmarkIds: List<int>.unmodifiable(landmarkIds),
     );
   }
+
+  /// The search half of a marker query for **one** result the tourist picked.
+  ///
+  /// [searchSelectionFor] answers for the whole result list, which is right
+  /// while the list is open: everything the keyword matched is marked, so the
+  /// tourist can see what their search found. Picking one entry is a narrowing,
+  /// and the map has to narrow with it.
+  ///
+  /// "Nasi Lemak" matches a dish, restaurants called Nasi Lemak and landmarks
+  /// called Nasi Lemak. Tapping one restaurant means *that* restaurant, so the
+  /// selection becomes its id and nothing else - not its name, which would
+  /// match the others, and not the dish, which would mark every stall selling
+  /// it. A place result carries the id of the row it came from and
+  /// [PlaceSuggestion.resultType] says which table that id belongs to; the two
+  /// together are the whole answer.
+  ///
+  /// A state or a city selects nothing: it is a camera position, not a place,
+  /// and the caller keeps whatever the keyword was already marking.
+  static MapSearchSelection searchSelectionForPlace(PlaceSuggestion place) {
+    final int? id = place.entityId;
+    if (id == null) return MapSearchSelection.none;
+    return switch (place.resultType) {
+      SearchResultType.restaurant => MapSearchSelection(
+        restaurantIds: List<int>.unmodifiable(<int>[id]),
+      ),
+      SearchResultType.landmark => MapSearchSelection(
+        landmarkIds: List<int>.unmodifiable(<int>[id]),
+      ),
+      SearchResultType.location => MapSearchSelection.none,
+    };
+  }
+
+  /// The same, for one local food picked out of the list (A8.1).
+  ///
+  /// A dish is the one result type whose id stands for many places: every
+  /// available restaurant and landmark serving it. That is the relationship
+  /// Restaurant/Landmark -> Local Food already describes, and it is the id that
+  /// travels, never the dish's name.
+  static MapSearchSelection searchSelectionForFood(LocalFood food) =>
+      MapSearchSelection(foodIds: List<int>.unmodifiable(<int>[food.id]));
 
   /// REQ102_41 - what a tap on [cluster] should do.
   ///
@@ -805,6 +900,10 @@ class MapExplorationLogic {
   ///
   /// Returns [pin] unchanged when the detail cannot be read, so a tap always
   /// opens a sheet with at least the name and photo already on the marker.
+  ///
+  /// [filter] and [localFoodId] say what the tourist was looking for. They
+  /// **order** the "Serves: ..." line and nothing else - the sheet lists the
+  /// whole menu either way (REQ102_47).
   Future<MapPin> pinDetail(
     MapPin pin, {
     ExplorationFilter filter = ExplorationFilter.none,
@@ -838,31 +937,48 @@ class MapExplorationLogic {
     }
     if (restaurant == null) return pin;
 
-    // "Serves: ..." lists what the tourist is looking for first. With nothing
-    // selected that is simply the menu, catalogue names preferred over the
+    // REQ102_47 - "Serves: ..." is the whole menu, always.
+    //
+    // A filter chip, a keyword and a Swipe card decide which *places* reach
+    // the map. They do not decide what a place turns out to serve once it is
+    // opened: a restaurant serving Nasi Lemak, Laksa, Satay and Roti Canai
+    // lists all four whether the tourist searched for Nasi Lemak, ticked
+    // Breakfast, or swiped past Satay. It used to list only the dishes that
+    // matched, which read as "this place serves one thing" (user report,
+    // 2026-09-13). Catalogue names are preferred over the
     // restaurant's own spelling so the sheet matches the rest of the app.
     final List<LocalFood> catalogue = await repository.getLocalFoods();
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
+    // What the tourist was looking for is still listed *first*. Ordering, not
+    // filtering - nothing is dropped - and it is what keeps the dish they
+    // asked for on the visible part of a long line. The list itself is
+    // whole; the sheet's strip ellipsises what will not fit, which is a
+    // truncation the tourist can see rather than a silent cut at eight.
     final Set<int> wanted = <int>{
       for (final LocalFood food in catalogue)
         if ((localFoodId == null || food.id == localFoodId) &&
             matchesFilter(food, filter))
           food.id,
     };
-    final bool narrowed = localFoodId != null || filter.selectionCount > 0;
 
     final List<String> served = <String>[];
+    final List<String> alsoServed = <String>[];
     final List<double> prices = <double>[];
     for (final RestaurantItem item in items) {
-      final bool matches = wanted.contains(item.localFoodId);
-      if (narrowed && !matches) continue;
       final String name = (nameById[item.localFoodId] ?? item.foodName).trim();
-      if (name.isNotEmpty && !served.contains(name)) served.add(name);
+      if (name.isNotEmpty &&
+          !served.contains(name) &&
+          !alsoServed.contains(name)) {
+        (wanted.contains(item.localFoodId) ? served : alsoServed).add(name);
+      }
       final double? price = item.price;
       if (price != null && price > 0) prices.add(price);
     }
+    // The rest of the menu, behind what was asked for. The price range covers
+    // the same dishes the line now names, so the two agree.
+    served.addAll(alsoServed);
 
     return MapPin(
       referenceId: pin.referenceId,
@@ -878,11 +994,7 @@ class MapExplorationLogic {
       thumbnailUrl: pin.thumbnailUrl,
       category: restaurant.category.isEmpty ? null : restaurant.category,
       rating: restaurant.rating ?? pin.rating,
-      servedFoods: List<String>.unmodifiable(
-        served.length > maximumServedFoods
-            ? served.sublist(0, maximumServedFoods)
-            : served,
-      ),
+      servedFoods: List<String>.unmodifiable(served),
       priceRange: _priceRangeOf(prices),
       openNow: _openNow(hours['restaurant:$id']),
       distanceMetres: pin.distanceMetres,
@@ -923,28 +1035,32 @@ class MapExplorationLogic {
     }
     if (landmark == null) return pin;
 
-    // The same "Serves: ..." rule as the restaurant sheet: catalogue names
-    // preferred over the submission's own spelling, and narrowed to what the
-    // tourist is looking for when a dish or a filter is active.
+    // The same "Serves: ..." rule as the restaurant sheet: every dish the
+    // landmark has on record, catalogue names preferred over the
+    // submission's own spelling, ordered so that what the tourist was
+    // looking for comes first.
     final List<LocalFood> catalogue = await repository.getLocalFoods();
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
+    // Listed first, never listed alone - see the restaurant branch above.
     final Set<int> wanted = <int>{
       for (final LocalFood food in catalogue)
         if ((localFoodId == null || food.id == localFoodId) &&
             matchesFilter(food, filter))
           food.id,
     };
-    final bool narrowed = localFoodId != null || filter.selectionCount > 0;
 
     final List<String> served = <String>[];
+    final List<String> alsoServed = <String>[];
     final List<double> prices = <double>[];
     for (final LandmarkItem item in landmark.items) {
-      final bool matches = wanted.contains(item.localFoodId);
-      if (narrowed && !matches) continue;
       final String name = (nameById[item.localFoodId] ?? item.dish).trim();
-      if (name.isNotEmpty && !served.contains(name)) served.add(name);
+      if (name.isNotEmpty &&
+          !served.contains(name) &&
+          !alsoServed.contains(name)) {
+        (wanted.contains(item.localFoodId) ? served : alsoServed).add(name);
+      }
       final double? price = item.price;
       if (price != null && price > 0) {
         prices.add(price);
@@ -955,6 +1071,7 @@ class MapExplorationLogic {
         prices.add(item.priceMax);
       }
     }
+    served.addAll(alsoServed);
 
     // The landmark's own category: the food category MOST of its dishes
     // carry (see `SubmittedLandmark.displayCategory`), worded the way the
@@ -974,11 +1091,7 @@ class MapExplorationLogic {
       thumbnailUrl: pin.thumbnailUrl,
       category: category.isEmpty ? null : category,
       rating: pin.rating,
-      servedFoods: List<String>.unmodifiable(
-        served.length > maximumServedFoods
-            ? served.sublist(0, maximumServedFoods)
-            : served,
-      ),
+      servedFoods: List<String>.unmodifiable(served),
       priceRange: _priceRangeOf(prices),
       openNow: _openNow(hours['submittedLandmark:$id']),
       distanceMetres: pin.distanceMetres,
@@ -1130,6 +1243,56 @@ class MapExplorationLogic {
 
     return true;
   }
+
+  // ===========================================================================
+  // Search history (REQ102_104)
+  // ===========================================================================
+  //
+  // Beside the search rather than inside it: nothing below reads the index,
+  // queries the catalogue or touches a result. `search()` is exactly the
+  // method it was, and a device with no history searches identically to one
+  // with five entries.
+
+  /// How many keywords a device keeps. Five is what fits under the search box
+  /// without the panel becoming a screen of its own.
+  static const int recentSearchLimit = 5;
+
+  /// What this device searched for, most recent first.
+  List<String> recentSearches() => repository.searchHistory.read();
+
+  /// Records [keyword] as the newest entry and returns the list that results.
+  ///
+  /// Returned rather than re-read so the caller repaints from the same answer
+  /// it just wrote, and one search is one storage write.
+  ///
+  /// **One entry per term.** Matching is case- and whitespace-insensitive, so
+  /// "nasi lemak", "Nasi Lemak" and " Nasi Lemak " are the same search; the
+  /// newest spelling wins, because that is the one the tourist just typed.
+  /// Searching something already in the list moves it to the top rather than
+  /// adding a second copy.
+  Future<List<String>> rememberSearch(String keyword) async {
+    final String term = keyword.trim();
+    if (term.isEmpty) return recentSearches();
+
+    final String key = _historyKey(term);
+    final List<String> next = <String>[term];
+    for (final String existing in repository.searchHistory.read()) {
+      if (_historyKey(existing) == key) continue;
+      if (next.length >= recentSearchLimit) break;
+      next.add(existing);
+    }
+
+    await repository.searchHistory.write(next);
+    return List<String>.unmodifiable(next);
+  }
+
+  /// A15-1 - forgets every remembered keyword.
+  Future<void> clearSearchHistory() => repository.searchHistory.clear();
+
+  /// Collapses a term to what makes two searches "the same" for the history:
+  /// case and runs of whitespace are not a difference a tourist means.
+  static String _historyKey(String term) =>
+      term.toLowerCase().split(RegExp(r'\s+')).join(' ');
 
   // ===========================================================================
   // Search (A8, REQ102_18 - REQ102_22, REQ102_30, REQ102_31)

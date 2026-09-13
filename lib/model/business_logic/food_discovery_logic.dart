@@ -106,6 +106,17 @@ class FoodDiscoveryLogic {
         .map((FoodOccurrence occurrence) => occurrence.localFoodId)
         .where(foodsById.containsKey)
         .toSet();
+    // A food backed by an open restaurant outranks one we only know about
+    // through places whose hours are unknown (see the sort below).
+    final Set<int> foodsWithOpenRestaurant = restaurantOccurrences
+        .where(
+          (FoodOccurrence occurrence) => OpeningHoursLogic.isConfidentlyOpenAt(
+            hoursByPlace['restaurant:${occurrence.sourceId}'],
+            malaysiaNow,
+          ),
+        )
+        .map((FoodOccurrence occurrence) => occurrence.localFoodId)
+        .toSet();
     final Map<int, double> nearestDistance = <int, double>{};
     for (final FoodOccurrence occurrence in restaurantOccurrences) {
       if (!distanceOrigin.isKnown) continue;
@@ -182,6 +193,13 @@ class FoodDiscoveryLogic {
       final int restrictionOrder = (restrictedFoodIds.contains(left.id) ? 1 : 0)
           .compareTo(restrictedFoodIds.contains(right.id) ? 1 : 0);
       if (restrictionOrder != 0) return restrictionOrder;
+
+      // Lowest priority: a food whose only restaurants have UNKNOWN opening
+      // hours sits under every food with a confirmed open restaurant, so a
+      // card we cannot vouch for is only reached after the ones we can.
+      final int hoursOrder = (foodsWithOpenRestaurant.contains(left.id) ? 0 : 1)
+          .compareTo(foodsWithOpenRestaurant.contains(right.id) ? 0 : 1);
+      if (hoursOrder != 0) return hoursOrder;
 
       final int mainTasteOrder =
           (_hasPreferredMainTaste(right, preferredTastes) ? 1 : 0).compareTo(

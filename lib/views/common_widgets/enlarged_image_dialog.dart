@@ -102,6 +102,21 @@ const String linkedFoodImageNotice =
 const String restaurantProvidedImageNotice =
     "Provided by the restaurant — this is the restaurant's own dish photo.";
 
+const String landmarkCaptureNotice =
+    'User capture — this photo was submitted with a landmark by a tourist, '
+    'not by the place itself.';
+
+Future<void> showLandmarkImage(
+  BuildContext context, {
+  required String semanticLabel,
+  required String? source,
+}) => showEnlargedImage(
+  context,
+  semanticLabel: semanticLabel,
+  source: source,
+  noticeMessage: landmarkCaptureNotice,
+);
+
 /// Opens a restaurant menu item's photo, labelled with where the picture came
 /// from: the restaurant's own dish photo (green) or the linked local-food
 /// catalogue image used as a stand-in (yellow, reference only).

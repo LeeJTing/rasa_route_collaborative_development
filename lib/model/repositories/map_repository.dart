@@ -414,6 +414,10 @@ class MapRepository {
     required double northLatitude,
     required double eastLongitude,
     required double zoom,
+
+    /// The deepest zoom the map allows. At or past it Postgres stops
+    /// grouping and answers with one marker per place (REQ102_41).
+    required double maximumZoom,
     List<int>? foodIds,
     int limit = 400,
     MapSearchSelection search = MapSearchSelection.none,
@@ -432,6 +436,7 @@ class MapRepository {
       north: northLatitude,
       east: eastLongitude,
       zoom: zoom,
+      maximumZoom: maximumZoom,
       foodIds: foodIds,
       limit: limit,
       search: search,
@@ -454,6 +459,9 @@ class MapRepository {
           'p_zoom': zoom,
           'p_food_ids': foodIds,
           'p_limit': limit,
+          // REQ102_41 - at or past this zoom the function groups by place
+          // instead of by cell, so the answer carries no clusters at all.
+          'p_max_zoom': maximumZoom,
           // Null rather than an empty array when nothing is searched: the
           // function tests `is not null` to decide whether a search is running
           // at all, and an empty array is not null.
@@ -671,6 +679,7 @@ class MapRepository {
     required double north,
     required double east,
     required double zoom,
+    required double maximumZoom,
     required List<int>? foodIds,
     required int limit,
     required MapSearchSelection search,
@@ -683,8 +692,10 @@ class MapRepository {
         : (List<int>.of(foodIds)..sort()).join('.');
     // The search half is part of the question, so it is part of the key.
     // Without it, typing a keyword would be answered from the cached markers
-    // of the same viewport with nothing flagged.
-    return '$box|${zoom.toStringAsFixed(1)}|$foods|$limit|${search.cacheKey}';
+    // of the same viewport with nothing flagged. The same reasoning covers
+    // `maximumZoom`: it decides whether the answer is grouped at all.
+    return '$box|${zoom.toStringAsFixed(1)}|${maximumZoom.toStringAsFixed(1)}'
+        '|$foods|$limit|${search.cacheKey}';
   }
 
   /// How much map data exists right now - polled by `RestaurantMonitor` to

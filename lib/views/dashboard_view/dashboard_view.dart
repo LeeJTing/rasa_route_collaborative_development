@@ -20,6 +20,7 @@ import 'widgets/map_controls.dart';
 import 'widgets/map_filter_panel.dart';
 import 'widgets/map_search_bar.dart';
 import 'widgets/map_search_results_panel.dart';
+import 'widgets/search_history_panel.dart';
 import 'widgets/map_update_banner.dart';
 import 'widgets/heatmap_scale.dart';
 import 'widgets/map_selection_cards.dart';
@@ -63,6 +64,27 @@ class _DashboardViewState extends State<DashboardView> {
   bool _mapReady = false;
   int _appliedCameraRevision = 0;
 
+  /// The place a search result asked to be shown, kept after the move has
+  /// landed so the map can be re-framed if the space below it changes.
+  ///
+  /// Null whenever nothing is being shown off - an ordinary pan, a state
+  /// opened from the heatmap, or the card being dismissed - and then none of
+  /// the bottom-panel arithmetic below runs at all.
+  LatLng? _focusTarget;
+  double _focusZoom = 0;
+
+  /// What the bottom of the map is currently losing.
+  ///
+  /// Two panels can sit there and the place card is drawn **over** the
+  /// Discovery Layer Bar, so what the map loses is the taller of the two, not
+  /// their sum. The card's height is measured rather than assumed: it has no
+  /// fixed size - the name, the "Serves:" strip and whether there is a photo
+  /// all move it.
+  double _pinSheetHeight = 0;
+  double _swipeBarHeight = 0;
+
+  double get _bottomInset => math.max(_pinSheetHeight, _swipeBarHeight);
+
   @override
   void initState() {
     super.initState();
@@ -80,16 +102,131 @@ class _DashboardViewState extends State<DashboardView> {
 
   /// Applies a camera request once per revision, after the frame that
   /// announced it - moving a `MapController` during `build` is not allowed.
+  ///
+  /// A request flagged `cameraKeepsPlaceClear` does not go to the screen
+  /// centre. It is a restaurant or landmark the tourist picked out of the
+  /// search results, and its card is about to open over the bottom of the map;
+  /// centring it would put the pin behind the card the pin is there to
+  /// introduce.
   void _applyCameraRequest(DashboardViewModel viewModel) {
     if (!_mapReady) return;
     if (viewModel.cameraRevision == _appliedCameraRevision) return;
     _appliedCameraRevision = viewModel.cameraRevision;
+
+    final LatLng target = LatLng(
+      viewModel.cameraLatitude,
+      viewModel.cameraLongitude,
+    );
+    final double zoom = viewModel.cameraZoom;
+    final bool keepClear = viewModel.cameraKeepsPlaceClear;
+
+    if (keepClear) {
+      _focusTarget = target;
+      _focusZoom = zoom;
+    } else {
+      _focusTarget = null;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _mapController.move(
-        LatLng(viewModel.cameraLatitude, viewModel.cameraLongitude),
-        viewModel.cameraZoom,
-      );
+      if (keepClear) {
+        // Reads `_focusTarget`, not the captured one: a newer request may have
+        // replaced it between the frames, and the newer request wins.
+        _moveFocusClearOfBottomPanel();
+        return;
+      }
+      _mapController.move(target, zoom);
+    });
+  }
+
+  /// Puts [_focusTarget] in the middle of the map the tourist can **see**,
+  /// rather than the middle of the map widget.
+  ///
+  /// The visible band runs from the top of the map to the top of the bottom
+  /// panel, so its middle sits half the panel's height above the middle of the
+  /// screen - and that is exactly how far the target has to be lifted. The
+  /// arithmetic is done in the projected pixel plane at the destination zoom,
+  /// where lifting the target by n pixels is lowering the camera centre by n,
+  /// so it stays correct at every zoom and every latitude.
+  void _moveFocusClearOfBottomPanel() {
+    final LatLng? target = _focusTarget;
+    if (target == null || !_mapReady) return;
+
+    final MapCamera camera = _mapController.camera;
+    final double mapHeight = camera.nonRotatedSize.y;
+    if (mapHeight <= 0) {
+      // The map has not been measured yet. Centre it for now; the measurement
+      // that follows will call back here and re-frame it.
+      _mapController.move(target, _focusZoom);
+      return;
+    }
+
+    double lift = _bottomInset.clamp(0.0, mapHeight) / 2;
+
+    // Never so far that the pin climbs out of the top of the map. The
+    // clearance keeps the marker and a margin of map around it on screen,
+    // which is the point of moving it at all.
+    final double highestLift = math.max(0, mapHeight / 2 - _focusTopClearance);
+    if (lift > highestLift) lift = highestLift;
+
+    // Below a pixel there is nothing worth correcting, and a plain move keeps
+    // the centre exact.
+    if (lift < 1) {
+      _mapController.move(target, _focusZoom);
+      return;
+    }
+
+    final math.Point<double> targetPoint = camera.project(target, _focusZoom);
+    final LatLng centre = camera.unproject(
+      math.Point<double>(targetPoint.x, targetPoint.y + lift),
+      _focusZoom,
+    );
+    _mapController.move(centre, _focusZoom);
+  }
+
+  /// Keeps the two bottom-panel heights in step with what is on screen.
+  ///
+  /// The Discovery Layer Bar's height is known from its own state; the place
+  /// card's is measured by `_MeasureHeight` as it lays out, so this only has
+  /// to notice when the card has gone.
+  void _syncBottomPanels(DashboardViewModel viewModel) {
+    if (viewModel.selectedPin == null) {
+      // The card is dismissed. Stop steering by it *before* clearing its
+      // height, so its disappearance does not drag the map back.
+      _focusTarget = null;
+      _setPinSheetHeight(0);
+    }
+    _setSwipeBarHeight(
+      viewModel.showSwipePanel ? _swipePanelHeight(viewModel) : 0,
+    );
+  }
+
+  void _setPinSheetHeight(double height) {
+    if ((height - _pinSheetHeight).abs() < 0.5) return;
+    final double before = _bottomInset;
+    _pinSheetHeight = height;
+    _reframeIfBottomInsetChanged(before);
+  }
+
+  void _setSwipeBarHeight(double height) {
+    if ((height - _swipeBarHeight).abs() < 0.5) return;
+    final double before = _bottomInset;
+    _swipeBarHeight = height;
+    _reframeIfBottomInsetChanged(before);
+  }
+
+  /// Re-frames the focused place when the space beneath it changes - the card
+  /// finishing its first layout, the Discovery Layer Bar sliding open or shut.
+  ///
+  /// No focus, no work: this is the whole cost of the feature during ordinary
+  /// panning. Nothing here calls `setState`, because the inset is not drawn -
+  /// it only tells the map controller where to sit.
+  void _reframeIfBottomInsetChanged(double before) {
+    if (_focusTarget == null) return;
+    if ((_bottomInset - before).abs() < 1) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _moveFocusClearOfBottomPanel();
     });
   }
 
@@ -120,6 +257,7 @@ class _DashboardViewState extends State<DashboardView> {
               (BuildContext context, DashboardViewModel viewModel, Widget? _) {
                 _applyCameraRequest(viewModel);
                 _syncSearchField(viewModel);
+                _syncBottomPanels(viewModel);
 
                 return Column(
                   children: <Widget>[
@@ -306,7 +444,12 @@ class _DashboardViewState extends State<DashboardView> {
         if (viewModel.showQuickModeButton)
           Positioned(
             left: AppSpacing.lg,
-            bottom: _swipePanelHeight(viewModel) + AppSpacing.sm,
+            // Sits on the bar when there is one. There is not one while a
+            // keyword is active, and the button has to drop with it rather
+            // than float over empty map.
+            bottom: viewModel.showSwipePanel
+                ? _swipePanelHeight(viewModel) + AppSpacing.sm
+                : AppSpacing.lg,
             child: MapQuickModeButton(onTap: () => viewModel.openQuickMode()),
           ),
 
@@ -422,6 +565,16 @@ class _DashboardViewState extends State<DashboardView> {
                   onPlaceSelected: viewModel.selectPlace,
                   onFoodSelected: viewModel.selectSearchedFood,
                 ),
+
+              // REQ102_104 - the same slot, while the field is still empty.
+              // `showSearchHistory` is the exact complement of the condition
+              // above, so one panel hangs under the box at a time.
+              if (viewModel.showSearchHistory)
+                SearchHistoryPanel(
+                  terms: viewModel.recentSearches,
+                  onSelected: viewModel.useRecentSearch,
+                  onClear: viewModel.clearSearchHistory,
+                ),
             ],
           ),
         ),
@@ -443,10 +596,16 @@ class _DashboardViewState extends State<DashboardView> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: RestaurantPinSheet(
-              pin: viewModel.selectedPin!,
-              onDismiss: viewModel.dismissPin,
-              onOpen: viewModel.openSelectedPin,
+            // Measured, not assumed: this card has no fixed height, and the
+            // map needs the real number to know how far to lift the pin it is
+            // about to cover.
+            child: _MeasureHeight(
+              onHeight: _setPinSheetHeight,
+              child: RestaurantPinSheet(
+                pin: viewModel.selectedPin!,
+                onDismiss: viewModel.dismissPin,
+                onOpen: viewModel.openSelectedPin,
+              ),
             ),
           ),
 
@@ -466,6 +625,57 @@ class _DashboardViewState extends State<DashboardView> {
           ),
       ],
     );
+  }
+
+  /// Hands one camera to the ViewModel - its centre, its zoom, its visible
+  /// bounds, and the Swipe Mode rectangle read off the map geometry.
+  ///
+  /// Every gesture arrives here through `onPositionChanged`, and the map's
+  /// opening viewport through `onMapReady` (REQ102_84). One path for both, so
+  /// the ViewModel's debounce and its load revision see one kind of report and
+  /// the initial fetch cannot be doubled by the gesture machinery.
+  ///
+  /// Deferred by a microtask: flutter_map can report a camera change from
+  /// inside a build, and notifying listeners there would be a setState during
+  /// build. The microtask runs once the frame has unwound.
+  void _reportCamera(
+    MapCamera camera,
+    DashboardViewModel viewModel, {
+    bool initial = false,
+  }) {
+    final LatLng centre = camera.center;
+    final double zoom = camera.zoom;
+    final LatLngBounds bounds = camera.visibleBounds;
+    // Swipe Mode deliberately never moves the camera. Its fixed discovery
+    // area is the unobstructed top half of this map, above the expanded card
+    // panel. Convert that screen rectangle here, where the Flutter Map
+    // geometry belongs, and pass only plain coordinates into the ViewModel.
+    final double mapWidth = camera.nonRotatedSize.x;
+    final double topHalfHeight = camera.nonRotatedSize.y / 2;
+    final bool hasMeasuredMap = mapWidth > 0 && topHalfHeight > 0;
+    final LatLng swipeNorthWest = hasMeasuredMap
+        ? camera.pointToLatLng(const math.Point<double>(0, 0))
+        : bounds.northWest;
+    final LatLng swipeSouthEast = hasMeasuredMap
+        ? camera.pointToLatLng(math.Point<double>(mapWidth, topHalfHeight))
+        : bounds.southEast;
+    Future<void>.microtask(() {
+      if (!mounted) return;
+      viewModel.onCameraChanged(
+        latitude: centre.latitude,
+        longitude: centre.longitude,
+        zoom: zoom,
+        south: bounds.south,
+        west: bounds.west,
+        north: bounds.north,
+        east: bounds.east,
+        swipeSouth: swipeSouthEast.latitude,
+        swipeWest: swipeNorthWest.longitude,
+        swipeNorth: swipeNorthWest.latitude,
+        swipeEast: swipeSouthEast.longitude,
+        initial: initial,
+      );
+    });
   }
 
   Widget _map(DashboardViewModel viewModel) {
@@ -500,53 +710,23 @@ class _DashboardViewState extends State<DashboardView> {
             // The ViewModel usually asks for its first camera position before
             // the map is ready to move; one rebuild here replays it.
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) setState(() {});
+              if (!mounted) return;
+              setState(() {});
+              // REQ102_84 - the pins belong on the map from the moment it
+              // exists. `onPositionChanged` reports a camera *change*, and
+              // opening the map at `initialCenter` is not one, so without this
+              // the ViewModel holds no bounds and the map stays bare until the
+              // tourist drags it. Reported after the frame, when the map has
+              // been laid out and its camera knows its own size.
+              _reportCamera(_mapController.camera, viewModel, initial: true);
             });
           },
           onTap: (TapPosition _, LatLng point) =>
               viewModel.onMapTapped(point.latitude, point.longitude),
           // REQ102_12 / REQ102_13 - crossing the predefined zoom level here is
           // what swaps the heatmap for the detailed map, and back.
-          // Deferred by a microtask: flutter_map can report a camera change from
-          // inside a build, and notifying listeners there would be a setState
-          // during build. The microtask runs once the frame has unwound.
-          onPositionChanged: (MapCamera camera, bool _) {
-            final LatLng centre = camera.center;
-            final double zoom = camera.zoom;
-            final LatLngBounds bounds = camera.visibleBounds;
-            // Swipe Mode deliberately never moves the camera. Its fixed
-            // discovery area is the unobstructed top half of this map, above
-            // the expanded card panel. Convert that screen rectangle here,
-            // where the Flutter Map geometry belongs, and pass only plain
-            // coordinates into the ViewModel.
-            final double mapWidth = camera.nonRotatedSize.x;
-            final double topHalfHeight = camera.nonRotatedSize.y / 2;
-            final bool hasMeasuredMap = mapWidth > 0 && topHalfHeight > 0;
-            final LatLng swipeNorthWest = hasMeasuredMap
-                ? camera.pointToLatLng(const math.Point<double>(0, 0))
-                : bounds.northWest;
-            final LatLng swipeSouthEast = hasMeasuredMap
-                ? camera.pointToLatLng(
-                    math.Point<double>(mapWidth, topHalfHeight),
-                  )
-                : bounds.southEast;
-            Future<void>.microtask(() {
-              if (!mounted) return;
-              viewModel.onCameraChanged(
-                latitude: centre.latitude,
-                longitude: centre.longitude,
-                zoom: zoom,
-                south: bounds.south,
-                west: bounds.west,
-                north: bounds.north,
-                east: bounds.east,
-                swipeSouth: swipeSouthEast.latitude,
-                swipeWest: swipeNorthWest.longitude,
-                swipeNorth: swipeNorthWest.latitude,
-                swipeEast: swipeSouthEast.longitude,
-              );
-            });
-          },
+          onPositionChanged: (MapCamera camera, bool _) =>
+              _reportCamera(camera, viewModel),
         ),
         children: <Widget>[
           // UC300 BF-1 - the detailed view is the real OpenStreetMap surface.
@@ -637,25 +817,46 @@ class _DashboardViewState extends State<DashboardView> {
 
           // The tourist's own position (REQ102_7), and only when that position
           // is inside Malaysia (A3) - see `showCurrentLocation`.
+          //
+          // **Drawn last, and deaf.** It has to be drawn last or a pin would
+          // cover the tourist's own position; but a marker is an ordinary
+          // widget in a Stack, and a filled circle drawn last is the one that
+          // answers a tap. A tourist standing outside a restaurant could not
+          // open it - the dot marking where they stood was in the way.
+          //
+          // `IgnorePointer` wraps the whole layer rather than the dot inside
+          // it, so nothing this layer ever grows - an accuracy halo, a heading
+          // arrow - can take a tap either. The pins underneath are hit-tested
+          // exactly as though it were not there, and it stays visible.
           if (viewModel.showCurrentLocation)
-            MarkerLayer(
-              markers: <Marker>[
-                Marker(
-                  point: LatLng(
-                    viewModel.location.latitude,
-                    viewModel.location.longitude,
+            IgnorePointer(
+              child: MarkerLayer(
+                markers: <Marker>[
+                  Marker(
+                    point: LatLng(
+                      viewModel.location.latitude,
+                      viewModel.location.longitude,
+                    ),
+                    width: AppSizes.currentLocationMarkerSize,
+                    height: AppSizes.currentLocationMarkerSize,
+                    child: const _CurrentLocationDot(),
                   ),
-                  width: 22,
-                  height: 22,
-                  child: const _CurrentLocationDot(),
-                ),
-              ],
+                ],
+              ),
             ),
         ],
       ),
     );
   }
 }
+
+/// How much map must stay above a place the search has just flown to.
+///
+/// Room for the marker itself and a margin of its surroundings, so the tourist
+/// can see what is around the place rather than the place alone. It only binds
+/// when the bottom panel covers more than half the map - on an ordinary phone
+/// the pin lands in the middle of the visible band well clear of this.
+const double _focusTopClearance = 72;
 
 /// A cluster badge grows with what it stands for, but slowly - a count ten
 /// times larger is not a marker ten times wider, or one busy city would cover
@@ -701,7 +902,7 @@ class _ClusterMarker extends StatelessWidget {
     child: DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: _allSearch ? AppColors.clusterSearchFill : AppColors.primary,
+        color: _allSearch ? AppColors.clusterSearchFill.withOpacity(0.7) : AppColors.primary.withOpacity(0.7),
         border: Border.fromBorderSide(
           BorderSide(
             // A mixed cell keeps the map's fill and takes the search colour as
@@ -803,6 +1004,13 @@ class _PinMarker extends StatelessWidget {
     );
 
     return GestureDetector(
+      // The whole marker box, not just the glyph the icon happens to paint.
+      // `deferToChild` (the default) made the tap target the icon's own text
+      // box, a few points inside a marker that is already under the 48pt
+      // minimum - so a tap that looked like it landed on the pin missed it.
+      // This matters most beside the current-location marker, where the
+      // tourist is aiming at a pin they can only half see.
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: searchResult
           ? DecoratedBox(
@@ -818,18 +1026,69 @@ class _PinMarker extends StatelessWidget {
   }
 }
 
+/// REQ102_7 - where the tourist is standing, on the detailed map.
+///
+/// Deliberately small. It is drawn over the pins, so every point of it is a
+/// point of some restaurant the tourist cannot see; 16pt across is enough to
+/// read as a position fix and leaves most of a 36pt pin showing around it.
+/// The overview draws the same idea as a ring for the same reason - see
+/// `RegionHeatmapCanvas._paintCurrentLocation`.
+///
+/// It takes no taps: the layer that holds it is wrapped in an `IgnorePointer`.
+/// Reports its child's height after every layout.
+///
+/// The place card is as tall as its contents make it - the name, the "Serves:"
+/// strip, whether the place has a photo - so the map cannot be told in advance
+/// how much of itself it is about to lose. This measures the real thing and
+/// hands the number back, which is also what lets the map re-frame itself when
+/// the card grows or shrinks.
+class _MeasureHeight extends StatefulWidget {
+  const _MeasureHeight({required this.onHeight, required this.child});
+
+  final ValueChanged<double> onHeight;
+  final Widget child;
+
+  @override
+  State<_MeasureHeight> createState() => _MeasureHeightState();
+}
+
+class _MeasureHeightState extends State<_MeasureHeight> {
+  @override
+  Widget build(BuildContext context) {
+    // After the frame, not during it: nothing has a height until this subtree
+    // has been laid out. The listener compares before it acts, so a rebuild
+    // that changes nothing costs one comparison and stops there - there is no
+    // measure/rebuild loop to fall into.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final RenderObject? object = context.findRenderObject();
+      if (object is RenderBox && object.hasSize) {
+        widget.onHeight(object.size.height);
+      }
+    });
+    return widget.child;
+  }
+}
+
 class _CurrentLocationDot extends StatelessWidget {
   const _CurrentLocationDot();
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: AppColors.currentLocationMarker,
-      shape: BoxShape.circle,
-      border: Border.all(color: AppColors.surface, width: 3),
-      boxShadow: const <BoxShadow>[
-        BoxShadow(color: AppColors.shadow, blurRadius: 6),
-      ],
+  Widget build(BuildContext context) => Center(
+    child: Container(
+      width: AppSizes.currentLocationDot + AppSizes.currentLocationRing * 2,
+      height: AppSizes.currentLocationDot + AppSizes.currentLocationRing * 2,
+      decoration: BoxDecoration(
+        color: AppColors.currentLocationMarker,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: AppColors.surface,
+          width: AppSizes.currentLocationRing,
+        ),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(color: AppColors.shadow, blurRadius: 6),
+        ],
+      ),
     ),
   );
 }
