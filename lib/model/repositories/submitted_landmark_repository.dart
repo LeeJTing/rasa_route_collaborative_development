@@ -1012,6 +1012,10 @@ class SubmittedLandmarkRepository {
     List<OpeningHour> hours,
   ) async {
     for (final OpeningHour hour in hours) {
+      // A placeholder "Unknown" row carries nothing - the untouched week must
+      // NOT become seven junk rows that later reads then mistake for stored
+      // hours (see `LandmarkSubmissionLogic.assertedOpeningHours`).
+      if (hour.status == DayStatus.unknown) continue;
       // An overnight row is split into its end-of-day row plus the next-day
       // tail - see `OpeningHoursRows` for the convention. No id is passed: the
       // primary key is left to the identity column (see the note above).
