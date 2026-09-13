@@ -7,40 +7,38 @@ import 'package:rasa_route_collaborative_development/model/business_logic/discov
 import 'package:rasa_route_collaborative_development/view_models/restaurant_recommendation_view_model.dart';
 
 void main() {
-  test(
-    'Quick Mode defaults to Food and re-searches nearby on each filter '
-    'change instead of filtering the previous 20',
-    () async {
-      final _FakeDiscoveryLogic logic = _FakeDiscoveryLogic();
-      final RestaurantRecommendationViewModel viewModel = _TestViewModel(logic);
-      addTearDown(viewModel.dispose);
+  test('Quick Mode defaults to Food and re-searches nearby on each filter '
+      'change instead of filtering the previous 20', () async {
+    final _FakeDiscoveryLogic logic = _FakeDiscoveryLogic();
+    final RestaurantRecommendationViewModel viewModel = _TestViewModel(logic);
+    addTearDown(viewModel.dispose);
 
-      // No "All" option - 'Food' is selected before any load happens.
-      expect(viewModel.selectedFoodType, 'Food');
+    // No "All" option - 'Food' is selected before any load happens.
+    expect(viewModel.selectedFoodType, 'Food');
 
-      await viewModel.loadNearbyRestaurants();
-      expect(logic.requestedFoodTypes, <String?>['Food']);
-      expect(viewModel.restaurants, hasLength(1));
-      expect(viewModel.restaurants.single.name, 'Nasi Lemak House');
+    await viewModel.loadNearbyRestaurants();
+    expect(logic.requestedFoodTypes, <String?>['Food']);
+    expect(viewModel.restaurants, hasLength(1));
+    expect(viewModel.restaurants.single.name, 'Nasi Lemak House');
 
-      await viewModel.selectFoodType('Beverage');
+    await viewModel.selectFoodType('Beverage');
 
-      expect(viewModel.selectedFoodType, 'Beverage');
-      expect(
-        logic.requestedFoodTypes,
-        <String?>['Food', 'Beverage'],
-        reason: 'selecting a chip must re-search nearby for that type, not '
-            'just filter the restaurants already on screen',
-      );
-      expect(viewModel.restaurants, hasLength(1));
-      expect(viewModel.restaurants.single.name, 'Beverage Corner');
-      expect(
-        viewModel.visibleRestaurants,
-        viewModel.restaurants,
-        reason: 'the list already comes back filtered by the repository',
-      );
-    },
-  );
+    expect(viewModel.selectedFoodType, 'Beverage');
+    expect(
+      logic.requestedFoodTypes,
+      <String?>['Food', 'Beverage'],
+      reason:
+          'selecting a chip must re-search nearby for that type, not '
+          'just filter the restaurants already on screen',
+    );
+    expect(viewModel.restaurants, hasLength(1));
+    expect(viewModel.restaurants.single.name, 'Beverage Corner');
+    expect(
+      viewModel.visibleRestaurants,
+      viewModel.restaurants,
+      reason: 'the list already comes back filtered by the repository',
+    );
+  });
 
   test('Quick Mode ignores unsupported food type values', () async {
     final _FakeDiscoveryLogic logic = _FakeDiscoveryLogic();
@@ -53,11 +51,9 @@ void main() {
     await viewModel.selectFoodType('Unknown');
 
     expect(viewModel.selectedFoodType, 'Food');
-    expect(
-      logic.requestedFoodTypes,
-      <String?>['Food'],
-      reason: 'an unsupported type must not trigger a re-search',
-    );
+    expect(logic.requestedFoodTypes, <String?>[
+      'Food',
+    ], reason: 'an unsupported type must not trigger a re-search');
   });
 }
 
@@ -115,6 +111,7 @@ class _FakeDiscoveryLogic extends DiscoveryLogicFacade {
   @override
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
+    String? foodType,
   }) async => const <SubmittedLandmarkRecommendation>[];
 }
 

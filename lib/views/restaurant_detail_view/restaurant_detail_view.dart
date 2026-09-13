@@ -179,7 +179,8 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
   /// along too: the address report's map opens on the spot the app currently
   /// places this restaurant. If the report froze or removed the place, the
   /// page pops `true` and this screen leaves too so the now-hidden pin is no
-  /// longer shown.
+  /// longer shown. A successful report that keeps the place visible pops
+  /// `false`; in that case this screen reloads the corrected details.
   Future<void> _openReport(Restaurant restaurant) async {
     final double? latitude = restaurant.latitude;
     final double? longitude = restaurant.longitude;
@@ -191,8 +192,12 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
           ? TouristLocation.unknown
           : TouristLocation(latitude: latitude, longitude: longitude);
     final bool? hidPlace = await AppNavigator.push<bool>(AppRoutes.reportPlace);
-    if (!mounted || hidPlace != true) return;
-    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+    if (!mounted || hidPlace == null) return;
+    if (hidPlace) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop(true);
+      return;
+    }
+    await _viewModel.refresh();
   }
 
   Future<void> _openRestaurantMap(Restaurant restaurant) async {

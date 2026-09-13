@@ -12,6 +12,7 @@ import '../common_widgets/food_notice_banner.dart';
 import '../common_widgets/food_section_card.dart';
 import '../food_recommendation_view/food_recommendation_view.dart';
 import 'widgets/food_hero_card.dart';
+import 'widgets/food_information_card.dart';
 import 'widgets/food_name_collision_card.dart';
 import 'widgets/food_overview_card.dart';
 
@@ -133,38 +134,10 @@ class _FoodDetailViewState extends State<FoodDetailView> {
             onPlayPronunciation: () => _playPronunciation(context, vm),
           ),
           const SizedBox(height: AppSpacing.lg),
-          FoodSectionCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                _InformationItem(label: 'Description', body: food.description),
-                _InformationItem(label: 'Origin', body: food.origin),
-                _InformationItem(label: 'Ingredients', body: food.ingredients),
-                if (vm.isFoodInformationExpanded) ...[
-                  _InformationItem(
-                    label: 'Cooking Styles',
-                    body: food.cookingStyle,
-                  ),
-                  _InformationItem(
-                    label: 'Cultural Background',
-                    body: food.culturalBackground,
-                  ),
-                ],
-                Center(
-                  child: IconButton(
-                    tooltip: vm.isFoodInformationExpanded
-                        ? 'Hide more details'
-                        : 'Show more details',
-                    onPressed: vm.toggleFoodInformation,
-                    icon: Icon(
-                      vm.isFoodInformationExpanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          FoodInformationCard(
+            food: food,
+            isExpanded: vm.isFoodInformationExpanded,
+            onToggle: vm.toggleFoodInformation,
           ),
           const SizedBox(height: AppSpacing.lg),
           if (vm.collidedFood != null) ...<Widget>[
@@ -260,31 +233,4 @@ class _FoodDetailViewState extends State<FoodDetailView> {
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
-}
-
-class _InformationItem extends StatelessWidget {
-  const _InformationItem({required this.label, required this.body});
-  final String label;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          label,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(color: AppColors.accentBrown),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          body.isEmpty ? 'Not available' : body,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-      ],
-    ),
-  );
 }
