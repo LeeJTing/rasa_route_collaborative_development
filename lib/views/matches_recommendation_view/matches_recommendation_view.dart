@@ -258,58 +258,80 @@ class _SortToolbar extends StatelessWidget {
           child: Row(
             children:
                 viewModel.selectedTab == MatchesRecommendationTab.restaurants
-                ? _restaurantSortChips(viewModel)
-                : _landmarkSortChips(viewModel),
+                ? _restaurantSortChips(context, viewModel)
+                : _landmarkSortChips(context, viewModel),
           ),
         ),
       ],
     ),
   );
 
-  List<Widget> _restaurantSortChips(MatchesRecommendationViewModel viewModel) =>
-      MatchesRestaurantSort.values
-          .map((MatchesRestaurantSort sort) {
-            final bool selected = viewModel.restaurantSort == sort;
-            return _paddedChip(
-              ChoiceChip(
-                selected: selected,
-                onSelected: (_) => viewModel.selectRestaurantSort(sort),
-                label: _SortLabel(
-                  text: switch (sort) {
-                    MatchesRestaurantSort.distance => 'Distance',
-                    MatchesRestaurantSort.price => 'Price',
-                    MatchesRestaurantSort.preference => 'Preference',
-                    MatchesRestaurantSort.rating => 'Rating',
-                  },
-                  direction: selected
-                      ? viewModel.restaurantSortDirection
-                      : null,
-                ),
-              ),
-            );
-          })
-          .toList(growable: false);
+  List<Widget> _restaurantSortChips(
+    BuildContext context,
+    MatchesRecommendationViewModel viewModel,
+  ) => MatchesRestaurantSort.values
+      .map((MatchesRestaurantSort sort) {
+        final bool selected = viewModel.restaurantSort == sort;
+        return _paddedChip(
+          ChoiceChip(
+            selected: selected,
+            onSelected: (_) => viewModel.selectRestaurantSort(sort),
+            backgroundColor: AppColors.surfaceVariant,
+            selectedColor: AppColors.primary,
+            checkmarkColor: AppColors.onPrimary,
+            side: BorderSide(
+              color: selected ? AppColors.primary : AppColors.outline,
+            ),
+            labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: selected ? AppColors.onPrimary : AppColors.textPrimary,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
+            label: _SortLabel(
+              text: switch (sort) {
+                MatchesRestaurantSort.distance => 'Distance',
+                MatchesRestaurantSort.price => 'Price',
+                MatchesRestaurantSort.preference => 'Preference',
+                MatchesRestaurantSort.rating => 'Rating',
+              },
+              direction: selected ? viewModel.restaurantSortDirection : null,
+            ),
+          ),
+        );
+      })
+      .toList(growable: false);
 
-  List<Widget> _landmarkSortChips(MatchesRecommendationViewModel viewModel) =>
-      MatchesLandmarkSort.values
-          .map((MatchesLandmarkSort sort) {
-            final bool selected = viewModel.landmarkSort == sort;
-            return _paddedChip(
-              ChoiceChip(
-                selected: selected,
-                onSelected: (_) => viewModel.selectLandmarkSort(sort),
-                label: _SortLabel(
-                  text: switch (sort) {
-                    MatchesLandmarkSort.distance => 'Distance',
-                    MatchesLandmarkSort.price => 'Price',
-                    MatchesLandmarkSort.name => 'Name',
-                  },
-                  direction: selected ? viewModel.landmarkSortDirection : null,
-                ),
-              ),
-            );
-          })
-          .toList(growable: false);
+  List<Widget> _landmarkSortChips(
+    BuildContext context,
+    MatchesRecommendationViewModel viewModel,
+  ) => MatchesLandmarkSort.values
+      .map((MatchesLandmarkSort sort) {
+        final bool selected = viewModel.landmarkSort == sort;
+        return _paddedChip(
+          ChoiceChip(
+            selected: selected,
+            onSelected: (_) => viewModel.selectLandmarkSort(sort),
+            backgroundColor: AppColors.surfaceVariant,
+            selectedColor: AppColors.primary,
+            checkmarkColor: AppColors.onPrimary,
+            side: BorderSide(
+              color: selected ? AppColors.primary : AppColors.outline,
+            ),
+            labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: selected ? AppColors.onPrimary : AppColors.textPrimary,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
+            label: _SortLabel(
+              text: switch (sort) {
+                MatchesLandmarkSort.distance => 'Distance',
+                MatchesLandmarkSort.price => 'Price',
+                MatchesLandmarkSort.name => 'Name',
+              },
+              direction: selected ? viewModel.landmarkSortDirection : null,
+            ),
+          ),
+        );
+      })
+      .toList(growable: false);
 
   Widget _paddedChip(Widget chip) => Padding(
     padding: const EdgeInsets.only(right: AppSpacing.sm),
