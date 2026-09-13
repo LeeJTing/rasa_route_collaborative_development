@@ -382,20 +382,46 @@ class _FilterGroup extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(title, style: Theme.of(context).textTheme.titleSmall),
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
         const SizedBox(height: AppSpacing.sm),
         Wrap(
           spacing: AppSpacing.sm,
           runSpacing: AppSpacing.sm,
-          children: values
-              .map(
-                (String value) => FilterChip(
-                  label: Text(value),
-                  selected: isSelected(value),
-                  onSelected: (_) => onToggle(value),
+          children: values.map(
+                (String value) {
+              final bool selected = isSelected(value);
+
+              return FilterChip(
+                label: Text(value),
+                selected: selected,
+                onSelected: (_) => onToggle(value),
+
+                // Keep the original theme background when not selected.
+                selectedColor: AppColors.primary,
+
+                labelStyle:
+                Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: selected
+                      ? AppColors.onPrimary
+                      : AppColors.textPrimary,
+                  fontWeight: selected
+                      ? FontWeight.w600
+                      : FontWeight.w500,
                 ),
-              )
-              .toList(growable: false),
+
+                checkmarkColor: AppColors.onPrimary,
+
+                side: BorderSide(
+                  color: selected
+                      ? AppColors.primary
+                      : AppColors.outline,
+                ),
+              );
+            },
+          ).toList(growable: false),
         ),
       ],
     ),
