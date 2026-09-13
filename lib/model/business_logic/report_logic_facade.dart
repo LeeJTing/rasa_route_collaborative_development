@@ -59,6 +59,16 @@ class ReportLogicFacade {
   String? addressError(String value, {bool required = false}) =>
       ReportModerationRules.addressError(value, required: required);
 
+  /// The amber "close to the cap" nudge for the report page's address field
+  /// (141-149), in the Add-Landmark form's own words (see
+  /// `ReportModerationRules.addressLengthWarning`).
+  String? addressLengthWarning(String value) =>
+      ReportModerationRules.addressLengthWarning(value);
+
+  /// The address cap - the Add-Landmark form's 150 - so the report page's
+  /// field stops accepting typing exactly where the form's field does.
+  int get maxAddressLength => ReportModerationRules.maximumAddressLength;
+
   /// Live address suggestions for the report page's address field - the same
   /// OpenStreetMap lookup the Add-Landmark form uses, measured from [around]
   /// and sorted nearest first. `null` = the lookup failed; `[]` = nothing

@@ -266,7 +266,7 @@ void main() {
           );
         final ReportPlaceViewModel viewModel = build(logic);
         viewModel.selectCategory(ReportCategory.address);
-        viewModel.setAddressText('Some address');
+        viewModel.setAddressText('12, Jalan Merdeka, Kuala Lumpur');
         await viewModel.submit();
         expect(viewModel.appliedMessage, isNotEmpty);
 
@@ -318,6 +318,27 @@ void main() {
       expect(viewModel.addressText, '10, Jalan Foo, 50000 Kuala Lumpur');
       expect(viewModel.addressError, isNull);
       expect(viewModel.mapAddressStatus, isNull);
+      viewModel.dispose();
+    });
+
+    test("the 150 cap and warn zone are the Add-Landmark form's", () {
+      final ReportPlaceViewModel viewModel = build(_FakeReportLogicFacade());
+      viewModel.selectCategory(ReportCategory.address);
+
+      expect(viewModel.addressMaxLength, 150);
+
+      // 149 characters - the last acceptable length; the amber nudge shows.
+      viewModel.setAddressText('12, Jalan A'.padRight(149, 'A'));
+      expect(viewModel.addressError, isNull);
+      expect(
+        viewModel.addressWarning,
+        'Address should stay under 150 characters (currently 149).',
+      );
+
+      // 150 - the form's hard stop, word for word.
+      viewModel.setAddressText('12, Jalan A'.padRight(150, 'A'));
+      expect(viewModel.addressError, 'Address is too long.');
+      expect(viewModel.addressWarning, isNull);
       viewModel.dispose();
     });
 

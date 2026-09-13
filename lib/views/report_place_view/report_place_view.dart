@@ -464,7 +464,7 @@ class _AddressBodyState extends State<_AddressBody> {
         TextField(
           controller: _controller,
           maxLines: 2,
-          maxLength: 150,
+          maxLength: viewModel.addressMaxLength,
           maxLengthEnforcement: MaxLengthEnforcement.enforced,
           inputFormatters: <TextInputFormatter>[
             FilteringTextInputFormatter.deny(RegExp(r'[\x00-\x1F\x7F]')),
@@ -472,10 +472,21 @@ class _AddressBodyState extends State<_AddressBody> {
           decoration: InputDecoration(
             labelText: 'New address',
             hintText: 'e.g. 12, Jalan Bukit Bintang, Kuala Lumpur',
+            // The Add-Landmark form hides the counter and nags in amber
+            // instead - same field, same behaviour.
+            counterText: '',
             errorText: viewModel.addressError,
           ),
           onChanged: viewModel.setAddressText,
         ),
+        if (viewModel.addressError == null &&
+            viewModel.addressWarning != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            viewModel.addressWarning!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.warning),
+          ),
+        ],
         if (viewModel.canApplyMapAddress) ...<Widget>[
           Align(
             alignment: Alignment.centerLeft,
