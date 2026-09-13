@@ -162,6 +162,9 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
         const SizedBox(height: AppSpacing.xl),
         RestaurantMenuPreview(
           items: restaurant.items,
+          emptyMessage: viewModel.hasDietaryRestrictions
+              ? 'No dishes here match your dietary restrictions.'
+              : 'Menu information is not available yet.',
           onImageTap: (item) => showRestaurantItemImage(
             context,
             semanticLabel: item.foodName,
