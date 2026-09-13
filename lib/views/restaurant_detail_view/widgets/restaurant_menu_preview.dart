@@ -33,6 +33,7 @@ class RestaurantMenuPreview extends StatelessWidget {
               borderRadius: AppRadius.cardRadius,
             ),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 InkWell(
                   onTap: item.imageUrl?.trim().isNotEmpty == true
@@ -40,7 +41,7 @@ class RestaurantMenuPreview extends StatelessWidget {
                       : null,
                   borderRadius: AppRadius.cardRadius,
                   child: SizedBox.square(
-                    dimension: AppSizes.pairingImage,
+                    dimension: AppSizes.menuItemImage,
                     child: AppImage(
                       source: item.imageUrl,
                       borderRadius: AppRadius.cardRadius,
@@ -79,8 +80,6 @@ class RestaurantMenuPreview extends StatelessWidget {
                         const SizedBox(height: AppSpacing.xs),
                         Text(
                           item.description!.trim(),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: AppColors.textSecondary),
                         ),
