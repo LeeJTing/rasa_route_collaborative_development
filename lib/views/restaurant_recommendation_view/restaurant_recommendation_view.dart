@@ -104,6 +104,35 @@ class _RestaurantRecommendationViewState
                                 if (vm.source == RestaurantSource.google) {
                                   final Restaurant restaurant =
                                       vm.visibleRestaurants[index];
+                    Expanded(
+                      child: vm.isLoadingResult
+                          ? const Center(child: CircularProgressIndicator())
+                          : vm.state == ViewState.error &&
+                                vm.selectedSourceIsEmpty
+                          ? AsyncMessage(
+                              icon: Icons.location_off_outlined,
+                              title: 'Unable to load nearby places',
+                              message:
+                                  vm.errorMessage ??
+                                  'Check your connection and location, then try again.',
+                              actionLabel: 'Try again',
+                              onAction: vm.loadNearbyRestaurants,
+                            )
+                          : vm.selectedSourceIsEmpty
+                          ? _EmptySource(source: vm.source)
+                          : ListView.separated(
+                              padding: AppSpacing.screenPadding.copyWith(
+                                bottom: AppSpacing.xl,
+                              ),
+                              itemCount: vm.source == RestaurantSource.google
+                                  ? vm.visibleRestaurants.length
+                                  : vm.landmarks.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: AppSpacing.md),
+                              itemBuilder: (BuildContext context, int index) {
+                                if (vm.source == RestaurantSource.google) {
+                                  final Restaurant restaurant =
+                                      vm.visibleRestaurants[index];
 
                                   return RestaurantCard(
                                     restaurant: restaurant,
@@ -232,14 +261,22 @@ class _SourceTabs extends StatelessWidget {
       segments: const <ButtonSegment<RestaurantSource>>[
         ButtonSegment(
           value: RestaurantSource.google,
-          label: Text('Google-Sourced Restaurant'),
+          icon: Icon(Icons.restaurant_outlined),
+          label: Text('Restaurants'),
         ),
         ButtonSegment(
           value: RestaurantSource.submitted,
-          label: Text('Submitted Landmark'),
+          icon: Icon(Icons.add_location_alt_outlined),
+          label: Text('Submitted Landmarks'),
         ),
       ],
       selected: <RestaurantSource>{source},
+      style: ButtonStyle(
+        textStyle: WidgetStatePropertyAll<TextStyle?>(
+          Theme.of(context).textTheme.labelMedium,
+        ),
+        visualDensity: VisualDensity.compact,
+      ),
       onSelectionChanged: (Set<RestaurantSource> value) =>
           onChanged(value.first),
     ),

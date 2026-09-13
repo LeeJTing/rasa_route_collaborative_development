@@ -24,12 +24,21 @@ class OtpCodeField extends StatefulWidget {
     required this.onChanged,
     // Supabase email OTPs are 6 digits.
     this.codeLength = 6,
+    this.enabled = true,
   });
 
   final ValueChanged<String> onChanged;
 
   /// Number of single-digit boxes.
   final int codeLength;
+
+  /// When false the boxes become read-only: the keyboard is dismissed and
+  /// backspace can no longer delete a digit.
+  ///
+  /// The OTP screen clears this while the entered code is being verified, so
+  /// the digits on screen keep matching the request that is already in flight
+  /// (the backend call cannot be cancelled, so the UI must not contradict it).
+  final bool enabled;
 
   @override
   State<OtpCodeField> createState() => _OtpCodeFieldState();
@@ -57,6 +66,31 @@ class _OtpCodeFieldState extends State<OtpCodeField> {
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant OtpCodeField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Locking the field mid-verify: a disabled field cannot hold focus, so
+    // drop it explicitly (after the frame, to stay clear of the build phase)
+    // and the keyboard closes with it instead of sitting there able to send
+    // backspaces at a locked input.
+    if (oldWidget.enabled && !widget.enabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.unfocus();
+      });
+      return;
+    }
+    // Unlocked again (the code was rejected): put the caret back at the end so
+    // the tourist can correct the digits straight away, exactly as before the
+    // field was locked.
+    if (!oldWidget.enabled && widget.enabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _moveCaretToEnd();
+        _focusNode.requestFocus();
+      });
+    }
   }
 
   void _onFocusChanged() {
@@ -138,6 +172,8 @@ class _OtpCodeFieldState extends State<OtpCodeField> {
               child: TextField(
                 controller: _controller,
                 focusNode: _focusNode,
+                // Locked while the code is being verified.
+                enabled: widget.enabled,
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
                 maxLength: widget.codeLength,

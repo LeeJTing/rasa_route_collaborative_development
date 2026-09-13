@@ -85,11 +85,17 @@ class MatchedFoodRecommendations {
     required this.food,
     required this.restaurants,
     required this.submittedLandmarks,
+    this.restaurantStartingPrices = const <int, double>{},
   });
 
   final LocalFood food;
   final List<Restaurant> restaurants;
   final List<SubmittedLandmarkRecommendation> submittedLandmarks;
+
+  /// Lowest positive price among all active menu items at each restaurant.
+  /// This is deliberately separate from [Restaurant.items], which contains
+  /// only the items proving that the restaurant serves the matched food.
+  final Map<int, double> restaurantStartingPrices;
 }
 
 /// State-scoped Matches result assembled from a persisted Swipe Mode session.
