@@ -287,5 +287,5 @@ abstract final class AppColors {
   /// A cluster badge on the search layer. The same teal as the pin ring, so
   /// "this came from what you typed" is one colour whether it is drawn as a
   /// marker or as a count.
-  static const Color clusterSearchFill = Color(0xFF00897B);
+  static const Color clusterSearchFill = secondary;
 }
