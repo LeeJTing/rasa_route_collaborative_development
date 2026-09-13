@@ -944,6 +944,30 @@ void main() {
     );
 
     test(
+      "an extension that only adds the dish's own synonym records NO variant "
+      '("Ais Kacang (ABC)")',
+      () async {
+        final aisKacang = _food('Ais Kacang').copyWith(
+          id: 250,
+          synonyms: <String>['ABC', 'air batu campur', 'ice kacang'],
+        );
+        knowledge.catalogue = <LocalFood>[aisKacang];
+        recognition.onIdentify = (_) async =>
+            _quickResponse(dish: 'Ais Kacang (ABC)', confidence: 0.95);
+
+        final FoodRecognitionResult result = await logic.recognizeFood(<int>[
+          1,
+        ]);
+
+        // 'ABC' IS the dish (a curated synonym) - the parenthesised spelling
+        // is not a variant, so the item uses the curated row alone and the
+        // same dish can never end up listed twice on the form.
+        expect(result.candidates.single.id, 250);
+        expect(result.variant, isEmpty);
+      },
+    );
+
+    test(
       'a brand-new dish (no curated row) keeps Gemini\'s dietary tags',
       () async {
         knowledge.catalogue = const <LocalFood>[];

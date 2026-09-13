@@ -1,5 +1,6 @@
 import 'package:meta/meta.dart' show protected;
 
+import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/food_recognition_result.dart';
 import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
@@ -9,6 +10,7 @@ import '../../domain_model/tourist_location.dart';
 import 'food_recognition_logic.dart';
 import 'landmark_draft_logic.dart';
 import 'landmark_submission_logic.dart';
+import 'opening_hours_logic.dart';
 
 /// Contributing a food landmark - recognising the dish, capturing the
 /// restaurant, submitting it. Used by the FoodRecognition, LandmarkDetail,
@@ -125,11 +127,41 @@ class LandmarkLogicFacade {
   bool isValidTimeOrder(int opensAt, int closesAt) =>
       submission.isValidTimeOrder(opensAt, closesAt);
 
+  /// The encoded close for an edited opening-hours row: a closing time at or
+  /// before the opening time means the NEXT day - "10:00 -> 02:00" becomes
+  /// `600 -> 1560` (minutes past midnight + 1440). See
+  /// `OpeningHoursLogic.encodeClose` / `OpeningHoursRows`.
+  int encodeCloseTime({required int opensAt, required int closeMinutes}) =>
+      OpeningHoursLogic.encodeClose(
+        opensAt: opensAt,
+        closeMinutes: closeMinutes,
+      );
+
   String? validateOperatingHours(
     Map<Weekday, List<OpeningHour>> operatingHours,
   ) => submission.validateOperatingHours(operatingHours);
 
   bool isValidPrice(double price) => submission.isValidPrice(price);
+
+  /// The food-price band (see `LandmarkSubmissionLogic.minPrice` /
+  /// [maxPrice]) - 0.01 to 9999.99 MYR.
+  double get minPrice => LandmarkSubmissionLogic.minPrice;
+  double get maxPrice => LandmarkSubmissionLogic.maxPrice;
+
+  /// The price field's digit shape (4 integral digits, 2 decimals).
+  int get priceIntegralDigits => LandmarkSubmissionLogic.priceIntegralDigits;
+  int get priceDecimalDigits => LandmarkSubmissionLogic.priceDecimalDigits;
+
+  /// The price text as shown while typing - a leading zero is rewritten to
+  /// the value's two-decimal form (see
+  /// `LandmarkSubmissionLogic.normalisePriceEntryText`).
+  String normalisePriceEntryText(String text) =>
+      LandmarkSubmissionLogic.normalisePriceEntryText(text);
+
+  /// The price text as shown once the field is left - always two decimals
+  /// (see `LandmarkSubmissionLogic.formatPriceText`).
+  String formatPriceText(String text) =>
+      LandmarkSubmissionLogic.formatPriceText(text);
 
   String? suggestedPriceWarning(
     String foodName,
@@ -149,6 +181,11 @@ class LandmarkLogicFacade {
     double adjustedLat,
     double adjustedLon,
   ) => submission.isWithinAllowedRange(current, adjustedLat, adjustedLon);
+
+  /// The pin correction allowance for the FORM's own copy (warning text) -
+  /// see `LandmarkSubmissionLogic.pinAdjustmentRangeMetres` (100 m).
+  double get pinAdjustmentRangeMetres =>
+      LandmarkSubmissionLogic.pinAdjustmentRangeMetres;
 
   bool isWithinMalaysia(double latitude, double longitude) =>
       submission.isWithinMalaysia(latitude, longitude);
@@ -215,6 +252,22 @@ class LandmarkLogicFacade {
   bool isValidMalaysianPhone(String phone) =>
       submission.isValidMalaysianPhone(phone);
 
+  /// The fixed country-code prefix the Add-Landmark phone field always shows
+  /// as plain, non-editable text (see
+  /// `LandmarkSubmissionLogic.phoneCountryCode`) - display only, the stored
+  /// value uses the restaurant table's national format.
+  String get phoneCountryCode => LandmarkSubmissionLogic.phoneCountryCode;
+
+  /// The national digits of a stored phone - what the field shows beside the
+  /// fixed prefix (see `LandmarkSubmissionLogic.phoneNationalPart`).
+  String phoneNationalPart(String phone) =>
+      LandmarkSubmissionLogic.phoneNationalPart(phone);
+
+  /// A phone entry in the SAME format the `restaurant` table stores phones
+  /// in - see `LandmarkSubmissionLogic.formatMalaysianPhone`.
+  String formatMalaysianPhone(String phone) =>
+      LandmarkSubmissionLogic.formatMalaysianPhone(phone);
+
   bool isValidWebsiteFormat(String website) =>
       submission.isValidWebsiteFormat(website);
 
@@ -234,6 +287,51 @@ class LandmarkLogicFacade {
 
   bool isValidAddressText(String address) =>
       submission.isValidAddressText(address);
+
+  /// The granular address rules behind [isValidAddressText], so the form can
+  /// say exactly what is wrong (see
+  /// `LandmarkSubmissionLogic.addressHasAllowedCharacters` and friends).
+  bool addressHasAllowedCharacters(String address) =>
+      submission.addressHasAllowedCharacters(address);
+
+  bool addressStartsOrEndsWithSpecialChar(String address) =>
+      submission.addressStartsOrEndsWithSpecialChar(address);
+
+  bool addressHasRepeatedSpecialChar(String address) =>
+      submission.addressHasRepeatedSpecialChar(address);
+
+  bool addressContainsLetter(String address) =>
+      submission.addressContainsLetter(address);
+
+  bool addressContainsDigit(String address) =>
+      submission.addressContainsDigit(address);
+
+  /// The shortest acceptable address (see
+  /// `LandmarkSubmissionLogic.minAddressLength`).
+  int get minAddressLength => LandmarkSubmissionLogic.minAddressLength;
+
+  /// The shortest typed query that triggers address suggestions (see
+  /// `LandmarkSubmissionLogic.minAddressSearchLength`).
+  int get minAddressSearchLength =>
+      LandmarkSubmissionLogic.minAddressSearchLength;
+
+  /// Live OpenStreetMap address suggestions for the form's address field,
+  /// measured from [around] and sorted nearest-first. `null` = the lookup
+  /// failed; empty = nothing matched (see
+  /// `LandmarkSubmissionLogic.searchAddresses`).
+  Future<List<AddressSuggestion>?> searchAddresses({
+    required String query,
+    required TouristLocation around,
+  }) => submission.searchAddresses(query: query, around: around);
+
+  /// The composed OpenStreetMap address of one point, in the DB style the
+  /// address field expects - `null` when OSM has nothing usable there (see
+  /// `LandmarkSubmissionLogic.reverseGeocodeAddress`).
+  Future<String?> reverseGeocodeAddress(TouristLocation location) =>
+      submission.reverseGeocodeAddress(location);
+
+  /// How the form labels a suggestion's distance ("350 m", "1.2 km").
+  String formatDistance(double metres) => submission.formatDistance(metres);
 
   bool isValidRestaurantNameText(String name) =>
       submission.isValidRestaurantNameText(name);
@@ -261,11 +359,27 @@ class LandmarkLogicFacade {
   String? foodNameLengthWarning(String foodName) =>
       submission.foodNameLengthWarning(foodName);
 
-  /// Submit limits (name <= 30) - typing may go a little further (warn
-  /// zone) but submission cannot. The website has no submit limit: it is
-  /// capped at [maxWebsiteLength] and validated, nothing more.
-  int get restaurantNameSubmitMaxLength =>
-      LandmarkSubmissionLogic.restaurantNameSubmitMaxLength;
+  /// How close to the restaurant-name cap the amber "stay under" warning
+  /// starts (91 of 100) - advisory only, like the website one; a name AT the
+  /// cap is still submittable.
+  int get restaurantNameWarnFromLength =>
+      LandmarkSubmissionLogic.restaurantNameWarnFromLength;
+
+  /// The price band as the form's messages word it ("RM0.01 and
+  /// RM9,999.99") - see `LandmarkSubmissionLogic.priceBandRangeText`.
+  String get priceBandRangeText => LandmarkSubmissionLogic.priceBandRangeText;
+
+  /// Copy for a merged submit (A13) - see
+  /// `LandmarkSubmissionLogic.mergeConfirmation`.
+  String mergeConfirmation({
+    required String targetName,
+    required List<String> addedDishNames,
+    required List<String> existingDishNames,
+  }) => LandmarkSubmissionLogic.mergeConfirmation(
+    targetName: targetName,
+    addedDishNames: addedDishNames,
+    existingDishNames: existingDishNames,
+  );
 
   Future<bool> isWebsiteReachable(String url) =>
       submission.isWebsiteReachable(url);
@@ -311,6 +425,11 @@ class LandmarkLogicFacade {
     candidate,
     candidateVariant,
   );
+
+  /// The one-line notice for a duplicate dish - shared by the capture
+  /// screen's blocking message and the form's snackbar (see
+  /// `LandmarkSubmissionLogic.duplicateFoodNotice`).
+  String get duplicateFoodNotice => LandmarkSubmissionLogic.duplicateFoodNotice;
 
   /// The name to report for a dish - its VARIANT when one was recorded, else
   /// the dictionary name (see [LandmarkSubmissionLogic.dishLabel]).

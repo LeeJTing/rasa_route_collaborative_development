@@ -74,6 +74,22 @@ void main() {
     viewModel.dispose();
   });
 
+  test('preserves See More state when recommendations reload', () async {
+    final MatchesRecommendationViewModel viewModel =
+        _TestMatchesRecommendationViewModel(FakeDiscoveryLogicFacade());
+    await viewModel.onInit();
+
+    await viewModel.showMore(testMatchedFood.id);
+    expect(viewModel.displayedGroups.single.restaurants, hasLength(3));
+    expect(viewModel.canShowLess(testMatchedFood.id), isTrue);
+
+    await viewModel.loadRecommendations();
+
+    expect(viewModel.displayedGroups.single.restaurants, hasLength(3));
+    expect(viewModel.canShowLess(testMatchedFood.id), isTrue);
+    viewModel.dispose();
+  });
+
   test('selects and toggles restaurant and landmark sorting', () async {
     final MatchesRecommendationViewModel viewModel =
         _TestMatchesRecommendationViewModel(FakeDiscoveryLogicFacade());

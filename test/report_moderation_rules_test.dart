@@ -195,8 +195,17 @@ void main() {
       expect(ReportModerationRules.priceError('8.50', required: true), isNull);
       expect(ReportModerationRules.priceError('', required: true), isNotNull);
       expect(ReportModerationRules.priceError('0', required: true), isNotNull);
+      // The cap matches the Add-Landmark form (2026-09-13): 9999.99 max.
       expect(
         ReportModerationRules.priceError('1000.01', required: true),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.priceError('9999.99', required: true),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.priceError('10000', required: true),
         isNotNull,
       );
     });
@@ -363,6 +372,53 @@ void main() {
         ReportModerationRules.issueSignature(claim(day: Weekday.monday)),
         isNot(base),
       );
+    });
+  });
+
+  group('operating hours - overnight (same rules as the landmark form)', () {
+    test('an encoded overnight row is valid', () {
+      expect(
+        ReportModerationRules.operatingHoursError(<Weekday, List<OpeningHour>>{
+          Weekday.monday: const <OpeningHour>[
+            OpeningHour(
+              id: 0,
+              day: Weekday.monday,
+              status: DayStatus.open,
+              opensAt: 22 * 60,
+              closesAt: 26 * 60, // 02:00 next day
+            ),
+          ],
+        }),
+        isNull,
+      );
+    });
+
+    test('an overnight tail overlapping the next day is rejected', () {
+      final String? error = ReportModerationRules.operatingHoursError(
+        <Weekday, List<OpeningHour>>{
+          Weekday.monday: const <OpeningHour>[
+            OpeningHour(
+              id: 0,
+              day: Weekday.monday,
+              status: DayStatus.open,
+              opensAt: 22 * 60,
+              closesAt: 26 * 60, // 02:00 next day
+            ),
+          ],
+          Weekday.tuesday: const <OpeningHour>[
+            OpeningHour(
+              id: 0,
+              day: Weekday.tuesday,
+              status: DayStatus.open,
+              opensAt: 60, // 01:00 - inside Monday's tail
+              closesAt: 6 * 60,
+            ),
+          ],
+        },
+      );
+      expect(error, isNotNull);
+      expect(error, contains("Monday's overnight hours run until 02:00"));
+      expect(error, contains('Tuesday'));
     });
   });
 }

@@ -67,6 +67,17 @@ class RestaurantMenuPreview extends StatelessWidget {
                               item.foodName,
                               style: Theme.of(context).textTheme.titleSmall,
                             ),
+                            if (item.description?.trim().isNotEmpty ??
+                                false) ...<Widget>[
+                              const SizedBox(height: AppSpacing.xs),
+                              Text(
+                                item.description!.trim(),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: AppColors.textSecondary),
+                              ),
+                            ],
                             Text(
                               item.foodCategory,
                               style: Theme.of(context).textTheme.bodySmall,
