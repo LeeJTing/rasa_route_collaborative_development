@@ -72,6 +72,14 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   /// show the new text even while focused).
   int _appliedAddressVersion = 0;
 
+  /// True from the moment Submit is tapped until the whole flow - the
+  /// overwrite pre-flight, the submission and its outcome - has finished.
+  /// It disables the button while the pre-flight network check runs and
+  /// keeps a second tap from stacking a parallel flow on top of it (user
+  /// report, 2026-09-14: a tap could sit with no visible reaction and
+  /// invite another).
+  bool _submitFlowActive = false;
+
   @override
   void initState() {
     super.initState();
@@ -283,6 +291,27 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   /// editable form with the reason under the Submit bar - ready to fix - and
   /// a successful one hands them back to the dashboard.
   Future<void> _submit(AddLandmarkViewModel viewModel) async {
+    // One flow at a time: the pre-flight question below is a network check,
+    // and a tap while it runs must not stack a parallel flow. The flag also
+    // keeps the button disabled until the whole flow - question, submission,
+    // outcome - is done, so the tap visibly takes hold right away (user
+    // report, 2026-09-14: it could sit with no reaction and invite another
+    // tap).
+    if (_submitFlowActive) return;
+    setState(() => _submitFlowActive = true);
+    try {
+      await _runSubmitFlow(viewModel);
+    } finally {
+      // The form may already be gone (a successful submit resets to the
+      // shell) - only touch state while it is still on screen.
+      if (mounted) setState(() => _submitFlowActive = false);
+    }
+  }
+
+  /// The submit flow proper (see [_submit], which guards and brackets it):
+  /// asks the pre-flight question, runs the submission behind the blocking
+  /// page, and lands on the dashboard when it succeeds.
+  Future<void> _runSubmitFlow(AddLandmarkViewModel viewModel) async {
     // Ask about replacing the same-place record's stored details BEFORE the
     // write starts - this is the last moment the tourist can keep them.
     await _askDetailsOverwriteIfNeeded(viewModel);
@@ -916,8 +945,14 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                           ),
                         ),
                         _BottomActions(
+                          // `_submitFlowActive` keeps the button disabled from
+                          // the tap until the flow's outcome - the pre-flight
+                          // question is a network check, so the tap must
+                          // visibly take hold right away.
                           canSubmit:
-                              viewModel.canSubmit && !viewModel.isSubmitting,
+                              viewModel.canSubmit &&
+                              !viewModel.isSubmitting &&
+                              !_submitFlowActive,
                           isSubmitting: viewModel.isSubmitting,
                           // A failed submit's own message wins: it is the one
                           // thing the tourist must see to fix the form, and

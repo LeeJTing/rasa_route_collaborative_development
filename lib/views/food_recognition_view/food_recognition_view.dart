@@ -674,6 +674,7 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           isLowConfidence: viewModel.isLowConfidence,
           nameMismatch: viewModel.nameMismatch,
           typedName: viewModel.typedName,
+          typoNotice: viewModel.typedNameTypoNotice,
           dietaryConflicts: viewModel.dietaryConflicts,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
           onViewDetails: viewModel.proceedToViewDetails,
@@ -709,6 +710,7 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           isLowConfidence: viewModel.isLowConfidence,
           nameMismatch: viewModel.nameMismatch,
           typedName: viewModel.typedName,
+          typoNotice: viewModel.typedNameTypoNotice,
           dietaryConflicts: viewModel.dietaryConflicts,
           onDismissNameMismatch: viewModel.dismissNameMismatch,
           // Same "View Details" as the primary capture; the detail screen's

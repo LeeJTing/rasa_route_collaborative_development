@@ -575,6 +575,32 @@ void main() {
       vm.dispose();
     });
 
+    test(
+      'a CASE-only difference follows the signboard reading - no check',
+      () async {
+        // A score that would refuse the name if it were ever sent - it must
+        // never be asked.
+        final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+          ..signboardNameScore = 0.1;
+        final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+        vm.setExtractedRestaurantName('CUSTOM n BAnnER');
+        vm.setRestaurantName('CUSTOM N BANNER');
+
+        // Same letters, different capitals - not an edit (user request,
+        // 2026-09-14).
+        expect(vm.hasEditedSignboardName, isFalse);
+
+        expect(await vm.confirmRestaurant(), isNull);
+
+        // The reading's capitals are adopted and nothing went to Gemini.
+        expect(vm.restaurantName, 'CUSTOM n BAnnER');
+        expect(vm.restaurantConfirmed, isTrue);
+        expect(vm.takeSignboardNameMismatch(), isFalse);
+        expect(facade.nameChecks, isEmpty);
+        vm.dispose();
+      },
+    );
+
     test('an edited name that still matches the signboard confirms', () async {
       final _TestAddLandmarkViewModel vm = await editedNameForm(score: 0.96);
 

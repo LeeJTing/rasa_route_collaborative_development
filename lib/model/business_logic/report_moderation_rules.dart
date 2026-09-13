@@ -17,7 +17,9 @@ import 'landmark_submission_logic.dart';
 ///   item_not_exist        5 identical (same item)
 ///   address               5 identical (same address text)
 ///   closed_permanently   10
-///   closed_temporarily   10 (most-common duration wins; tie -> longest)
+///   closed_temporarily   10 (durations may differ; claims are normalised to
+///                            the END DATE they mean - most-voted date wins,
+///                            tie -> the later date)
 class ReportModerationRules {
   ReportModerationRules._();
 
@@ -49,6 +51,17 @@ class ReportModerationRules {
   };
 
   static int thresholdFor(ReportCategory category) => thresholds[category] ?? 0;
+
+  /// How long a claim stays ALIVE: after a year it no longer counts toward
+  /// its threshold and no longer blocks the same tourist from reporting the
+  /// issue again (user request, 2026-09-14). The constant and the comparison
+  /// live on the domain model (`reportClaimLifetime` / `isReportClaimExpired`)
+  /// so `ReportRepository` can apply exactly the same rule without importing
+  /// this layer - these are the moderation-facing aliases.
+  static const Duration claimLifetime = reportClaimLifetime;
+
+  static bool isClaimExpired(DateTime? createdAt, DateTime now) =>
+      isReportClaimExpired(createdAt, now);
 
   static String? priceError(String raw, {bool required = false}) {
     final String value = raw.trim();
@@ -390,36 +403,52 @@ class ReportModerationRules {
   // Temporary-closure duration resolution
   // ===========================================================================
 
-  /// Picks the `closed_until` offset from a list of temporary-closure claim
-  /// payloads (the canonical strings). The MOST COMMON reported duration wins;
-  /// ties break to the LONGER duration so a place is never re-opened early.
-  /// Returns null when [payloads] is empty.
-  static ProposedClosure? resolveMostCommonClosure(List<String> payloads) {
-    if (payloads.isEmpty) return null;
-    final Map<String, int> counts = <String, int>{};
-    final Map<String, ProposedClosure> byPayload = <String, ProposedClosure>{};
-    for (final String payload in payloads) {
-      final ProposedClosure? parsed = parseTemporaryClosurePayload(payload);
-      if (parsed == null) continue;
-      counts[payload] = (counts[payload] ?? 0) + 1;
-      byPayload[payload] = parsed;
-    }
-    if (counts.isEmpty) return null;
-    ProposedClosure? best;
-    int bestCount = 0;
-    // Sort deterministically so the longest wins ties.
-    final List<String> keys = counts.keys.toList()
-      ..sort(
-        (String a, String b) =>
-            byPayload[b]!.amount.compareTo(byPayload[a]!.amount),
+  /// Picks the closure the reporters agreed on, as the END DATE they meant.
+  ///
+  /// Every claim is normalised to `createdAt + duration days`, so STAGGERED
+  /// reports of the same closure vote together - "15 days" filed three days
+  /// ago and "12 days" filed today are the same end date instead of
+  /// fragmenting the tally by day-count (user's design, 2026-09-14). The
+  /// most-voted END DAY (Malaysia calendar day - voters mean "the 26th",
+  /// whatever hour they filed) wins; ties go to the LATER day so a place is
+  /// never re-opened early. The returned instant is the LATEST end stamp of
+  /// the winning day; it is stored as `closed_until` verbatim, so a date
+  /// already in the past simply means the place reads as open again. Returns
+  /// null when [claims] is empty or none carries a closure payload.
+  static DateTime? resolveClosureUntil(List<ClosureClaim> claims) {
+    if (claims.isEmpty) return null;
+    final Map<int, List<DateTime>> endsByDay = <int, List<DateTime>>{};
+    for (final ClosureClaim claim in claims) {
+      final ProposedClosure? parsed = parseTemporaryClosurePayload(
+        claim.payload,
       );
-    for (final String key in keys) {
-      if (counts[key]! > bestCount) {
-        bestCount = counts[key]!;
-        best = byPayload[key];
+      if (parsed == null) continue;
+      final DateTime end = claim.createdAt.toUtc().add(
+        Duration(days: closureDurationDays(parsed)),
+      );
+      // Group by the Malaysia calendar day the end falls on - two voters
+      // meaning "the 26th" must land in one bucket whatever hour they filed.
+      final DateTime local = end.add(const Duration(hours: 8));
+      final int day = local.year * 10000 + local.month * 100 + local.day;
+      endsByDay.putIfAbsent(day, () => <DateTime>[]).add(end);
+    }
+    if (endsByDay.isEmpty) return null;
+    int bestDay = 0;
+    int bestCount = 0;
+    // Descending order + strictly-greater keeps the LATER day on ties.
+    final List<int> days = endsByDay.keys.toList()
+      ..sort((int a, int b) => b.compareTo(a));
+    for (final int day in days) {
+      if (endsByDay[day]!.length > bestCount) {
+        bestCount = endsByDay[day]!.length;
+        bestDay = day;
       }
     }
-    return best;
+    DateTime latest = endsByDay[bestDay]!.first;
+    for (final DateTime end in endsByDay[bestDay]!) {
+      if (end.isAfter(latest)) latest = end;
+    }
+    return latest;
   }
 
   /// Parses a temporary-closure payload back into a [ProposedClosure] (for
@@ -435,9 +464,10 @@ class ReportModerationRules {
     return ProposedClosure(amount: amount, unit: unit);
   }
 
-  /// Days represented by a closure of [amount] [unit]s - used to compute
-  /// `closed_until = now + duration`. Months are approximated as 30 days (the
-  /// app has no calendar dependency; close enough for a moderation flag).
+  /// Days represented by a closure of [amount] [unit]s - what the closure
+  /// resolution adds to a claim's `created_at` to find the END DATE it meant.
+  /// Months are approximated as 30 days (the app has no calendar dependency;
+  /// close enough for a moderation flag).
   static int closureDurationDays(ProposedClosure closure) =>
       closure.unit == ClosureUnit.days ? closure.amount : closure.amount * 30;
 }

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rasa_route_collaborative_development/domain_model/dietary_restriction.dart';
 import 'package:rasa_route_collaborative_development/domain_model/food_distribution.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
@@ -156,6 +157,55 @@ void main() {
         );
       },
     );
+
+    test('a landmark dish list drops the dishes the user cannot eat', () async {
+      repository.restrictions = const <DietaryRestriction>[
+        DietaryRestriction(id: 7, name: 'No Pork'),
+      ];
+      repository.restrictionIdsByFood = const <int, List<int>>{
+        2: <int>[7],
+      };
+
+      final MatchesRecommendationResult result = await logic.recommendations(
+        const MatchesRecommendationRequest(
+          stateCode: 'TST',
+          origin: TouristLocation(latitude: 1, longitude: 1),
+        ),
+      );
+
+      // The landmark still shows (its liked dish is safe) but the
+      // conflicting dish is gone from the card's dish list - exactly what
+      // Quick Mode's landmark cards already do.
+      final SubmittedLandmarkRecommendation landmark =
+          result.groups.single.submittedLandmarks.single;
+      expect(landmark.id, 20);
+      expect(
+        landmark.dishes.map((SubmittedLandmarkDish dish) => dish.name),
+        orderedEquals(<String>['Liked Food']),
+      );
+    });
+
+    test('a liked food that conflicts with the user disappears from every '
+        'place', () async {
+      repository.restrictions = const <DietaryRestriction>[
+        DietaryRestriction(id: 7, name: 'No Pork'),
+      ];
+      repository.restrictionIdsByFood = const <int, List<int>>{
+        1: <int>[7], // The LIKED food itself conflicts.
+      };
+
+      final MatchesRecommendationResult result = await logic.recommendations(
+        const MatchesRecommendationRequest(
+          stateCode: 'TST',
+          origin: TouristLocation(latitude: 1, longitude: 1),
+        ),
+      );
+
+      // Every place serving it was left with nothing safe to show - the
+      // group is empty instead of recommending a dish the user cannot eat.
+      expect(result.groups.single.restaurants, isEmpty);
+      expect(result.groups.single.submittedLandmarks, isEmpty);
+    });
   });
 }
 
@@ -191,6 +241,12 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
   Map<String, List<OpeningHour>> hoursByPlace =
       const <String, List<OpeningHour>>{};
   bool catalogueIncludesItems = true;
+
+  /// The user's dietary restrictions and the catalogue's food -> restriction
+  /// links behind them - empty by default, so unrelated tests see no
+  /// filtering (and no restrictions = everything is safe).
+  List<DietaryRestriction> restrictions = const <DietaryRestriction>[];
+  Map<int, List<int>> restrictionIdsByFood = const <int, List<int>>{};
 
   @override
   Future<String?> currentTouristId() async => 'tourist';
@@ -341,4 +397,12 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
   Future<void> saveSwipeSession(SwipeSession value) async {
     savedSession = value;
   }
+
+  @override
+  Future<List<DietaryRestriction>> getCurrentDietaryRestrictions() async =>
+      restrictions;
+
+  @override
+  Future<Map<int, List<int>>> getRestrictionIdsByFood() async =>
+      restrictionIdsByFood;
 }

@@ -85,6 +85,22 @@ class ReportClaim {
   final String payload;
 }
 
+/// How long a stored claim stays ALIVE (user request, 2026-09-14): after a
+/// year a claim no longer counts toward its threshold and no longer blocks
+/// the same tourist from reporting the issue again - a year-old report must
+/// not stack with today's. Applied by `ReportRepository` on every read
+/// (`countIdentical`, `countIssue`, `alreadyReported`, pins and payloads).
+const Duration reportClaimLifetime = Duration(days: 365);
+
+/// Whether a stored claim (its `created_at`) is past [reportClaimLifetime]
+/// at [now]. A missing/unreadable timestamp is NOT expired - real rows always
+/// carry `created_at` (not-null default), and dropping one would silently
+/// weaken dedupe.
+bool isReportClaimExpired(DateTime? createdAt, DateTime now) {
+  if (createdAt == null) return false;
+  return now.toUtc().difference(createdAt.toUtc()) > reportClaimLifetime;
+}
+
 /// A single day's PROPOSED hours for an operating-hours claim - mirrors
 /// [OpeningHour] without the id.
 class ProposedDayHours {
@@ -103,6 +119,22 @@ class ProposedClosure {
 
   final int amount;
   final ClosureUnit unit;
+}
+
+/// One stored temporary-closure claim as the closure resolution needs it:
+/// its canonical payload and WHEN it was filed (`report.created_at`).
+///
+/// The resolution normalises each claim to the END DATE it points at
+/// (`createdAt + duration`), so claims filed on different days that all mean
+/// "closed until the same day" vote together (user's design, 2026-09-14).
+class ClosureClaim {
+  const ClosureClaim({required this.payload, required this.createdAt});
+
+  /// The canonical `closed-temporarily:<amount>:<unit>` payload.
+  final String payload;
+
+  /// `report.created_at` - when the claim was filed (UTC instant).
+  final DateTime createdAt;
 }
 
 /// A menu item a report can target, with just what the picker and claim need.
