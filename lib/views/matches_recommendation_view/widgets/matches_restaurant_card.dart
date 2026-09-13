@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/restaurant.dart';
-import '../../../domain_model/restaurant_item.dart';
 import '../../common_widgets/app_image.dart';
 import '../../common_widgets/app_tag_chip.dart';
 
@@ -13,16 +12,17 @@ class MatchesRestaurantCard extends StatelessWidget {
     super.key,
     required this.restaurant,
     required this.matchedFoodName,
+    required this.startingPrice,
     required this.onTap,
   });
 
   final Restaurant restaurant;
   final String matchedFoodName;
+  final double? startingPrice;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final double? minimumPrice = _minimumPrice;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Column(
@@ -101,9 +101,9 @@ class MatchesRestaurantCard extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    minimumPrice == null
+                    startingPrice == null
                         ? 'Price unavailable'
-                        : 'From RM ${minimumPrice.toStringAsFixed(2)}',
+                        : 'From RM ${startingPrice!.toStringAsFixed(2)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -128,16 +128,6 @@ class MatchesRestaurantCard extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  double? get _minimumPrice {
-    final List<double> prices = restaurant.items
-        .map((RestaurantItem item) => item.price)
-        .whereType<double>()
-        .toList(growable: false);
-    if (prices.isEmpty) return null;
-    prices.sort();
-    return prices.first;
   }
 
   String _distanceLabel(double? distanceMetres) {

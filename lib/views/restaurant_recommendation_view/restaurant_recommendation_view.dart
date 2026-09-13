@@ -232,14 +232,22 @@ class _SourceTabs extends StatelessWidget {
       segments: const <ButtonSegment<RestaurantSource>>[
         ButtonSegment(
           value: RestaurantSource.google,
-          label: Text('Google-Sourced Restaurant'),
+          icon: Icon(Icons.restaurant_outlined),
+          label: Text('Restaurants'),
         ),
         ButtonSegment(
           value: RestaurantSource.submitted,
-          label: Text('Submitted Landmark'),
+          icon: Icon(Icons.add_location_alt_outlined),
+          label: Text('Submitted Landmarks'),
         ),
       ],
       selected: <RestaurantSource>{source},
+      style: ButtonStyle(
+        textStyle: WidgetStatePropertyAll<TextStyle?>(
+          Theme.of(context).textTheme.labelMedium,
+        ),
+        visualDensity: VisualDensity.compact,
+      ),
       onSelectionChanged: (Set<RestaurantSource> value) =>
           onChanged(value.first),
     ),

@@ -261,8 +261,26 @@ abstract final class AppSizes {
   /// The same line for the state the tourist has selected.
   static const double heatmapSelectedBorderWidth = 2.6;
 
-  /// The tourist's own position marker.
+  /// The solid blue core of the tourist's own position marker.
+  ///
+  /// Reduced from an effective 16: on the detailed map this marker is drawn
+  /// **over** the restaurant and landmark pins, and a disc wide enough to
+  /// swallow a 36pt pin hid the place the tourist was standing next to. It no
+  /// longer blocks the tap (the layer is behind an `IgnorePointer`), but it
+  /// should not hide the pin either.
   static const double currentLocationDot = 11;
+
+  /// The whole position marker on the detailed map - the core plus its white
+  /// ring, with room for the shadow.
+  ///
+  /// The ring is drawn inside this box, so the visible marker is
+  /// [currentLocationDot] + twice [currentLocationRing] across: 16pt, against
+  /// the 22 it used to be.
+  static const double currentLocationMarkerSize = 20;
+
+  /// White ring around [currentLocationDot], so the marker stays legible on a
+  /// dark tile or a park.
+  static const double currentLocationRing = 2.5;
 
   /// Corner radius of the map surface, which sits as a card on the cream
   /// scaffold rather than bleeding to the screen edge.
