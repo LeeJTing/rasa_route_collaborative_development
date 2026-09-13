@@ -29,9 +29,7 @@ class RestaurantDetailViewModel extends BaseViewModel {
 
   Restaurant? _restaurant;
   int? _restaurantId;
-  bool _hasDietaryRestrictions = false;
   Restaurant? get restaurant => _restaurant;
-  bool get hasDietaryRestrictions => _hasDietaryRestrictions;
 
   void selectRestaurant(int? restaurantId) {
     _restaurantId = restaurantId;
@@ -47,19 +45,13 @@ class RestaurantDetailViewModel extends BaseViewModel {
 
   Future<void> loadRestaurant(int restaurantId) => runGuarded(() async {
     _restaurantId = restaurantId;
-    final List<Object?> loaded = await Future.wait(<Future<Object?>>[
-      discoveryLogic.getRestaurantById(
-        restaurantId,
-        origin: locationFacade.latest,
-      ),
-      discoveryLogic.hasDietaryRestrictions(),
-    ]);
-    final Restaurant? restaurant = loaded[0] as Restaurant?;
-    _hasDietaryRestrictions = loaded[1] as bool;
-    if (restaurant == null) {
+    _restaurant = await discoveryLogic.getRestaurantById(
+      restaurantId,
+      origin: locationFacade.latest,
+    );
+    if (_restaurant == null) {
       throw Exception('Restaurant details are unavailable.');
     }
-    _restaurant = restaurant;
   });
 
   Future<void> retry() async {

@@ -1,4 +1,7 @@
+import '../../domain_model/dietary_restriction.dart';
+
 import 'auth_repository.dart';
+import 'dietary_restriction_repository.dart';
 import 'geocoding_repository.dart';
 import 'landmark_draft_repository.dart';
 import 'link_check_repository.dart';
@@ -47,4 +50,13 @@ class LandmarkRepositoryFacade {
 
   /// Saved (incomplete) Add-New-Landmark forms.
   final LandmarkDraftRepository drafts = LandmarkDraftRepository();
+
+  final DietaryRestrictionRepository dietaryRestriction =
+      DietaryRestrictionRepository();
+
+  Future<List<DietaryRestriction>> getCurrentDietaryRestrictions() =>
+      dietaryRestriction.restrictionsForCurrentTourist();
+
+  Future<Map<int, List<int>>> getRestrictionIdsByFood() =>
+      dietaryRestriction.restrictionIdsByFood();
 }
