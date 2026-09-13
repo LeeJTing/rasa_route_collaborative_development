@@ -132,6 +132,40 @@ void main() {
           );
       expect(values, <String, Object?>{'phone': '012-345 6789'});
     });
+
+    test('a case- or spacing-only difference is not a change', () {
+      // The SAME detail written in another case (or with a double space) is
+      // not an edit - it must not rewrite the stored row, and it must not
+      // raise the merge's overwrite question (user request 2026-09-14: every
+      // such check folds case first).
+      expect(
+        SubmittedLandmarkRepository.changedContactFields(
+          storedPhone: '012-345 6789',
+          storedWebsite: 'https://TianYiKopitiam.my',
+          storedAddress: '12, Jalan Ampang,  Kuala Lumpur',
+          phone: '012-345 6789',
+          website: 'https://tianyikopitiam.my',
+          address: '12, jalan ampang, kuala lumpur',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a real edit on the same field is still written', () {
+      // Case folding must never swallow content: the postal code is new.
+      final Map<String, Object?> values =
+          SubmittedLandmarkRepository.changedContactFields(
+            storedPhone: null,
+            storedWebsite: null,
+            storedAddress: '12, Jalan Ampang, Kuala Lumpur',
+            phone: null,
+            website: null,
+            address: '12, Jalan Ampang, Kuala Lumpur 50450',
+          );
+      expect(values, <String, Object?>{
+        'address': '12, Jalan Ampang, Kuala Lumpur 50450',
+      });
+    });
   });
 
   group('changedOpeningHourDays (A13 merge, per-day hours update)', () {

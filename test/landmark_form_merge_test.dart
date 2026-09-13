@@ -2,11 +2,13 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:rasa_route_collaborative_development/domain_model/address_suggestion.dart';
 import 'package:rasa_route_collaborative_development/domain_model/landmark_draft.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/place_overwrite_report.dart';
 import 'package:rasa_route_collaborative_development/domain_model/similar_place_candidate.dart';
+import 'package:rasa_route_collaborative_development/domain_model/stored_place_details.dart';
 import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/landmark_logic_facade.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/landmark_submission_logic.dart';
@@ -120,6 +122,33 @@ class _FakeLandmarkLogicFacade extends LandmarkLogicFacade {
     overwriteChecks.add(restaurantName);
     return overwriteReport;
   }
+
+  /// What the place already on record stores for the form's name - null (the
+  /// default) means "nothing matches this name", so Confirm behaves exactly
+  /// as it did before that fill (see
+  /// `AddLandmarkViewModel._prefillFromExistingPlace`).
+  StoredPlaceDetails? storedPlace;
+
+  /// Every name the stored-details fill looked up.
+  final List<String> storedPlaceLookups = <String>[];
+
+  @override
+  Future<StoredPlaceDetails?> storedPlaceDetails({
+    required String restaurantName,
+    double? latitude,
+    double? longitude,
+  }) async {
+    storedPlaceLookups.add(restaurantName);
+    return storedPlace;
+  }
+
+  /// The address field's live search - stubbed to "nothing found" so a test
+  /// that fills an address never reaches the geocoder.
+  @override
+  Future<List<AddressSuggestion>?> searchAddresses({
+    required String query,
+    required TouristLocation around,
+  }) async => const <AddressSuggestion>[];
 
   @override
   Future<bool> nameMatchesSignboard({
@@ -710,6 +739,128 @@ void main() {
       vm.dispose();
     });
 
+    test('Confirm fills the form with what the place already stores', () async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+        ..storedPlace = const StoredPlaceDetails(
+          name: 'Ali and Abu',
+          phone: '03-4162 6527',
+          website: 'https://ali.example',
+          address: '12, Jalan Ampang, 50450 Kuala Lumpur',
+          openingHours: <OpeningHour>[
+            OpeningHour(
+              id: 4,
+              day: Weekday.monday,
+              status: DayStatus.open,
+              opensAt: 540,
+              closesAt: 1080,
+            ),
+          ],
+        );
+      final _TestAddLandmarkViewModel vm = await _form(
+        name: 'ali and abu',
+        facade: facade,
+      );
+      vm.addListener(() {});
+      final int phoneBefore = vm.phoneVersion;
+      final int websiteBefore = vm.websiteVersion;
+      final int addressBefore = vm.addressVersion;
+
+      expect(await vm.confirmRestaurant(), isNull);
+
+      // The record's own spelling of the name (its lookup ignores case)...
+      expect(vm.restaurantName, 'Ali and Abu');
+      // ...and what that place stores, into the fields the form left empty.
+      expect(vm.restaurantPhone, '03-4162 6527');
+      expect(vm.restaurantWebsite, 'https://ali.example');
+      expect(vm.restaurantAddress, '12, Jalan Ampang, 50450 Kuala Lumpur');
+      expect(vm.operatingHours[Weekday.monday]?.first.opensAt, 540);
+      expect(vm.operatingHours[Weekday.monday]?.first.closesAt, 1080);
+      // The fill must also reach the VISIBLE fields: their text controllers
+      // are built once when the form opens, so each filled field moves its
+      // version and `AddLandmarkView` force-syncs the controller (user
+      // report, 2026-09-14: the stored details were in the form's state but
+      // the input fields stayed empty).
+      expect(vm.phoneVersion, phoneBefore + 1);
+      expect(vm.websiteVersion, websiteBefore + 1);
+      expect(vm.addressVersion, addressBefore + 1);
+      // The fill ran with the form's own name, and the confirmation STANDS -
+      // our own fill is not the tourist editing the signboard reading.
+      expect(facade.storedPlaceLookups, <String>['ali and abu']);
+      expect(vm.restaurantConfirmed, isTrue);
+      vm.dispose();
+    });
+
+    test('the fill leaves what the tourist typed alone', () async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+        ..storedPlace = const StoredPlaceDetails(
+          name: 'Ali and Abu',
+          phone: '03-4162 6527',
+          website: 'https://ali.example',
+          address: '12, Jalan Ampang, 50450 Kuala Lumpur',
+        );
+      final _TestAddLandmarkViewModel vm = await _form(
+        name: 'Ali and Abu',
+        facade: facade,
+      );
+      vm.addListener(() {});
+      vm.setRestaurantPhone('0123456789');
+
+      await vm.confirmRestaurant();
+
+      // Their own entry stays exactly as typed (and normalised)...
+      expect(vm.restaurantPhone, '012-345 6789');
+      // ...while the fields still empty take the record's.
+      expect(vm.restaurantWebsite, 'https://ali.example');
+      expect(vm.restaurantAddress, '12, Jalan Ampang, 50450 Kuala Lumpur');
+      vm.dispose();
+    });
+
+    test('a RESUMED confirmed form still gets the stored phone/website - its '
+        'Confirm button is gone', () async {
+      // The View runs this fill once when a saved submission is resumed in
+      // its already-confirmed state (see
+      // `AddLandmarkViewModel.fillDetailsFromPlaceOnRecord`): the Confirm row
+      // reports the confirmed state instead of offering the button, so
+      // without it a resumed form's phone and website would stay empty
+      // (user request, 2026-09-14).
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+        ..storedPlace = const StoredPlaceDetails(
+          name: 'Ali and Abu',
+          phone: '03-4162 6527',
+          website: 'https://ali.example',
+          address: '12, Jalan Ampang, 50450 Kuala Lumpur',
+          openingHours: <OpeningHour>[
+            OpeningHour(
+              id: 4,
+              day: Weekday.monday,
+              status: DayStatus.open,
+              opensAt: 540,
+              closesAt: 1080,
+            ),
+          ],
+        );
+      final _TestAddLandmarkViewModel vm = await _form(
+        name: 'Ali and Abu',
+        facade: facade,
+      );
+      vm.addListener(() {});
+
+      expect(vm.restaurantPhone, isEmpty);
+      expect(vm.restaurantWebsite, isEmpty);
+
+      await vm.fillDetailsFromPlaceOnRecord();
+
+      expect(vm.restaurantPhone, '03-4162 6527');
+      expect(vm.restaurantWebsite, 'https://ali.example');
+      expect(vm.restaurantAddress, '12, Jalan Ampang, 50450 Kuala Lumpur');
+      expect(vm.operatingHours[Weekday.monday]?.first.opensAt, 540);
+      // Into the FIELDS too: both versions move, which is what the View syncs
+      // its text controllers on.
+      expect(vm.phoneVersion, 1);
+      expect(vm.websiteVersion, 1);
+      vm.dispose();
+    });
+
     test('a matching photo asks the question INSTEAD of confirming', () async {
       final _TestAddLandmarkViewModel vm = await formWithCandidate();
 
@@ -765,6 +916,23 @@ void main() {
       expect(vm.dropExistingDishes(), <String>['Teh Tarik']);
       expect(vm.additionalFoods, isEmpty);
       expect(vm.recognizedFood?.name, 'Cendol');
+      vm.dispose();
+    });
+
+    test('a dish spelled in another case is still the same dish', () async {
+      // The place's own spelling comes back from the read while the form
+      // holds the tourist's - the check folds case, so the duplicate is
+      // recognised and dropped instead of being listed twice
+      // (user request 2026-09-14).
+      final _TestAddLandmarkViewModel vm = await formWithCandidate(
+        existing: <String>['TEH TARIK'],
+      );
+      vm.addAdditionalFood(_food('teh tarik'));
+      await vm.confirmRestaurant();
+      await vm.acceptSimilarPlace();
+
+      expect(vm.dropExistingDishes(), <String>['teh tarik']);
+      expect(vm.additionalFoods, isEmpty);
       vm.dispose();
     });
 
@@ -845,6 +1013,36 @@ void main() {
       // A DIFFERENT detail is a different decision.
       vm.setRestaurantPhone('019-000 0000');
       expect(await vm.checkDetailsOverwrite(), isTrue);
+      vm.dispose();
+    });
+
+    test('the answer is acknowledged, once - the replacement waits for '
+        'submit', () async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+        ..overwriteReport = report();
+      final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+      vm.setRestaurantPhone('012-345 6789');
+
+      // Nothing answered yet: nothing to acknowledge.
+      expect(vm.takeOverwriteAck(), isNull);
+
+      await vm.checkDetailsOverwrite();
+      vm.resolveOverwrite(true);
+      final String? replaceAck = vm.takeOverwriteAck();
+      expect(replaceAck, isNotNull);
+      expect(replaceAck, contains('Tian Yi'));
+      expect(replaceAck, contains('submit'));
+      // One-shot: the notice cannot be raised twice by a rebuild.
+      expect(vm.takeOverwriteAck(), isNull);
+
+      // "Keep" says the stored record stands.
+      vm.setRestaurantPhone('019-000 0000');
+      await vm.checkDetailsOverwrite();
+      vm.resolveOverwrite(false);
+      final String? keepAck = vm.takeOverwriteAck();
+      expect(keepAck, isNotNull);
+      expect(keepAck, contains('Tian Yi'));
+      expect(keepAck, contains('not written'));
       vm.dispose();
     });
   });
