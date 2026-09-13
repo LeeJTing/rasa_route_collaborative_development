@@ -23,6 +23,7 @@ class RestaurantExpandedInfo extends StatelessWidget {
     final List<RestaurantItem> previewItems = items
         .take(_previewItemLimit)
         .toList(growable: false);
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
@@ -40,8 +41,19 @@ class RestaurantExpandedInfo extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             )
           else
-            ...previewItems.map(
-              (RestaurantItem item) => Padding(
+            ...previewItems.map((RestaurantItem item) {
+              final String? ingredients = item.ingredients?.trim();
+
+              final String? description = item.description?.trim();
+
+              final String? displayText =
+                  ingredients != null && ingredients.isNotEmpty
+                  ? ingredients
+                  : description != null && description.isNotEmpty
+                  ? description
+                  : null;
+
+              return Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.md),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -80,24 +92,21 @@ class RestaurantExpandedInfo extends StatelessWidget {
                               if (item.price != null) ...<Widget>[
                                 const SizedBox(width: AppSpacing.md),
                                 Text(
-                                  '${item.currency} ${item.price!.toStringAsFixed(2)}',
+                                  '${item.currency} '
+                                  '${item.price!.toStringAsFixed(2)}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   textAlign: TextAlign.end,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
+                                  style: Theme.of(context).textTheme.titleSmall
                                       ?.copyWith(color: AppColors.accentRust),
                                 ),
                               ],
                             ],
                           ),
-                          if (item.ingredients?.isNotEmpty == true) ...<Widget>[
+                          if (displayText != null) ...<Widget>[
                             const SizedBox(height: AppSpacing.xs),
-                            // The whole description, however long: no maxLines
-                            // and no ellipsis, so nothing is cut in half.
                             Text(
-                              item.ingredients!,
+                              displayText,
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],
@@ -106,12 +115,13 @@ class RestaurantExpandedInfo extends StatelessWidget {
                     ),
                   ],
                 ),
-              ),
-            ),
+              );
+            }),
           if (items.length > _previewItemLimit)
             Center(
               child: Text(
-                'Showing $_previewItemLimit of ${items.length} local foods · '
+                'Showing $_previewItemLimit of '
+                '${items.length} local foods · '
                 'Tap the restaurant for all',
                 textAlign: TextAlign.center,
                 style: Theme.of(
