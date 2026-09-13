@@ -126,10 +126,7 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
                           ),
                           child: OutlinedButton.icon(
                             onPressed: () => _openReport(landmark),
-                            icon: const Icon(
-                              Icons.flag_outlined,
-                              color: AppColors.error,
-                            ),
+                            icon: const Icon(Icons.flag_outlined),
                             label: const Text('Report Landmark'),
                           ),
                         ),
@@ -264,16 +261,16 @@ class _LandmarkHeader extends StatelessWidget {
           style: Theme.of(context).textTheme.headlineSmall,
         ),
         const SizedBox(height: AppSpacing.sm),
-        _MetaRow(distanceMetres: distanceMetres),
-        const SizedBox(height: AppSpacing.md),
-        if (category.isNotEmpty)
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: <Widget>[
+        Wrap(
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.sm,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            _MetaRow(distanceMetres: distanceMetres),
+            if (category.isNotEmpty)
               AppTagChip(label: category, style: AppTagStyle.category),
-            ],
-          ),
+          ],
+        ),
         if (landmark.status == LandmarkStatus.frozen) ...<Widget>[
           const SizedBox(height: AppSpacing.sm),
           Text(
@@ -343,20 +340,20 @@ class _Photo extends StatelessWidget {
   );
 }
 
-/// The distance line under the header, left-aligned with the name and the
-/// category chip below it (same icon + text style the restaurant page uses
-/// for its own distance). No rating/reviews (a tourist cannot rate a
-/// submitted landmark) and no report count (moderation data the tourist
-/// does not need to see).
+/// The distance line, on the SAME line as the category chip (the same
+/// wrap the restaurant header uses for its rating / distance / category) -
+/// the icon + text style the restaurant page uses for its own distance. No
+/// rating/reviews (a tourist cannot rate a submitted landmark) and no report
+/// count (moderation data the tourist does not need to see).
 ///
 /// It carries no "Open Google Maps" link of its own any more - the address
 /// row in the information card below opens the map (at the landmark's
 /// coordinates, or searched by its address), so a second link to the same
 /// destination only crowded the header. While that link existed it filled
 /// the left half of this row and the distance sat on the right; with the link
-/// gone the right-aligned distance left an empty band above the chip, so the
-/// distance moved in line with the text above and below it (user report:
-/// "the Category have a gap with whatever is above it").
+/// gone the distance moved in line with the text above it (user report:
+/// "the Category have a gap with whatever is above it"), and it now shares
+/// that line with the chip itself (user request, 2026-09-14).
 class _MetaRow extends StatelessWidget {
   const _MetaRow({required this.distanceMetres});
 
