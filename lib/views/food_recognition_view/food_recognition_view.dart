@@ -150,6 +150,12 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
     _viewModel.setReferenceLocation(
       LandmarkDraftHandoff().takeReferenceLocation(),
     );
+    // The dishes the form (for an additional-food capture) already holds -
+    // a re-captured duplicate is blocked on THIS screen instead of being
+    // bounced back with a notice.
+    _viewModel.setExistingFormFoods(
+      LandmarkDraftHandoff().takeExistingFormFoods(),
+    );
     _viewModel.onInit();
 
     _initCamera();
@@ -691,12 +697,15 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           onViewDetails: viewModel.proceedToViewDetails,
           // Non-addable food: never "Add to Landmark" back onto the form.
           // Also blocked when this second food was captured more than 50 m
-          // from the first food - it is not the same restaurant, so the only
-          // way forward is capturing it again on site.
+          // from the first food - it is not the same restaurant - or when
+          // the dish is ALREADY on the form (the same duplicate rule the
+          // form applies), in which case the reason is shown below instead
+          // of bouncing the tourist back with a notice.
           onAddLandmark:
               viewModel.isLocalFood &&
                   viewModel.fitsCatalogueCategory &&
-                  !viewModel.isCaptureOutOfRange
+                  !viewModel.isCaptureOutOfRange &&
+                  viewModel.duplicateFormFoodBlockMessage == null
               ? viewModel.confirmFoodAndReturn
               : null,
           onEnterName: viewModel.enterFoodName,
@@ -704,11 +713,15 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
           foodNameWarning: viewModel.foodNameWarning,
           isProcessing: viewModel.isProcessing,
           addLandmarkLabel: 'Add to Landmark',
-          blockMessage: viewModel.captureRangeError,
-          // Out of range: the warning box above already carries the reason
-          // AND the action ("Move closer... capture again") - a prompt line
+          blockMessage:
+              viewModel.captureRangeError ??
+              viewModel.duplicateFormFoodBlockMessage,
+          // Blocked (out of range, or already on the form): the warning box
+          // above already carries the reason AND the action - a prompt line
           // here would only repeat it.
-          promptText: viewModel.captureRangeError != null
+          promptText:
+              viewModel.captureRangeError != null ||
+                  viewModel.duplicateFormFoodBlockMessage != null
               ? null
               : (viewModel.isLocalFood && viewModel.fitsCatalogueCategory
                     ? '                 Add this food to the landmark?'

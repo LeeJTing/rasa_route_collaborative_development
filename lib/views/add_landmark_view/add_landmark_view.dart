@@ -8,6 +8,7 @@ import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
+import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
 import '../../view_models/add_landmark_view_model.dart';
@@ -16,6 +17,7 @@ import '../../view_models/food_recognition_view_model.dart'
 import '../common_widgets/app_dialog.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/combine_draft_dialog.dart';
+import '../common_widgets/enlarged_image_dialog.dart';
 import '../common_widgets/operating_hours_editor.dart';
 import '../common_widgets/recognised_food_card.dart';
 import 'widgets/location_picker_field.dart';
@@ -47,16 +49,24 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   late final TextEditingController _restaurantNameController;
   final FocusNode _restaurantNameFocusNode = FocusNode();
 
-  /// Optional contact/address fields - simple controllers, no auto-fill, so
-  /// they only need a plain value read (no focus-guarded sync like the name).
+  /// Optional contact fields are plain controllers; the address one is ALSO
+  /// filled from the map, so it gets a focus node and a version-sync like
+  /// the restaurant name (see [_appliedAddressVersion]).
   late final TextEditingController _phoneController;
   late final TextEditingController _websiteController;
   late final TextEditingController _addressController;
+  final FocusNode _addressFocusNode = FocusNode();
 
   /// Last signboard-extraction version applied to `_restaurantNameController`
   /// (see the force-sync in `build` - a fresh extraction must overwrite the
   /// tourist's typed name even while the field is focused).
   int _appliedRestaurantNameVersion = 0;
+
+  /// Last address version applied to `_addressController` (see
+  /// `AddLandmarkViewModel.addressVersion` - the map, a picked suggestion or
+  /// the "use the map pin's address" button bumps it, and the field must
+  /// show the new text even while focused).
+  int _appliedAddressVersion = 0;
 
   @override
   void initState() {
@@ -93,7 +103,9 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     _restaurantNameController = TextEditingController(
       text: _viewModel.restaurantName,
     );
-    _phoneController = TextEditingController(text: _viewModel.restaurantPhone);
+    _phoneController = TextEditingController(
+      text: _viewModel.restaurantPhoneLocal,
+    );
     _websiteController = TextEditingController(
       text: _viewModel.restaurantWebsite,
     );
@@ -102,6 +114,14 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     );
     _appliedRestaurantNameVersion = _viewModel.extractedRestaurantNameVersion;
     _viewModel.onInit();
+
+    // Fill an empty address from the pinned (captured) spot once the first
+    // frame is up - the ViewModel only talks to the geocoder while a screen
+    // is watching it. A restored draft's address, or anything typed, is
+    // never overwritten.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _viewModel.prefillAddressFromMap();
+    });
 
     // A submission resumed in its ALREADY-CONFIRMED state checks once for
     // ANOTHER saved submission for the same restaurant: the Confirm button
@@ -123,6 +143,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     _phoneController.dispose();
     _websiteController.dispose();
     _addressController.dispose();
+    _addressFocusNode.dispose();
     _viewModel.dispose();
     super.dispose();
   }
@@ -287,14 +308,9 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     await viewModel.openAddMoreFood();
     if (!mounted) return;
     if (!viewModel.takeDuplicateFoodNotice()) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'This dish is already on the form. Update its entry instead of '
-          'adding it again.',
-        ),
-      ),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(viewModel.duplicateFoodNotice)));
   }
 
   /// "Confirm" under the Restaurant Name. It checks the mandatory photo and
@@ -412,6 +428,19 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                       _restaurantNameController.text = viewModel.restaurantName;
                     }
 
+                    // Same idea for the address: a map fill or a picked
+                    // suggestion must reach the field even while it is
+                    // focused (the force-sync), otherwise a focus-guarded
+                    // sync keeps the tourist's typing responsive.
+                    if (_appliedAddressVersion != viewModel.addressVersion) {
+                      _addressController.text = viewModel.restaurantAddress;
+                      _appliedAddressVersion = viewModel.addressVersion;
+                    } else if (!_addressFocusNode.hasFocus &&
+                        _addressController.text !=
+                            viewModel.restaurantAddress) {
+                      _addressController.text = viewModel.restaurantAddress;
+                    }
+
                     return Column(
                       children: <Widget>[
                         Expanded(
@@ -427,6 +456,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                                   image: viewModel.recognizedFoodImage,
                                   imageUrl: viewModel.recognizedFoodImageUrl,
                                   price: viewModel.primaryFoodPrice,
+                                  priceRules: viewModel.priceRules,
                                   priceWarning:
                                       viewModel.primaryFoodPriceWarning,
                                   suggestedRange:
@@ -447,6 +477,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                                     viewModel.additionalFoodPriceWarning,
                                 suggestedRangeFor:
                                     viewModel.additionalFoodSuggestedPriceText,
+                                priceRules: viewModel.priceRules,
                               ),
                               const SizedBox(height: AppSpacing.lg),
                               _ImageCaptureRow(
@@ -481,7 +512,9 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                               _ContactDetailsSection(
                                 phoneController: _phoneController,
                                 websiteController: _websiteController,
-                                phoneMaxLength: viewModel.phoneMaxLength,
+                                phonePrefix: viewModel.phoneCountryCode,
+                                phoneLocalMaxLength:
+                                    viewModel.phoneLocalMaxLength,
                                 websiteMaxLength: viewModel.websiteMaxLength,
                                 phoneError: viewModel.restaurantPhoneError,
                                 websiteError: viewModel.restaurantWebsiteError,
@@ -495,17 +528,15 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                                     viewModel.setRestaurantWebsite,
                               ),
                               const SizedBox(height: AppSpacing.lg),
-                              _RestaurantAddressSection(
-                                controller: _addressController,
-                                maxLength: viewModel.addressMaxLength,
-                                error: viewModel.restaurantAddressError,
-                                warning: viewModel.restaurantAddressWarning,
-                                onChanged: viewModel.setRestaurantAddress,
-                              ),
-                              const SizedBox(height: AppSpacing.lg),
                               const Text(
                                 'Location (GPS)',
                                 style: AppTextStyles.titleSmall,
+                              ),
+                              const SizedBox(height: AppSpacing.xs),
+                              const Text(
+                                'Choose the exact spot on the map first - the '
+                                'restaurant address below follows the pin.',
+                                style: AppTextStyles.bodySmall,
                               ),
                               const SizedBox(height: AppSpacing.sm),
                               if (viewModel.addLocationBlockMessage !=
@@ -522,6 +553,32 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                                     : viewModel.baseLocation,
                                 errorMessage: viewModel.locationError,
                                 onMove: viewModel.adjustLandmarkLocation,
+                                onRecover: viewModel.adjustedLocation.isKnown
+                                    ? viewModel.resetLandmarkLocation
+                                    : null,
+                                rangeMetres: viewModel.pinRangeMetres,
+                              ),
+                              const SizedBox(height: AppSpacing.lg),
+                              _RestaurantAddressSection(
+                                controller: _addressController,
+                                focusNode: _addressFocusNode,
+                                maxLength: viewModel.addressMaxLength,
+                                error: viewModel.restaurantAddressError,
+                                warning: viewModel.restaurantAddressWarning,
+                                pinWarning: viewModel.addressPinWarning,
+                                mapStatus: viewModel.mapAddressStatus,
+                                searchStatus: viewModel.addressSearchStatus,
+                                suggestions: viewModel.addressSuggestions,
+                                distanceLabel: viewModel.formatDistance,
+                                canApplyMapAddress:
+                                    viewModel.canApplyMapAddress,
+                                onApplyMapAddress:
+                                    viewModel.applyMapAddressFromPin,
+                                onSelectSuggestion: (AddressSuggestion s) {
+                                  _addressFocusNode.unfocus();
+                                  viewModel.selectAddressSuggestion(s);
+                                },
+                                onChanged: viewModel.setRestaurantAddress,
                               ),
                               const SizedBox(height: AppSpacing.lg),
                               OperatingHoursEditor(
@@ -662,6 +719,7 @@ class _PrimaryFoodSection extends StatelessWidget {
     this.variant = '',
     required this.image,
     required this.price,
+    required this.priceRules,
     required this.onPriceChanged,
     this.imageUrl,
     this.priceWarning,
@@ -683,6 +741,10 @@ class _PrimaryFoodSection extends StatelessWidget {
   final double? price;
   final ValueChanged<double> onPriceChanged;
 
+  /// The form's price rules (see [_PriceRules]) - handed to the price field
+  /// so the band and the text rules live in one place.
+  final _PriceRules priceRules;
+
   /// Optional soft price guidance (Gemini's suggested range) under the field.
   final String? priceWarning;
 
@@ -702,9 +764,18 @@ class _PrimaryFoodSection extends StatelessWidget {
       imageUrl: imageUrl,
       collapsible: true,
       dietaryConflicts: dietaryConflicts,
+      // The card's thumbnail is a square crop - the capture itself opens
+      // full-screen (the stored copy when the form came from a draft).
+      onImageTap: () => showEnlargedImage(
+        context,
+        file: image,
+        source: imageUrl,
+        semanticLabel: 'Captured photo of ${food.name}',
+      ),
       footer: _PriceField(
         label: 'Price (MYR)',
         initialValue: price,
+        priceRules: priceRules,
         warning: priceWarning,
         suggestedRange: suggestedRange,
         onChanged: onPriceChanged,
@@ -713,11 +784,36 @@ class _PrimaryFoodSection extends StatelessWidget {
   }
 }
 
-/// A single price entry field. STRICTLY capped + formatted so a pasted blob
-/// can never overflow: max 7 characters, digits and one dot only, at most 4
-/// integer digits and 2 decimals (the 0.01-1000 MYR rule). Shows a precise
-/// inline error under the field when the value is unparsable or outside the
-/// allowed range.
+/// The price rules every price field on the form follows, produced by
+/// `AddLandmarkViewModel.priceRules`: the inclusive band, the field's digit
+/// shape, and the two TEXT rules - the while-typing leading-zero rewrite and
+/// the on-leave two-decimal format. The rules themselves live in
+/// `LandmarkSubmissionLogic`.
+typedef _PriceRules = ({
+  double minPrice,
+  double maxPrice,
+  int integralDigits,
+  int decimalDigits,
+  String rangeText,
+  String Function(String text) normaliseEntryText,
+  String Function(String text) formatEntryText,
+});
+
+/// A single price entry field. STRICTLY capped + formatted so pasted content
+/// (words, Chinese characters, markup - anything that is not digits and one
+/// dot) can never enter: max 7 characters, at most 4 integral digits and 2
+/// decimals, inside the band the ViewModel hands over (0.01-9999.99 MYR).
+///
+/// Two text rules ride [priceRules]:
+///   * WHILE TYPING a leading zero is rewritten on the spot - "01" shows
+///     "1.00", a pasted "0010.00" shows "10.00" - so a displayed price can
+///     never start with 0 (the lone "0" of a "0.50" entry in progress is
+///     untouched);
+///   * once the field is LEFT every valid price shows exactly two decimals -
+///     "1" -> "1.00", "1.5" -> "1.50".
+///
+/// Shows a precise inline error under the field when the value is unparsable
+/// or outside the allowed range.
 ///
 /// [suggestedRange] (Gemini's suggested range as a display line) is shown
 /// whenever it is known - INCLUDING while the value is invalid, so the
@@ -729,6 +825,7 @@ class _PriceField extends StatefulWidget {
     required this.label,
     required this.initialValue,
     required this.onChanged,
+    required this.priceRules,
     this.warning,
     this.suggestedRange,
   });
@@ -736,6 +833,9 @@ class _PriceField extends StatefulWidget {
   final String label;
   final double? initialValue;
   final ValueChanged<double> onChanged;
+
+  /// The form's price rules (see [_PriceRules]).
+  final _PriceRules priceRules;
 
   /// Optional soft price guidance (Gemini's suggested range) shown under the
   /// field - a warning, not an error.
@@ -750,10 +850,11 @@ class _PriceField extends StatefulWidget {
 }
 
 class _PriceFieldState extends State<_PriceField> {
-  /// '1000.00' is the widest allowed value (0.01-1000 MYR, 2 decimals).
+  /// '9999.99' is the widest allowed value (0.01-9999.99 MYR, 2 decimals).
   static const int _maxLength = 7;
 
   late final TextEditingController _controller;
+  late final FocusNode _focusNode;
   String? _error;
 
   @override
@@ -762,12 +863,29 @@ class _PriceFieldState extends State<_PriceField> {
     _controller = TextEditingController(
       text: widget.initialValue?.toStringAsFixed(2) ?? '',
     );
+    _focusNode = FocusNode()..addListener(_onFocusChanged);
   }
 
   @override
   void dispose() {
+    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Leaving the field normalises a valid price to exactly two decimals
+  /// ("1" -> "1.00", "1.5" -> "1.50") - the same money format the field
+  /// opens with when a value is already known. Not a value change.
+  void _onFocusChanged() {
+    if (_focusNode.hasFocus) return;
+    final String formatted = widget.priceRules.formatEntryText(
+      _controller.text,
+    );
+    if (formatted == _controller.text) return;
+    _controller.value = TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
   }
 
   void _onChanged(String raw) {
@@ -775,16 +893,28 @@ class _PriceFieldState extends State<_PriceField> {
     String? error;
     double? parsed;
     if (value.isNotEmpty) {
-      final bool wellFormed = RegExp(r'^\d{1,4}(\.\d{1,2})?$').hasMatch(value);
-      parsed = wellFormed ? double.tryParse(value) : null;
+      // The formatter already guarantees digits + one dot; this check is
+      // the range one (plus the odd mid-entry state like "." or "0").
+      parsed = _parse(value);
       if (parsed == null) {
         error = 'Use numbers only, up to 2 decimals (e.g. 12.50).';
-      } else if (parsed <= 0 || parsed > 1000) {
-        error = 'Price must be between 0.01 and 1000 MYR.';
+      } else if (parsed < widget.priceRules.minPrice ||
+          parsed > widget.priceRules.maxPrice) {
+        error = 'Price must be between ${widget.priceRules.rangeText}.';
       }
     }
     if (error != _error) setState(() => _error = error);
     if (parsed != null) widget.onChanged(parsed);
+  }
+
+  /// A trailing dot is a natural mid-entry state ("12.") that Dart will not
+  /// parse - and "." alone is not a number yet.
+  static double? _parse(String text) {
+    final String parseable = text.endsWith('.')
+        ? text.substring(0, text.length - 1)
+        : text;
+    if (parseable.isEmpty) return null;
+    return double.tryParse(parseable);
   }
 
   @override
@@ -792,26 +922,79 @@ class _PriceFieldState extends State<_PriceField> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        TextField(
-          controller: _controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          maxLength: _maxLength,
-          maxLengthEnforcement: MaxLengthEnforcement.enforced,
-          inputFormatters: <TextInputFormatter>[
-            const _DecimalInputFormatter(
-              maxIntegralDigits: 4,
-              maxFractionDigits: 2,
+        // The form's standard frame for a field: label above, an
+        // icon-bordered box, the inline note underneath in the same styles
+        // the name/phone/website/address fields use. This one used to be a
+        // bare Material `TextField` (floating label, Material error text) -
+        // the only input on the form that did not match the others.
+        Text(widget.label, style: AppTextStyles.titleSmall),
+        const SizedBox(height: AppSpacing.sm),
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: _error != null
+                  ? AppColors.error
+                  : (widget.warning != null
+                        ? AppColors.warning
+                        : AppColors.outline),
             ),
-          ],
-          onChanged: _onChanged,
-          decoration: InputDecoration(
-            labelText: widget.label,
-            prefixText: 'RM ',
-            counterText: '',
-            errorText: _error,
-            errorMaxLines: 2,
+            borderRadius: AppRadius.cardRadius,
+          ),
+          child: Row(
+            children: <Widget>[
+              const Icon(
+                Icons.payments_outlined,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              // The currency mark sits inside the box like the phone field's
+              // fixed "+60" - never part of the editable value.
+              Text(
+                'RM',
+                style: AppTextStyles.bodyLarge.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  maxLength: _maxLength,
+                  maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                  inputFormatters: <TextInputFormatter>[
+                    _DecimalInputFormatter(
+                      maxIntegralDigits: widget.priceRules.integralDigits,
+                      maxFractionDigits: widget.priceRules.decimalDigits,
+                      normalise: widget.priceRules.normaliseEntryText,
+                    ),
+                  ],
+                  onChanged: _onChanged,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    counterText: '',
+                    hintText: '0.00',
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
+        if (_error != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            _error!,
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
+          ),
+        ],
         if (widget.warning != null && _error == null) ...<Widget>[
           const SizedBox(height: AppSpacing.xs),
           Text(
@@ -834,15 +1017,24 @@ class _PriceFieldState extends State<_PriceField> {
 
 /// Keeps a decimal price well-formed while typing: at most
 /// [maxIntegralDigits] digits before the dot, at most [maxFractionDigits]
-/// after it, and never more than one dot.
+/// after it, and never more than one dot. It also applies [normalise], which
+/// rewrites text that must never be DISPLAYED as typed (a leading zero -
+/// "01" shows "1.00"); content the shape check rejects - words, Chinese
+/// characters, a second dot - is dropped entirely (the old value is kept).
 class _DecimalInputFormatter extends TextInputFormatter {
   const _DecimalInputFormatter({
     required this.maxIntegralDigits,
     required this.maxFractionDigits,
+    required this.normalise,
   });
 
   final int maxIntegralDigits;
   final int maxFractionDigits;
+
+  /// The while-typing rewrite (see `_PriceField`'s doc); receives text that
+  /// already passed the shape check and returns it unchanged when there is
+  /// nothing to rewrite.
+  final String Function(String text) normalise;
 
   @override
   TextEditingValue formatEditUpdate(
@@ -854,7 +1046,13 @@ class _DecimalInputFormatter extends TextInputFormatter {
     final RegExp pattern = RegExp(
       '^(\\d{0,$maxIntegralDigits})(\\.(\\d{0,$maxFractionDigits})?)?\$',
     );
-    return pattern.hasMatch(text) ? newValue : oldValue;
+    if (!pattern.hasMatch(text)) return oldValue;
+    final String rewritten = normalise(text);
+    if (rewritten == text) return newValue;
+    return TextEditingValue(
+      text: rewritten,
+      selection: TextSelection.collapsed(offset: rewritten.length),
+    );
   }
 }
 
@@ -931,7 +1129,7 @@ class _RestaurantNameField extends StatelessWidget {
                     border: InputBorder.none,
                     isDense: true,
                     counterText: '',
-                    hintText: 'Enter restaurant name',
+                    hintText: 'e.g. Restoran Nasi Kandar Pelita',
                   ),
                 ),
               ),
@@ -970,17 +1168,33 @@ class _FormTextField extends StatelessWidget {
     required this.maxLength,
     required this.onChanged,
     required this.error,
+    this.leadingText,
     this.warning,
     this.status,
     this.statusColor = AppColors.textSecondary,
     this.keyboardType = TextInputType.text,
     this.maxLines = 1,
+    this.focusNode,
+    this.inputFormatters = const <TextInputFormatter>[],
   });
 
   final String label;
   final IconData icon;
   final String hint;
   final TextEditingController controller;
+
+  /// Extra input formatters, applied AFTER the control-character guard - the
+  /// phone field uses one to keep its value digits-only.
+  final List<TextInputFormatter> inputFormatters;
+
+  /// Fixed, NON-EDITABLE text shown inside the field before the input - the
+  /// phone's "+60" country code, which is never part of the editable value
+  /// (so it can neither be deleted nor typed over).
+  final String? leadingText;
+
+  /// Optional focus node - the address field needs one so the map and the
+  /// suggestion dropdown can keep their hands off while the tourist types.
+  final FocusNode? focusNode;
   final int maxLength;
   final ValueChanged<String> onChanged;
   final String? error;
@@ -1021,9 +1235,19 @@ class _FormTextField extends StatelessWidget {
             children: <Widget>[
               Icon(icon, color: AppColors.textSecondary),
               const SizedBox(width: AppSpacing.sm),
+              if (leadingText != null) ...<Widget>[
+                Text(
+                  leadingText!,
+                  style: AppTextStyles.bodyLarge.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+              ],
               Expanded(
                 child: TextField(
                   controller: controller,
+                  focusNode: focusNode,
                   keyboardType: keyboardType,
                   maxLines: maxLines,
                   maxLength: maxLength,
@@ -1033,6 +1257,7 @@ class _FormTextField extends StatelessWidget {
                     FilteringTextInputFormatter.deny(
                       RegExp(r'[\x00-\x1F\x7F]'),
                     ),
+                    ...inputFormatters,
                   ],
                   onChanged: onChanged,
                   decoration: InputDecoration(
@@ -1125,11 +1350,17 @@ class _ConfirmRestaurantRow extends StatelessWidget {
 /// real dotted domain, exactly one link). The website is also probed live
 /// while typing ("Checking this link…", then a note when it cannot be
 /// opened) and re-checked - blocking - at submit.
+///
+/// The phone field carries a FIXED, non-editable [phonePrefix] ("+60") and
+/// accepts DIGITS ONLY - no letters, words, symbols or separators can be
+/// typed or pasted in. The tourist edits only the national number, and the
+/// ViewModel stores it with the country code.
 class _ContactDetailsSection extends StatelessWidget {
   const _ContactDetailsSection({
     required this.phoneController,
     required this.websiteController,
-    required this.phoneMaxLength,
+    required this.phonePrefix,
+    required this.phoneLocalMaxLength,
     required this.websiteMaxLength,
     required this.phoneError,
     required this.websiteError,
@@ -1142,7 +1373,15 @@ class _ContactDetailsSection extends StatelessWidget {
 
   final TextEditingController phoneController;
   final TextEditingController websiteController;
-  final int phoneMaxLength;
+
+  /// The fixed country-code prefix shown inside the phone field - plain text,
+  /// never part of the field's editable value.
+  final String phonePrefix;
+
+  /// Cap for the phone's editable (national) part - the fixed prefix already
+  /// counts toward the stored cap.
+  final int phoneLocalMaxLength;
+
   final int websiteMaxLength;
   final String? phoneError;
   final String? websiteError;
@@ -1167,10 +1406,16 @@ class _ContactDetailsSection extends StatelessWidget {
       _FormTextField(
         label: 'Phone Number',
         icon: Icons.phone_outlined,
-        hint: '+60 12-345 6789',
+        hint: '123456789',
+        leadingText: phonePrefix,
         controller: phoneController,
-        maxLength: phoneMaxLength,
-        keyboardType: TextInputType.phone,
+        maxLength: phoneLocalMaxLength,
+        keyboardType: TextInputType.number,
+        inputFormatters: <TextInputFormatter>[
+          // Numbers only - words, symbols and separators never enter the
+          // field, whether typed or pasted.
+          FilteringTextInputFormatter.digitsOnly,
+        ],
         onChanged: onPhoneChanged,
         error: phoneError,
       ),
@@ -1194,37 +1439,180 @@ class _ContactDetailsSection extends StatelessWidget {
   );
 }
 
-/// Optional restaurant address field. When the tourist types anything it must
-/// be at least 5 characters, use only letters/digits/spaces/common address
-/// punctuation, and respect [maxLength].
+/// Optional restaurant address field, BOUND TO THE MAP: OpenStreetMap
+/// suggestions appear while the tourist types (nearest first, each labelled
+/// with its distance), picking one fills the field - and moves the pin when
+/// the place is within the pin range - and the pin itself can fill the field
+/// (see `AddLandmarkViewModel`'s address ↔ map section).
+///
+/// Whatever ends up in the field is validated strictly: letters/digits/spaces
+/// plus only `.,-/#`, no leading/trailing or repeated special characters, at
+/// least one digit, at least 10 characters, at most its cap (all rules live
+/// in `LandmarkSubmissionLogic`, surfaced by `AddLandmarkViewModel`).
 class _RestaurantAddressSection extends StatelessWidget {
   const _RestaurantAddressSection({
     required this.controller,
+    required this.focusNode,
     required this.maxLength,
     required this.error,
     this.warning,
+    this.pinWarning,
+    this.mapStatus,
+    this.searchStatus,
+    this.suggestions = const <AddressSuggestion>[],
+    required this.distanceLabel,
+    required this.canApplyMapAddress,
+    required this.onApplyMapAddress,
+    required this.onSelectSuggestion,
     required this.onChanged,
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final int maxLength;
   final String? error;
 
   /// Amber warning while the address is close to its cap (see ViewModel).
   final String? warning;
+
+  /// Amber warning after picking a suggestion farther than the pin may move -
+  /// the text is kept, the pin stays put, submission stays allowed.
+  final String? pinWarning;
+
+  /// "Looking up the address…" / the map lookup's inline notice.
+  final String? mapStatus;
+
+  /// The search's running / unavailable / nothing-found line.
+  final String? searchStatus;
+
+  /// OpenStreetMap suggestions, nearest first.
+  final List<AddressSuggestion> suggestions;
+
+  /// Formats one suggestion's distance ("350 m", "1.2 km").
+  final String Function(double metres) distanceLabel;
+
+  /// Whether the pin's own composed address differs from the field's text
+  /// and may be applied with one tap.
+  final bool canApplyMapAddress;
+  final VoidCallback onApplyMapAddress;
+  final ValueChanged<AddressSuggestion> onSelectSuggestion;
   final ValueChanged<String> onChanged;
 
   @override
-  Widget build(BuildContext context) => _FormTextField(
-    label: 'Restaurant Address (Optional)',
-    icon: Icons.place_outlined,
-    hint: 'e.g. 12, Jalan Bukit Bintang, Kuala Lumpur',
-    controller: controller,
-    maxLength: maxLength,
-    maxLines: 2,
-    onChanged: onChanged,
-    error: error,
-    warning: warning,
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      _FormTextField(
+        label: 'Restaurant Address (Optional)',
+        icon: Icons.place_outlined,
+        hint: 'e.g. 12, Jalan Bukit Bintang, Kuala Lumpur',
+        controller: controller,
+        focusNode: focusNode,
+        maxLength: maxLength,
+        maxLines: 2,
+        onChanged: onChanged,
+        error: error,
+        warning: warning,
+      ),
+      if (pinWarning != null) ...<Widget>[
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          pinWarning!,
+          style: AppTextStyles.bodySmall.copyWith(color: AppColors.warning),
+        ),
+      ],
+      if (mapStatus != null) ...<Widget>[
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          mapStatus!,
+          style: AppTextStyles.bodySmall.copyWith(
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
+      if (canApplyMapAddress) ...<Widget>[
+        const SizedBox(height: AppSpacing.xs),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: onApplyMapAddress,
+            icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+            label: const Text("Use the map pin's address"),
+          ),
+        ),
+      ],
+      if (suggestions.isNotEmpty) ...<Widget>[
+        const SizedBox(height: AppSpacing.xs),
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            border: Border.all(color: AppColors.outline),
+            borderRadius: AppRadius.cardRadius,
+          ),
+          // Bounded height: a search can return several places, and an
+          // unbounded box pushed the rest of the form off the screen. Up to
+          // about four rows show; the rest of the list scrolls inside it.
+          constraints: const BoxConstraints(
+            maxHeight: AppSizes.addressSuggestionListMaxHeight,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              children: <Widget>[
+                for (int i = 0; i < suggestions.length; i++) ...<Widget>[
+                  if (i > 0) const Divider(height: 1),
+                  InkWell(
+                    onTap: () => onSelectSuggestion(suggestions[i]),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                        vertical: AppSpacing.sm,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          const Icon(
+                            Icons.place_outlined,
+                            size: 18,
+                            color: AppColors.textSecondary,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(
+                            child: Text(
+                              suggestions[i].address,
+                              style: AppTextStyles.bodyMedium,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(
+                            distanceLabel(suggestions[i].distanceMeters),
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        // No attribution line here: the map card on this same form already
+        // carries "© OpenStreetMap contributors" (see `LocationPickerField`),
+        // and a second copy only read as one more confusing status line
+        // sitting among the field's errors.
+      ],
+      if (searchStatus != null && suggestions.isEmpty) ...<Widget>[
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          searchStatus!,
+          style: AppTextStyles.bodySmall.copyWith(
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
+    ],
   );
 }
 
@@ -1277,85 +1665,98 @@ class _ImageCaptureRow extends StatelessWidget {
             style: AppTextStyles.titleSmall,
           ),
           const SizedBox(height: AppSpacing.sm),
-          ClipRRect(
+          // The photo here is cover-cropped to a fixed height, so open it
+          // full-screen too - a signboard is hard to read on a crop.
+          EnlargeablePhoto(
+            onTap: () => showEnlargedImage(
+              context,
+              file: image,
+              source: storedUrl,
+              semanticLabel: isSignboard
+                  ? 'Captured signboard photo'
+                  : 'Captured stall photo',
+            ),
             borderRadius: AppRadius.cardRadius,
-            child: Stack(
-              children: <Widget>[
-                if (image != null)
-                  FutureBuilder<Uint8List>(
-                    future: image.readAsBytes(),
-                    builder:
-                        (
-                          BuildContext context,
-                          AsyncSnapshot<Uint8List> snapshot,
-                        ) {
-                          if (!snapshot.hasData) {
-                            return const SizedBox(
+            child: ClipRRect(
+              borderRadius: AppRadius.cardRadius,
+              child: Stack(
+                children: <Widget>[
+                  if (image != null)
+                    FutureBuilder<Uint8List>(
+                      future: image.readAsBytes(),
+                      builder:
+                          (
+                            BuildContext context,
+                            AsyncSnapshot<Uint8List> snapshot,
+                          ) {
+                            if (!snapshot.hasData) {
+                              return const SizedBox(
+                                width: double.infinity,
+                                height: AppSizes.capturedPhotoPreviewHeight,
+                                child: ColoredBox(
+                                  color: AppColors.surfaceVariant,
+                                ),
+                              );
+                            }
+                            return Image.memory(
+                              snapshot.data!,
                               width: double.infinity,
                               height: AppSizes.capturedPhotoPreviewHeight,
-                              child: ColoredBox(
-                                color: AppColors.surfaceVariant,
-                              ),
+                              fit: BoxFit.cover,
                             );
-                          }
-                          return Image.memory(
-                            snapshot.data!,
-                            width: double.infinity,
-                            height: AppSizes.capturedPhotoPreviewHeight,
-                            fit: BoxFit.cover,
-                          );
-                        },
-                  )
-                else
-                  Image.network(
-                    storedUrl!,
-                    width: double.infinity,
-                    height: AppSizes.capturedPhotoPreviewHeight,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const SizedBox(
+                          },
+                    )
+                  else
+                    Image.network(
+                      storedUrl!,
                       width: double.infinity,
                       height: AppSizes.capturedPhotoPreviewHeight,
-                      child: ColoredBox(color: AppColors.surfaceVariant),
-                    ),
-                  ),
-                Positioned(
-                  top: AppSpacing.xs,
-                  left: AppSpacing.xs,
-                  child: InkWell(
-                    onTap: onCancelImage,
-                    borderRadius: BorderRadius.circular(AppRadius.pill),
-                    child: Container(
-                      padding: const EdgeInsets.all(AppSpacing.xs),
-                      decoration: const BoxDecoration(
-                        color: AppColors.scrim,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.close,
-                        color: AppColors.onPrimary,
-                        size: AppSizes.addRangeIconSize,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const SizedBox(
+                        width: double.infinity,
+                        height: AppSizes.capturedPhotoPreviewHeight,
+                        child: ColoredBox(color: AppColors.surfaceVariant),
                       ),
                     ),
-                  ),
-                ),
-                Positioned(
-                  top: AppSpacing.xs,
-                  right: AppSpacing.xs,
-                  child: TextButton(
-                    onPressed: retake,
-                    style: TextButton.styleFrom(
-                      backgroundColor: AppColors.scrim,
-                    ),
-                    child: Text(
-                      'Retake',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.onPrimary,
-                        decoration: TextDecoration.underline,
+                  Positioned(
+                    top: AppSpacing.xs,
+                    left: AppSpacing.xs,
+                    child: InkWell(
+                      onTap: onCancelImage,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      child: Container(
+                        padding: const EdgeInsets.all(AppSpacing.xs),
+                        decoration: const BoxDecoration(
+                          color: AppColors.scrim,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          color: AppColors.onPrimary,
+                          size: AppSizes.addRangeIconSize,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                  Positioned(
+                    top: AppSpacing.xs,
+                    right: AppSpacing.xs,
+                    child: TextButton(
+                      onPressed: retake,
+                      style: TextButton.styleFrom(
+                        backgroundColor: AppColors.scrim,
+                      ),
+                      child: Text(
+                        'Retake',
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.onPrimary,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1405,6 +1806,7 @@ class _AdditionalFoodsSection extends StatelessWidget {
     required this.onRemove,
     required this.priceWarningFor,
     required this.suggestedRangeFor,
+    required this.priceRules,
   });
 
   final List<LandmarkFoodEntry> entries;
@@ -1418,6 +1820,10 @@ class _AdditionalFoodsSection extends StatelessWidget {
   /// Returns the suggested-range display line for one entry - see
   /// `_PriceField.suggestedRange`.
   final String? Function(int entryId) suggestedRangeFor;
+
+  /// The form's price rules (see [_PriceRules]) - handed to every price field
+  /// so the band and the text rules live in one place.
+  final _PriceRules priceRules;
 
   @override
   Widget build(BuildContext context) {
@@ -1443,12 +1849,21 @@ class _AdditionalFoodsSection extends StatelessWidget {
               image: entry.image,
               imageUrl: entry.photoRef?.url,
               collapsible: true,
+              // Every dish's own capture opens full-screen, like the
+              // primary food's.
+              onImageTap: () => showEnlargedImage(
+                context,
+                file: entry.image,
+                source: entry.photoRef?.url,
+                semanticLabel: 'Captured photo of ${entry.food.name}',
+              ),
               footer: Row(
                 children: <Widget>[
                   Expanded(
                     child: _PriceField(
-                      label: 'Price',
+                      label: 'Price (MYR)',
                       initialValue: entry.price,
+                      priceRules: priceRules,
                       warning: priceWarningFor(entry.entryId),
                       suggestedRange: suggestedRangeFor(entry.entryId),
                       onChanged: (double price) =>
@@ -1467,10 +1882,16 @@ class _AdditionalFoodsSection extends StatelessWidget {
               ),
             ),
           ),
-        OutlinedButton.icon(
-          onPressed: onAddMore,
-          icon: const Icon(Icons.add),
-          label: const Text('Add More Food'),
+        // Full width like the form's other secondary actions ("Confirm",
+        // "Recover to captured location", the two capture buttons) - it used
+        // to size to its own label and float against the card edges.
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: onAddMore,
+            icon: const Icon(Icons.add),
+            label: const Text('Add More Food'),
+          ),
         ),
       ],
     );

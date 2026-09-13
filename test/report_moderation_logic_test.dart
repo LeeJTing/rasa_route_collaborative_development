@@ -4,6 +4,7 @@ import 'package:rasa_route_collaborative_development/domain_model/report_categor
 import 'package:rasa_route_collaborative_development/domain_model/report_claim.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant_item.dart';
 import 'package:rasa_route_collaborative_development/domain_model/submitted_landmark.dart';
+import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/report_moderation_logic.dart';
 import 'package:rasa_route_collaborative_development/model/repositories/auth_repository.dart';
 import 'package:rasa_route_collaborative_development/model/repositories/map_repository.dart';
@@ -72,7 +73,9 @@ void main() {
       'at the threshold applies the fix and clears the matched rows',
       () async {
         final _FakeReportRepository report = _FakeReportRepository()
-          ..identicalCount = 5;
+          ..identicalCount = 5
+          // Three on-site pins, all inside 30 m of each other.
+          ..issuePins = <TouristLocation>[_pin(0), _pin(10), _pin(20)];
         final _FakeRestaurantRepository restaurant =
             _FakeRestaurantRepository();
         final ReportModerationLogic logic = _build(
@@ -91,6 +94,72 @@ void main() {
         expect(report.deletedIdentical, 1);
       },
     );
+
+    test('the applied spot is the median of the pins that agree', () async {
+      // The reported text is the OpenStreetMap wording for the spot, which is
+      // approximate - so the coordinates come from the VALID pins, and only
+      // from those that agree with each other (user's design, 2026-09-13).
+      final _FakeReportRepository report = _FakeReportRepository()
+        ..identicalCount = 5
+        ..issuePins = <TouristLocation>[
+          _pin(0),
+          _pin(10),
+          _pin(20),
+          // A dissenting tourist 500 m away must not drag the result.
+          _pin(500),
+        ];
+      final _FakeRestaurantRepository restaurant = _FakeRestaurantRepository();
+      final ReportModerationLogic logic = _build(
+        report,
+        restaurant: restaurant,
+        touristId: 't1',
+      );
+
+      await logic.submitClaims(claims: <ReportClaim>[_addressClaim()]);
+
+      expect(restaurant.updatedAddress, '12 Jalan Merdeka');
+      expect(restaurant.updatedAddressLatitude, closeTo(_latitudeAt(10), 1e-9));
+      expect(restaurant.updatedAddressLongitude, closeTo(101.69, 1e-9));
+    });
+
+    test('the fix is held back while the pins disagree', () async {
+      final _FakeReportRepository report = _FakeReportRepository()
+        ..identicalCount = 5
+        // Only two close together - not a consensus.
+        ..issuePins = <TouristLocation>[_pin(0), _pin(8), _pin(600)];
+      final _FakeRestaurantRepository restaurant = _FakeRestaurantRepository();
+      final ReportModerationLogic logic = _build(
+        report,
+        restaurant: restaurant,
+        touristId: 't1',
+      );
+
+      final outcome = await logic.submitClaims(
+        claims: <ReportClaim>[_addressClaim()],
+      );
+
+      expect(outcome.submittedCount, 1);
+      expect(outcome.applied, isEmpty);
+      expect(restaurant.updatedAddress, isNull);
+      // The rows are KEPT, so the next valid report re-runs the check.
+      expect(report.deletedIdentical, 0);
+    });
+
+    test('with no pins at all the fix is held back too', () async {
+      final _FakeReportRepository report = _FakeReportRepository()
+        ..identicalCount = 5;
+      final _FakeRestaurantRepository restaurant = _FakeRestaurantRepository();
+      final ReportModerationLogic logic = _build(
+        report,
+        restaurant: restaurant,
+        touristId: 't1',
+      );
+
+      await logic.submitClaims(claims: <ReportClaim>[_addressClaim()]);
+
+      expect(restaurant.updatedAddress, isNull);
+      expect(report.deletedIdentical, 0);
+    });
   });
 
   group('submitClaims - item price', () {
@@ -413,12 +482,21 @@ void main() {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-ReportClaim _addressClaim() => ReportClaim(
+ReportClaim _addressClaim({double? latitude, double? longitude}) => ReportClaim(
   placeKind: ReportPlaceKind.restaurant,
   placeId: 1,
   category: ReportCategory.address,
+  latitude: latitude,
+  longitude: longitude,
   payload: 'address:12 Jalan Merdeka',
 );
+
+/// A pin [northMetres] north of the reported spot. One degree of latitude is
+/// ~111.32 km, so the offsets in these tests read as metres.
+double _latitudeAt(double northMetres) => 3.139 + northMetres / 111320;
+
+TouristLocation _pin(double northMetres) =>
+    TouristLocation(latitude: _latitudeAt(northMetres), longitude: 101.69);
 
 String _closurePayload(ProposedClosure closure) =>
     'closed-temporarily:${closure.amount}:${closure.unit.columnValue}';
@@ -491,6 +569,7 @@ class _FakeReportRepository extends ReportRepository {
   int identicalCount = 0;
   int issueCount = 0;
   List<String> issuePayloads = const <String>[];
+  List<TouristLocation> issuePins = const <TouristLocation>[];
   Set<String> already = <String>{};
   final List<Map<String, Object?>> inserted = <Map<String, Object?>>[];
   int deletedIdentical = 0;
@@ -521,6 +600,10 @@ class _FakeReportRepository extends ReportRepository {
       issuePayloads;
 
   @override
+  Future<List<TouristLocation>> locationsForIssue(ReportClaim claim) async =>
+      issuePins;
+
+  @override
   Future<void> deleteIdentical(ReportClaim claim) async {
     deletedIdentical++;
   }
@@ -534,6 +617,8 @@ class _FakeReportRepository extends ReportRepository {
 class _FakeRestaurantRepository extends RestaurantRepository {
   List<RestaurantItem> reportable = const <RestaurantItem>[];
   String? updatedAddress;
+  double? updatedAddressLatitude;
+  double? updatedAddressLongitude;
   int? updatedPriceItemId;
   double? updatedPrice;
   List<int> frozenWithoutUntil = <int>[];
@@ -552,8 +637,15 @@ class _FakeRestaurantRepository extends RestaurantRepository {
   }
 
   @override
-  Future<void> updateRestaurantAddress(int restaurantId, String address) async {
+  Future<void> updateRestaurantAddress(
+    int restaurantId,
+    String address, {
+    double? latitude,
+    double? longitude,
+  }) async {
     updatedAddress = address;
+    updatedAddressLatitude = latitude;
+    updatedAddressLongitude = longitude;
   }
 
   @override

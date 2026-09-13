@@ -37,6 +37,117 @@ void main() {
     });
   });
 
+  group('phone stored in the restaurant-table format', () {
+    test('formats exactly like the live restaurant rows', () {
+      // Shapes verified against the `restaurant` table (2026-09-13).
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('126840922'),
+        '012-684 0922',
+      );
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('0126840922'),
+        '012-684 0922', // trunk 0 typed out of habit - same result
+      );
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('+60 12-684 0922'),
+        '012-684 0922', // an international shape normalises too
+      );
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('1125360286'),
+        '011-2536 0286',
+      );
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('341626527'),
+        '03-4162 6527',
+      );
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('045383414'),
+        '04-538 3414',
+      );
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('73313621'),
+        '07-331 3621',
+      );
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('88669099'),
+        '088-669 099',
+      );
+    });
+
+    test('a partial entry stays as its digits - typing is never mangled', () {
+      expect(LandmarkSubmissionLogic.formatMalaysianPhone('01268'), '01268');
+      expect(LandmarkSubmissionLogic.formatMalaysianPhone('126'), '126');
+      // Nothing to dial yet (or no digits at all) stays empty.
+      expect(LandmarkSubmissionLogic.formatMalaysianPhone('0'), '');
+      expect(LandmarkSubmissionLogic.formatMalaysianPhone('+60'), '');
+      expect(LandmarkSubmissionLogic.formatMalaysianPhone(''), '');
+    });
+
+    test('the stored shape validates and round-trips', () {
+      expect(logic.isValidMalaysianPhone('012-684 0922'), isTrue);
+      expect(logic.isValidMalaysianPhone('088-669 099'), isTrue);
+      expect(
+        LandmarkSubmissionLogic.formatMalaysianPhone('012-684 0922'),
+        '012-684 0922',
+      );
+      expect(
+        LandmarkSubmissionLogic.phoneNationalPart('012-684 0922'),
+        '126840922',
+      );
+      expect(LandmarkSubmissionLogic.phoneCountryCode, '+60');
+    });
+  });
+
+  group('restaurant-table phone format (ViewModel)', () {
+    test('a complete number stores like the restaurant rows', () {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      vm.setRestaurantPhone('126840922'); // typed WITHOUT the trunk 0
+      expect(vm.restaurantPhone, '012-684 0922');
+      expect(vm.restaurantPhoneError, isNull);
+
+      vm.setRestaurantPhone('0126840922'); // ...or WITH it - same result
+      expect(vm.restaurantPhone, '012-684 0922');
+
+      vm.setRestaurantPhone('1125360286');
+      expect(vm.restaurantPhone, '011-2536 0286');
+
+      vm.setRestaurantPhone('088669099');
+      expect(vm.restaurantPhone, '088-669 099');
+      expect(vm.restaurantPhoneError, isNull);
+      vm.dispose();
+    });
+
+    test('the field reads back the national digits', () {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      vm.setRestaurantPhone('0126840922');
+      expect(vm.restaurantPhoneLocal, '126840922');
+      vm.dispose();
+    });
+
+    test('an incomplete (or empty) entry stays as typed', () {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      vm.setRestaurantPhone('');
+      expect(vm.restaurantPhone, '');
+      expect(vm.restaurantPhoneError, isNull);
+
+      vm.setRestaurantPhone('0');
+      expect(vm.restaurantPhone, '');
+      expect(vm.restaurantPhoneError, isNull);
+
+      vm.setRestaurantPhone('01268'); // still typing
+      expect(vm.restaurantPhone, '01268');
+      expect(vm.restaurantPhoneError, isNotNull);
+      vm.dispose();
+    });
+
+    test('the editable part is capped so prefix + part fit the phone cap', () {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      expect(vm.phoneCountryCode, '+60');
+      expect(vm.phoneLocalMaxLength, vm.phoneMaxLength - '+60 '.length);
+      vm.dispose();
+    });
+  });
+
   group('website format validation (RFC 3986 + XSS rules)', () {
     test('accepts plain http(s) URLs with a dotted host', () {
       expect(logic.isValidWebsiteFormat('https://example.com'), isTrue);
@@ -195,12 +306,19 @@ void main() {
     });
   });
 
-  group('address free-text validation', () {
-    test('accepts common address characters incl. Chinese', () {
+  group('address free-text validation (strict Malaysian rules)', () {
+    test('accepts letters/digits/spaces and only .,-/# specials', () {
       expect(logic.isValidAddressText('12, Jalan Bukit Bintang, KL'), isTrue);
       expect(logic.isValidAddressText('No.12 Jalan ABC #3-4'), isTrue);
-      expect(logic.isValidAddressText('Lot 123 & 124, Jalan Baru'), isTrue);
+      expect(logic.isValidAddressText('12A/3, Jalan PV 9/1, Selangor'), isTrue);
       expect(logic.isValidAddressText('吉隆坡 武吉免登路12号'), isTrue);
+    });
+
+    test('rejects the removed punctuation (brackets, &, apostrophe, +)', () {
+      expect(logic.isValidAddressText('Lot 123 & 124, Jalan Baru'), isFalse);
+      expect(logic.isValidAddressText("12, Jalan O'Brien, KL"), isFalse);
+      expect(logic.isValidAddressText('Blok A (Tingkat 2), Jalan 3'), isFalse);
+      expect(logic.isValidAddressText('12+3, Jalan Empat, KL'), isFalse);
     });
 
     test('rejects control characters, unsupported symbols, digit-only', () {
@@ -210,6 +328,33 @@ void main() {
       // No letters at all is not an address.
       expect(logic.isValidAddressText('12345'), isFalse);
       expect(logic.isValidAddressText('12, 34, #56-78'), isFalse);
+    });
+
+    test('rejects a leading or trailing special character', () {
+      expect(logic.isValidAddressText('.12 Jalan ABC'), isFalse);
+      expect(logic.isValidAddressText('12 Jalan ABC.'), isFalse);
+      expect(logic.isValidAddressText('#12 Jalan ABC'), isFalse);
+      expect(logic.isValidAddressText('12 Jalan ABC/'), isFalse);
+      // Checked on the trimmed value - stray spaces hide nothing.
+      expect(logic.isValidAddressText('  12 Jalan ABC.  '), isFalse);
+      expect(logic.isValidAddressText('12 Jalan ABC'), isTrue);
+    });
+
+    test('rejects repeated special characters and digit-free text', () {
+      expect(logic.isValidAddressText('12,, Jalan ABC'), isFalse);
+      expect(logic.isValidAddressText('12--3 Jalan ABC'), isFalse);
+      expect(logic.isValidAddressText('12, Jalan ABC // 3'), isFalse);
+      // A street name with no house/unit/lot number is incomplete.
+      expect(logic.isValidAddressText('Jalan Ampang, Kuala Lumpur'), isFalse);
+    });
+
+    test('granular rules back the field messages', () {
+      expect(logic.addressHasAllowedCharacters("12, Jalan O'Neil"), isFalse);
+      expect(logic.addressStartsOrEndsWithSpecialChar('#12 Jalan A'), isTrue);
+      expect(logic.addressHasRepeatedSpecialChar('12,, Jalan A'), isTrue);
+      expect(logic.addressContainsDigit('Jalan Ampang'), isFalse);
+      expect(logic.addressContainsLetter('12 #56-78'), isFalse);
+      expect(LandmarkSubmissionLogic.minAddressLength, greaterThan(5));
     });
 
     test('blanket control-character guard', () {
@@ -241,17 +386,38 @@ void main() {
 
   group('field caps', () {
     test(
-      'name: stop 40, warn 31, submit <=30; website: warn 2043, stop 2048',
+      'name: stop 100, warn 91 (no submit cap); website: warn 2043, stop 2048',
       () {
-        expect(LandmarkSubmissionLogic.maxRestaurantNameLength, 40);
-        expect(LandmarkSubmissionLogic.restaurantNameWarnFromLength, 31);
-        expect(LandmarkSubmissionLogic.restaurantNameSubmitMaxLength, 30);
+        expect(LandmarkSubmissionLogic.maxRestaurantNameLength, 100);
+        expect(LandmarkSubmissionLogic.restaurantNameWarnFromLength, 91);
         expect(LandmarkSubmissionLogic.maxPhoneLength, 18);
         expect(LandmarkSubmissionLogic.maxWebsiteLength, 2048);
         expect(LandmarkSubmissionLogic.websiteWarnFromLength, 2043);
         expect(LandmarkSubmissionLogic.maxAddressLength, 150);
       },
     );
+  });
+
+  group('restaurant name length policy (ViewModel)', () {
+    test('90 characters is silent, 91-99 warns only, 100 is the cap', () {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      String name(int length) => 'N' * length;
+
+      vm.setRestaurantName(name(90));
+      expect(vm.restaurantNameError, isNull);
+      expect(vm.restaurantNameWarning, isNull);
+
+      // Advisory only: a 95-character name is still fine to submit - the
+      // warning just says it is close to the cap (the old rule blocked
+      // every name past 30 characters).
+      vm.setRestaurantName(name(95));
+      expect(vm.restaurantNameError, isNull);
+      expect(vm.restaurantNameWarning, contains('100'));
+
+      vm.setRestaurantName(name(100));
+      expect(vm.restaurantNameError, 'Restaurant name is too long.');
+      vm.dispose();
+    });
   });
 
   group('website warn zone (ViewModel, advisory only)', () {
@@ -284,12 +450,12 @@ void main() {
   });
 
   group('website field error (ViewModel)', () {
-    test('a multi-link paste gets the one-link message', () {
+    test('a multi-link paste gets the plain link message', () {
       final AddLandmarkViewModel vm = AddLandmarkViewModel();
       vm.setRestaurantWebsite('https://a.comhttps://b.com');
       expect(
         vm.restaurantWebsiteError,
-        'Enter only one website link, e.g. https://example.com.',
+        'Invalid website link, e.g. https://example.com.',
       );
       vm.setRestaurantWebsite('https://a.com/http://b.com');
       expect(vm.restaurantWebsiteError, isNotNull);
