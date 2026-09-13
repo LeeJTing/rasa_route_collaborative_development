@@ -205,10 +205,19 @@ class _PreferenceCardState extends State<_PreferenceCard> {
                           color: AppColors.accentBrown,
                         ),
                         const SizedBox(width: AppSpacing.xs),
-                        Text(
-                          widget.title,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
+                        // Expanded so the title can wrap inside the space left by
+                        // the badge and the chevron. A plain Text takes its full
+                        // intrinsic width in a Row, so "Culture Preference"
+                        // overflowed this row by a few pixels on a narrow phone.
+                        Expanded(
+                          child: Text(
+                            widget.title,
+                            maxLines:
+                                AppLayoutRatios.profileSectionTitleMaxLines,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
                         ),
                       ],
                     ),
