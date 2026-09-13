@@ -78,15 +78,11 @@ class RestaurantExpandedInfo extends StatelessWidget {
                                 ),
                               ),
                               if (item.price != null) ...<Widget>[
-                                const SizedBox(width: AppSpacing.md),
+                                const SizedBox(width: AppSpacing.sm),
                                 Text(
                                   '${item.currency} ${item.price!.toStringAsFixed(2)}',
                                   maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.end,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
+                                  style: Theme.of(context).textTheme.titleSmall
                                       ?.copyWith(color: AppColors.accentRust),
                                 ),
                               ],
@@ -94,10 +90,10 @@ class RestaurantExpandedInfo extends StatelessWidget {
                           ),
                           if (item.ingredients?.isNotEmpty == true) ...<Widget>[
                             const SizedBox(height: AppSpacing.xs),
+                            // The whole description, however long: no maxLines
+                            // and no ellipsis, so nothing is cut in half.
                             Text(
                               item.ingredients!,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -111,7 +113,7 @@ class _DashboardViewState extends State<DashboardView> {
         appBar: AppTopBar(
           title: 'Dashboard',
           showBackButton: false,
-          onProfileTap: () => Navigator.pushNamed(context, AppRoutes.profile),
+          onProfileTap: _viewModel.openProfile,
         ),
         body: Consumer<DashboardViewModel>(
           builder:
@@ -256,8 +258,7 @@ class _DashboardViewState extends State<DashboardView> {
             left: AppSpacing.lg,
             bottom: AppSpacing.lg,
             child: HeatmapLegend(
-              maximumPlaceCount:
-                  viewModel.distribution.maximumPlaceCount,
+              maximumPlaceCount: viewModel.distribution.maximumPlaceCount,
             ),
           ),
 
@@ -344,11 +345,14 @@ class _DashboardViewState extends State<DashboardView> {
               onHeartTap: viewModel.toggleCurrentSwipeFoodLike,
               onContinue: viewModel.continueSwipeSession,
               onStartNew: viewModel.startNewSwipeSession,
-              onMatchesTap: () => Navigator.pushNamed(
-                context,
-                AppRoutes.matchesRecommendation,
-                arguments: viewModel.matchesRecommendationRequest,
-              ),
+              onMatchesTap: () async {
+                await Navigator.pushNamed(
+                  context,
+                  AppRoutes.matchesRecommendation,
+                  arguments: viewModel.matchesRecommendationRequest,
+                );
+                await viewModel.refreshSwipeSessionAfterMatches();
+              },
             ),
           ),
 
@@ -370,6 +374,15 @@ class _DashboardViewState extends State<DashboardView> {
                   onUpdate: viewModel.applyMapUpdate,
                   onDismiss: viewModel.dismissMapUpdate,
                   busy: viewModel.isBusy,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
+              if (viewModel.swipeQueueUpdateAvailable) ...<Widget>[
+                MapUpdateBanner(
+                  message: viewModel.swipeQueueUpdateMessage,
+                  onUpdate: viewModel.applySwipeQueueUpdate,
+                  onDismiss: viewModel.dismissSwipeQueueUpdate,
+                  busy: viewModel.swipeLoading,
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
@@ -501,6 +514,22 @@ class _DashboardViewState extends State<DashboardView> {
             final LatLng centre = camera.center;
             final double zoom = camera.zoom;
             final LatLngBounds bounds = camera.visibleBounds;
+            // Swipe Mode deliberately never moves the camera. Its fixed
+            // discovery area is the unobstructed top half of this map, above
+            // the expanded card panel. Convert that screen rectangle here,
+            // where the Flutter Map geometry belongs, and pass only plain
+            // coordinates into the ViewModel.
+            final double mapWidth = camera.nonRotatedSize.x;
+            final double topHalfHeight = camera.nonRotatedSize.y / 2;
+            final bool hasMeasuredMap = mapWidth > 0 && topHalfHeight > 0;
+            final LatLng swipeNorthWest = hasMeasuredMap
+                ? camera.pointToLatLng(const math.Point<double>(0, 0))
+                : bounds.northWest;
+            final LatLng swipeSouthEast = hasMeasuredMap
+                ? camera.pointToLatLng(
+                    math.Point<double>(mapWidth, topHalfHeight),
+                  )
+                : bounds.southEast;
             Future<void>.microtask(() {
               if (!mounted) return;
               viewModel.onCameraChanged(
@@ -511,6 +540,10 @@ class _DashboardViewState extends State<DashboardView> {
                 west: bounds.west,
                 north: bounds.north,
                 east: bounds.east,
+                swipeSouth: swipeSouthEast.latitude,
+                swipeWest: swipeNorthWest.longitude,
+                swipeNorth: swipeNorthWest.latitude,
+                swipeEast: swipeSouthEast.longitude,
               );
             });
           },
@@ -550,6 +583,12 @@ class _DashboardViewState extends State<DashboardView> {
           // REQ102_41 - aggregated counts while the map is zoomed out. One
           // badge per grid cell, counted in Postgres: at a Malaysia-wide view
           // this is seven markers instead of twelve thousand.
+          //
+          // **One layer, for both.** Search results and the filtered map are
+          // grouped by one grid in one query, so a cell is one badge whatever
+          // it holds - the count is every place in it. There were briefly two
+          // layers and two grids, which is how a 100 and a 5 came to sit on top
+          // of each other for places in the same street.
           if (viewModel.clusters.isNotEmpty)
             MarkerLayer(
               markers: viewModel.clusters
@@ -561,6 +600,9 @@ class _DashboardViewState extends State<DashboardView> {
                       height: _clusterDiameter(cluster.count),
                       child: _ClusterMarker(
                         count: cluster.count,
+                        // How much of this badge the keyword is responsible
+                        // for, which is what colours it.
+                        searchCount: cluster.searchCount,
                         onTap: () => viewModel.zoomIntoCluster(cluster),
                       ),
                     ),
@@ -582,6 +624,10 @@ class _DashboardViewState extends State<DashboardView> {
                           viewModel.selectedPin?.referenceId ==
                               pin.referenceId &&
                           viewModel.selectedPin?.kind == pin.kind,
+                      // Drawn from the same layer as everything else, marked
+                      // so the tourist can tell which of these the keyword
+                      // put there.
+                      searchResult: viewModel.isSearchPin(pin),
                       onTap: () => viewModel.selectPin(pin),
                     ),
                   ),
@@ -622,22 +668,51 @@ double _clusterDiameter(int count) {
 
 /// "1,200 places here", drawn as one tappable circle.
 class _ClusterMarker extends StatelessWidget {
-  const _ClusterMarker({required this.count, required this.onTap});
+  const _ClusterMarker({
+    required this.count,
+    required this.onTap,
+    this.searchCount = 0,
+  });
 
+  /// Every place in this cell, the keyword's and the filter's alike.
   final int count;
+
+  /// How many of [count] the keyword is responsible for.
+  ///
+  /// Three looks, not two, because a cell is not one thing or the other:
+  ///
+  ///  * **none** - the filtered map's own badge, in the primary colour;
+  ///  * **all** - everything here answers the keyword, so the badge is filled
+  ///    in the search colour;
+  ///  * **some** - filled as the map's, ringed in the search colour. A mixed
+  ///    cell is exactly the case a second layer used to draw as two badges
+  ///    fighting for the same pixel, and pretending it is wholly one or the
+  ///    other would be the same lie in one marker instead of two.
+  final int searchCount;
+
+  bool get _hasSearch => searchCount > 0;
+  bool get _allSearch => searchCount >= count;
+
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: AppColors.primary,
+        color: _allSearch ? AppColors.clusterSearchFill : AppColors.primary,
         border: Border.fromBorderSide(
-          BorderSide(color: AppColors.surface, width: 2),
+          BorderSide(
+            // A mixed cell keeps the map's fill and takes the search colour as
+            // its edge, so it reads as "some of these" at a glance.
+            color: _hasSearch && !_allSearch
+                ? AppColors.clusterSearchFill
+                : AppColors.surface,
+            width: _hasSearch && !_allSearch ? 3 : 2,
+          ),
         ),
-        boxShadow: <BoxShadow>[
+        boxShadow: const <BoxShadow>[
           BoxShadow(
             color: AppColors.shadow,
             blurRadius: 4,
@@ -692,31 +767,53 @@ class _PinMarker extends StatelessWidget {
     required this.pin,
     required this.selected,
     required this.onTap,
+    this.searchResult = false,
   });
 
   final MapPin pin;
   final bool selected;
+
+  /// Whether the current keyword is what put this marker on the map.
+  ///
+  /// Marked with a ring rather than a colour of its own: the two pin colours
+  /// say where a place came from, and a search result is still a restaurant or
+  /// still somebody's landmark.
+  final bool searchResult;
+
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final bool userSubmitted = pin.kind == MapPinKind.landmark;
+    final Widget marker = Icon(
+      Icons.location_on,
+      size: selected || searchResult
+          ? AppSizes.mapPinSize
+          : AppSizes.mapPinSize - 6,
+      color: userSubmitted
+          ? AppColors.pinUserLandmark
+          : AppColors.pinSystemRestaurant,
+      shadows: <Shadow>[
+        const Shadow(color: AppColors.surface, blurRadius: 3),
+        Shadow(
+          color: selected ? AppColors.pinSelectedRing : AppColors.surface,
+          blurRadius: selected ? 6 : 4,
+        ),
+      ],
+    );
+
     return GestureDetector(
       onTap: onTap,
-      child: Icon(
-        Icons.location_on,
-        size: selected ? AppSizes.mapPinSize : AppSizes.mapPinSize - 6,
-        color: userSubmitted
-            ? AppColors.pinUserLandmark
-            : AppColors.pinSystemRestaurant,
-        shadows: <Shadow>[
-          const Shadow(color: AppColors.surface, blurRadius: 3),
-          Shadow(
-            color: selected ? AppColors.pinSelectedRing : AppColors.surface,
-            blurRadius: selected ? 6 : 4,
-          ),
-        ],
-      ),
+      child: searchResult
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.pinSearchHalo,
+                border: Border.all(color: AppColors.pinSearchRing, width: 2),
+              ),
+              child: marker,
+            )
+          : marker,
     );
   }
 }

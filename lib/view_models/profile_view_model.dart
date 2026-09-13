@@ -29,6 +29,7 @@ class ProfileViewModel extends BaseViewModel {
   List<FoodPreference> _foodPreferences = const <FoodPreference>[];
   List<DietaryRestriction> _dietaryRestrictions = const <DietaryRestriction>[];
   String _email = '';
+  bool _discoverySettingsChanged = false;
 
   /// The signed-in tourist's email (from the auth session).
   String get email => _email;
@@ -47,6 +48,10 @@ class ProfileViewModel extends BaseViewModel {
 
   List<DietaryRestriction> get dietaryRestrictions =>
       List<DietaryRestriction>.unmodifiable(_dietaryRestrictions);
+
+  /// Whether this Profile visit successfully saved a preference or dietary
+  /// change that can affect the Dashboard's Swipe queue.
+  bool get discoverySettingsChanged => _discoverySettingsChanged;
 
   @override
   Future<void> onInit() => load();
@@ -75,13 +80,20 @@ class ProfileViewModel extends BaseViewModel {
   /// pops (its `State` stays alive), so without this reload the chips would
   /// keep showing the pre-edit selection.
   Future<void> openFoodPreference() async {
-    await AppNavigator.push(AppRoutes.editFoodPreference);
+    final bool changed =
+        await AppNavigator.push<bool>(AppRoutes.editFoodPreference) ?? false;
+    if (!changed) return;
+    _discoverySettingsChanged = true;
     await load();
   }
 
   /// Same reload-on-return behaviour for the dietary-restriction editor.
   Future<void> openDietaryRestriction() async {
-    await AppNavigator.push(AppRoutes.editDietaryRestriction);
+    final bool changed =
+        await AppNavigator.push<bool>(AppRoutes.editDietaryRestriction) ??
+        false;
+    if (!changed) return;
+    _discoverySettingsChanged = true;
     await load();
   }
 

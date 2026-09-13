@@ -9,7 +9,7 @@ import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
 import 'current_location_facade.dart';
 import 'food_recognition_view_model.dart'
-    show AdditionalFoodCaptureResult, LandmarkDraftHandoff;
+    show AdditionalFoodCaptureResult, ExistingFormFood, LandmarkDraftHandoff;
 
 /// ViewModel for `LandmarkDetailView`.
 ///
@@ -134,6 +134,17 @@ class LandmarkDetailViewModel extends BaseViewModel
     _referenceLocation = location;
   }
 
+  /// The dishes already on the form this food would join (additional-food
+  /// flow) - see [LandmarkDraftHandoff.pendingExistingFormFoods]; empty for
+  /// the primary flow.
+  List<ExistingFormFood> _existingFormFoods = const <ExistingFormFood>[];
+
+  /// Set from `LandmarkDraftHandoff` in the View's `initState` - see
+  /// [LandmarkDraftHandoff.pendingExistingFormFoods].
+  void setExistingFormFoods(List<ExistingFormFood> foods) {
+    _existingFormFoods = List<ExistingFormFood>.unmodifiable(foods);
+  }
+
   /// Whether this food was captured more than 50 m from the first food, so
   /// it is not the same restaurant. False when either spot is unknown -
   /// the same fail-open rule the capture screen applies.
@@ -147,6 +158,28 @@ class LandmarkDetailViewModel extends BaseViewModel
   String? get captureRangeBlockMessage => isCaptureOutOfRange
       ? landmarkLogic.captureTooFarMessage('This food')
       : null;
+
+  /// Why this food cannot join the form - it is ALREADY on it (the same
+  /// duplicate rule the capture screen applies, see
+  /// `LandmarkSubmissionLogic.isSameDishAndVariant`). Only meaningful for
+  /// the additional-food return ([returnToFormAsAdditionalFood]); null
+  /// otherwise, and while the dish is not a duplicate.
+  String? get duplicateFormFoodBlockMessage {
+    if (!_returnToFormAsAdditionalFood) return null;
+    final LocalFood? food = _recognizedFood;
+    if (food == null) return null;
+    for (final ExistingFormFood existing in _existingFormFoods) {
+      if (landmarkLogic.isSameDishAndVariant(
+        existing.food,
+        existing.variant,
+        food,
+        _variant,
+      )) {
+        return landmarkLogic.duplicateFoodNotice;
+      }
+    }
+    return null;
+  }
 
   LocalFood? get recognizedFood => _recognizedFood;
   XFile? get capturedImage => _capturedImage;
@@ -250,6 +283,10 @@ class LandmarkDetailViewModel extends BaseViewModel
     // paths - the additional-food return below AND opening a new form -
     // otherwise opening "View Details" would be a way around the block.
     if (isCaptureOutOfRange) return;
+    // Already on the form (the duplicate rule) - the capture screen already
+    // withheld its button for this; this screen must not be a way around
+    // that block either.
+    if (duplicateFormFoodBlockMessage != null) return;
     if (_returnToFormAsAdditionalFood) {
       final XFile? image = _capturedImage;
       if (image == null) return;

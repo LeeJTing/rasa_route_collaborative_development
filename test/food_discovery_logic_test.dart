@@ -33,6 +33,35 @@ void main() {
       expect(result.savedRestaurantCount, 1);
     });
 
+    test('prioritises favourites when explicit main tastes are tied', () async {
+      repository.preferences = const <FoodPreference>[];
+      repository.favouriteFoodIds = <int>{3};
+
+      final SwipeModePreparation result = await logic.prepareSwipeMode(
+        latitude: 1,
+        longitude: 1,
+      );
+
+      expect(result.queue.map((LocalFood food) => food.id), <int>[3, 1, 2]);
+    });
+
+    test(
+      'explicit main taste remains ahead of an unrelated favourite',
+      () async {
+        repository.preferences = const <FoodPreference>[
+          FoodPreference(id: 3, kind: FoodPreferenceKind.taste, name: 'Sweet'),
+        ];
+        repository.favouriteFoodIds = <int>{1};
+
+        final SwipeModePreparation result = await logic.prepareSwipeMode(
+          latitude: 1,
+          longitude: 1,
+        );
+
+        expect(result.queue.map((LocalFood food) => food.id), <int>[3, 1, 2]);
+      },
+    );
+
     test('starts, moves, and saves a like locally', () async {
       final SwipeModePreparation preparation = await logic.prepareSwipeMode(
         latitude: 1,
@@ -120,7 +149,11 @@ void main() {
         final SwipeModePreparation refreshed = await logic
             .refreshAfterProfileChange(latitude: 1, longitude: 1);
 
-        expect(refreshed.queue.map((LocalFood food) => food.id), <int>[1, 2, 3]);
+        expect(refreshed.queue.map((LocalFood food) => food.id), <int>[
+          1,
+          2,
+          3,
+        ]);
         expect(refreshed.restrictedFoodIds, <int>{3});
         expect(refreshed.savedSession!.candidateFoodIds, <int>[1, 2, 3]);
         expect(refreshed.savedSession!.currentIndex, 0);
@@ -130,28 +163,58 @@ void main() {
       },
     );
 
-    test('profile refresh keeps a newly restricted current card visible', () async {
-      repository.savedSession = const SwipeSession(
-        sessionId: 'saved',
-        touristId: 'tourist-1',
-        stateCode: 'TST',
-        candidateFoodIds: <int>[1, 3, 2],
-        likedFoodIds: <int>[3],
-        dislikedFoodIds: <int>[],
-        currentIndex: 1,
-      );
-      repository.restrictionIdsByFood = <int, Set<int>>{
-        3: <int>{7},
-      };
+    test(
+      'profile refresh keeps a newly restricted current card visible',
+      () async {
+        repository.savedSession = const SwipeSession(
+          sessionId: 'saved',
+          touristId: 'tourist-1',
+          stateCode: 'TST',
+          candidateFoodIds: <int>[1, 3, 2],
+          likedFoodIds: <int>[3],
+          dislikedFoodIds: <int>[],
+          currentIndex: 1,
+        );
+        repository.restrictionIdsByFood = <int, Set<int>>{
+          3: <int>{7},
+        };
 
-      final SwipeModePreparation refreshed = await logic
-          .refreshAfterProfileChange(latitude: 1, longitude: 1);
+        final SwipeModePreparation refreshed = await logic
+            .refreshAfterProfileChange(latitude: 1, longitude: 1);
 
-      expect(refreshed.savedSession!.candidateFoodIds, <int>[1, 3, 2]);
-      expect(refreshed.savedSession!.currentIndex, 1);
-      expect(refreshed.savedSession!.likedFoodIds, <int>[3]);
-      expect(refreshed.restrictedFoodIds, contains(3));
-    });
+        expect(refreshed.savedSession!.candidateFoodIds, <int>[1, 3, 2]);
+        expect(refreshed.savedSession!.currentIndex, 1);
+        expect(refreshed.savedSession!.likedFoodIds, <int>[3]);
+        expect(refreshed.restrictedFoodIds, contains(3));
+      },
+    );
+
+    test(
+      'profile update can rebuild the complete queue from its new ranking',
+      () async {
+        repository.savedSession = const SwipeSession(
+          sessionId: 'saved',
+          touristId: 'tourist-1',
+          stateCode: 'TST',
+          candidateFoodIds: <int>[3, 2, 1],
+          likedFoodIds: <int>[1],
+          dislikedFoodIds: <int>[2],
+          currentIndex: 2,
+        );
+
+        final SwipeModePreparation refreshed = await logic
+            .refreshAfterProfileChange(
+              latitude: 1,
+              longitude: 1,
+              rebuildWholeQueue: true,
+            );
+
+        expect(refreshed.savedSession!.candidateFoodIds, <int>[1, 3, 2]);
+        expect(refreshed.savedSession!.currentIndex, 0);
+        expect(refreshed.savedSession!.likedFoodIds, <int>[1]);
+        expect(refreshed.savedSession!.dislikedFoodIds, <int>[2]);
+      },
+    );
 
     test('excludes food backed only by a restaurant closed now', () async {
       repository.hoursByPlace = const <String, List<OpeningHour>>{
@@ -166,6 +229,19 @@ void main() {
       );
 
       expect(result.queue.map((LocalFood food) => food.id), isNot(contains(1)));
+    });
+
+    test('limits the queue to restaurant foods inside the viewport', () async {
+      final SwipeModePreparation result = await logic.prepareSwipeMode(
+        latitude: 1,
+        longitude: 1,
+        south: 0.99,
+        west: 1.008,
+        north: 1.01,
+        east: 1.015,
+      );
+
+      expect(result.queue.map((LocalFood food) => food.id), <int>[1]);
     });
   });
 }
@@ -198,6 +274,11 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
   Map<int, Set<int>> restrictionIdsByFood = <int, Set<int>>{
     2: <int>{7},
   };
+  List<FoodPreference> preferences = const <FoodPreference>[
+    FoodPreference(id: 1, kind: FoodPreferenceKind.category, name: 'Malay'),
+    FoodPreference(id: 2, kind: FoodPreferenceKind.taste, name: 'Spicy'),
+  ];
+  Set<int> favouriteFoodIds = <int>{};
 
   @override
   Future<String?> currentTouristId() async => 'tourist-1';
@@ -233,7 +314,8 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
           localFoodId: 1,
           foodName: 'Nasi Lemak',
           latitude: 1,
-          longitude: 1.01, foodType: '',
+          longitude: 1.01,
+          foodType: '',
         ),
         FoodOccurrence(
           sourceId: '20',
@@ -242,7 +324,8 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
           localFoodId: 2,
           foodName: 'Curry Mee',
           latitude: 1,
-          longitude: 1.02, foodType: '',
+          longitude: 1.02,
+          foodType: '',
         ),
         FoodOccurrence(
           sourceId: '30',
@@ -251,7 +334,8 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
           localFoodId: 3,
           foodName: 'Cendol',
           latitude: 1,
-          longitude: 1.005, foodType: '',
+          longitude: 1.005,
+          foodType: '',
         ),
         FoodOccurrence(
           sourceId: '40',
@@ -260,7 +344,8 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
           localFoodId: 4,
           foodName: 'Outside Dish',
           latitude: 4,
-          longitude: 4, foodType: '',
+          longitude: 4,
+          foodType: '',
         ),
       ];
 
@@ -272,10 +357,11 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
   @override
   Future<List<FoodPreference>> foodPreferencesForTourist(
     String touristId,
-  ) async => const <FoodPreference>[
-    FoodPreference(id: 1, kind: FoodPreferenceKind.category, name: 'Malay'),
-    FoodPreference(id: 2, kind: FoodPreferenceKind.taste, name: 'Spicy'),
-  ];
+  ) async => preferences;
+
+  @override
+  Future<Set<int>> favouriteFoodIdsForTourist(String touristId) async =>
+      favouriteFoodIds;
 
   @override
   Future<List<DietaryRestriction>> dietaryRestrictionsForTourist(

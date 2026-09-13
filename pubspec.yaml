@@ -58,6 +58,12 @@ dependencies:
   # Persistent state-scoped Swipe Mode sessions (REQ103_4 - REQ103_6).
   shared_preferences: ^2.5.5
 
+  # Fuzzy matching for Smart Search's local-food half (REQ102_30): Dice
+  # coefficient over bigrams, so "nasi lemka" still finds Nasi Lemak. Used
+  # against the 368-row cached food catalogue only - restaurant and landmark
+  # names are matched in Postgres by pg_trgm and never downloaded.
+  string_similarity: ^2.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
