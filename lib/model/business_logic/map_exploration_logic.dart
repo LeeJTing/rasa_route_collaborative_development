@@ -108,8 +108,24 @@ class MapExplorationLogic {
   /// Where a city search result settles the map (REQ102_22).
   static const double cityZoom = 13;
 
-  /// Where a restaurant or landmark search result settles - street level.
-  static const double addressZoom = 16;
+  /// Where a restaurant or landmark search result settles.
+  ///
+  /// **The map's maximum**, not a comfortable street zoom. A tourist who typed
+  /// a restaurant's name and picked it out of the list has already said which
+  /// place they mean; what they want next is to see exactly where it is, and
+  /// the card that opens underneath is already telling them the name, the
+  /// photo and the rating - the map does not have to carry the identification
+  /// as well. At 16 the pin arrived among its neighbours and the tourist was
+  /// left picking it out again, which is the question they had just answered.
+  ///
+  /// It is the zoom `expandCluster` already uses for the same reason: it is
+  /// where this module goes when individual places have to be told apart.
+  ///
+  /// A city or a state result is unaffected - see [cityZoom] and
+  /// `Region.defaultZoom`. If this reads too tight on a real device, one step
+  /// back (17) keeps the street and its neighbours in frame and leaves the
+  /// "+" button live; nothing else has to change.
+  static const double addressZoom = maximumZoom;
 
   /// What people type instead of a state's official name.
   ///
