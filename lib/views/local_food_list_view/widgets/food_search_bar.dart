@@ -32,7 +32,7 @@ class FoodSearchBar extends StatelessWidget {
         maxLines: 1,
         textInputAction: TextInputAction.search,
         decoration: InputDecoration(
-          hintText: 'Search local food...',
+          hintText: 'Search local food by name...',
           prefixIcon: const Icon(Icons.search),
           suffixIcon: controller.text.isNotEmpty
               ? InkWell(

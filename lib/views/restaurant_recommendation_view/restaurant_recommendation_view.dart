@@ -11,9 +11,9 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../view_models/dashboard_view_model.dart';
 import '../../view_models/restaurant_recommendation_view_model.dart';
-import '../common_widgets/app_image.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
+import '../common_widgets/enlarged_image_dialog.dart';
 import 'widgets/restaurant_card.dart';
 import 'widgets/restaurant_food_type_filter.dart';
 
@@ -119,10 +119,11 @@ class _RestaurantRecommendationViewState
                             arguments: restaurant.id,
                           ),
                           onFoodImageTap: (RestaurantItem item) =>
-                              _showEnlargedImage(
+                              showRestaurantItemImage(
                                 context,
-                                item.imageUrl,
-                                item.foodName,
+                                semanticLabel: item.foodName,
+                                source: item.imageUrl,
+                                fromLinkedFood: item.imageFromLinkedFood,
                               ),
                         );
                       }
@@ -139,10 +140,10 @@ class _RestaurantRecommendationViewState
                             _openLandmarkDetails(context, landmark),
                         onImageTap:
                             (String? source, String semanticLabel) =>
-                            _showEnlargedImage(
+                            showEnlargedImage(
                               context,
-                              source,
-                              semanticLabel,
+                              semanticLabel: semanticLabel,
+                              source: source,
                             ),
                       );
                     },
@@ -168,50 +169,6 @@ class _RestaurantRecommendationViewState
     }
     MapSelectionHandoff().pendingLandmarkId = landmark.id;
     Navigator.pushNamed(context, AppRoutes.landmarkPlaceDetail);
-  }
-
-  Future<void> _showEnlargedImage(
-      BuildContext context,
-      String? source,
-      String semanticLabel,
-      ) {
-    if (source?.trim().isNotEmpty != true) return Future<void>.value();
-    return showDialog<void>(
-      context: context,
-      barrierColor: AppColors.scrim,
-      builder: (BuildContext dialogContext) => Dialog(
-        insetPadding: EdgeInsets.zero,
-        backgroundColor: AppColors.transparent,
-        child: Center(
-          child: Stack(
-            children: <Widget>[
-              InteractiveViewer(
-                minScale: 1,
-                maxScale: 4,
-                child: AppImage(
-                  source: source,
-                  fit: BoxFit.contain,
-                  semanticLabel: semanticLabel,
-                ),
-              ),
-              Positioned(
-                top: AppSpacing.sm,
-                right: AppSpacing.sm,
-                child: Material(
-                  color: AppColors.surface,
-                  shape: const CircleBorder(),
-                  child: IconButton(
-                    tooltip: 'Close image',
-                    onPressed: () => Navigator.pop(dialogContext),
-                    icon: const Icon(Icons.close),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
 

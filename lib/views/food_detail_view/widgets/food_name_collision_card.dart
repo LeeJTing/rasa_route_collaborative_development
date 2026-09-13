@@ -5,7 +5,7 @@ import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/local_food.dart';
 import '../../common_widgets/app_image.dart';
 import '../../common_widgets/app_tag_chip.dart';
-import 'food_notice_banner.dart';
+import '../../common_widgets/food_notice_banner.dart';
 
 /// Figma's Food Detail name-collision section: the alternate dish is shown as
 /// a real food card, followed by the ordering caution.
