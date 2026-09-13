@@ -530,10 +530,12 @@ $_lookalikeRules
       rewrite, shorten or "improve" text that is still true;
     - if the photo shows a VARIANT the record does not describe ("Siew Yoke
       Nasi Lemak" over "Nasi Lemak"), ADAPT those fields to the dish
-      actually shown: change what the variant changes (the ingredients gain
-      the variant's own ones, the category/culture move to the tradition it
-      belongs to) and keep every part of the record the variant does not
-      affect;
+      actually shown: change what the variant changes and keep every part of
+      the record the variant does not affect. The ingredients gain the
+      variant's own ones, and the CATEGORY + cultural background follow the
+      VARIANT, not the base dish - a nasi lemak served with siew yoke (roast
+      pork) is no longer a Malay dish, so it is categorized under the
+      tradition that variant comes from (Chinese), never "Malay";
     - never turn the record into an answer of its own: it is background, and
       your own observation of the photo still decides the dish (and, for a
       typed name, whether the photo matches that name).
@@ -629,7 +631,9 @@ $_lookalikeRules
      spelled exactly as listed: All-Day Dining | Breakfast | Lunch | High
      Tea | Dinner | Supper | Street Food | Dessert | Beverage (Beverage for
      drinks). Never invent another value.
-  7. Categorize: Malay|Chinese|Indian|Nyonya|Sabah|Sarawak|Other
+  7. Categorize: Malay|Chinese|Indian|Nyonya|Sabah|Sarawak|Other - the dish
+     AS SHOWN. For a VARIANT this is the variant's own tradition, never the
+     base dish's: a nasi lemak with siew yoke (roast pork) is not "Malay".
   8. Cultural background
   9. Taste/flavour tags (e.g. Spicy, Sweet, Rich, Savoury, Sour) - up to 3,
      plus "mainTaste": the single most important taste of the dish.
@@ -872,7 +876,9 @@ $_lookalikeRules
     - meal type - EXACTLY ONE of the catalogue's own values: All-Day Dining,
       Breakfast, Lunch, High Tea, Dinner, Supper, Street Food, Dessert or
       Beverage (Beverage for drinks; never invent another value)
-    - food category (Malay|Chinese|Indian|Nyonya|Sabah|Sarawak|Other)
+    - food category (Malay|Chinese|Indian|Nyonya|Sabah|Sarawak|Other) for the
+      dish AS SHOWN - a variant that changes the tradition moves it (a nasi
+      lemak with siew yoke (roast pork) is not "Malay")
     - localClass ("a"|"b"|"c"|"d" per the local-food rules above) and
       isMalaysianLocalFood (true for a/b, false for c/d - they must agree)
     - cultural background
