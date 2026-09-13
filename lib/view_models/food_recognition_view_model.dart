@@ -134,6 +134,16 @@ class LandmarkDraftHandoff {
   /// "View Details" can never bypass the block.
   TouristLocation? pendingReferenceLocation;
 
+  /// The dishes ALREADY on the form an additional-food capture is for.
+  /// Handed over by `AddLandmarkViewModel.openAddMoreFood` and read (then
+  /// cleared) by `FoodRecognitionViewModel`, so a re-captured duplicate is
+  /// blocked ON THE SPOT - "Add to Landmark" is withheld and the reason is
+  /// shown right there - instead of bouncing the tourist back with a notice
+  /// on the form. Also carried into `LandmarkDetailView` (see
+  /// [pushLandmarkDetail]), whose add action re-checks the same rule so
+  /// "View Details" can never bypass the block.
+  List<ExistingFormFood> pendingExistingFormFoods = const <ExistingFormFood>[];
+
   /// The saved (incomplete) form the tourist chose to continue - read by
   /// `AddLandmarkView.initState` when the form was opened from the draft
   /// list, or auto-continued because the same dish was captured again.
@@ -229,6 +239,14 @@ class LandmarkDraftHandoff {
     return value ?? TouristLocation.unknown;
   }
 
+  /// The dishes already on the form this capture returns to - see
+  /// [pendingExistingFormFoods].
+  List<ExistingFormFood> takeExistingFormFoods() {
+    final List<ExistingFormFood> value = pendingExistingFormFoods;
+    pendingExistingFormFoods = const <ExistingFormFood>[];
+    return value;
+  }
+
   /// The saved form to resume, or null when this is a fresh capture.
   LandmarkDraft? takeDraft() {
     final LandmarkDraft? value = pendingDraft;
@@ -242,7 +260,8 @@ class LandmarkDraftHandoff {
   /// recognized food", called by
   /// `FoodRecognitionViewModel.proceedToViewDetails`. The first food's
   /// capture spot ([referenceLocation], when there is one) rides along so
-  /// the detail screen re-checks the 50 m same-restaurant rule itself.
+  /// the detail screen re-checks the 50 m same-restaurant rule itself, and
+  /// [existingFormFoods] rides along so it re-checks the duplicate rule too.
   void pushLandmarkDetail(
     LocalFood food,
     XFile? image, {
@@ -256,6 +275,7 @@ class LandmarkDraftHandoff {
     String variant = '',
     TouristLocation captureLocation = TouristLocation.unknown,
     TouristLocation referenceLocation = TouristLocation.unknown,
+    List<ExistingFormFood> existingFormFoods = const <ExistingFormFood>[],
   }) {
     pendingRecognizedFood = food;
     pendingCapturedImage = image;
@@ -276,6 +296,10 @@ class LandmarkDraftHandoff {
     pendingReferenceLocation = referenceLocation.isKnown
         ? referenceLocation
         : null;
+    // The form's own dishes ride along too, so the detail screen re-checks
+    // the duplicate rule itself - "View Details" must never be a way
+    // around the block either.
+    pendingExistingFormFoods = existingFormFoods;
     // Only overwrite when a real confidence is passed - a later re-push
     // without one (e.g. from the detail screen) must keep the value set here.
     if (confidence > 0) pendingConfidence = confidence;
@@ -336,6 +360,7 @@ class LandmarkDraftHandoff {
     pendingVariant = '';
     pendingCaptureLocation = null;
     pendingReferenceLocation = null;
+    pendingExistingFormFoods = const <ExistingFormFood>[];
     pendingDraft = null;
   }
 }
@@ -364,6 +389,12 @@ typedef LandmarkImageCaptureResult = ({
   /// location (50 m same-restaurant rule) before the form may use it.
   TouristLocation captureLocation,
 });
+
+/// One dish already on the form an additional-food capture returns to: the
+/// dish itself (name, catalogue id and synonyms) plus the variant it was
+/// recorded with - exactly what the shared "is this the same thing to add?"
+/// rule needs (see `LandmarkSubmissionLogic.isSameDishAndVariant`).
+typedef ExistingFormFood = ({LocalFood food, String variant});
 
 /// What this screen hands back to `AddLandmarkView` when reused for
 /// additional-food capture - the recognized food AND its own photo, so
@@ -441,6 +472,18 @@ class FoodRecognitionViewModel extends BaseViewModel
   /// `onInit()` - see [LandmarkDraftHandoff.pendingReferenceLocation].
   void setReferenceLocation(TouristLocation location) {
     _referenceLocation = location;
+    safeNotifyListeners();
+  }
+
+  /// The dishes already on the form this capture returns to - see
+  /// [LandmarkDraftHandoff.pendingExistingFormFoods]. Empty for the primary
+  /// flow (no form exists yet).
+  List<ExistingFormFood> _existingFormFoods = const <ExistingFormFood>[];
+
+  /// Set from `LandmarkDraftHandoff` in the View's `initState`, before
+  /// `onInit()` - see [LandmarkDraftHandoff.pendingExistingFormFoods].
+  void setExistingFormFoods(List<ExistingFormFood> foods) {
+    _existingFormFoods = List<ExistingFormFood>.unmodifiable(foods);
     safeNotifyListeners();
   }
 
@@ -720,6 +763,29 @@ class FoodRecognitionViewModel extends BaseViewModel
         )
         ? null
         : landmarkLogic.captureTooFarMessage(capturedWhat);
+  }
+
+  /// Why "Add to Landmark" is withheld for the recognised food: it is
+  /// ALREADY on the form this capture returns to - the same duplicate rule
+  /// the form itself applies (`LandmarkSubmissionLogic.isSameDishAndVariant`,
+  /// synonyms and all), checked HERE so the button is never offered for a
+  /// dish that would only be rejected after popping back. Null otherwise -
+  /// and always for the primary flow, which has no form yet.
+  String? get duplicateFormFoodBlockMessage {
+    if (_purpose != FoodRecognitionPurpose.additionalFood) return null;
+    final LocalFood? food = _recognizedFood;
+    if (food == null) return null;
+    for (final ExistingFormFood existing in _existingFormFoods) {
+      if (landmarkLogic.isSameDishAndVariant(
+        existing.food,
+        existing.variant,
+        food,
+        _variant,
+      )) {
+        return landmarkLogic.duplicateFoodNotice;
+      }
+    }
+    return null;
   }
 
   /// Re-derives [_dietaryConflicts] from the current food tags and the user's
@@ -1015,7 +1081,8 @@ class FoodRecognitionViewModel extends BaseViewModel
   /// The first food's capture spot ([_referenceLocation]) rides along, so the
   /// detail screen re-checks the 50 m same-restaurant rule before this food
   /// may join a landmark - a capture this screen blocked must stay blocked
-  /// there too.
+  /// there too. The form's own dishes ([_existingFormFoods]) ride along for
+  /// the same reason: the duplicate rule is re-checked there as well.
   void proceedToViewDetails() {
     final LocalFood? food = _recognizedFood;
     if (food == null) return;
@@ -1035,6 +1102,7 @@ class FoodRecognitionViewModel extends BaseViewModel
       variant: _variant,
       captureLocation: _captureLocation,
       referenceLocation: _referenceLocation,
+      existingFormFoods: _existingFormFoods,
     );
   }
 

@@ -265,13 +265,26 @@ class ReportPlaceViewModel extends BaseViewModel {
     final List<OpeningHour> existing = _hours[day] ?? const <OpeningHour>[];
     if (rangeIndex >= existing.length) return;
     final OpeningHour current = existing[rangeIndex];
+    final int? opening = isOpeningTime ? minutes : current.opensAt;
+    int? closing = isOpeningTime ? current.closesAt : minutes;
+
+    // A closing time at or BEFORE the opening time means the NEXT day
+    // ("10:00 -> 02:00"): encoded as minutes past midnight + 1440, exactly
+    // like the Add-Landmark form - see `OpeningHoursRows`.
+    if (opening != null && closing != null) {
+      closing = reportLogic.encodeCloseTime(
+        opensAt: opening,
+        closeMinutes: closing,
+      );
+    }
+
     final List<OpeningHour> updated = List<OpeningHour>.of(existing);
     updated[rangeIndex] = OpeningHour(
       id: 0,
       day: day,
       status: DayStatus.open,
-      opensAt: isOpeningTime ? minutes : current.opensAt,
-      closesAt: isOpeningTime ? current.closesAt : minutes,
+      opensAt: opening,
+      closesAt: closing,
     );
     _hours = Map<Weekday, List<OpeningHour>>.of(_hours)..[day] = updated;
     _hoursError = null;

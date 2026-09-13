@@ -152,11 +152,17 @@ abstract final class AppSizes {
   static const double openLabelSlotWidth = 36;
 
   /// Opening/closing time dropdown width - a FIXED width wide enough to show
-  /// "00:00" on one line, so the box never resizes when the time changes.
+  /// "00:00"-"24:00" on one line, so the box never resizes when the time
+  /// changes.
   static const double timeDropdownWidth = 86;
 
   /// Recognised-food card label column (Dish/Variant/...) width.
   static const double fieldLabelWidth = 110;
+
+  /// Max height of the address-suggestion list that opens under the address
+  /// field - about four rows, after which the list scrolls on its own
+  /// instead of pushing the rest of the form further down.
+  static const double addressSuggestionListMaxHeight = 220;
 
   /// Compact label column for the recognition-result popup.
   static const double fieldLabelWidthCompact = 84;

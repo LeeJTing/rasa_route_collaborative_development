@@ -78,23 +78,31 @@ class OperatingHoursEditor extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             if (onCopyMondayToAll != null)
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Expanded(child: Text(title, style: AppTextStyles.titleSmall)),
-                  // Flexible + ellipsis so the long button label never
-                  // overflows the card's right edge on narrow screens.
-                  Flexible(
-                    child: TextButton(
-                      onPressed: onCopyMondayToAll,
-                      style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                      child: Text(
-                        'Copy Monday to All Weekdays',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodySmall.copyWith(
-                          decoration: TextDecoration.underline,
-                          color: AppColors.primary,
-                        ),
+                  Text(title, style: AppTextStyles.titleSmall),
+                  // The link gets its OWN line. Sharing the title's row left
+                  // it barely a third of the card on a phone, so the label
+                  // ellipsized to "Copy Monday to All Week…" - the whole
+                  // label fits one line easily when it has the full width.
+                  // Padding/tap target are tightened so the extra line costs
+                  // as little height as possible.
+                  TextButton(
+                    onPressed: onCopyMondayToAll,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      alignment: Alignment.centerLeft,
+                    ),
+                    child: Text(
+                      'Copy Monday to All Weekdays',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        decoration: TextDecoration.underline,
+                        color: AppColors.primary,
                       ),
                     ),
                   ),
@@ -323,6 +331,15 @@ class OperatingHoursDayRow extends StatelessWidget {
 /// option, meaning "open until midnight," not the same slot as "00:00").
 /// Replaces the old wheel-style `showTimePicker` dialog - the tourist picks
 /// straight from the fixed list instead.
+///
+/// An overnight close is INVISIBLE here, on purpose: a period ending past
+/// midnight is encoded as minutes + 1440 ("02:00 next day" is 1560, see
+/// `OpeningHoursRows`) so the rules and the database rows are right, but the
+/// box simply shows "02:00" like any other time - the tourist picked 02:00,
+/// and a "(+1)"/"next day" marker only raised the question of what it
+/// meant. Picking works on the normal 00:00-24:00 list: a pick at or before
+/// the opening time becomes the next day's time (see
+/// `AddLandmarkViewModel.setRangeTime`).
 class TimeDropdownField extends StatelessWidget {
   const TimeDropdownField({
     super.key,
@@ -330,7 +347,8 @@ class TimeDropdownField extends StatelessWidget {
     required this.onChanged,
   });
 
-  /// Minutes since midnight (0-1440). 1440 itself is the "24:00" option.
+  /// Minutes since midnight: 0-1440 for an opening time, or 1440 + minutes
+  /// for an overnight closing time (1560 = 02:00 the next day).
   final int? minutes;
   final ValueChanged<int> onChanged;
 
@@ -346,12 +364,20 @@ class TimeDropdownField extends StatelessWidget {
 
   /// Rounds to the nearest valid dropdown entry - guards against a stored
   /// value that doesn't land exactly on a 15-minute mark (DropdownButton
-  /// throws if its value doesn't match one of its items exactly).
+  /// throws if its value doesn't match one of its items exactly). An
+  /// overnight close (past 1440) snaps onto its minutes-of-day item
+  /// (1560 -> 02:00).
   static int? _snap(int? value) {
     if (value == null) return null;
-    final int snapped = ((value / _stepMinutes).round()) * _stepMinutes;
+    final int minutesOfDay = value > _maxMinutes ? value - _maxMinutes : value;
+    final int snapped = ((minutesOfDay / _stepMinutes).round()) * _stepMinutes;
     return snapped.clamp(0, _maxMinutes);
   }
+
+  /// The label of one dropdown ITEM: an overnight close reuses its
+  /// minutes-of-day item, so 1560 (02:00 the next day) reads as plain
+  /// "02:00" - the next-day meaning lives in the VALUE, not the label.
+  static String _itemLabel(int itemMinutes) => _label(itemMinutes);
 
   @override
   Widget build(BuildContext context) {
@@ -378,6 +404,14 @@ class TimeDropdownField extends StatelessWidget {
           iconSize: AppSizes.compactCheckboxIconSize,
           style: AppTextStyles.bodySmall,
           hint: Text('--:--', style: AppTextStyles.bodySmall),
+          selectedItemBuilder: (BuildContext context) => <Widget>[
+            for (int m = 0; m <= _maxMinutes; m += _stepMinutes)
+              Text(
+                _itemLabel(m),
+                style: AppTextStyles.bodySmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+          ],
           items: <DropdownMenuItem<int>>[
             for (int m = 0; m <= _maxMinutes; m += _stepMinutes)
               DropdownMenuItem<int>(value: m, child: Text(_label(m))),

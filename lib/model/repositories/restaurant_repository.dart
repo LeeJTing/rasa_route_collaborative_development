@@ -14,6 +14,7 @@ import '../data_models/restaurant_item_data_model.dart';
 import '../data_models/local_food_data_model.dart';
 import '../data_models/local_food_image_data_model.dart';
 import '../data_models/opening_hours_data_model.dart';
+import 'opening_hours_rows.dart';
 
 /// Supabase-backed restaurant catalogue used by Quick Mode.
 ///
@@ -714,13 +715,40 @@ class RestaurantRepository {
   }
 
   /// 1 operating hours: replaces ONE weekday's stored rows with the reported
-  /// proposal (delete that day's rows, insert the proposed rows). Used when a
-  /// day's hours claim reaches its threshold - only that day is touched.
+  /// proposal (delete that day's rows - plus the tail it previously wrote
+  /// onto the next day - then insert the proposed rows, overnight tails
+  /// included). Used when a day's hours claim reaches its threshold - only
+  /// that day is touched.
   Future<void> replaceRestaurantOpeningHourDay(
     int restaurantId,
     Weekday day,
     List<OpeningHour> rows,
   ) async {
+    final List<Map<String, dynamic>> storedRows = await api.selectAll(
+      APIManager.tableOpeningHours,
+      columns:
+          'opening_hours_id, day, status, opening_time, closing_time, '
+          'landmark_id, restaurant_id',
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    final Map<Weekday, List<OpeningHour>> storedByDay =
+        <Weekday, List<OpeningHour>>{};
+    for (final OpeningHour hour in openingHoursFromRows(storedRows)) {
+      storedByDay.putIfAbsent(hour.day, () => <OpeningHour>[]).add(hour);
+    }
+
+    final OpeningHour? oldTail = OpeningHoursRows.tailOf(storedByDay, day);
+    if (oldTail != null) {
+      await api.deleteRows(
+        APIManager.tableOpeningHours,
+        eq: <String, Object?>{
+          'restaurant_id': restaurantId,
+          'day': _dayName(OpeningHoursRows.dayAfter(day)),
+          'opening_time': '00:00:00',
+          'closing_time': _formatTime(oldTail.closesAt!),
+        },
+      );
+    }
     await api.deleteRows(
       APIManager.tableOpeningHours,
       eq: <String, Object?>{
@@ -731,6 +759,15 @@ class RestaurantRepository {
     if (rows.isNotEmpty) {
       await _insertOpeningHours(restaurantId, rows);
     }
+    // Restore the tail the PREVIOUS day wrote onto this day's morning - the
+    // delete above removed it with the day's own rows.
+    final OpeningHour? incomingTail = OpeningHoursRows.tailOf(
+      storedByDay,
+      OpeningHoursRows.dayBefore(day),
+    );
+    if (incomingTail != null) {
+      await _insertOpeningHours(restaurantId, <OpeningHour>[incomingTail]);
+    }
     invalidate();
   }
 
@@ -740,20 +777,24 @@ class RestaurantRepository {
   ) async {
     int nextId = await _nextOpeningHoursId();
     for (final OpeningHour hour in hours) {
-      final bool isOpen = hour.status == DayStatus.open;
-      await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
-        'opening_hours_id': nextId++,
-        'day': _dayName(hour.day),
-        'status': hour.status.name,
-        'opening_time': isOpen && hour.opensAt != null
-            ? _formatTime(hour.opensAt!)
-            : null,
-        'closing_time': isOpen && hour.closesAt != null
-            ? _formatTime(hour.closesAt!)
-            : null,
-        'landmark_id': null,
-        'restaurant_id': restaurantId,
-      });
+      // An overnight row is split into its end-of-day row plus the next-day
+      // tail - see `OpeningHoursRows` for the convention.
+      for (final OpeningHour stored in OpeningHoursRows.splitForStorage(hour)) {
+        final bool isOpen = stored.status == DayStatus.open;
+        await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
+          'opening_hours_id': nextId++,
+          'day': _dayName(stored.day),
+          'status': stored.status.name,
+          'opening_time': isOpen && stored.opensAt != null
+              ? _formatTime(stored.opensAt!)
+              : null,
+          'closing_time': isOpen && stored.closesAt != null
+              ? _formatTime(stored.closesAt!)
+              : null,
+          'landmark_id': null,
+          'restaurant_id': restaurantId,
+        });
+      }
     }
   }
 
@@ -849,12 +890,17 @@ class RestaurantRepository {
         ),
       );
     }
-    hours.sort((OpeningHour a, OpeningHour b) {
-      final int dayOrder = a.day.index.compareTo(b.day.index);
-      if (dayOrder != 0) return dayOrder;
-      return (a.opensAt ?? -1).compareTo(b.opensAt ?? -1);
-    });
-    return List<OpeningHour>.unmodifiable(hours);
+    // Overnight tails fold back into the day that owns them, so the detail
+    // page shows "Monday 10:00 AM - 2:00 AM" instead of a separate Tuesday
+    // 12:00 AM - 2:00 AM row (see `OpeningHoursRows`).
+    final List<OpeningHour> merged = OpeningHoursRows.mergeTails(hours);
+    final List<OpeningHour> sorted = List<OpeningHour>.of(merged)
+      ..sort((OpeningHour a, OpeningHour b) {
+        final int dayOrder = a.day.index.compareTo(b.day.index);
+        if (dayOrder != 0) return dayOrder;
+        return (a.opensAt ?? -1).compareTo(b.opensAt ?? -1);
+      });
+    return List<OpeningHour>.unmodifiable(sorted);
   }
 
   Weekday? _weekday(String value) {

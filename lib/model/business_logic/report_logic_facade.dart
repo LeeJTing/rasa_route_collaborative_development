@@ -4,6 +4,7 @@ import '../../domain_model/report_outcome.dart';
 import '../../domain_model/opening_hour.dart';
 import 'report_moderation_logic.dart';
 import 'report_moderation_rules.dart';
+import 'opening_hours_logic.dart';
 
 /// The shared report flow (restaurant + submitted landmark): loading the
 /// place's current menu items for the picker, submitting one tourist's claims,
@@ -63,6 +64,16 @@ class ReportLogicFacade {
 
   String? operatingHoursError(Map<Weekday, List<OpeningHour>> operatingHours) =>
       ReportModerationRules.operatingHoursError(operatingHours);
+
+  /// The encoded close for an edited hours row: a closing time at or before
+  /// the opening time means the NEXT day - "10:00 -> 02:00" becomes
+  /// 600 -> 1560 (minutes past midnight + 1440). See
+  /// `OpeningHoursLogic.encodeClose` / `OpeningHoursRows`.
+  int encodeCloseTime({required int opensAt, required int closeMinutes}) =>
+      OpeningHoursLogic.encodeClose(
+        opensAt: opensAt,
+        closeMinutes: closeMinutes,
+      );
 
   /// Canonical payload for one day's proposed hours (see
   /// `ReportModerationRules.hoursPayload`). Exposed so the report form and
