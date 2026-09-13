@@ -23,10 +23,30 @@ class LocationRepository {
   /// While a dev GPS mock is live this returns the mocked spot instead, so
   /// every consumer (the background monitor, Find Me, ...) agrees on the same
   /// location for as long as the mock is active.
+  ///
+  /// Right after a mock STOPS the fix is asked from the platform location
+  /// manager instead: Android's fused provider can keep answering with the
+  /// mocked spot as if it were real, which left "Stop mock" still behaving
+  /// like the mock was on (a capture taken at the tourist's real spot was
+  /// measured against the mocked one and rejected as > 50 m away). The mock
+  /// only ever touched the platform's TEST provider, so the platform's own
+  /// fix is the one that can be trusted. Best-effort: a platform fix that
+  /// does not arrive falls back to the normal call (see
+  /// `DeviceCapabilityManager.currentLocation`).
   Future<TouristLocation> currentLocation() async {
     if (mock.isActive) return mockLocation ?? TouristLocation.unknown;
-    return _toDomain(await device.currentLocation());
+    final DateTime? stoppedAt = mock.stoppedAt;
+    final bool justStopped =
+        stoppedAt != null &&
+        DateTime.now().difference(stoppedAt) < postMockTrustWindow;
+    return _toDomain(
+      await device.currentLocation(preferPlatformProvider: justStopped),
+    );
   }
+
+  /// How long after a mock stops the platform provider is preferred - the
+  /// fused provider's cached mock can outlive the mock itself by a while.
+  static const Duration postMockTrustWindow = Duration(minutes: 2);
 
   /// Continuous GPS fixes, consumed by `LocationMonitor`.
   Stream<TouristLocation> locationStream({

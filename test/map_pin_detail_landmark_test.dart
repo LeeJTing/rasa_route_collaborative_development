@@ -123,7 +123,7 @@ void main() {
 
       final MapPin pin = await logic.pinDetail(_landmarkPin());
 
-      expect(pin.category, 'Dessert restaurant');
+      expect(pin.category, 'Dessert Restaurant');
       expect(pin.priceRange, 'RM5-8');
       expect(pin.servedFoods, <String>['Ice Kacang', 'Cendol']);
       expect(pin.openNow, isTrue);
@@ -189,7 +189,7 @@ void main() {
 
     expect(
       (await logic.pinDetail(_landmarkPin())).category,
-      'Chinese restaurant',
+      'Chinese Restaurant',
     );
   });
 
@@ -207,7 +207,7 @@ void main() {
 
     expect(
       (await logic.pinDetail(_landmarkPin())).category,
-      'Malay restaurant',
+      'Malay Restaurant',
     );
   });
 

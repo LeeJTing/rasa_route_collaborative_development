@@ -548,7 +548,9 @@ class FoodDiscoveryLogic {
         placeImageUrl: occurrence.placeImageUrl,
         placeCategory: occurrence.placeCategory,
         placeRating: occurrence.placeRating,
+        placeAddress: occurrence.placeAddress,
         itemPrice: occurrence.itemPrice,
+        itemDescription: occurrence.itemDescription,
       );
     }
     return occurrence;

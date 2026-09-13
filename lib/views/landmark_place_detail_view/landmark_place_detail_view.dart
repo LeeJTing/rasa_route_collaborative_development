@@ -17,6 +17,7 @@ import '../common_widgets/app_image.dart';
 import '../common_widgets/app_tag_chip.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
+import '../common_widgets/enlarged_image_dialog.dart';
 import '../common_widgets/food_image_fallback.dart';
 import '../common_widgets/landmark_item_formatting.dart';
 import '../common_widgets/place_menu_section.dart';
@@ -289,9 +290,12 @@ class _LandmarkHeader extends StatelessWidget {
 /// restaurant header uses, so the two place pages are not visually different
 /// kinds of screen. `cover` crops a tall stall photo to fill that frame; the
 /// trade-off is deliberate (uniform presentation over showing every edge of
-/// the submitted photo). A missing DB value ("No photo") is shown
-/// differently from a photo the app tried and failed to load ("Couldn't
-/// load" - usually the storage bucket not being public).
+/// the submitted photo). Tapping it opens the photo full-screen with the
+/// "User submitted photo" note - the same viewer `RestaurantDetailHeader`
+/// gives the restaurant's own photo (user report, 2026-09-14: the landmark
+/// photo did not enlarge when pressed). A missing DB value ("No photo") is
+/// shown differently from a photo the app tried and failed to load
+/// ("Couldn't load" - usually the storage bucket not being public).
 class _Photo extends StatelessWidget {
   const _Photo({required this.landmark});
 
@@ -305,11 +309,19 @@ class _Photo extends StatelessWidget {
     }
     return AspectRatio(
       aspectRatio: 2,
-      child: AppImage(
-        source: url,
+      child: InkWell(
+        onTap: () => showLandmarkImage(
+          context,
+          semanticLabel: landmark.name,
+          source: url,
+        ),
         borderRadius: AppRadius.cardRadius,
-        semanticLabel: landmark.name,
-        fallback: _placeholder('Couldn’t load'),
+        child: AppImage(
+          source: url,
+          borderRadius: AppRadius.cardRadius,
+          semanticLabel: landmark.name,
+          fallback: _placeholder('Couldn’t load'),
+        ),
       ),
     );
   }
@@ -447,9 +459,10 @@ void _showLaunchFailure(BuildContext context, String message) {
 
 /// One dish attached to the landmark - the SAME row the catalogue restaurant
 /// detail's menu shows (square photo, dish name, a two-line description when
-/// one was recorded, the food category, price in rust) and, like those rows,
-/// NOT tappable: the restaurant page offers no way into a dish's details
-/// either, so the two place pages present their dishes identically. The NAME
+/// one was recorded, the food category, price in rust), and, like those rows,
+/// the PHOTO opens full-screen when tapped - with the "User submitted photo"
+/// note, because a landmark's dish photo is the tourist's own capture (the
+/// same treatment the quick-mode landmark rows give it). The NAME
 /// shown is the VARIANT the tourist actually photographed / typed ("Cendol
 /// Jagung") when one was recorded - the landmark lists what was captured -
 /// falling back to the dictionary dish (the `local_food` row it links to).
@@ -476,13 +489,23 @@ class _DishCard extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          SizedBox.square(
-            dimension: AppSizes.pairingImage,
-            child: AppImage(
-              source: item.imageUrl,
-              borderRadius: AppRadius.cardRadius,
-              semanticLabel: name,
-              fallback: const FoodImageFallback(),
+          InkWell(
+            onTap: item.imageUrl?.trim().isNotEmpty == true
+                ? () => showLandmarkImage(
+                    context,
+                    semanticLabel: name,
+                    source: item.imageUrl,
+                  )
+                : null,
+            borderRadius: AppRadius.cardRadius,
+            child: SizedBox.square(
+              dimension: AppSizes.pairingImage,
+              child: AppImage(
+                source: item.imageUrl,
+                borderRadius: AppRadius.cardRadius,
+                semanticLabel: name,
+                fallback: const FoodImageFallback(),
+              ),
             ),
           ),
           const SizedBox(width: AppSpacing.md),
