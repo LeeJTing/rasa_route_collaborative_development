@@ -225,6 +225,24 @@ class DashboardViewModel extends BaseViewModel {
   double get cameraZoom => _cameraZoom;
   int get cameraRevision => _cameraRevision;
 
+  bool _cameraKeepsPlaceClear = false;
+
+  /// Whether this camera request is carrying the tourist to a **place they are
+  /// about to be shown a card for**, and must therefore leave that place out
+  /// from under the card.
+  ///
+  /// True only for a restaurant or landmark picked out of the search results:
+  /// that is the one navigation that opens a bottom sheet over the very pin it
+  /// just flew to, so centring the pin on the screen centre buries it. A
+  /// state, a city or a Find Me has nothing covering it and is centred
+  /// normally.
+  ///
+  /// **The ViewModel says what must stay visible; it does not say where.**
+  /// How far above the screen centre that lands depends on the height of a
+  /// widget, which is the View's business and nothing this class can see. See
+  /// `_DashboardViewState._moveFocusClearOfBottomPanel`.
+  bool get cameraKeepsPlaceClear => _cameraKeepsPlaceClear;
+
   // ===========================================================================
   // The heatmap illustration
   // ===========================================================================
@@ -514,6 +532,21 @@ class DashboardViewModel extends BaseViewModel {
   bool _searching = false;
   bool get searching => _searching;
 
+  /// Whether a keyword is currently driving the map.
+  ///
+  /// Distinct from [searching], which means "a request is in flight". This is
+  /// true from the first character typed until the field is cleared - and it
+  /// stays true after a result has been picked, because picking one leaves the
+  /// keyword in the box and its markers on the map.
+  ///
+  /// **Swipe Mode is unavailable while this is true.** The Target Frame and a
+  /// keyword are two claims on the same map: the frame narrows every marker to
+  /// one dish, the keyword adds markers the chips never asked for, and a
+  /// tourist looking at both has no way to tell which one is answering. The
+  /// search is what the tourist asked for most recently, so it wins; the
+  /// Discovery Layer Bar comes back the moment the search is cleared.
+  bool get hasActiveSearch => _searchKeyword.trim().isNotEmpty;
+
   /// A8.2 / M2 - shown under the search field when nothing matched.
   String? _searchMessage;
   String? get searchMessage => _searchMessage;
@@ -523,6 +556,13 @@ class DashboardViewModel extends BaseViewModel {
 
   static const String notInMalaysiaMessage =
       'You are not in Malaysia, you are not allowed to use Quick Mode.';
+
+  /// Shown when a search closes an open Discovery Layer Bar. Named rather
+  /// than written inline, so the banner can be taken down again by the code
+  /// that puts the bar back, and only when it is this banner that is up.
+  static const String swipePausedNotice =
+      'Swipe Mode is paused while you are searching. '
+      'Clear the search to carry on swiping.';
 
   /// The dish the map is currently narrowed to (REQ102_32, REQ102_33).
   ///
@@ -665,6 +705,10 @@ class DashboardViewModel extends BaseViewModel {
   bool get swipePanelExpanded => _swipePanelExpanded;
 
   void toggleSwipePanel() {
+    // The bar is off screen while a keyword is active, so this cannot be
+    // reached by tapping it. It is the guard for any other route in, and for
+    // a tap racing the keystroke that started the search.
+    if (hasActiveSearch) return;
     _swipePanelExpanded = !_swipePanelExpanded;
     safeNotifyListeners();
     if (_swipePanelExpanded) {
@@ -750,8 +794,12 @@ class DashboardViewModel extends BaseViewModel {
     }, showLoading: false);
   }
 
-  /// REQ102_10 - the Discovery Layer Bar appears with the detailed map view.
-  bool get showSwipePanel => isDetailedView;
+  /// REQ102_10 - the Discovery Layer Bar appears with the detailed map view,
+  /// and only while no keyword is active.
+  ///
+  /// A search owns the map and so does Swipe Mode; they cannot both have it.
+  /// See [hasActiveSearch].
+  bool get showSwipePanel => isDetailedView && !hasActiveSearch;
 
   /// REQ102_11 / A9 - the tourist starts Quick Mode from the detailed map.
   /// Permission, a fresh fix and the Malaysia boundary are checked on tap.
@@ -979,6 +1027,10 @@ class DashboardViewModel extends BaseViewModel {
   /// This is where REQ102_12 and REQ102_13 happen: crossing
   /// `DiscoveryLogicFacade.detailedViewZoom` in either direction swaps the two
   /// map views, and each view loads the data it needs.
+  ///
+  /// [initial] marks the opening viewport of a map that has just been
+  /// built rather than moved (REQ102_84). Its pins are fetched at once,
+  /// without the settling delay a gesture needs.
   void onCameraChanged({
     required double latitude,
     required double longitude,
@@ -991,9 +1043,15 @@ class DashboardViewModel extends BaseViewModel {
     double? swipeWest,
     double? swipeNorth,
     double? swipeEast,
+    bool initial = false,
   }) {
     final bool previousCanZoomIn = canZoomIn;
     final bool previousCanZoomOut = canZoomOut;
+    // REQ102_84 - the opening viewport of a freshly built map, which the
+    // View marks with [initial]. Null bounds say the same thing for a
+    // ViewModel that has never been told where the map is looking - this is
+    // the one place they are left behind.
+    final bool firstViewport = initial || _viewportSouth == null;
 
     _centreLatitude = latitude;
     _centreLongitude = longitude;
@@ -1043,7 +1101,37 @@ class DashboardViewModel extends BaseViewModel {
     // the visible bounds. Debounced rather than gated on distance: a pinch
     // never moves the centre, so a distance gate meant zooming never refreshed
     // at all.
-    if (_mode == DashboardMapMode.detailed) _schedulePinRefresh();
+    if (_mode != DashboardMapMode.detailed) return;
+    // REQ102_84 - opening the map is not a gesture, so the first viewport is
+    // not debounced like one.
+    if (firstViewport) {
+      _loadPinsForFirstViewport();
+      return;
+    }
+    _schedulePinRefresh();
+  }
+
+  /// REQ102_84 - the pins for the viewport the map opens on, fetched at once.
+  ///
+  /// [_schedulePinRefresh] is built for gestures: it waits out a 350 ms
+  /// settling delay and re-localises Swipe Mode *before* the pins, both of
+  /// which are right when a tourist is dragging the map and wrong for the
+  /// report that arrives with the map itself - there the tourist is looking at
+  /// an empty map with nothing to settle. Same query, same filter, same
+  /// clustering; only the waiting is dropped, and the region refresh follows
+  /// the pins instead of leading them.
+  ///
+  /// One request, not two: the pending refresh timer is cancelled first, and
+  /// `_loadPins` records the loaded centre and zoom synchronously, so a
+  /// `onPositionChanged` that lands straight after the map settles finds
+  /// `_viewportChangedSinceLastPinLoad()` false and fetches nothing.
+  Future<void> _loadPinsForFirstViewport() async {
+    _pinRefreshTimer?.cancel();
+    await _loadPins();
+    if (_mode != DashboardMapMode.detailed) return;
+    if (!_swipePanelExpanded && !hasActiveSearch) {
+      await _refreshSwipeModeRegion();
+    }
   }
 
   /// Coalesces the flood of camera events a single gesture produces into one
@@ -1055,7 +1143,9 @@ class DashboardViewModel extends BaseViewModel {
       // Moving the map changes the visible pins, not the active Swipe deck.
       // Re-localising an expanded deck here would replace its state-scoped
       // session and reopen the Continue/New prompt while the tourist pans.
-      if (!_swipePanelExpanded) await _refreshSwipeModeRegion();
+      if (!_swipePanelExpanded && !hasActiveSearch) {
+        await _refreshSwipeModeRegion();
+      }
       if (_swipePanelExpanded) _offerSwipeQueueUpdateIfViewportChanged();
       if (_mode != DashboardMapMode.detailed) return;
       // One load, whether or not a keyword is active: the search half rides
@@ -1206,12 +1296,27 @@ class DashboardViewModel extends BaseViewModel {
   /// into a word that already resolved - must not refetch the map.
   void _applySearchSelection(ExplorationSearchResults results) {
     _searchLayerFor = results;
-    final MapSearchSelection next = discoveryLogic.searchSelection(results);
+    _useSearchSelection(discoveryLogic.searchSelection(results));
+  }
+
+  /// Hands the marker query a new search half, whatever worked it out.
+  ///
+  /// Two things reach this: the whole result list while it is open, and the
+  /// single entity the tourist then picks out of it. Both arrive as ids - a
+  /// restaurant id, a landmark id, a food id - and **never as the keyword that
+  /// found them.** A name would match every place sharing it, which is exactly
+  /// the bug: three results called "Nasi Lemak" and one tap turning all of
+  /// them green.
+  /// [reload] is false when the caller is about to move the camera or reload
+  /// the view itself. Loading here as well would ask the marker query the old
+  /// viewport's question - and a country-sized box at street zoom is the one
+  /// query this module is built to never make.
+  void _useSearchSelection(MapSearchSelection next, {bool reload = true}) {
     if (next.cacheKey == _searchSelection.cacheKey) return;
     _searchSelection = next;
     // An open cluster belonged to the old answer; it is stale now.
     _collapseExpandedCluster();
-    if (isDetailedView) _loadPins();
+    if (reload && isDetailedView) _loadPins();
   }
 
   /// Forgets the keyword's half of the marker query, and puts the map back to
@@ -1427,6 +1532,8 @@ class DashboardViewModel extends BaseViewModel {
     _searchMessage = null;
     _searchPanelOpen = true;
     _searching = true;
+    // A8 - the keyword takes the map, so the Target Frame gives it back.
+    _suspendSwipeModeForSearch();
     safeNotifyListeners();
     _runSearch(keyword, ++_searchRevision);
   }
@@ -1453,12 +1560,16 @@ class DashboardViewModel extends BaseViewModel {
       // of the marker query and what is left is the filtered map - which is
       // what it was all along, since the keyword only ever joined it.
       _clearSearchSelection();
+      // The keyword is gone, so Swipe Mode can have the map back.
+      _resumeSwipeModeAfterSearch();
       safeNotifyListeners();
       return;
     }
 
     _searchPanelOpen = true;
     _searching = true;
+    // Only the first keystroke does anything here; the rest return early.
+    _suspendSwipeModeForSearch();
     safeNotifyListeners();
 
     final int revision = ++_searchRevision;
@@ -1517,17 +1628,46 @@ class DashboardViewModel extends BaseViewModel {
   /// position - and `selectPin` fills in the rest by id, which is the same
   /// two-stage load a tapped marker uses.
   void selectPlace(PlaceSuggestion place) {
+    // Read before the camera request, which is what flips the two views.
+    final bool wasDetailed = isDetailedView;
     _searchPanelOpen = false;
     _searchKeyword = place.name;
     _searchResults = ExplorationSearchResults.empty;
     _searchMessage = null;
-    _requestCamera(place.latitude, place.longitude, place.zoom);
+    // A restaurant or landmark result opens its sheet over the bottom of the
+    // map a moment after this move lands, so the pin cannot go to the middle
+    // of the screen - it has to go to the middle of what will still be
+    // *visible*. A state or a city opens no sheet and is centred as before.
+    _requestCamera(
+      place.latitude,
+      place.longitude,
+      place.zoom,
+      keepClearOfBottomPanel: place.isPlaceOnTheMap,
+    );
 
     if (!place.isPlaceOnTheMap) {
-      // A state, city, town or area: there is no single place to open.
+      // A state, city, town or area: there is no single place to open, and
+      // nothing to narrow to. Whatever the keyword was already marking stays
+      // marked - the tourist has moved the camera, not changed their mind
+      // about what they were looking for.
       dismissPin();
       return;
     }
+
+    // **One result, one place.** The keyword matched a dish, some restaurants
+    // and some landmarks, and every one of them was marked while the list was
+    // open. Picking this entry is the tourist saying which they meant, so the
+    // map narrows to its id alone - not to its name, which the others share.
+    //
+    // Reloading here is only right if the map was already the detailed view,
+    // in which case the viewport this asks about is the real one. Coming up
+    // from the overview, the bounds still describe the whole country and the
+    // zoom is now street level; `onCameraChanged` loads the pins itself the
+    // moment it sees the mode change, with bounds that mean something.
+    _useSearchSelection(
+      discoveryLogic.searchSelectionForPlace(place),
+      reload: wasDetailed,
+    );
 
     selectPin(
       MapPin(
@@ -1561,12 +1701,21 @@ class DashboardViewModel extends BaseViewModel {
     // detailed map - it no longer replaces the pins the filter chips are
     // drawing. Picking "Nasi Lemak" out of the results should show where nasi
     // lemak is, on top of the map the tourist already had, not instead of it.
-    _applySearchSelection(
-      ExplorationSearchResults(
-        keyword: food.name,
-        places: const <PlaceSuggestion>[],
-        foods: <LocalFood>[food],
-      ),
+    //
+    // One dish, by id: the places marked are the ones linked to this
+    // `local_food_id` through Restaurant/Landmark -> Local Food. Restaurants
+    // and landmarks that merely share the *name* are not marked - picking the
+    // dish said nothing about them.
+    _searchLayerFor = ExplorationSearchResults(
+      keyword: food.name,
+      places: const <PlaceSuggestion>[],
+      foods: <LocalFood>[food],
+    );
+    // `_reloadActiveView` below is the one load this needs - the heatmap when
+    // the overview is showing, the pins when it is not.
+    _useSearchSelection(
+      discoveryLogic.searchSelectionForFood(food),
+      reload: false,
     );
     safeNotifyListeners();
     _reloadActiveView();
@@ -1619,6 +1768,8 @@ class DashboardViewModel extends BaseViewModel {
     // The keyword leaves the marker query and the filtered markers remain.
     // Nothing is "restored": they were never replaced, only joined.
     _clearSearchSelection();
+    // The bar comes back, with the deck it had before the search.
+    _resumeSwipeModeAfterSearch();
     safeNotifyListeners();
     if (hadFood) _reloadActiveView();
   }
@@ -1819,6 +1970,11 @@ class DashboardViewModel extends BaseViewModel {
 
   Future<void> _prepareSwipeModeForActiveState() async {
     if (!isDetailedView) return;
+    // Nothing to prepare for a bar that is not on screen - and this is the
+    // most expensive call in the module, so it is worth not making. The queue
+    // is built lazily when the bar is expanded, which is the path a tourist
+    // takes after clearing the search.
+    if (hasActiveSearch) return;
     final int revision = ++_swipePrepareRevision;
     _swipeLoading = true;
     _swipeError = null;
@@ -1912,6 +2068,55 @@ class DashboardViewModel extends BaseViewModel {
     return message.startsWith('Exception: ')
         ? message.substring('Exception: '.length)
         : message;
+  }
+
+  /// A keyword has taken the map, so Swipe Mode stands down (A8).
+  ///
+  /// **Collapse, not teardown.** [_leaveSwipeModeForHeatmap] throws the
+  /// preparation and the session away, which is right when the tourist leaves
+  /// the detailed view - but rebuilding them costs the largest read in the
+  /// application, and a search is a detour, not a departure. The deck, its
+  /// likes and its state binding all survive; the panel closes and the Target
+  /// Frame lets go of the map.
+  void _suspendSwipeModeForSearch() {
+    if (!_swipePanelExpanded) return;
+    // True only when the frame was actually narrowing the markers - an open
+    // panel with no card yet was not, and needs no reload.
+    final bool heldTheMap = _targetFrameOwnsSelection && _selectedFood != null;
+
+    _swipePanelExpanded = false;
+    // The prompt belonged to a deck that is no longer on screen.
+    _swipeQueueUpdatePending = false;
+    _swipeQueueProfileChanged = false;
+    if (_targetFrameOwnsSelection) {
+      _selectedFood = null;
+      _targetFrameOwnsSelection = false;
+    }
+    // Said out loud, because a panel that vanishes mid-swipe otherwise reads
+    // as lost work. Nothing is lost - the deck and its likes are still here.
+    _notice = swipePausedNotice;
+    // `_activePinFoodId` has just become null, so the markers the frame was
+    // narrowing must be asked for again. `_applySearchSelection` cannot be
+    // relied on to do it: a keyword that matches nothing changes no selection
+    // and triggers no load, and the map would keep one dish's pins under a
+    // search asking about something else.
+    if (heldTheMap) _reloadActiveView();
+  }
+
+  /// The keyword is gone and the Discovery Layer Bar is back (A8.3).
+  ///
+  /// One thing can have gone stale while the bar was hidden: which state the
+  /// deck belongs to. `_schedulePinRefresh` skips its region check during a
+  /// search, so a tourist who panned into another state while searching would
+  /// otherwise reopen the bar on the previous state's queue. This is one
+  /// cached `regionAt`, and it re-prepares only when the state really changed.
+  void _resumeSwipeModeAfterSearch() {
+    // The banner explained a bar that is back on screen; leaving it up would
+    // make it a lie. Compared rather than cleared outright, so a location or
+    // navigation notice raised since is not swallowed.
+    if (_notice == swipePausedNotice) _notice = null;
+    if (!isDetailedView || _swipePreparation == null) return;
+    _refreshSwipeModeRegion();
   }
 
   void _leaveSwipeModeForHeatmap() {
@@ -2192,10 +2397,19 @@ class DashboardViewModel extends BaseViewModel {
   /// asking for a camera above the predefined level *is* the switch to the
   /// detailed view (REQ102_12), and asking for one below it is the way back
   /// (REQ102_13).
-  void _requestCamera(double latitude, double longitude, double zoom) {
+  /// [keepClearOfBottomPanel] marks a move that ends with a card over the
+  /// target - see [cameraKeepsPlaceClear]. It defaults to false, so every
+  /// other navigation keeps the behaviour it has always had.
+  void _requestCamera(
+    double latitude,
+    double longitude,
+    double zoom, {
+    bool keepClearOfBottomPanel = false,
+  }) {
     _cameraLatitude = latitude;
     _cameraLongitude = longitude;
     _cameraZoom = _clampZoom(zoom);
+    _cameraKeepsPlaceClear = keepClearOfBottomPanel;
     _cameraRevision++;
 
     _centreLatitude = latitude;
