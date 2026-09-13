@@ -1118,6 +1118,64 @@ void main() {
       expect(result.candidates.single.ingredients, contains('fried chicken'));
     });
 
+    test('an analysis that echoes the stored dish name still keeps the photo\'s '
+        'variant + adapted fields', () async {
+      final nasiLemak = _food('Nasi Lemak').copyWith(
+        id: 19,
+        description: 'Fragrant rice cooked in coconut milk and pandan.',
+        ingredients: 'Rice, coconut milk, anchovies, peanuts, egg',
+      );
+      knowledge.catalogue = <LocalFood>[nasiLemak];
+      // The quick call names the PORK variant ...
+      recognition.onIdentify = (_) async =>
+          _quickResponse(dish: 'Siew Yoke Nasi Lemak', confidence: 0.98);
+      // ... while the analysis (SENT the stored record) echoes the plain
+      // dish back - as the prompt lets it do while the record still holds.
+      recognition.onAnalyzeFull = (List<int> _) async => (
+        food: LocalFood(
+          id: 0,
+          name: 'Nasi Lemak',
+          description:
+              'Fragrant rice cooked in coconut milk and pandan, served '
+              'with siew yoke.',
+          origin: 'Malaysia',
+          culturalBackground: 'Chinese coffee-shop take on nasi lemak.',
+          ingredients:
+              'Rice, coconut milk, anchovies, peanuts, siew yoke (roast pork)',
+          category: 'Chinese',
+          cookingStyle: 'Braised',
+          mealType: 'All-Day Dining',
+          foodType: 'Food',
+        ),
+        priceMin: 9.0,
+        priceMax: 14.0,
+        isLocal: true,
+        confidence: 0.95,
+        localConfidence: 1.0,
+        imageQuality: 'good',
+        imageQualityIssues: const <String>[],
+        nameMatchesPhoto: true,
+        matchConfidence: 1.0,
+        observedFood: '',
+        foodType: 'Food',
+        dietaryRestrictions: const <String>['No Pork'],
+      );
+
+      final FoodRecognitionResult result = await logic.recognizeFood(<int>[1]);
+
+      expect(recognition.fullStoredDish?.name, 'Nasi Lemak');
+      // The same-dish name the analysis echoed does NOT lose what the photo
+      // showed (the quick call's variant) ...
+      expect(result.candidates.single.id, nasiLemak.id);
+      expect(result.variant, 'Siew Yoke Nasi Lemak');
+      // ... so the item still takes the row ADAPTED to the variant: the
+      // pork in the ingredients and the category moved OFF the Malay base
+      // dish, which is exactly what "the category did not change" reported.
+      expect(result.candidates.single.ingredients, contains('roast pork'));
+      expect(result.candidates.single.category, 'Chinese');
+      expect(result.candidates.single.description, contains('siew yoke'));
+    });
+
     test('a match on the dictionary name records no variant', () async {
       knowledge.catalogue = <LocalFood>[_food('Cendol').copyWith(id: 375)];
       recognition.onIdentify = (_) async =>
@@ -1812,6 +1870,30 @@ void main() {
       },
     );
 
+    test('a variant is never shortened to its base dish by the gate '
+        '(nasi lemak with pork stays a variant)', () async {
+      final LocalFood nasiLemak = _food('Nasi Lemak').copyWith(id: 19);
+      knowledge.catalogue = <LocalFood>[nasiLemak];
+      matchedAnalysis('Nasi Lemak');
+      // A model that "corrects" the variant to the plain dish must not be
+      // followed - losing words is not a spelling fix.
+      recognition.onSpellCheck = (String _, String _) async =>
+          (isTypo: true, correctedName: 'Nasi Lemak');
+
+      final result = await logic.resolveByName(<int>[
+        1,
+      ], 'Nasi Lemak with Pork');
+
+      expect(result.typedNameIsTypo, isFalse);
+      expect(result.correctedName, '');
+      // The curated row IS the dish (its id links the item) ...
+      expect(result.food.id, nasiLemak.id);
+      expect(result.food.name, 'Nasi Lemak');
+      // ... and the pork the tourist named is recorded as its VARIANT - the
+      // plain dish would record none.
+      expect(result.variant, 'Nasi Lemak with Pork');
+    });
+
     test(
       'the corrected spelling links to the curated row when one exists',
       () async {
@@ -1834,7 +1916,6 @@ void main() {
       matchedAnalysis('Char Kway Teow');
       recognition.onSpellCheck = (String _, String _) async =>
           (isTypo: false, correctedName: '');
-
       final result = await logic.resolveByName(<int>[1], 'char kuey teow');
 
       expect(result.typedNameIsTypo, isFalse);

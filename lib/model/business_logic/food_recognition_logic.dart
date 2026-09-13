@@ -662,20 +662,28 @@ class FoodRecognitionLogic {
         final ({LocalFood food, bool isExtension}) curated =
             await _preferCuratedOverGemini(analysis.food);
         final LocalFood food = curated.food;
+        // The observation that made this a VARIANT may only survive on the
+        // QUICK name: the analysis is SENT the stored record and can echo it
+        // back ("Nasi Lemak"), which would read as a same-dish match and drop
+        // both the variant and the adapted fields - a pork nasi lemak kept
+        // "Malay" because of exactly that (user report). The quick name still
+        // counts while the analysis resolved to that same curated row.
+        final bool quickVariantStands =
+            existing != null &&
+            quickVariant.isNotEmpty &&
+            food.id == existing.id;
+        final bool isVariant = curated.isExtension || quickVariantStands;
         result = <LocalFood>[
           food.id == 0
               ? food
-              : _itemFoodFor(
-                  food,
-                  analysis.food,
-                  isExtension: curated.isExtension,
-                ),
+              : _itemFoodFor(food, analysis.food, isExtension: isVariant),
         ];
         variant = _variantFor(
           food,
           analysis.food.name,
           extension: curated.isExtension,
         );
+        if (variant.isEmpty && quickVariantStands) variant = quickVariant;
         priceMin = analysis.priceMin;
         priceMax = analysis.priceMax;
         confidence = analysis.confidence;
@@ -898,10 +906,27 @@ class FoodRecognitionLogic {
       if (corrected.isEmpty) return null;
       // A "correction" that only repeats the typed text changes nothing.
       if (corrected.toLowerCase() == typedName.toLowerCase()) return null;
+      // A "correction" that only DROPS trailing words off the typed name is
+      // not a spelling fix: "nasi lemak with pork" is a VARIANT of "Nasi
+      // Lemak", not a misspelling of it, and collapsing it would erase the
+      // variant the item has to record (user report: the pork version must
+      // record as a variant, the plain dish records none).
+      if (_dropsTrailingWords(typedName, corrected)) return null;
       return corrected;
     } catch (_) {
       return null;
     }
+  }
+
+  /// Whether [corrected] is [typed] with its trailing words removed (a
+  /// whole-word prefix) - i.e. the "correction" would drop what the tourist
+  /// added rather than fix a spelling. A genuine typo differs IN a word
+  /// ("prok belly" -> "Pork Belly"), it never just loses words.
+  static bool _dropsTrailingWords(String typed, String corrected) {
+    final String t = FoodNameMatcher.normalize(typed);
+    final String c = FoodNameMatcher.normalize(corrected);
+    if (t.isEmpty || c.isEmpty || t == c) return false;
+    return t.startsWith('$c ');
   }
 
   /// Enriches a candidate the tourist picked from the top-3 picker (A5).
