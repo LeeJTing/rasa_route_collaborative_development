@@ -207,54 +207,121 @@ class _FoodHeaderState extends State<_FoodHeader> {
   int _page = 0;
 
   @override
+  void didUpdateWidget(_FoodHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A quick-switch can replace this slot's dish, so never keep a gallery
+    // page index that belonged to the previous one.
+    if (oldWidget.food.id != widget.food.id) _page = 0;
+  }
+
+  Future<void> _showGallery(
+    BuildContext context,
+    List<String> images,
+    int initialIndex,
+  ) => showDialog<void>(
+    context: context,
+    barrierColor: AppColors.scrim,
+    builder: (BuildContext dialogContext) => Dialog(
+      insetPadding: EdgeInsets.zero,
+      backgroundColor: AppColors.transparent,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          PageView.builder(
+            controller: PageController(initialPage: initialIndex),
+            itemCount: images.length,
+            itemBuilder: (BuildContext context, int index) =>
+                InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: Center(
+                    child: AppImage(
+                      source: images[index],
+                      fit: BoxFit.contain,
+                      semanticLabel: '${widget.food.name} image '
+                          '${index + 1} of ${images.length}',
+                    ),
+                  ),
+                ),
+          ),
+          Positioned(
+            top: AppSpacing.lg,
+            right: AppSpacing.lg,
+            child: Material(
+              color: AppColors.surface,
+              shape: const CircleBorder(),
+              child: IconButton(
+                tooltip: 'Close image',
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  @override
   Widget build(BuildContext context) {
     final List<String> images = widget.food.imageUrls;
+    final bool hasImages = images.isNotEmpty;
+    final int page = hasImages && _page < images.length ? _page : 0;
     return Column(
       children: <Widget>[
-        SizedBox(
-          height: AppSizes.comparisonImageHeight,
-          width: double.infinity,
-          child: images.length > 1
-              ? Stack(
-                  children: <Widget>[
-                    Positioned.fill(
-                      child: PageView.builder(
-                        itemCount: images.length,
-                        onPageChanged: (int index) {
-                          setState(() => _page = index);
-                        },
-                        itemBuilder: (BuildContext context, int index) =>
-                            AppImage(
-                              source: images[index],
-                              semanticLabel: '${widget.food.name} image '
-                                  '${index + 1} of ${images.length}',
-                            ),
-                      ),
-                    ),
-                    Positioned(
-                      top: AppSpacing.sm,
-                      right: AppSpacing.sm,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.sm,
-                          vertical: AppSpacing.xs,
-                        ),
-                        decoration: const BoxDecoration(
-                          color: AppColors.scrim,
-                          borderRadius: BorderRadius.all(
-                            Radius.circular(AppRadius.pill),
+        Semantics(
+          button: hasImages,
+          label: 'Enlarge ${widget.food.name} photo',
+          child: InkWell(
+            onTap: hasImages
+                ? () => _showGallery(context, images, page)
+                : null,
+            child: SizedBox(
+              height: AppSizes.comparisonImageHeight,
+              width: double.infinity,
+              child: images.length > 1
+                  ? Stack(
+                      children: <Widget>[
+                        Positioned.fill(
+                          child: PageView.builder(
+                            itemCount: images.length,
+                            onPageChanged: (int index) {
+                              setState(() => _page = index);
+                            },
+                            itemBuilder: (BuildContext context, int index) =>
+                                AppImage(
+                                  source: images[index],
+                                  semanticLabel: '${widget.food.name} image '
+                                      '${index + 1} of ${images.length}',
+                                ),
                           ),
                         ),
-                        child: Text(
-                          '${_page + 1}/${images.length}',
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(color: AppColors.surface),
+                        Positioned(
+                          top: AppSpacing.sm,
+                          right: AppSpacing.sm,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                              vertical: AppSpacing.xs,
+                            ),
+                            decoration: const BoxDecoration(
+                              color: AppColors.scrim,
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(AppRadius.pill),
+                              ),
+                            ),
+                            child: Text(
+                              '${page + 1}/${images.length}',
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(color: AppColors.surface),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                )
-              : AppImage(source: widget.food.imageUrl),
+                      ],
+                    )
+                  : AppImage(source: widget.food.imageUrl),
+            ),
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(

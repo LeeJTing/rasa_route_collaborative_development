@@ -302,6 +302,14 @@ class MapExplorationLogic {
 
   /// C4 / REQ102_26. Order follows the requirement, not the alphabet, so the
   /// row reads the way the spec does.
+  ///
+  /// **`Nutty` was dropped from the filter but still exists in the catalogue**
+  /// - 42 local foods carry it, and no data was removed with the chip. Those
+  /// dishes stay searchable and stay counted while no taste filter is set;
+  /// they simply cannot be filtered *to* by taste, and picking any taste now
+  /// excludes them. Same arrangement as `Sabah`/`Sarawak` above. Removing the
+  /// chip is the whole change: nothing validates against this list, so a
+  /// value it no longer names is ignored rather than rejected.
   static const List<String> tasteOptions = <String>[
     'Sweet',
     'Salty',
@@ -320,7 +328,6 @@ class MapExplorationLogic {
     'Roasted',
     'Fresh',
     'Herbal',
-    'Nutty',
     'Earthy',
     'Fermented',
     'Tangy',

@@ -119,6 +119,7 @@ abstract final class AppSizes {
 
   /// Images used in pairing rows.
   static const double pairingImage = 60;
+  static const double menuItemImage = 96;
 
   /// Images used in the similar-food strip.
   static const double recommendationImage = 100;
