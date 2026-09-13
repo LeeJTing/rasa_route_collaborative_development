@@ -652,6 +652,14 @@ class AuthenticateLogic {
   /// code is pending (see `AuthRepository`'s Option B pending-OTP marker).
   DateTime? get pendingOtpSentAt => repository.pendingOtpSentAt;
 
+  /// Auth -----
+  /// When this device last sent ANY code, whichever address it was for, or
+  /// null when it has not sent one yet - the anchor of the device-wide
+  /// cooldown that [sendEmailOtp] enforces (see [otpDeviceCooldown]).
+  DateTime? get otpLastDeviceSendAt => repository.otpLastDeviceSendAt;
+
+  /// Auth end ----
+
   Future<bool> signInWithGoogle({required String redirectTo}) {
     return repository.signInWithGoogle(redirectTo: redirectTo);
   }
