@@ -225,6 +225,24 @@ class DashboardViewModel extends BaseViewModel {
   double get cameraZoom => _cameraZoom;
   int get cameraRevision => _cameraRevision;
 
+  bool _cameraKeepsPlaceClear = false;
+
+  /// Whether this camera request is carrying the tourist to a **place they are
+  /// about to be shown a card for**, and must therefore leave that place out
+  /// from under the card.
+  ///
+  /// True only for a restaurant or landmark picked out of the search results:
+  /// that is the one navigation that opens a bottom sheet over the very pin it
+  /// just flew to, so centring the pin on the screen centre buries it. A
+  /// state, a city or a Find Me has nothing covering it and is centred
+  /// normally.
+  ///
+  /// **The ViewModel says what must stay visible; it does not say where.**
+  /// How far above the screen centre that lands depends on the height of a
+  /// widget, which is the View's business and nothing this class can see. See
+  /// `_DashboardViewState._moveFocusClearOfBottomPanel`.
+  bool get cameraKeepsPlaceClear => _cameraKeepsPlaceClear;
+
   // ===========================================================================
   // The heatmap illustration
   // ===========================================================================
@@ -1238,12 +1256,27 @@ class DashboardViewModel extends BaseViewModel {
   /// into a word that already resolved - must not refetch the map.
   void _applySearchSelection(ExplorationSearchResults results) {
     _searchLayerFor = results;
-    final MapSearchSelection next = discoveryLogic.searchSelection(results);
+    _useSearchSelection(discoveryLogic.searchSelection(results));
+  }
+
+  /// Hands the marker query a new search half, whatever worked it out.
+  ///
+  /// Two things reach this: the whole result list while it is open, and the
+  /// single entity the tourist then picks out of it. Both arrive as ids - a
+  /// restaurant id, a landmark id, a food id - and **never as the keyword that
+  /// found them.** A name would match every place sharing it, which is exactly
+  /// the bug: three results called "Nasi Lemak" and one tap turning all of
+  /// them green.
+  /// [reload] is false when the caller is about to move the camera or reload
+  /// the view itself. Loading here as well would ask the marker query the old
+  /// viewport's question - and a country-sized box at street zoom is the one
+  /// query this module is built to never make.
+  void _useSearchSelection(MapSearchSelection next, {bool reload = true}) {
     if (next.cacheKey == _searchSelection.cacheKey) return;
     _searchSelection = next;
     // An open cluster belonged to the old answer; it is stale now.
     _collapseExpandedCluster();
-    if (isDetailedView) _loadPins();
+    if (reload && isDetailedView) _loadPins();
   }
 
   /// Forgets the keyword's half of the marker query, and puts the map back to
@@ -1555,17 +1588,46 @@ class DashboardViewModel extends BaseViewModel {
   /// position - and `selectPin` fills in the rest by id, which is the same
   /// two-stage load a tapped marker uses.
   void selectPlace(PlaceSuggestion place) {
+    // Read before the camera request, which is what flips the two views.
+    final bool wasDetailed = isDetailedView;
     _searchPanelOpen = false;
     _searchKeyword = place.name;
     _searchResults = ExplorationSearchResults.empty;
     _searchMessage = null;
-    _requestCamera(place.latitude, place.longitude, place.zoom);
+    // A restaurant or landmark result opens its sheet over the bottom of the
+    // map a moment after this move lands, so the pin cannot go to the middle
+    // of the screen - it has to go to the middle of what will still be
+    // *visible*. A state or a city opens no sheet and is centred as before.
+    _requestCamera(
+      place.latitude,
+      place.longitude,
+      place.zoom,
+      keepClearOfBottomPanel: place.isPlaceOnTheMap,
+    );
 
     if (!place.isPlaceOnTheMap) {
-      // A state, city, town or area: there is no single place to open.
+      // A state, city, town or area: there is no single place to open, and
+      // nothing to narrow to. Whatever the keyword was already marking stays
+      // marked - the tourist has moved the camera, not changed their mind
+      // about what they were looking for.
       dismissPin();
       return;
     }
+
+    // **One result, one place.** The keyword matched a dish, some restaurants
+    // and some landmarks, and every one of them was marked while the list was
+    // open. Picking this entry is the tourist saying which they meant, so the
+    // map narrows to its id alone - not to its name, which the others share.
+    //
+    // Reloading here is only right if the map was already the detailed view,
+    // in which case the viewport this asks about is the real one. Coming up
+    // from the overview, the bounds still describe the whole country and the
+    // zoom is now street level; `onCameraChanged` loads the pins itself the
+    // moment it sees the mode change, with bounds that mean something.
+    _useSearchSelection(
+      discoveryLogic.searchSelectionForPlace(place),
+      reload: wasDetailed,
+    );
 
     selectPin(
       MapPin(
@@ -1599,12 +1661,21 @@ class DashboardViewModel extends BaseViewModel {
     // detailed map - it no longer replaces the pins the filter chips are
     // drawing. Picking "Nasi Lemak" out of the results should show where nasi
     // lemak is, on top of the map the tourist already had, not instead of it.
-    _applySearchSelection(
-      ExplorationSearchResults(
-        keyword: food.name,
-        places: const <PlaceSuggestion>[],
-        foods: <LocalFood>[food],
-      ),
+    //
+    // One dish, by id: the places marked are the ones linked to this
+    // `local_food_id` through Restaurant/Landmark -> Local Food. Restaurants
+    // and landmarks that merely share the *name* are not marked - picking the
+    // dish said nothing about them.
+    _searchLayerFor = ExplorationSearchResults(
+      keyword: food.name,
+      places: const <PlaceSuggestion>[],
+      foods: <LocalFood>[food],
+    );
+    // `_reloadActiveView` below is the one load this needs - the heatmap when
+    // the overview is showing, the pins when it is not.
+    _useSearchSelection(
+      discoveryLogic.searchSelectionForFood(food),
+      reload: false,
     );
     safeNotifyListeners();
     _reloadActiveView();
@@ -2286,10 +2357,19 @@ class DashboardViewModel extends BaseViewModel {
   /// asking for a camera above the predefined level *is* the switch to the
   /// detailed view (REQ102_12), and asking for one below it is the way back
   /// (REQ102_13).
-  void _requestCamera(double latitude, double longitude, double zoom) {
+  /// [keepClearOfBottomPanel] marks a move that ends with a card over the
+  /// target - see [cameraKeepsPlaceClear]. It defaults to false, so every
+  /// other navigation keeps the behaviour it has always had.
+  void _requestCamera(
+    double latitude,
+    double longitude,
+    double zoom, {
+    bool keepClearOfBottomPanel = false,
+  }) {
     _cameraLatitude = latitude;
     _cameraLongitude = longitude;
     _cameraZoom = _clampZoom(zoom);
+    _cameraKeepsPlaceClear = keepClearOfBottomPanel;
     _cameraRevision++;
 
     _centreLatitude = latitude;

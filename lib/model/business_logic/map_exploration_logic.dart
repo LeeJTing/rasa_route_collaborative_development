@@ -610,13 +610,17 @@ class MapExplorationLogic {
     final List<int> landmarkIds = <int>[];
 
     for (final PlaceSuggestion place in results.places) {
-      if (!place.isPlaceOnTheMap) continue;
-      final int? id = int.tryParse(place.referenceId!);
+      // The id and the table it belongs to, read off the result itself. The
+      // keyword that produced it never enters into which pins are marked.
+      final int? id = place.entityId;
       if (id == null) continue;
-      if (place.isRestaurant) {
-        restaurantIds.add(id);
-      } else {
-        landmarkIds.add(id);
+      switch (place.resultType) {
+        case SearchResultType.restaurant:
+          restaurantIds.add(id);
+        case SearchResultType.landmark:
+          landmarkIds.add(id);
+        case SearchResultType.location:
+          break;
       }
     }
 
@@ -629,6 +633,46 @@ class MapExplorationLogic {
       landmarkIds: List<int>.unmodifiable(landmarkIds),
     );
   }
+
+  /// The search half of a marker query for **one** result the tourist picked.
+  ///
+  /// [searchSelectionFor] answers for the whole result list, which is right
+  /// while the list is open: everything the keyword matched is marked, so the
+  /// tourist can see what their search found. Picking one entry is a narrowing,
+  /// and the map has to narrow with it.
+  ///
+  /// "Nasi Lemak" matches a dish, restaurants called Nasi Lemak and landmarks
+  /// called Nasi Lemak. Tapping one restaurant means *that* restaurant, so the
+  /// selection becomes its id and nothing else - not its name, which would
+  /// match the others, and not the dish, which would mark every stall selling
+  /// it. A place result carries the id of the row it came from and
+  /// [PlaceSuggestion.resultType] says which table that id belongs to; the two
+  /// together are the whole answer.
+  ///
+  /// A state or a city selects nothing: it is a camera position, not a place,
+  /// and the caller keeps whatever the keyword was already marking.
+  static MapSearchSelection searchSelectionForPlace(PlaceSuggestion place) {
+    final int? id = place.entityId;
+    if (id == null) return MapSearchSelection.none;
+    return switch (place.resultType) {
+      SearchResultType.restaurant => MapSearchSelection(
+        restaurantIds: List<int>.unmodifiable(<int>[id]),
+      ),
+      SearchResultType.landmark => MapSearchSelection(
+        landmarkIds: List<int>.unmodifiable(<int>[id]),
+      ),
+      SearchResultType.location => MapSearchSelection.none,
+    };
+  }
+
+  /// The same, for one local food picked out of the list (A8.1).
+  ///
+  /// A dish is the one result type whose id stands for many places: every
+  /// available restaurant and landmark serving it. That is the relationship
+  /// Restaurant/Landmark -> Local Food already describes, and it is the id that
+  /// travels, never the dish's name.
+  static MapSearchSelection searchSelectionForFood(LocalFood food) =>
+      MapSearchSelection(foodIds: List<int>.unmodifiable(<int>[food.id]));
 
   /// REQ102_41 - what a tap on [cluster] should do.
   ///
