@@ -61,9 +61,10 @@ class FoodKnowledgeLogic {
   Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) =>
       repository.playPronunciation(food);
 
-  /// Finds another catalogue entry whose canonical name or synonym overlaps
-  /// with the selected food. Collision detection is data-driven; no dish name
-  /// or database id is embedded in the app.
+  /// Finds another catalogue entry that claims the selected food's canonical
+  /// name as an exact synonym. Synonyms are directional: an alias on the
+  /// selected food does not make the selected food ambiguous when ordered by
+  /// its own canonical name. No dish name or database id is embedded here.
   Future<LocalFood?> detectNameCollision(int foodId) async {
     final List<LocalFood> catalogue = await repository.getFoods();
     return findNameCollision(catalogue: catalogue, foodId: foodId);
@@ -78,56 +79,24 @@ class FoodKnowledgeLogic {
       (LocalFood food) => food.id == foodId,
       orElse: () => throw Exception('Local food not found.'),
     );
-    final Map<String, String> selectedNames = _namesByNormalisedValue(selected);
+    final String selectedName = _normaliseName(selected.name);
+    if (selectedName.isEmpty) return null;
     for (final LocalFood candidate in catalogue) {
       if (candidate.id == selected.id) continue;
-      final Map<String, String> candidateNames = _namesByNormalisedValue(
-        candidate,
-      );
-      for (final MapEntry<String, String> selectedName
-          in selectedNames.entries) {
-        for (final MapEntry<String, String> candidateName
-            in candidateNames.entries) {
-          final String? sharedName = _sharedCollisionName(
-            selectedName,
-            candidateName,
-          );
-          if (sharedName == null) continue;
-          return candidate;
-        }
+      if (_normaliseName(candidate.name) == selectedName ||
+          candidate.synonyms.any(
+            (String synonym) => _normaliseName(synonym) == selectedName,
+          )) {
+        return candidate;
       }
     }
     return null;
   }
 
-  String? _sharedCollisionName(
-    MapEntry<String, String> selected,
-    MapEntry<String, String> candidate,
-  ) {
-    if (selected.key == candidate.key) return selected.value;
-    final MapEntry<String, String> shorter =
-        selected.key.length <= candidate.key.length ? selected : candidate;
-    final MapEntry<String, String> longer = identical(shorter, selected)
-        ? candidate
-        : selected;
-    if (shorter.key.split(' ').length < 2) return null;
-    return ' ${longer.key} '.contains(' ${shorter.key} ')
-        ? shorter.value
-        : null;
-  }
-
-  Map<String, String> _namesByNormalisedValue(LocalFood food) {
-    final Map<String, String> names = <String, String>{};
-    for (final String value in <String>[food.name, ...food.synonyms]) {
-      final String display = value.trim();
-      final String normalised = display
-          .toLowerCase()
-          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-          .trim();
-      if (normalised.isNotEmpty) names.putIfAbsent(normalised, () => display);
-    }
-    return names;
-  }
+  String _normaliseName(String value) => value
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ')
+      .trim();
 
   Future<String?> dietaryWarning(int foodId) async {
     final List<DietaryRestriction> restrictions = await repository

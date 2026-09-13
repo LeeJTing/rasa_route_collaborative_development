@@ -21,11 +21,13 @@ class InformationRow extends StatelessWidget {
     required this.icon,
     required this.label,
     this.onTap,
+    this.textColor,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
+  final Color? textColor;
 
   @override
   Widget build(BuildContext context) {
@@ -44,18 +46,18 @@ class InformationRow extends StatelessWidget {
                 label,
                 style: onTap == null
                     ? null
-                    : const TextStyle(
-                        color: AppColors.info,
+                    : TextStyle(
+                        color: textColor ?? AppColors.info,
                         decoration: TextDecoration.underline,
                       ),
               ),
             ),
             if (onTap != null) ...<Widget>[
               const SizedBox(width: AppSpacing.sm),
-              const Icon(
+              Icon(
                 Icons.open_in_new,
                 size: AppSizes.iconSmall,
-                color: AppColors.info,
+                color: textColor ?? AppColors.info,
               ),
             ],
           ],

@@ -13,6 +13,7 @@ class RestaurantItem {
     this.description,
     this.ingredients,
     this.imageUrl,
+    this.imageFromLinkedFood = false,
     this.price,
     required this.currency,
     required this.foodCategory,
@@ -27,6 +28,8 @@ class RestaurantItem {
   final String? description;
   final String? ingredients;
   final String? imageUrl;
+  final bool imageFromLinkedFood;
+
   final double? price;
   final String currency;
   final String foodCategory;

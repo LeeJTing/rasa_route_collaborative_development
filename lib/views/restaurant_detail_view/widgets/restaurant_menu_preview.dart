@@ -8,9 +8,14 @@ import '../../common_widgets/food_image_fallback.dart';
 import '../../common_widgets/place_menu_section.dart';
 
 class RestaurantMenuPreview extends StatelessWidget {
-  const RestaurantMenuPreview({super.key, required this.items});
+  const RestaurantMenuPreview({
+    super.key,
+    required this.items,
+    required this.onImageTap,
+  });
 
   final List<RestaurantItem> items;
+  final ValueChanged<RestaurantItem> onImageTap;
 
   @override
   Widget build(BuildContext context) => PlaceMenuSection(
@@ -29,13 +34,19 @@ class RestaurantMenuPreview extends StatelessWidget {
             ),
             child: Row(
               children: <Widget>[
-                SizedBox.square(
-                  dimension: AppSizes.pairingImage,
-                  child: AppImage(
-                    source: item.imageUrl,
-                    borderRadius: AppRadius.cardRadius,
-                    semanticLabel: item.foodName,
-                    fallback: const FoodImageFallback(),
+                InkWell(
+                  onTap: item.imageUrl?.trim().isNotEmpty == true
+                      ? () => onImageTap(item)
+                      : null,
+                  borderRadius: AppRadius.cardRadius,
+                  child: SizedBox.square(
+                    dimension: AppSizes.pairingImage,
+                    child: AppImage(
+                      source: item.imageUrl,
+                      borderRadius: AppRadius.cardRadius,
+                      semanticLabel: item.foodName,
+                      fallback: const FoodImageFallback(),
+                    ),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.md),
@@ -43,9 +54,25 @@ class RestaurantMenuPreview extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(
-                        item.foodName,
-                        style: Theme.of(context).textTheme.titleSmall,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              item.foodName,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ),
+                          if (item.price != null) ...<Widget>[
+                            const SizedBox(width: AppSpacing.sm),
+                            Text(
+                              '${item.currency} '
+                              '${item.price!.toStringAsFixed(2)}',
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(color: AppColors.accentRust),
+                            ),
+                          ],
+                        ],
                       ),
                       if (item.description?.trim().isNotEmpty ??
                           false) ...<Widget>[
@@ -65,13 +92,6 @@ class RestaurantMenuPreview extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (item.price != null)
-                  Text(
-                    '${item.currency} ${item.price!.toStringAsFixed(2)}',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: AppColors.accentRust,
-                    ),
-                  ),
               ],
             ),
           ),
