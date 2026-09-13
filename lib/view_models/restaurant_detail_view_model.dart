@@ -56,6 +56,12 @@ class RestaurantDetailViewModel extends BaseViewModel {
   });
 
   Future<void> retry() async {
+    await refresh();
+  }
+
+  /// Re-reads the selected restaurant after a report applies a correction
+  /// while this details route remains mounted.
+  Future<void> refresh() async {
     final int? restaurantId = _restaurantId;
     if (restaurantId != null) await loadRestaurant(restaurantId);
   }
