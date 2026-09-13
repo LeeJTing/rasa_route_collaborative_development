@@ -141,10 +141,13 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                                         if (!context.mounted || result is! Map)
                                           return;
 
-                                        vm.updateFavourite(
-                                          result['id'] as int,
-                                          result['isFavourite'] as bool,
-                                        );
+                                        final Object? id = result['id'];
+                                        final Object? isFavourite =
+                                            result['isFavourite'];
+                                        if (id is! int || isFavourite is! bool) {
+                                          return;
+                                        }
+                                        vm.updateFavourite(id, isFavourite);
                                       }
                                     },
                                     onFavourite: () async {

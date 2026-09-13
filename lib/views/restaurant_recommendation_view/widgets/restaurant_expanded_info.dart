@@ -78,16 +78,18 @@ class RestaurantExpandedInfo extends StatelessWidget {
                                 ),
                               ),
                               if (item.price != null) ...<Widget>[
-                                const SizedBox(width: AppSpacing.md),
-                                Text(
-                                  '${item.currency} ${item.price!.toStringAsFixed(2)}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.end,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
-                                      ?.copyWith(color: AppColors.accentRust),
+                                const SizedBox(width: AppSpacing.sm),
+                                Flexible(
+                                  child: Text(
+                                    '${item.currency} ${item.price!.toStringAsFixed(2)}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.end,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(color: AppColors.accentRust),
+                                  ),
                                 ),
                               ],
                             ],
