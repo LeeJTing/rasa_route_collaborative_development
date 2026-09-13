@@ -10,6 +10,17 @@ enum OpeningHoursAvailability { open, closed, unknown }
 class OpeningHoursLogic {
   const OpeningHoursLogic._();
 
+  /// The encoded close for a row being edited: a selected closing time at or
+  /// BEFORE the opening time means the NEXT day - "10:00 -> 02:00" is
+  /// `600 -> 1560`, i.e. minutes past midnight plus 1440 (see
+  /// `OpeningHoursRows` for how that is stored). A closing time after the
+  /// opening stays same-day. `24:00` and `00:00` both mean midnight, so they
+  /// encode to 1440 whatever the opening time.
+  static int encodeClose({required int opensAt, required int closeMinutes}) {
+    final int raw = closeMinutes % 1440;
+    return raw <= opensAt ? raw + 1440 : raw;
+  }
+
   static OpeningHoursAvailability availabilityAt(
     List<OpeningHour>? hours,
     DateTime malaysiaTime,
@@ -28,10 +39,14 @@ class OpeningHoursLogic {
       if (row.day != previous || row.status != DayStatus.open) continue;
       final int? opens = row.opensAt;
       final int? closes = row.closesAt;
-      if (opens != null &&
-          closes != null &&
-          closes < opens &&
-          minute < closes) {
+      if (opens == null || closes == null) continue;
+      // "Ran into today" is encoded two ways: the editor's next-day close
+      // (closesAt > 1440 - Monday 600 -> 1560) and a wrapped close
+      // (closes < opens) some sources use. Both end in the small hours.
+      final int morningEnd = closes > 1440
+          ? closes - 1440
+          : (closes < opens ? closes : 0);
+      if (morningEnd > 0 && minute < morningEnd) {
         return OpeningHoursAvailability.open;
       }
     }
@@ -78,4 +93,9 @@ class OpeningHoursLogic {
     List<OpeningHour>? hours,
     DateTime malaysiaTime,
   ) => availabilityAt(hours, malaysiaTime) == OpeningHoursAvailability.closed;
+
+  static bool isConfidentlyOpenAt(
+    List<OpeningHour>? hours,
+    DateTime malaysiaTime,
+  ) => availabilityAt(hours, malaysiaTime) == OpeningHoursAvailability.open;
 }

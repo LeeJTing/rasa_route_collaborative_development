@@ -67,10 +67,18 @@ class DiscoveryLogicFacade {
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
   }) => foodDiscovery.prepareSwipeMode(
     latitude: latitude,
     longitude: longitude,
     distanceOrigin: distanceOrigin,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
   );
 
   Future<SwipeSession> startNewSwipeSession(SwipeModePreparation preparation) =>
@@ -83,10 +91,20 @@ class DiscoveryLogicFacade {
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
+    bool rebuildWholeQueue = false,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
   }) => foodDiscovery.refreshAfterProfileChange(
     latitude: latitude,
     longitude: longitude,
     distanceOrigin: distanceOrigin,
+    rebuildWholeQueue: rebuildWholeQueue,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
   );
 
   Future<SwipeSession?> reloadSwipeSession(SwipeModePreparation preparation) =>
@@ -257,6 +275,7 @@ class DiscoveryLogicFacade {
     double? fromLongitude,
     double zoom = detailedViewZoom,
     int? limit,
+    MapSearchSelection search = MapSearchSelection.none,
   }) => mapExploration.pins(
     filter: filter,
     localFoodId: localFoodId,
@@ -268,7 +287,18 @@ class DiscoveryLogicFacade {
     fromLongitude: fromLongitude,
     zoom: zoom,
     limit: limit,
+    search: search,
   );
+
+  /// What a keyword is asking the map about, ready to hand to [mapPins].
+  ///
+  /// There is **no second marker query**. The search used to have its own call
+  /// and therefore its own grid, which is how two badges came to sit on top of
+  /// each other. One query now answers for the filtered map and the keyword
+  /// together; this turns a search result list into the half of that question
+  /// the keyword owns.
+  MapSearchSelection searchSelection(ExplorationSearchResults results) =>
+      MapExplorationLogic.searchSelectionFor(results);
 
   /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
@@ -283,16 +313,23 @@ class DiscoveryLogicFacade {
 
   /// REQ102_41 - what a tap on [cluster] should do: the zoom that visibly
   /// breaks it up, or its members when no zoom ever separates them.
+  /// [search] must be whatever was passed to [mapPins] for the load this badge
+  /// came from. The probe has to see the same set the badge was drawn from, or
+  /// it answers with a zoom that does not split this badge.
   Future<ClusterExpansion> expandMapCluster(
     MapCluster cluster, {
     required double zoom,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
+    List<int>? foodIds,
+    MapSearchSelection search = MapSearchSelection.none,
   }) => mapExploration.expandCluster(
     cluster,
     zoom: zoom,
     filter: filter,
     localFoodId: localFoodId,
+    foodIds: foodIds,
+    search: search,
   );
 
   /// REQ102_47 - the full detail behind one tapped marker, fetched by id.

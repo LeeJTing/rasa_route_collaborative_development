@@ -71,5 +71,22 @@ void main() {
       expect(result, hasLength(1));
       expect(result.single.id, 2);
     });
+
+    test('excludes soft-removed menu items', () {
+      const RestaurantItem removed = RestaurantItem(
+        id: 3,
+        restaurantId: 9,
+        localFoodId: 29,
+        foodName: 'Bak Kut Teh',
+        currency: 'RM',
+        foodCategory: 'Chinese',
+        isRemoved: true,
+      );
+
+      expect(
+        repository.deduplicateRestaurantItems(<RestaurantItem>[removed]),
+        isEmpty,
+      );
+    });
   });
 }

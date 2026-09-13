@@ -1,16 +1,20 @@
 import 'package:meta/meta.dart' show protected;
 
+import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/report_category.dart';
 import '../../domain_model/report_claim.dart';
 import '../../domain_model/report_outcome.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/submitted_landmark.dart';
+import '../../domain_model/tourist_location.dart';
 import '../repositories/auth_repository.dart';
+import '../repositories/geocoding_repository.dart';
 import '../repositories/map_repository.dart';
 import '../repositories/report_repository.dart';
 import '../repositories/restaurant_repository.dart';
 import '../repositories/submitted_landmark_repository.dart';
+import 'landmark_submission_logic.dart';
 import 'report_moderation_rules.dart';
 
 /// The report flow shared by catalogue restaurants AND submitted landmarks:
@@ -52,11 +56,42 @@ class ReportModerationLogic {
   @protected
   MapRepository createMapRepository() => MapRepository();
 
+  /// The address field's geocoder - the SAME OpenStreetMap/Nominatim
+  /// repository the Add-Landmark form searches through, so a corrected
+  /// address is composed and worded identically on both screens.
+  @protected
+  GeocodingRepository createGeocodingRepository() => GeocodingRepository();
+
   late final ReportRepository report = createReportRepository();
   late final RestaurantRepository restaurant = createRestaurantRepository();
   late final SubmittedLandmarkRepository landmark = createLandmarkRepository();
   late final AuthRepository auth = createAuthRepository();
   late final MapRepository map = createMapRepository();
+  late final GeocodingRepository geocoding = createGeocodingRepository();
+
+  /// Live address suggestions for the report page's address field -
+  /// measured from [around] and sorted nearest first, exactly like the
+  /// Add-Landmark form (the measuring/ordering rules are shared statics on
+  /// `LandmarkSubmissionLogic`). `null` = the lookup failed; `[]` = nothing
+  /// matched.
+  Future<List<AddressSuggestion>?> searchAddresses({
+    required String query,
+    required TouristLocation around,
+  }) => LandmarkSubmissionLogic.searchAddressesWith(
+    geocoding,
+    query: query,
+    around: around,
+  );
+
+  /// The composed OSM address of one point - what the address field fills in
+  /// when the report page's pin moves. Never throws.
+  Future<String?> reverseGeocodeAddress(TouristLocation location) =>
+      geocoding.reverseGeocodeAddress(location);
+
+  /// How a suggestion's distance is labelled ("350 m", "1.2 km") - the same
+  /// rule the Add-Landmark form uses.
+  String formatDistance(double metres) =>
+      LandmarkSubmissionLogic.formatDistanceLabel(metres);
 
   /// The place's current (non-removed) menu items for the report picker.
   Future<List<ReportableMenuItem>> reportableItemsFor({
@@ -156,8 +191,12 @@ class ReportModerationLogic {
       } else {
         result = await _applyFix(claim);
         // The fix matched this claim's identical group - clear those rows so
-        // the next report starts a fresh count (per approved plan).
-        await report.deleteIdentical(claim);
+        // the next report starts a fresh count (per approved plan). A fix
+        // that was HELD BACK (the pins do not agree on the spot yet) keeps
+        // its rows, so each further valid report re-runs the consensus check.
+        if (!result.heldBack) {
+          await report.deleteIdentical(claim);
+        }
       }
       if (result.label != null) applied.add(result.label!);
       if (result.hidPlace) placeHiddenNow = true;
@@ -283,14 +322,46 @@ class ReportModerationLogic {
     return const _ApplyResult();
   }
 
+  /// Applies the accepted address fix: the reported text AND the spot the
+  /// VALID pins agree on.
+  ///
+  /// Two rules decide the location (user's design, 2026-09-13): only claims
+  /// whose reporter was on site counted toward the threshold in the first
+  /// place, and the coordinates move only when at least three of those pins
+  /// fall within 30 m of their median - the median of THOSE pins is what gets
+  /// written, so a dissenting tap cannot drag the place.
+  ///
+  /// Below three agreeing pins the fix is HELD BACK: nothing is written and
+  /// the claims are KEPT (see [submitClaims]), so every further valid report
+  /// re-runs this check until the tourists agree.
   Future<_ApplyResult> _applyAddress(ReportClaim claim) async {
     final String address = claim.payload.replaceFirst('address:', '').trim();
     if (address.isEmpty) return const _ApplyResult();
+    final List<TouristLocation> pins = await report.locationsForIssue(claim);
+    final TouristLocation? agreed = ReportModerationRules.consensusLocation(
+      pins,
+    );
+    if (agreed == null) return const _ApplyResult(heldBack: true);
+    final double latitude = agreed.latitude;
+    final double longitude = agreed.longitude;
     if (claim.placeKind == ReportPlaceKind.restaurant) {
-      await restaurant.updateRestaurantAddress(claim.placeId, address);
+      await restaurant.updateRestaurantAddress(
+        claim.placeId,
+        address,
+        latitude: latitude,
+        longitude: longitude,
+      );
     } else {
-      await landmark.updateLandmarkAddress(claim.placeId, address);
+      await landmark.updateLandmarkAddress(
+        claim.placeId,
+        address,
+        latitude: latitude,
+        longitude: longitude,
+      );
     }
+    // A moved pin is new map data, so the map caches are dropped the same way
+    // a freeze drops them.
+    map.clearCache();
     return const _ApplyResult(label: 'Address updated');
   }
 
@@ -338,10 +409,24 @@ class ReportModerationLogic {
 /// Result of one auto-apply: an optional human label for the confirmation
 /// message, and whether the action hid the whole place (freeze/remove).
 class _ApplyResult {
-  const _ApplyResult({this.label, this.hidPlace = false});
+  const _ApplyResult({
+    this.label,
+    this.hidPlace = false,
+    this.heldBack = false,
+  });
 
+  /// The label added to `ReportSubmitOutcome.applied` (null = nothing
+  /// applied).
   final String? label;
+
+  /// True when the place is now hidden (frozen/removed) - the caller leaves
+  /// the map and drops the pin.
   final bool hidPlace;
+
+  /// True when the fix was DELIBERATELY not written yet: an address report's
+  /// pins do not agree on a spot, so its claims are kept and the consensus
+  /// check re-runs as more valid reports arrive.
+  final bool heldBack;
 }
 
 String _dayLabel(Weekday day) => switch (day) {

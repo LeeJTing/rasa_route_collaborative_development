@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../core/name_normalization.dart';
+import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
@@ -10,6 +11,7 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
+import '../repositories/geocoding_repository.dart';
 import '../repositories/landmark_repository_facade.dart';
 import 'food_name_matcher.dart';
 import 'location_rules.dart';
@@ -272,11 +274,13 @@ class LandmarkSubmissionLogic {
 
   /// Whether [opensAt]/[closesAt] (minutes since midnight) form a valid
   /// single range - closing strictly after opening. The same rule
-  /// [validateOperatingHours] checks across a whole day's rows, exposed here
-  /// separately so a single in-progress edit (e.g.
-  /// `AddLandmarkViewModel.setRangeTime`, which rejects a pick that would
-  /// make a range invalid, keeping the previous value) can check just one
-  /// range without needing a whole day's rows to check overlap against.
+  /// [validateOperatingHours] checks across a whole day's rows.
+  ///
+  /// OVERNIGHT: a period running past midnight is NOT a wrapped pair of
+  /// numbers here - the editor encodes its close as minutes past midnight
+  /// plus 1440 (Monday 10:00 -> 02:00 is `600 -> 1560`), so it still closes
+  /// strictly after it opens. `OpeningHoursLogic.encodeClose` is what turns a
+  /// selected closing time at or before the opening time into that value.
   bool isValidTimeOrder(int opensAt, int closesAt) => closesAt > opensAt;
 
   /// Shortest allowed single operating-hours row, in minutes. A row is one
@@ -290,9 +294,10 @@ class LandmarkSubmissionLogic {
   /// completeness check ("did the tourist fill in both times"), which stays
   /// in `AddLandmarkViewModel` since it's only meaningful because a human is
   /// mid-way through filling in a form (BF-19..23):
-  ///  - closing time must be strictly after opening time - no overnight
-  ///    wrap-around, since "24:00" already exists to express "open until
-  ///    midnight" without needing to cross into the next day;
+  ///  - closing time must be strictly after opening time. OVERNIGHT periods
+  ///    are expressed by the editor as a close PAST 1440 (Monday 10:00 ->
+  ///    02:00 is `600 -> 1560`), so they satisfy this naturally - see
+  ///    `OpeningHoursLogic.encodeClose`;
   ///  - a single row must be at least [minimumOperatingRowMinutes] long
   ///    (e.g. "09:00-09:30" on one row is rejected);
   ///  - multiple rows for the same day must not overlap (e.g.
@@ -300,7 +305,10 @@ class LandmarkSubmissionLogic {
   ///  - multiple rows for the same day must not be CONTIGUOUS - one ending
   ///    exactly when the next begins ("09:00-12:00" + "12:00-14:00") is one
   ///    continuous period written as two rows and must be combined into a
-  ///    single row ("09:00-14:00").
+  ///    single row ("09:00-14:00");
+  ///  - an overnight row's tail (closing past midnight) must not overlap the
+  ///    NEXT day's own rows - Monday "10:00 -> 02:00" plus a Tuesday
+  ///    "01:00-05:00" row would double-book 01:00-02:00 on Tuesday.
   ///
   /// Only meaningful for rows that have already passed the ViewModel's own
   /// completeness check (every Open row's `opensAt`/`closesAt` non-null) -
@@ -324,8 +332,7 @@ class LandmarkSubmissionLogic {
         }
         if (row.closesAt! - row.opensAt! < minimumOperatingRowMinutes) {
           return '$dayName has a row shorter than 1 hour '
-              '(${_timeLabel(row.opensAt!)}-${_timeLabel(row.closesAt!)}) - '
-              'each opening-hours row must be at least 1 hour.';
+              '(${_timeLabel(row.opensAt!)}-${_timeLabel(row.closesAt!)}).';
         }
         ranges.add((row.opensAt!, row.closesAt!));
       }
@@ -341,6 +348,36 @@ class LandmarkSubmissionLogic {
               '${_timeLabel(ranges[i].$1)}-${_timeLabel(ranges[i].$2)} are '
               'continuous - combine them into one row '
               '${_timeLabel(ranges[i - 1].$1)}-${_timeLabel(ranges[i].$2)}.';
+        }
+      }
+    }
+
+    // Overnight tails: a row closing past midnight (closesAt > 1440, e.g.
+    // "10:00 -> 02:00" = 600 -> 1560) is still open into the NEXT day, so
+    // it must not run into that day's own morning rows.
+    for (final MapEntry<Weekday, List<OpeningHour>> entry
+        in operatingHours.entries) {
+      final String dayName = _dayNames[entry.key]!;
+      final Weekday nextDay =
+          Weekday.values[(entry.key.index + 1) % Weekday.values.length];
+      final String nextDayName = _dayNames[nextDay]!;
+      for (final OpeningHour row in entry.value) {
+        final int? closesAt = row.closesAt;
+        if (row.status != DayStatus.open ||
+            closesAt == null ||
+            closesAt <= 1440) {
+          continue;
+        }
+        final int tailEnd = closesAt - 1440;
+        for (final OpeningHour next
+            in operatingHours[nextDay] ?? const <OpeningHour>[]) {
+          if (next.status != DayStatus.open || next.opensAt == null) continue;
+          if (next.opensAt! < tailEnd) {
+            return "$dayName's overnight hours run until "
+                '${_timeLabel(tailEnd)} the next day, which overlaps '
+                "$nextDayName's row starting at "
+                '${_timeLabel(next.opensAt!)}. Please adjust the times.';
+          }
         }
       }
     }
@@ -369,6 +406,11 @@ class LandmarkSubmissionLogic {
   /// later capture (additional food, signboard or stall) for it to count as
   /// the same restaurant.
   static const double sameRestaurantCaptureRangeMetres = 50;
+
+  /// How far the map pin may be corrected from the captured GPS fix (A9.1) -
+  /// the allowance drawn around the fix, and the range a picked address
+  /// suggestion must fall inside to be allowed to move the pin.
+  static const double pinAdjustmentRangeMetres = 100;
 
   /// How far apart two forms' first-food spots may be and still describe the
   /// SAME restaurant when they also carry the same restaurant name - the
@@ -410,13 +452,87 @@ class LandmarkSubmissionLogic {
       '${sameRestaurantCaptureRangeMetres.round()} m from the first food. '
       'Move closer to the restaurant and capture again.';
 
-  /// Whether [price] (MYR) is a valid price for a landmark's food item
-  /// (A16) - a domain invariant true of any price regardless of where it
-  /// came from (this form, a bulk import, an admin tool), not a form-UX
-  /// check. Used to live duplicated three times inside
-  /// `AddLandmarkViewModel` (`setPrimaryFoodPrice`, `setAdditionalFoodPrice`,
-  /// and again inline in `submitLandmark`) - centralised here instead.
-  bool isValidPrice(double price) => price > 0 && price <= 1000;
+  /// The band a landmark's food price (MYR) must fall inside (A16): at least
+  /// [minPrice] - a landmark must carry a real selling price, never "free" -
+  /// and at most [maxPrice], the widest value the field's
+  /// [priceIntegralDigits]+[priceDecimalDigits] shape can produce. A domain
+  /// invariant true of any price regardless of where it came from (this
+  /// form, a bulk import, an admin tool), not a form-UX check. Used to live
+  /// duplicated three times inside `AddLandmarkViewModel`
+  /// (`setPrimaryFoodPrice`, `setAdditionalFoodPrice`, and again inline in
+  /// `submitLandmark`) - centralised here instead.
+  static const double minPrice = 0.01;
+  static const double maxPrice = 9999.99;
+
+  bool isValidPrice(double price) => price >= minPrice && price <= maxPrice;
+
+  /// The price band as the form's (and the report flow's) messages word it:
+  /// "RM0.01 and RM9,999.99". One wording for the field's own error, the
+  /// submit checks and the report page's correction field - a tourist must
+  /// not see the band phrased three ways.
+  static String get priceBandRangeText =>
+      'RM${formatPriceAmount(minPrice)} and RM${formatPriceAmount(maxPrice)}';
+
+  /// A price rendered for the currency messages: two decimals with thousands
+  /// separators ("9,999.99"). `toStringAsFixed` has no grouping, and
+  /// "RM9999.99" reads like a typo next to the report flow's "RM9,999.99".
+  static String formatPriceAmount(double value) {
+    final String fixed = value.toStringAsFixed(priceDecimalDigits);
+    final int dot = fixed.indexOf('.');
+    final String integral = fixed.substring(0, dot);
+    final String decimals = fixed.substring(dot);
+    final StringBuffer grouped = StringBuffer();
+    for (int i = 0; i < integral.length; i++) {
+      if (i > 0 && (integral.length - i) % 3 == 0) grouped.write(',');
+      grouped.write(integral[i]);
+    }
+    return '$grouped$decimals';
+  }
+
+  /// How many integral digits and decimal places the price field accepts -
+  /// the shape [maxPrice] ("9999.99") describes.
+  static const int priceIntegralDigits = 4;
+  static const int priceDecimalDigits = 2;
+
+  /// The price text as it is shown WHILE TYPING: a leading zero followed by
+  /// any other character ("01", "0010.25", a pasted "0010.00") is rewritten
+  /// to its value with exactly [priceDecimalDigits] decimals - "1.00",
+  /// "10.25", "10.00" - so a displayed price can never start with 0. Text
+  /// that needs no rewrite is returned unchanged, INCLUDING the lone "0" of
+  /// a "0.50" entry in progress and any value not starting with 0.
+  static String normalisePriceEntryText(String text) {
+    final int dot = text.indexOf('.');
+    final String integral = dot == -1 ? text : text.substring(0, dot);
+    if (integral.length <= 1 || !integral.startsWith('0')) return text;
+    final double? value = _parsePriceText(text);
+    if (value == null) return text;
+    // "00"/"000" - keep the single zero of a "0.xx" entry in progress.
+    if (value == 0) return '0';
+    return value.toStringAsFixed(priceDecimalDigits);
+  }
+
+  /// The price text shown once the field is LEFT: exactly
+  /// [priceDecimalDigits] decimals - "1" -> "1.00", "1.5" -> "1.50".
+  /// Empty or unparsable text is returned unchanged, and so is a zero value
+  /// ("0.00" is never a valid price - the range error must keep pointing at
+  /// what was actually typed).
+  static String formatPriceText(String text) {
+    final String trimmed = text.trim();
+    if (trimmed.isEmpty) return text;
+    final double? value = _parsePriceText(trimmed);
+    if (value == null || value <= 0) return text;
+    return value.toStringAsFixed(priceDecimalDigits);
+  }
+
+  /// Parses price text that may still be mid-entry - a trailing dot ("12.")
+  /// is not a number to Dart, but is a natural state of a field being typed.
+  static double? _parsePriceText(String text) {
+    final String parseable = text.endsWith('.')
+        ? text.substring(0, text.length - 1)
+        : text;
+    if (parseable.isEmpty) return null;
+    return double.tryParse(parseable);
+  }
 
   /// Soft, non-blocking price guidance: when Gemini supplied a suggested
   /// selling range for the recognised dish (both [priceMin]/[priceMax] > 0),
@@ -483,9 +599,9 @@ class LandmarkSubmissionLogic {
 
   /// Whether a tourist-adjusted pin at ([adjustedLat], [adjustedLon]) is
   /// still within the allowed correction range of [current] (A9.1) - the
-  /// pin can be moved at most 100m from the GPS fix. Always allowed if
-  /// [current] itself has no fix yet - nothing to compare the adjustment
-  /// against.
+  /// pin can be moved at most [pinAdjustmentRangeMetres] from the GPS fix.
+  /// Always allowed if [current] itself has no fix yet - nothing to compare
+  /// the adjustment against.
   bool isWithinAllowedRange(
     TouristLocation current,
     double adjustedLat,
@@ -498,7 +614,7 @@ class LandmarkSubmissionLogic {
           adjustedLat,
           adjustedLon,
         ) <=
-        100;
+        pinAdjustmentRangeMetres;
   }
 
   /// Whether (lat, lon) is within Malaysia's (simplified) land boundary - a
@@ -834,6 +950,39 @@ class LandmarkSubmissionLogic {
     }
   }
 
+  /// Copy for a MERGED submit (A13): the place was already on the map (a
+  /// catalogue restaurant, or an earlier submitted landmark of the same name
+  /// within ~100 m), so no new pin was created and the dishes joined that
+  /// place instead.
+  ///
+  /// Full sentences naming the place, in the same voice as every other
+  /// message this form shows - the old copy read "Added X. Already exists:
+  /// Y. (\"Name\")", two fragments with the place name in brackets.
+  ///
+  /// [targetName] is the place merged into (empty when unknown);
+  /// [addedDishNames] the dishes that joined it and [existingDishNames] the
+  /// ones it already had (either may be empty).
+  static String mergeConfirmation({
+    required String targetName,
+    required List<String> addedDishNames,
+    required List<String> existingDishNames,
+  }) {
+    final String name = targetName.trim();
+    final String target = name.isEmpty ? 'the existing place' : '"$name"';
+    final String added = addedDishNames.isEmpty
+        ? ''
+        : 'Added ${addedDishNames.join(', ')} to $target.';
+    final String existing = existingDishNames.isEmpty
+        ? ''
+        : 'Already there: ${existingDishNames.join(', ')}.';
+    if (added.isEmpty && existing.isEmpty) {
+      return 'Nothing new was added to $target.';
+    }
+    if (added.isEmpty) return 'Nothing new was added to $target. $existing';
+    if (existing.isEmpty) return added;
+    return '$added $existing';
+  }
+
   /// Attaches the submitted dishes to an existing catalogue restaurant as
   /// `restaurant_item` rows (the A13 restaurant merge, called after
   /// genuinely-new foods were registered to `local_food` so every item has a
@@ -937,7 +1086,9 @@ class LandmarkSubmissionLogic {
       final int localFoodId = newFoodIds[entry.food.name] ?? entry.food.id;
       final String label = dishLabel(entry.food.name, entry.variant);
       // "Already there" means the SAME dish AND the same variant - a
-      // different variant is a different dish to list.
+      // different variant is a different dish to list (see
+      // [sameDishAndVariantIdentity]: a spelling that only repeats the dish
+      // or its curated synonyms is NOT a different variant).
       final bool alreadyListed = listed.any(
         (row) => sameDishAndVariantIdentity(
           dish: row.dish,
@@ -946,6 +1097,7 @@ class LandmarkSubmissionLogic {
           otherDish: entry.food.name,
           otherLocalFoodId: localFoodId,
           otherVariant: entry.variant,
+          otherVariantSynonyms: entry.food.synonyms,
         ),
       );
       if (alreadyListed) {
@@ -1009,10 +1161,11 @@ class LandmarkSubmissionLogic {
 
   /// Field caps / thresholds for the Add New Landmark form.
   ///
-  /// Restaurant name: typing STOPS at [maxRestaurantNameLength] (40, input is
-  /// cut off no matter what is pasted), a WARNING shows from
-  /// [restaurantNameWarnFromLength] (31), and submit is only allowed up to
-  /// [restaurantNameSubmitMaxLength] (30).
+  /// Restaurant name: typing STOPS at [maxRestaurantNameLength] (100 - input
+  /// is cut off no matter what is pasted), and an amber WARNING shows from
+  /// [restaurantNameWarnFromLength] (91) as the tourist approaches it. There
+  /// is no separate submit limit: any name that fits the cap and passes
+  /// [isValidRestaurantNameText] may be submitted.
   ///
   /// Website: typing STOPS at [maxWebsiteLength] (2048 - the practical URL
   /// ceiling), and an amber WARNING shows from [websiteWarnFromLength]
@@ -1020,11 +1173,10 @@ class LandmarkSubmissionLogic {
   /// limit: any link that fits the cap and passes [isValidWebsiteFormat]
   /// may be submitted.
   ///
-  /// Phone counts FORMATTED text (e.g. "+60 12-345 6789" = 16 chars; the
-  /// digits themselves are at most ~12). Address is capped at 150.
-  static const int maxRestaurantNameLength = 40;
-  static const int restaurantNameSubmitMaxLength = 30;
-  static const int restaurantNameWarnFromLength = 31;
+  /// Phone counts FORMATTED text (e.g. "012-684 0922" = 12 chars; the
+  /// digits themselves are at most 11). Address is capped at 150.
+  static const int maxRestaurantNameLength = 100;
+  static const int restaurantNameWarnFromLength = 91;
 
   static const int maxPhoneLength = 18;
 
@@ -1035,6 +1187,15 @@ class LandmarkSubmissionLogic {
   static const int websiteWarnFromLength = 2043;
 
   static const int maxAddressLength = 150;
+
+  /// The address's amber "stay under" nudge starts here - the 9 characters
+  /// below the [maxAddressLength] hard stop (141-149), where input is still
+  /// accepted but the cap is close.
+  static const int addressWarnFromLength = maxAddressLength - 9;
+
+  /// The shortest acceptable address (typed or auto-filled). Shorter than
+  /// this cannot carry a house number AND a street, so it is a typo.
+  static const int minAddressLength = 10;
 
   /// Manual food-name entry (the recognition screen's "Wrong dish? Type the
   /// name" / "Show this food" fields).
@@ -1060,6 +1221,70 @@ class LandmarkSubmissionLogic {
 
   static String _phoneDigits(String value) =>
       value.replaceAll(RegExp(r'[^0-9]'), '');
+
+  /// The country-code prefix the Add-Landmark phone field always shows as
+  /// fixed, non-editable text beside the input. NOTE: it is DISPLAY only -
+  /// the STORED value matches the `restaurant` table's own style, which is
+  /// national with the trunk "0" (see [formatMalaysianPhone]).
+  static const String phoneCountryCode = '+60';
+
+  /// The NATIONAL digits of [value] - a leading "+60" / "0060" / "60" and
+  /// the national trunk "0" are dropped ("012-684 0922" -> "126840922").
+  static String phoneNationalPart(String value) {
+    String digits = _phoneDigits(value);
+    if (digits.startsWith('0060')) {
+      digits = digits.substring(4);
+    } else if (digits.startsWith('60')) {
+      digits = digits.substring(2);
+    }
+    if (digits.startsWith('0')) digits = digits.substring(1);
+    return digits;
+  }
+
+  /// [value] in the SAME format the `restaurant` table stores phones in -
+  /// national digits WITH their trunk "0", grouped by number type. Shapes
+  /// verified against the live rows (2026-09-13):
+  ///
+  ///   * mobile - "012-684 0922", "011-2536 0286"
+  ///   * landline - "03-4162 6527" (8 subscriber digits), "04-538 3414"
+  ///     (7), "088-669 099" (6)
+  ///
+  /// Accepts anything a typed or stored entry can look like ("012...",
+  /// "12...", "+60 12..."); an entry that is not a complete number yet comes
+  /// back as its plain digits, so typing is never mangled mid-number, and an
+  /// entry with nothing to dial comes back empty.
+  static String formatMalaysianPhone(String value) {
+    final String national = phoneNationalPart(value);
+    if (national.isEmpty) return '';
+    if (national.length < 8 || national.length > 10) return _phoneDigits(value);
+    if (national.startsWith('1')) {
+      // Mobile: "01x-XXX XXXX" / "011-XXXX XXXX".
+      final String rest = national.substring(2);
+      if (rest.length == 7) {
+        return '0${national.substring(0, 2)}-${rest.substring(0, 3)} '
+            '${rest.substring(3)}';
+      }
+      if (rest.length == 8) {
+        return '0${national.substring(0, 2)}-${rest.substring(0, 4)} '
+            '${rest.substring(4)}';
+      }
+      return _phoneDigits(value);
+    }
+    // Landline: "08x" areas keep two area digits, the rest one.
+    final String area = national.startsWith('8')
+        ? national.substring(0, 2)
+        : national.substring(0, 1);
+    final String rest = national.substring(area.length);
+    final int firstGroup = switch (rest.length) {
+      6 => 3,
+      7 => 3,
+      8 => 4,
+      _ => 0,
+    };
+    if (firstGroup == 0) return _phoneDigits(value);
+    return '0$area-${rest.substring(0, firstGroup)} '
+        '${rest.substring(firstGroup)}';
+  }
 
   /// Whether [value] is a plausible MALAYSIAN phone number - format-level
   /// only (the app cannot verify the number is real/active without an SMS
@@ -1204,19 +1429,125 @@ class LandmarkSubmissionLogic {
       .trim();
 
   /// Whether [value] is acceptable free text for the optional restaurant
-  /// address. STRICT: letters/digits (any script, so Chinese addresses
-  /// work), spaces and common address punctuation ONLY - no control
-  /// characters/newlines - and at least one LETTER is required (a string of
-  /// nothing but digits/punctuation is not an address).
-  bool isValidAddressText(String value) {
-    if (containsControlCharacters(value)) return false;
-    final bool safeChars = RegExp(
-      r"^[\p{L}\p{N}\s.,#\-/()'&+]+$",
-      unicode: true,
-    ).hasMatch(value);
-    if (!safeChars) return false;
-    return RegExp(r'\p{L}', unicode: true).hasMatch(value);
+  /// address. STRICT, Malaysian-address rules:
+  ///  * letters/digits of any script (Chinese addresses work), spaces and ONLY
+  ///    the four address specials `.` `,` `-` `/` `#` - brackets, `&`, `'`,
+  ///    `+`, markup and control characters are rejected;
+  ///  * the value may not START or END with a special character (after
+  ///    trimming) - an address begins and ends with a letter or digit;
+  ///  * a special character may not repeat back-to-back (`A,, B`, `12--3`);
+  ///  * it must contain at least one LETTER (digits/punctuation alone is not
+  ///    an address) and at least one DIGIT (Malaysian addresses carry a
+  ///    house/unit/lot number).
+  ///
+  /// Length limits are the form's business ([minAddressLength] and
+  /// [maxAddressLength]) - this method judges the content only.
+  bool isValidAddressText(String value) => isValidAddressContent(value);
+
+  /// [isValidAddressText] as a STATIC, so the report page's address field can
+  /// accept and reject exactly the same strings the Add-Landmark form does
+  /// (see [addressError]) - one set of rules for one field, wherever it
+  /// appears.
+  static bool isValidAddressContent(String value) {
+    if (value.trim().isEmpty) return false;
+    if (!_addressHasAllowedCharacters(value)) return false;
+    if (_addressStartsOrEndsWithSpecialChar(value)) return false;
+    if (_addressHasRepeatedSpecialChar(value)) return false;
+    if (!_addressContainsLetter(value)) return false;
+    return _addressContainsDigit(value);
   }
+
+  /// The Add-Landmark form's COMPLETE address judgement, in the form's own
+  /// ORDER and its own words: a raw control character, a value shorter than
+  /// [minAddressLength], or ANY shape violation ([isValidAddressContent])
+  /// reports the one plain "Invalid address."; only something that passes all
+  /// of that at [maxAddressLength] characters or more is called out as
+  /// "Address is too long." (the field caps typing there, so 150 itself is
+  /// the hard stop - see [addressLengthWarning] for the amber nudge below
+  /// it).
+  ///
+  /// Both address fields the app shows - the form's and the report page's -
+  /// call THIS method (via `AddLandmarkViewModel.restaurantAddressError` and
+  /// `ReportModerationRules.addressError`), so the two can never drift
+  /// apart. Length is measured on the RAW text, exactly like the form's.
+  ///
+  /// An EMPTY value returns null: the form's field is optional, so whether
+  /// emptiness is an error is the caller's rule.
+  static String? addressError(String raw) {
+    if (raw.isEmpty) return null;
+    final String value = raw.trim();
+    if (_containsControlCharacters(raw) ||
+        value.length < minAddressLength ||
+        !isValidAddressContent(value)) {
+      return 'Invalid address.';
+    }
+    if (raw.length >= maxAddressLength) return 'Address is too long.';
+    return null;
+  }
+
+  /// The amber "stay under" nudge shown while a value is inside its warn
+  /// zone ([addressWarnFromLength] up to, but not including,
+  /// [maxAddressLength]) - advisory only, it never blocks submission. Shared
+  /// by both address fields so they nag in the same words.
+  static String? addressLengthWarning(String value) {
+    final int length = value.length;
+    if (length >= addressWarnFromLength && length < maxAddressLength) {
+      return 'Address should stay under $maxAddressLength characters '
+          '(currently $length).';
+    }
+    return null;
+  }
+
+  /// The four characters allowed besides letters, digits and spaces: comma,
+  /// period, hyphen, slash and hash.
+  static final RegExp _addressSpecial = RegExp(r'[.,\-/#]');
+
+  /// Whether [value] uses only letters/digits (any script), spaces and the
+  /// allowed address specials.
+  bool addressHasAllowedCharacters(String value) =>
+      _addressHasAllowedCharacters(value);
+
+  static bool _addressHasAllowedCharacters(String value) {
+    if (_containsControlCharacters(value)) return false;
+    return RegExp(r'^[\p{L}\p{N}\s.,\-/#]+$', unicode: true).hasMatch(value);
+  }
+
+  /// Whether [value] starts or ends with one of the address specials
+  /// (`.` `,` `-` `/` `#`) - runs on the trimmed value, so stray spaces do
+  /// not hide a trailing period.
+  bool addressStartsOrEndsWithSpecialChar(String value) =>
+      _addressStartsOrEndsWithSpecialChar(value);
+
+  static bool _addressStartsOrEndsWithSpecialChar(String value) {
+    final String trimmed = value.trim();
+    if (trimmed.isEmpty) return false;
+    final String edges = trimmed[0] == trimmed[trimmed.length - 1]
+        ? trimmed[0]
+        : '${trimmed[0]}${trimmed[trimmed.length - 1]}';
+    return _addressSpecial.hasMatch(edges);
+  }
+
+  /// Whether [value] repeats an address special back-to-back (`A,, B`,
+  /// `12--3`, `A//B`) - a typo, never a real address. A single special
+  /// between alphanumerics is fine (`12A/3`, `No. 5-7`).
+  bool addressHasRepeatedSpecialChar(String value) =>
+      _addressHasRepeatedSpecialChar(value);
+
+  static bool _addressHasRepeatedSpecialChar(String value) =>
+      RegExp(r'[.,\-/#]{2,}').hasMatch(value);
+
+  /// Whether [value] contains at least one letter (any script).
+  bool addressContainsLetter(String value) => _addressContainsLetter(value);
+
+  static bool _addressContainsLetter(String value) =>
+      RegExp(r'\p{L}', unicode: true).hasMatch(value);
+
+  /// Whether [value] contains at least one digit - a Malaysian address
+  /// carries a house/unit/lot number, so "Jalan Melati" alone is rejected.
+  bool addressContainsDigit(String value) => _addressContainsDigit(value);
+
+  static bool _addressContainsDigit(String value) =>
+      RegExp(r'\p{N}', unicode: true).hasMatch(value);
 
   /// Whether [value] is acceptable for the restaurant name. STRICT: letters
   /// or digits of any script, spaces and common name punctuation only; no
@@ -1237,6 +1568,9 @@ class LandmarkSubmissionLogic {
   /// blanket guard applied to every free-text form field so pasted content
   /// can never smuggle in newlines/control bytes.
   bool containsControlCharacters(String value) =>
+      _containsControlCharacters(value);
+
+  static bool _containsControlCharacters(String value) =>
       value.contains(RegExp(r'[\x00-\x1F\x7F]'));
 
   /// Whether [url] answers a GET within 5s with HTTP 200-399 - the website
@@ -1245,6 +1579,109 @@ class LandmarkSubmissionLogic {
   /// run the equivalent check server-side (SSRF).
   Future<bool> isWebsiteReachable(String url) =>
       repository.links.isWebsiteReachable(url);
+
+  // ===========================================================================
+  // Address search (OpenStreetMap / Nominatim) - Add-Landmark address field
+  // ===========================================================================
+
+  /// The shortest typed query that triggers address suggestions - "PV" is the
+  /// example the feature was designed around, so two characters.
+  static const int minAddressSearchLength = 2;
+
+  /// Live address suggestions for [query], measured from [around] and sorted
+  /// NEAREST FIRST - the form labels every suggestion with its distance and
+  /// only moves the pin when the pick is within the 100 m adjustment range
+  /// (a farther pick fills the address text and warns instead).
+  ///
+  /// Returns `null` when the lookup FAILED (offline, rate-limited, bad
+  /// response) and an empty list when nothing matched - the form shows a
+  /// different notice for each, and neither ever blocks typing the address by
+  /// hand.
+  Future<List<AddressSuggestion>?> searchAddresses({
+    required String query,
+    required TouristLocation around,
+  }) => searchAddressesWith(repository.geocoding, query: query, around: around);
+
+  /// [searchAddresses] against a geocoder the CALLER owns.
+  ///
+  /// The Add-Landmark form searches through its own [GeocodingRepository];
+  /// the report page searches through its logic class's own - both get the
+  /// same query rules, distance measuring and nearest-first ordering from
+  /// here, so the two screens can never disagree about what an address looks
+  /// like or how close it is.
+  static Future<List<AddressSuggestion>?> searchAddressesWith(
+    GeocodingRepository geocoding, {
+    required String query,
+    required TouristLocation around,
+  }) async {
+    final String trimmed = query.trim();
+    if (trimmed.length < minAddressSearchLength) {
+      return const <AddressSuggestion>[];
+    }
+    final List<AddressSuggestion>? results = await geocoding.searchAddresses(
+      query: trimmed,
+      around: around,
+    );
+    if (results == null) return null;
+    return sortSuggestionsByDistance(results, around);
+  }
+
+  /// Measures every suggestion from [around] and sorts them NEAREST FIRST.
+  /// Pure - no I/O - so the ordering rule is unit-testable on its own.
+  List<AddressSuggestion> measureAndSortSuggestions(
+    List<AddressSuggestion> suggestions,
+    TouristLocation around,
+  ) => sortSuggestionsByDistance(suggestions, around);
+
+  /// The static core of [measureAndSortSuggestions] - shared with the report
+  /// page's address field through `ReportModerationLogic`.
+  static List<AddressSuggestion> sortSuggestionsByDistance(
+    List<AddressSuggestion> suggestions,
+    TouristLocation around,
+  ) {
+    final List<AddressSuggestion> measured =
+        <AddressSuggestion>[
+          for (final AddressSuggestion suggestion in suggestions)
+            suggestion.withDistance(
+              _distanceMetres(
+                around.latitude,
+                around.longitude,
+                suggestion.latitude,
+                suggestion.longitude,
+              ),
+            ),
+        ]..sort(
+          (AddressSuggestion a, AddressSuggestion b) =>
+              a.distanceMeters.compareTo(b.distanceMeters),
+        );
+    return measured;
+  }
+
+  /// The composed OSM address of one point ([location]) in the same DB style
+  /// the address field expects - `null` when the lookup failed or
+  /// OpenStreetMap has no usable address there. Never throws (the repository
+  /// is best-effort), so a map interaction can never break the form.
+  Future<String?> reverseGeocodeAddress(TouristLocation location) =>
+      repository.geocoding.reverseGeocodeAddress(location);
+
+  /// How the form shows a suggestion's distance: metres below 1 km
+  /// ("350 m"), one decimal below 10 km ("1.2 km"), whole kilometres above
+  /// ("14 km"). A value that would round up to 1000 m crosses into the km
+  /// format instead ("1.0 km").
+  String formatDistance(double metres) => formatDistanceLabel(metres);
+
+  /// The static core of [formatDistance] - shared with the report page's
+  /// address suggestions through `ReportModerationLogic`.
+  static String formatDistanceLabel(double metres) {
+    if (metres.isNaN || metres.isInfinite || metres < 0) return '';
+    if (metres < 1000) {
+      final int rounded = metres.round();
+      if (rounded < 1000) return '$rounded m';
+    }
+    final double km = metres / 1000;
+    if (km < 10) return '${km.toStringAsFixed(1)} km';
+    return '${km.round()} km';
+  }
 
   // ===========================================================================
   // Dev GPS mock (Android-only presenter tool)
@@ -1290,9 +1727,10 @@ class LandmarkSubmissionLogic {
   /// pre-filled when the tourist agrees.
   ///
   /// All three must agree - the dish, the variant and the place. The variant
-  /// compares exactly (see [isSameDishAndVariant]): a plain "Cendol" capture
-  /// does NOT resume a draft holding "Cendol Jagung" - continuing it would
-  /// file the plain dish as that variant - and vice versa. An unknown capture
+  /// is compared by what it ADDS beyond the dish's own names (see
+  /// [isSameDishAndVariant]): a plain "Cendol" capture does NOT resume a
+  /// draft holding "Cendol Jagung" - continuing it would file the plain dish
+  /// as that variant - and vice versa. An unknown capture
   /// fix (or a draft without one) can never match either: a draft saved at
   /// another restaurant must not be resumed by a stray capture.
   LandmarkDraft? matchingDraft({
@@ -1339,9 +1777,11 @@ class LandmarkSubmissionLogic {
     dish: existing.name,
     localFoodId: existing.id,
     variant: existingVariant,
+    variantSynonyms: existing.synonyms,
     otherDish: candidate.name,
     otherLocalFoodId: candidate.id,
     otherVariant: candidateVariant,
+    otherVariantSynonyms: candidate.synonyms,
   );
 
   /// The saved incomplete submission for the SAME RESTAURANT as a form the
@@ -1388,24 +1828,43 @@ class LandmarkSubmissionLogic {
   ///     holding "Cendol Jagung" does NOT already have plain "Cendol".
   ///
   /// The DISH matches by catalogue id when both sides have one, else by
-  /// script-folded name (海天樓麵 and 海天楼面 are one dish). The VARIANT must
-  /// match too, compared the same way - case and punctuation never split it,
-  /// and an empty variant equals an EMPTY variant only.
+  /// script-folded name (海天樓麵 and 海天楼面 are one dish). The VARIANT is
+  /// compared by what it ADDS beyond the dish's own names (see
+  /// `FoodNameMatcher.variantDistinction`): case, punctuation and script
+  /// never split it, an empty variant equals an empty one - and a spelling
+  /// that only repeats the dish or one of its curated SYNONYMS ("Ais Kacang
+  /// (ABC)", 'ABC' being a synonym of "Ais Kacang") counts as empty too, so
+  /// it matches the plain dish instead of listing the same dish twice.
   static bool sameDishAndVariantIdentity({
     required String dish,
     required int localFoodId,
     required String variant,
+    List<String> variantSynonyms = const <String>[],
     required String otherDish,
     required int otherLocalFoodId,
     required String otherVariant,
+    List<String> otherVariantSynonyms = const <String>[],
   }) {
     final bool sameDish =
         (localFoodId != 0 && localFoodId == otherLocalFoodId) ||
         FoodNameMatcher.normalize(dish) == FoodNameMatcher.normalize(otherDish);
     if (!sameDish) return false;
-    return FoodNameMatcher.normalize(variant) ==
-        FoodNameMatcher.normalize(otherVariant);
+    return FoodNameMatcher.variantDistinction(dish, variant, variantSynonyms) ==
+        FoodNameMatcher.variantDistinction(
+          otherDish,
+          otherVariant,
+          otherVariantSynonyms,
+        );
   }
+
+  /// The one-line notice for a dish the form already holds: the capture
+  /// screen withholds its "Add to Landmark" behind it (and says why right
+  /// there), and the form repeats it if a duplicate ever slips through.
+  /// Kept here so the two can never drift apart.
+  ///
+  /// SHORT on purpose, like every other capture message - state the problem,
+  /// never lecture (see [captureTooFarMessage]).
+  static const String duplicateFoodNotice = 'This dish is already on the form.';
 }
 
 /// Result of attaching a set of submitted dishes to an existing place -

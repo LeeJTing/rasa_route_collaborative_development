@@ -57,7 +57,7 @@ class _EditFoodPreferenceViewState extends State<EditFoodPreferenceView> {
       );
       return;
     }
-    Navigator.pop(context);
+    Navigator.pop(context, true);
   }
 
   @override

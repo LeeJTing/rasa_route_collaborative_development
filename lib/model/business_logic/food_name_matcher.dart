@@ -194,6 +194,33 @@ class FoodNameMatcher {
     yield* food.synonyms;
   }
 
+  /// The words [variant] adds BEYOND the dish's own names - its [synonyms]
+  /// included, since a synonym IS the dish. Empty means there is no variant
+  /// at all: "Ais Kacang (ABC)" reduces to nothing when "ABC" is a curated
+  /// synonym of "Ais Kacang" (the catalogue row lists it), so a capture or
+  /// an entry spelled that way is simply the plain dish. A genuine variant
+  /// keeps its distinguishing words: "Cendol Jagung" over "Cendol" leaves
+  /// 'jagung'.
+  ///
+  /// Word-level and script-folded, exactly like every other name comparison
+  /// here - case, punctuation and Traditional/Simplified spelling never
+  /// split a word.
+  static String variantDistinction(
+    String dish,
+    String variant,
+    Iterable<String> synonyms,
+  ) {
+    final Set<String> known = <String>{
+      ...normalize(dish).split(' '),
+      for (final String synonym in synonyms) ...normalize(synonym).split(' '),
+    }..remove('');
+    final List<String> extra = normalize(variant)
+        .split(' ')
+        .where((String word) => word.isNotEmpty && !known.contains(word))
+        .toList(growable: false);
+    return extra.join(' ');
+  }
+
   /// Normalises a dish name for matching: Traditional → Simplified Chinese
   /// folding, lowercase, everything that is not a letter or digit becomes a
   /// space, and runs of whitespace collapse. "Nasi Lemak (Ayam)!" ->

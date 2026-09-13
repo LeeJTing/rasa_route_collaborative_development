@@ -1158,4 +1158,70 @@ void main() {
       expect(handoff.takeIsLocalFood(), isTrue);
     });
   });
+
+  group('a duplicate dish already on the form blocks the add button', () {
+    _FakeFoodRecognitionLogic recognizing(String dish, {String variant = ''}) {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food(dish)],
+        variant: variant,
+      );
+      return logic;
+    }
+
+    test(
+      'the duplicate is blocked with the shared notice, before popping',
+      () async {
+        final FoodRecognitionViewModel vm = _buildViewModel(
+          recognizing('Murtabak'),
+        );
+        vm.setPurpose(FoodRecognitionPurpose.additionalFood);
+        vm.setReferenceLocation(_fix(3.1390, 101.6869));
+        vm.onCurrentLocationChanged(_fix(3.1390, 101.6869));
+        vm.setExistingFormFoods(<ExistingFormFood>[
+          (food: _food('murtabak'), variant: ''),
+        ]);
+
+        await vm.captureAndRecognize(_image());
+
+        expect(
+          vm.duplicateFormFoodBlockMessage,
+          'This dish is already on the form.',
+        );
+        vm.dispose();
+      },
+    );
+
+    test('a genuinely different variant is not blocked', () async {
+      final FoodRecognitionViewModel vm = _buildViewModel(
+        recognizing('Murtabak'),
+      );
+      vm.setPurpose(FoodRecognitionPurpose.additionalFood);
+      vm.setReferenceLocation(_fix(3.1390, 101.6869));
+      vm.onCurrentLocationChanged(_fix(3.1390, 101.6869));
+      vm.setExistingFormFoods(<ExistingFormFood>[
+        (food: _food('Murtabak'), variant: 'Murtabak Special'),
+      ]);
+
+      await vm.captureAndRecognize(_image());
+
+      expect(vm.duplicateFormFoodBlockMessage, isNull);
+      vm.dispose();
+    });
+
+    test('the primary flow never blocks - there is no form yet', () async {
+      final FoodRecognitionViewModel vm = _buildViewModel(
+        recognizing('Murtabak'),
+      );
+      vm.setExistingFormFoods(<ExistingFormFood>[
+        (food: _food('murtabak'), variant: ''),
+      ]);
+
+      await vm.captureAndRecognize(_image());
+
+      expect(vm.duplicateFormFoodBlockMessage, isNull);
+      vm.dispose();
+    });
+  });
 }

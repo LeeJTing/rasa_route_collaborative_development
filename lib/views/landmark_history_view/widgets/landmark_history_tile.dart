@@ -46,16 +46,21 @@ class LandmarkHistoryTile extends StatelessWidget {
                       style: AppTextStyles.titleSmall,
                     ),
                     const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      landmark.category.isEmpty
-                          ? 'Landmark submitted by a tourist'
-                          : landmark.category,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textSecondary,
+                    // The same category the pin sheet and the detail page
+                    // show - the one MOST of its dishes carry, worded as the
+                    // restaurant table stores it ("Chinese restaurant"). A
+                    // landmark with no category at all leaves the line out -
+                    // the old "Landmark submitted by a tourist" placeholder
+                    // was noise (user report, 2026-09-13).
+                    if (landmark.displayCategoryLabel.isNotEmpty)
+                      Text(
+                        landmark.displayCategoryLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
                       ),
-                    ),
                     const SizedBox(height: AppSpacing.xs),
                     _StatusAndDishes(landmark: landmark),
                   ],

@@ -94,10 +94,10 @@ class RestaurantExpandedInfo extends StatelessWidget {
                           ),
                           if (item.ingredients?.isNotEmpty == true) ...<Widget>[
                             const SizedBox(height: AppSpacing.xs),
+                            // The whole description, however long: no maxLines
+                            // and no ellipsis, so nothing is cut in half.
                             Text(
                               item.ingredients!,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],

@@ -61,6 +61,44 @@ class SubmittedLandmark {
 
   final List<LandmarkItem> items;
   final List<OpeningHour> openingHours;
+
+  /// The category to SHOW for this landmark.
+  ///
+  /// A landmark is submitted with ONE category (its primary dish's food
+  /// category), but its dishes can disagree - a re-submission may add a dish
+  /// from another category. The dishes are the evidence the tourist can see,
+  /// so the category MOST of them carry wins (user request, 2026-09-13); a
+  /// tie goes to the category whose dish comes first, which keeps the answer
+  /// stable for a given dish order. Falls back to the stored [category]
+  /// column when no dish carries a category at all, and to '' when neither
+  /// does.
+  String get displayCategory {
+    final Map<String, int> counts = <String, int>{};
+    String best = '';
+    for (final LandmarkItem item in items) {
+      final String category = item.foodCategory.trim();
+      if (category.isEmpty) continue;
+      final int count = (counts[category] ?? 0) + 1;
+      counts[category] = count;
+      // Strictly greater, so the FIRST category to reach a count keeps it.
+      if (best.isEmpty || count > counts[best]!) best = category;
+    }
+    return best.isNotEmpty ? best : category.trim();
+  }
+
+  /// [displayCategory] worded the way the catalogue's own places read theirs:
+  /// the restaurant table stores the full phrase ("Chinese restaurant"), so
+  /// the landmark page says the same thing instead of a bare "Chinese"
+  /// (user request, 2026-09-13). A category that already says "restaurant" is
+  /// left alone, and an unknown category stays empty rather than inventing
+  /// "restaurant" on its own.
+  String get displayCategoryLabel {
+    final String category = displayCategory;
+    if (category.isEmpty) return '';
+    return category.toLowerCase().contains('restaurant')
+        ? category
+        : '$category restaurant';
+  }
 }
 
 /// Moderation state of a submission - `submitted_landmark.status` is free

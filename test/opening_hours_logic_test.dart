@@ -67,4 +67,58 @@ void main() {
       OpeningHoursAvailability.unknown,
     );
   });
+
+  group('encodeClose (the overnight convention)', () {
+    test('a close after the open stays on the same day', () {
+      expect(
+        OpeningHoursLogic.encodeClose(opensAt: 10 * 60, closeMinutes: 14 * 60),
+        14 * 60,
+      );
+    });
+
+    test('a close at or before the open runs into the next day (+1440)', () {
+      expect(
+        OpeningHoursLogic.encodeClose(opensAt: 10 * 60, closeMinutes: 2 * 60),
+        26 * 60, // 10:00 -> 02:00 next day
+      );
+      expect(
+        OpeningHoursLogic.encodeClose(opensAt: 10 * 60, closeMinutes: 10 * 60),
+        34 * 60, // 10:00 -> 10:00 next day = 24 hours
+      );
+    });
+
+    test('a midnight close stays midnight, not a next-day 00:00 tail', () {
+      expect(
+        OpeningHoursLogic.encodeClose(opensAt: 10 * 60, closeMinutes: 0),
+        1440,
+      );
+    });
+  });
+
+  test(
+    'an ENCODED overnight row (closesAt > 1440) stays open past midnight',
+    () {
+      const List<OpeningHour> hours = <OpeningHour>[
+        OpeningHour(
+          id: 1,
+          day: Weekday.monday,
+          status: DayStatus.open,
+          opensAt: 10 * 60,
+          closesAt: 26 * 60, // merged Monday 10:00 -> 02:00 next day
+        ),
+      ];
+      expect(
+        OpeningHoursLogic.availabilityAt(hours, DateTime(2026, 9, 7, 23)),
+        OpeningHoursAvailability.open,
+      );
+      expect(
+        OpeningHoursLogic.availabilityAt(hours, DateTime(2026, 9, 8, 1)),
+        OpeningHoursAvailability.open,
+      );
+      expect(
+        OpeningHoursLogic.availabilityAt(hours, DateTime(2026, 9, 8, 3)),
+        isNot(OpeningHoursAvailability.open),
+      );
+    },
+  );
 }

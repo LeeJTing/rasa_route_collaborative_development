@@ -65,21 +65,21 @@ class RestaurantCard extends StatelessWidget {
                         const SizedBox(height: AppSpacing.xs),
                         Row(
                           children: <Widget>[
-                            Expanded(
-                              child: _RestaurantMetric(
-                                icon: Icons.star,
-                                iconColor: AppColors.secondary,
-                                label: restaurant.reviewCount == null
-                                    ? restaurant.rating?.toStringAsFixed(1) ??
-                                          '—'
-                                    : '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount})',
-                              ),
+                            _RestaurantMetric(
+                              icon: Icons.star,
+                              iconColor: AppColors.secondary,
+                              label: restaurant.reviewCount == null
+                                  ? restaurant.rating?.toStringAsFixed(1) ??
+                                        '—'
+                                  : '${restaurant.rating?.toStringAsFixed(1) ?? '—'} (${restaurant.reviewCount})',
+                              fill: false,
                             ),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
                               child: _RestaurantMetric(
                                 icon: Icons.location_on_outlined,
                                 label: distanceLabel,
+                                alignment: MainAxisAlignment.end,
                               ),
                             ),
                           ],
@@ -125,20 +125,33 @@ class _RestaurantMetric extends StatelessWidget {
     required this.icon,
     required this.label,
     this.iconColor,
+    this.alignment = MainAxisAlignment.start,
+    this.fill = true,
   });
 
   final IconData icon;
   final String label;
   final Color? iconColor;
 
+  /// Where the icon + label sit inside the width they are given.
+  final MainAxisAlignment alignment;
+  final bool fill;
+
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Icon(icon, size: AppSizes.iconCompact, color: iconColor),
-      const SizedBox(width: AppSpacing.xs),
-      Expanded(
-        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-      ),
-    ],
-  );
+  Widget build(BuildContext context) {
+    final Widget labelText = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+    return Row(
+      mainAxisAlignment: alignment,
+      mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
+      children: <Widget>[
+        Icon(icon, size: AppSizes.iconCompact, color: iconColor),
+        const SizedBox(width: AppSpacing.xs),
+        if (fill) Flexible(child: labelText) else labelText,
+      ],
+    );
+  }
 }

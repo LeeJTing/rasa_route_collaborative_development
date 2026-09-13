@@ -13,6 +13,7 @@ import '../../view_models/landmark_detail_view_model.dart';
 import '../common_widgets/add_landmark_reminder_dialog.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/continue_draft_dialog.dart';
+import '../common_widgets/enlarged_image_dialog.dart';
 import '../common_widgets/recognised_food_card.dart';
 
 /// Landmark detail screen (UC500, A6 "View Details").
@@ -31,6 +32,9 @@ import '../common_widgets/recognised_food_card.dart';
 ///   * it is published to this screen's subtree with a
 ///     `ChangeNotifierProvider` declared by this View and nobody else;
 ///   * it is disposed with the screen.
+///
+/// The captured photo on the card opens full-screen, pinch to zoom (see
+/// `showEnlargedImage`) - the card itself only has room for a square crop.
 class LandmarkDetailView extends StatefulWidget {
   const LandmarkDetailView({super.key});
 
@@ -95,6 +99,11 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
     _viewModel.setReferenceLocation(
       LandmarkDraftHandoff().takeReferenceLocation(),
     );
+    // The dishes the form already holds (additional-food flow) - a duplicate
+    // is blocked here too, never bounced back with a notice.
+    _viewModel.setExistingFormFoods(
+      LandmarkDraftHandoff().takeExistingFormFoods(),
+    );
 
     _viewModel.onInit();
   }
@@ -135,6 +144,23 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
     viewModel.proceedToAddLandmark();
   }
 
+  /// Opens the captured photo full-screen (pinch to zoom) - the card's
+  /// thumbnail is a small square crop, so this is how the tourist sees the
+  /// WHOLE shot they took. Same overlay the food-detail and submitted-landmark
+  /// screens show (see `showEnlargedImage`).
+  Future<void> _showCapturedImage(
+    LandmarkDetailViewModel viewModel,
+    LocalFood food,
+  ) {
+    final XFile? image = viewModel.capturedImage;
+    if (image == null) return Future<void>.value();
+    return showEnlargedImage(
+      context,
+      file: image,
+      semanticLabel: 'Captured photo of ${food.name}',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<LandmarkDetailViewModel>.value(
@@ -164,13 +190,15 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                       const SizedBox(height: AppSpacing.lg),
                       // The same "Recognised Food" card as `AddLandmarkView`'s,
                       // just always expanded (no collapse arrow) and without the
-                      // Form-1 price footer.
+                      // Form-1 price footer. Its photo opens full-screen -
+                      // the card shows only a square crop of the capture.
                       RecognisedFoodCard(
                         food: food,
                         variant: viewModel.variant,
                         image: viewModel.capturedImage,
                         collapsible: false,
                         dietaryConflicts: viewModel.dietaryConflicts,
+                        onImageTap: () => _showCapturedImage(viewModel, food),
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       if (viewModel.isLocalFood &&
@@ -196,6 +224,18 @@ class _LandmarkDetailViewState extends State<LandmarkDetailView> {
                           // be viewed, but it must not become a landmark.
                           Text(
                             viewModel.addLandmarkLocationBlockMessage!,
+                            textAlign: TextAlign.center,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.warning,
+                            ),
+                          ),
+                        ] else if (viewModel.duplicateFormFoodBlockMessage !=
+                            null) ...<Widget>[
+                          // Already on the form (the duplicate rule): the
+                          // capture screen already withholds its add button;
+                          // this screen must not be a way around that.
+                          Text(
+                            viewModel.duplicateFormFoodBlockMessage!,
                             textAlign: TextAlign.center,
                             style: AppTextStyles.bodyMedium.copyWith(
                               color: AppColors.warning,
