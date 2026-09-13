@@ -71,6 +71,7 @@ class _FakeDiscoveryLogic extends DiscoveryLogicFacade {
   @override
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
+    String? foodType,
   }) => _landmarkResults
       .putIfAbsent(
         location.latitude,

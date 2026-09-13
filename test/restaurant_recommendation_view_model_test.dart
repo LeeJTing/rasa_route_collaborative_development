@@ -46,6 +46,7 @@ class _FakeDiscoveryFacade extends DiscoveryLogicFacade {
   @override
   Future<List<SubmittedLandmarkRecommendation>> getQuickModeLandmarks({
     required TouristLocation location,
+    String? foodType,
   }) async {
     landmarkCalls++;
     return const <SubmittedLandmarkRecommendation>[];
@@ -191,7 +192,7 @@ void main() {
       // ...but the View's Retry button / onInit call this directly, and a
       // user asking for a reload must always get one.
       viewModel.advance(const Duration(seconds: 5));
-      await viewModel.loadNearbyRestaurants();
+      await viewModel.loadNearbyRestaurants(forceRefresh: true);
 
       expect(
         facade.restaurantCalls,
