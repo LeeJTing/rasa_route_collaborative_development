@@ -5,6 +5,7 @@ import '../../model/data_models/food_analysis_response.dart';
 import '../../model/data_models/place_photo_match_response.dart';
 import '../../model/data_models/signboard_analysis_response.dart';
 import '../../model/data_models/signboard_name_match_response.dart';
+import '../../model/data_models/signboard_script_check_response.dart';
 import '../../model/data_models/stall_analysis_response.dart';
 import 'gemini_service.dart';
 
@@ -1308,6 +1309,89 @@ $_catalogueFoodTypeRules
       matched: (json['matched'] as bool?) ?? rawScore >= 95,
       reason: (json['reason'] as String?) ?? '',
     );
+  }
+
+  /// The SIGNBOARD photo asked a SEPARATELY-FRAMED question (UC500): which
+  /// Chinese character style is painted on the sign - Traditional or
+  /// Simplified?
+  ///
+  /// Needed because the first reading can be self-consistently wrong: a model
+  /// that transcribes a Traditional signboard in Simplified characters AND
+  /// labels the sign "simplified" contradicts nothing, so the app's own
+  /// style-vs-transcription check (`isScriptVariantContradiction`) cannot see
+  /// it. This call looks ONLY at the strokes painted on the sign and must
+  /// quote the characters it read, so the answer is evidence rather than a
+  /// second habit (user report 2026-09-14: "why the gemini return simplified
+  /// chinese for the signboard recognition while the signboard is having
+  /// traditional chinese again").
+  ///
+  /// The answer is used to RESTORE the transcription to the painted style
+  /// (`correctChineseScriptStyle`), never to replace what was read. See
+  /// `LandmarkSubmissionLogic.applyPaintedScript`.
+  /// Errors: A2 (timeout) - the caller keeps the first reading on every
+  /// unanswerable check.
+  Future<SignboardScriptCheckResponse> verifySignboardScript({
+    required List<int> imageBytes,
+  }) async {
+    if (useLiveGemini) {
+      return _verifySignboardScriptLive(imageBytes);
+    }
+
+    // Stub fallback - only reached while the live call is disabled. Nothing
+    // was read, so it must NOT claim a style: "unknown" leaves the first
+    // reading exactly as it was.
+    return const SignboardScriptCheckResponse(
+      paintedStyle: 'unknown',
+      reason: 'stub: no live signboard script check',
+    );
+  }
+
+  Future<SignboardScriptCheckResponse> _verifySignboardScriptLive(
+    List<int> imageBytes,
+  ) async {
+    const String prompt = '''
+  This image is a restaurant signboard photo.
+
+  Question: which CHINESE character style is PAINTED on this signboard -
+  Traditional or Simplified?
+
+  Decide ONLY from the strokes visible on the sign, never from the style you
+  would normally write:
+  - Traditional characters are the COMPLEX, high-stroke forms: 樓 記 麵 雞
+    館 義 號 餅.
+  - Simplified characters are the REDUCED forms: 楼 记 面 鸡 馆 义 号 饼.
+
+  Steps:
+  1. Find the Chinese characters actually painted on the signboard (usually
+     the shop name - ignore Malay/English/Tamil lines and any Jawi).
+  2. For at least two of them, look closely at the strokes: does the glyph
+     carry every complex stroke of the Traditional form, or is it the
+     reduced Simplified form? STROKE COUNT decides - the reading
+     (pronunciation) is identical for both forms, so it can never decide,
+     and neither can what you would normally write yourself.
+  3. Copy those characters into "exampleCharacters" EXACTLY as painted on the
+     sign - 樓 stays 樓, 楼 stays 楼, in the form the sign shows.
+  4. Answer "paintedStyle": "traditional" | "simplified" | "none" (the
+     signboard has no Chinese characters at all) | "unknown".
+
+  Return ONLY raw JSON, no markdown fences, no extra text:
+  {
+    "paintedStyle": "traditional|simplified|none|unknown",
+    "exampleCharacters": "the Chinese characters read off the sign, exactly as painted, or empty",
+    "reason": "one short sentence naming the strokes that decided it"
+  }
+  ''';
+
+    final String raw = await _gemini.describeImage(
+      imageBytes: imageBytes,
+      prompt: prompt,
+      apiKey: Env.geminiApiKeyLandmark,
+      model: Env.geminiModelLandmark,
+      jsonResponse: true,
+      thinkingBudget: Env.geminiThinkingBudget,
+      label: 'signboard-script-check',
+    );
+    return SignboardScriptCheckResponse.fromJson(_decodeJsonObject(raw));
   }
 
   /// The near-duplicate question (UC500): do these two photos show the same

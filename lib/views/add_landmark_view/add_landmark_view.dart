@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -72,6 +73,12 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   /// show the new text even while focused).
   int _appliedAddressVersion = 0;
 
+  /// Last phone/website version applied to their controllers (see
+  /// `AddLandmarkViewModel.phoneVersion` - the Confirm prefill bumps them, and
+  /// the fields must show what the place on record stores).
+  int _appliedPhoneVersion = 0;
+  int _appliedWebsiteVersion = 0;
+
   /// True from the moment Submit is tapped until the whole flow - the
   /// overwrite pre-flight, the submission and its outcome - has finished.
   /// It disables the button while the pre-flight network check runs and
@@ -79,6 +86,67 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   /// report, 2026-09-14: a tap could sit with no visible reaction and
   /// invite another).
   bool _submitFlowActive = false;
+
+  /// Whether the blocking page is currently up (see [_putBlockingPageUp] /
+  /// [_takeBlockingPageDown]). ONE page covers a whole chain of network
+  /// checks, and every question the chain asks stacks above it.
+  bool _blockingPageUp = false;
+
+  /// The blocking page's CURRENT copy. A `ValueNotifier`, so a running chain
+  /// can re-word the page it already has up - the tourist then reads WHAT is
+  /// happening at this step ("Loading what this place already stores…") and a
+  /// slow check is never taken for a frozen screen (user report 2026-09-14:
+  /// the "Replace the existing details?" question arrived after a long wait
+  /// with no loading ever shown, and answering it gave no feedback at all).
+  final ValueNotifier<({String title, String message})> _blockingPageCopy =
+      ValueNotifier<({String title, String message})>((
+        title: 'One moment…',
+        message: 'Please keep this screen open.',
+      ));
+
+  /// Puts the blocking page up (see [_BlockingPage]). A no-op while one is
+  /// already up, so a chain of checks - the confirm's Gemini photo check, the
+  /// near-duplicate question, what the place already lists, its stored
+  /// details, another incomplete submission - shares ONE page instead of
+  /// flashing a new one per step. The copy is ALWAYS set, so a re-word takes
+  /// effect whether the page is already up or about to be pushed.
+  ///
+  /// The page stays up until [_takeBlockingPageDown], and the QUESTIONS the
+  /// chain asks render above it (the same arrangement the submit flow uses),
+  /// so the tourist is never left on an EDITABLE form while a check or a
+  /// question is still on its way (user report, 2026-09-14: after answering
+  /// "yes, this is the place", the form became editable again and the
+  /// "already on the menu" dialog then landed mid-edit, with no loading ever
+  /// shown).
+  void _putBlockingPageUp({required String title, required String message}) {
+    _blockingPageCopy.value = (title: title, message: message);
+    if (_blockingPageUp || !mounted) return;
+    _blockingPageUp = true;
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) =>
+            _BlockingPage(copy: _blockingPageCopy),
+      ),
+    );
+  }
+
+  /// Re-words the page the chain already has up, so it says what THIS step is
+  /// doing (no-op when no page is up).
+  void _rewordBlockingPage({required String title, required String message}) {
+    if (!_blockingPageUp) return;
+    _blockingPageCopy.value = (title: title, message: message);
+  }
+
+  /// Takes the page down exactly once, on every outcome - a no-op when it is
+  /// already down, so nested brackets (a chain, then the draft-combine read at
+  /// its end) cannot pop a route twice.
+  void _takeBlockingPageDown() {
+    if (!_blockingPageUp) return;
+    _blockingPageUp = false;
+    if (mounted) Navigator.of(context, rootNavigator: true).pop();
+  }
 
   @override
   void initState() {
@@ -125,6 +193,8 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
       text: _viewModel.restaurantAddress,
     );
     _appliedRestaurantNameVersion = _viewModel.extractedRestaurantNameVersion;
+    _appliedPhoneVersion = _viewModel.phoneVersion;
+    _appliedWebsiteVersion = _viewModel.websiteVersion;
     _viewModel.onInit();
 
     // Fill an empty address from the pinned (captured) spot once the first
@@ -139,10 +209,29 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     // ANOTHER saved submission for the same restaurant: the Confirm button
     // never runs on a confirmed form, yet the two drafts must still be
     // combinable (the absorbed row goes on the next save - see
-    // `AddLandmarkViewModel.mergeExistingDraft`).
+    // `AddLandmarkViewModel.mergeExistingDraft`). The same missing Confirm is
+    // why the stored DETAILS are fetched here too - a confirmed form has no
+    // button left to press, so without this its phone, website, address and
+    // hours could never be auto-filled (user request, 2026-09-14: "phone and
+    // websites shall also be auto filled").
     if (draft != null && _viewModel.restaurantConfirmed) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _offerDraftCombine(_viewModel);
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        _putBlockingPageUp(
+          title: 'Loading what this place already stores…',
+          message:
+              'This submission is already confirmed - we are pulling the '
+              'phone, website, address and opening hours stored for it into '
+              'this form. Please keep this screen open; the form cannot be '
+              'edited until this finishes.',
+        );
+        try {
+          await _viewModel.fillDetailsFromPlaceOnRecord();
+        } finally {
+          // The combine offer runs next and owns the rest of the page's
+          // lifecycle - it takes the page down once its own read is done.
+          if (mounted) await _offerDraftCombine(_viewModel);
+        }
       });
     }
   }
@@ -150,6 +239,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _blockingPageCopy.dispose();
     _restaurantNameController.dispose();
     _restaurantNameFocusNode.dispose();
     _phoneController.dispose();
@@ -284,12 +374,14 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   /// [_SubmittingPage]) over it for as long as the write is in flight, so
   /// nothing on the form can be edited (or left) mid-write.
   ///
-  /// The page goes up only once `submitLandmark` has actually STARTED: its
-  /// own checks run synchronously before its first await, so a form it
-  /// rejects shows that message with no spinner flashing over it. A FAILED
-  /// submit takes the page down and leaves the tourist on the very same,
-  /// editable form with the reason under the Submit bar - ready to fix - and
-  /// a successful one hands them back to the dashboard.
+  /// The page goes up the moment the tap is handled and stays until the whole
+  /// flow - the pre-flight question, the write, the outcome - is done, so the
+  /// form cannot be edited while anything is in flight (user report,
+  /// 2026-09-14: it used to appear only once the write itself started, which
+  /// left the form editable behind a greyed-out Submit during the pre-flight
+  /// read). A FAILED submit takes the page down and leaves the tourist on the
+  /// very same, editable form with the reason under the Submit bar - ready to
+  /// fix - and a successful one hands them back to the dashboard.
   Future<void> _submit(AddLandmarkViewModel viewModel) async {
     // One flow at a time: the pre-flight question below is a network check,
     // and a tap while it runs must not stack a parallel flow. The flag also
@@ -309,35 +401,31 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   }
 
   /// The submit flow proper (see [_submit], which guards and brackets it):
-  /// asks the pre-flight question, runs the submission behind the blocking
-  /// page, and lands on the dashboard when it succeeds.
+  /// puts the blocking page up IMMEDIATELY, asks the pre-flight question,
+  /// runs the submission behind that page, and lands on the dashboard when it
+  /// succeeds.
   Future<void> _runSubmitFlow(AddLandmarkViewModel viewModel) async {
-    // Ask about replacing the same-place record's stored details BEFORE the
-    // write starts - this is the last moment the tourist can keep them.
-    await _askDetailsOverwriteIfNeeded(viewModel);
-    if (!mounted) return;
-    final Future<void> submission = viewModel.submitLandmark();
-    final bool started = viewModel.isSubmitting;
-    if (started) {
-      unawaited(
-        showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (BuildContext dialogContext) => const _BlockingPage(
-            title: 'Submitting your landmark…',
-            message:
-                'This can take a moment - your photos are being uploaded. '
-                "Please keep this screen open; we'll take you back to the "
-                'dashboard once it is done.',
-          ),
-        ),
-      );
+    // The page goes up ON THE TAP, before the pre-flight read below: that
+    // read is a network call, and until it answered the form sat editable
+    // with nothing but a greyed-out Submit (user report, 2026-09-14). The
+    // pre-flight question's own dialog renders above this page.
+    _putBlockingPageUp(
+      title: 'Submitting your landmark…',
+      message:
+          'This can take a moment - your photos are being uploaded. '
+          "Please keep this screen open; we'll take you back to the "
+          'dashboard once it is done.',
+    );
+    try {
+      // Ask about replacing the same-place record's stored details BEFORE the
+      // write starts - this is the last moment the tourist can keep them.
+      await _askDetailsOverwriteIfNeeded(viewModel);
+      if (!mounted) return;
+      await viewModel.submitLandmark();
+    } finally {
+      _takeBlockingPageDown();
     }
-
-    await submission;
     if (!mounted) return;
-    // The page comes down exactly once, on every outcome.
-    if (started) Navigator.of(context, rootNavigator: true).pop();
     if (viewModel.submitError != null) return; // Fix it on this form.
 
     // A13 - when the place already exists on the map (same name within
@@ -402,9 +490,14 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   /// then offers to combine this form with another unfinished submission for
   /// the same restaurant.
   ///
-  /// The checks are Gemini calls, so the click can take a moment: the form is
-  /// BLOCKED behind [_BlockingPage] while they run (nothing may change the
-  /// name or the photos mid-question), and the Confirm row reports progress.
+  /// The checks are Gemini calls and catalogue reads, so the click can take a
+  /// moment: ONE blocking page covers the WHOLE chain - including everything
+  /// that runs AFTER the tourist answers the near-duplicate question - and
+  /// each question renders above it (user report, 2026-09-14: the page used to
+  /// come down as soon as the photo check answered, so the form was editable
+  /// while "what this place already lists" was still being read and the
+  /// "already on the menu" dialog then landed mid-edit, with no loading ever
+  /// shown).
   Future<void> _confirmRestaurant(AddLandmarkViewModel viewModel) async {
     // A photo + a name means the checks will actually run - show the wait
     // only then, so a form that is rejected outright never flashes it.
@@ -413,42 +506,49 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
         viewModel.restaurantName.trim().isNotEmpty;
     final Future<String?> confirming = viewModel.confirmRestaurant();
     if (wait) {
-      unawaited(
-        showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (BuildContext dialogContext) => const _BlockingPage(
-            title: 'Checking nearby restaurants…',
-            message:
-                'We are comparing your photo with the places already saved '
-                'around here. Please keep this screen open - the form cannot '
-                'be edited until this finishes.',
-          ),
-        ),
+      _putBlockingPageUp(
+        title: 'Checking this restaurant…',
+        message:
+            'We are comparing your photo with the places already saved '
+            'around here, then checking what this restaurant already lists. '
+            'Please keep this screen open - the form cannot be edited until '
+            'this finishes. A question of ours may come up on top.',
       );
     }
-    final String? problem = await confirming;
-    if (!mounted) return;
-    if (wait) Navigator.of(context, rootNavigator: true).pop();
-    if (problem != null) {
-      await _showNotice(
-        icon: Icons.info_outline,
-        title: 'Cannot confirm yet',
-        message: problem,
+    try {
+      final String? problem = await confirming;
+      if (!mounted) return;
+      if (problem != null) {
+        await _showNotice(
+          icon: Icons.info_outline,
+          title: 'Cannot confirm yet',
+          message: problem,
+        );
+        return;
+      }
+      if (viewModel.takeSignboardNameMismatch()) {
+        await _showNameMismatchNotice(viewModel);
+        return;
+      }
+      if (viewModel.similarPlacePrompt != null) {
+        await _askSimilarPlace(viewModel);
+        return;
+      }
+      // The details check is another slow read (the same-place lookup) - the
+      // page says so while it runs, and the question then renders above it.
+      _rewordBlockingPage(
+        title: 'Checking the stored details…',
+        message:
+            'We are comparing what you entered with what '
+            '"${viewModel.restaurantName}" already stores. A question may '
+            'come up on top; the form cannot be edited until this finishes.',
       );
-      return;
+      await _askDetailsOverwriteIfNeeded(viewModel, acknowledge: true);
+      if (!mounted) return;
+      await _offerDraftCombine(viewModel);
+    } finally {
+      _takeBlockingPageDown();
     }
-    if (viewModel.takeSignboardNameMismatch()) {
-      await _showNameMismatchNotice(viewModel);
-      return;
-    }
-    if (viewModel.similarPlacePrompt != null) {
-      await _askSimilarPlace(viewModel);
-      return;
-    }
-    await _askDetailsOverwriteIfNeeded(viewModel);
-    if (!mounted) return;
-    await _offerDraftCombine(viewModel);
   }
 
   /// Asks whether this submission REPLACES details the same-place record
@@ -456,9 +556,16 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   /// merge would otherwise overwrite them silently. Does nothing when there
   /// is nothing to ask, and the answer is remembered for the submit that
   /// follows.
+  ///
+  /// [acknowledge] says whether the ANSWER gets a notice of its own: at
+  /// Confirm the tourist stays on the form, so the choice is confirmed back to
+  /// them - a silent answer left them unsure it had registered ("after i
+  /// click replace, nothing changed"); at Submit the write follows
+  /// immediately and needs no extra tap.
   Future<void> _askDetailsOverwriteIfNeeded(
-    AddLandmarkViewModel viewModel,
-  ) async {
+    AddLandmarkViewModel viewModel, {
+    bool acknowledge = false,
+  }) async {
     if (!await viewModel.checkDetailsOverwrite()) return;
     if (!mounted) return;
     final PlaceOverwriteReport? report = viewModel.overwritePrompt;
@@ -487,6 +594,19 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     if (!mounted) return;
     // A dismissed dialog keeps the stored record - the safe direction.
     viewModel.resolveOverwrite(overwrite == true);
+    // Consumed either way, so a stale acknowledgement can never surface later.
+    final String? ack = viewModel.takeOverwriteAck();
+    if (!acknowledge || ack == null || !mounted) return;
+    // The replacement itself happens on SUBMIT (see `submitLandmark`), so the
+    // answer is said out loud here instead of leaving the form apparently
+    // unchanged.
+    await _showNotice(
+      icon: Icons.edit_note_outlined,
+      title: overwrite == true
+          ? 'Details will be replaced'
+          : 'Stored details kept',
+      message: ack,
+    );
   }
 
   /// "Is this the same restaurant?" - a nearby place, saved under a name that
@@ -540,14 +660,45 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     );
     if (!mounted) return;
     if (samePlace != true) {
-      viewModel.rejectSimilarPlace();
+      // "No" still fills the form from the place this name is on record as
+      // (the same retrieval the "yes" branch runs) - a read, so the page
+      // covers it and says so.
+      _rewordBlockingPage(
+        title: 'Checking the place on record…',
+        message:
+            'We are loading the details saved for '
+            '"${viewModel.restaurantName}" into this form. Please keep this '
+            'screen open - the form cannot be edited until this finishes.',
+      );
+      await viewModel.rejectSimilarPlace();
       if (!mounted) return;
-      await _askDetailsOverwriteIfNeeded(viewModel);
+      _rewordBlockingPage(
+        title: 'Checking the stored details…',
+        message:
+            'We are comparing what you entered with what '
+            '"${viewModel.restaurantName}" already stores. A question may '
+            'come up on top; the form cannot be edited until this finishes.',
+      );
+      await _askDetailsOverwriteIfNeeded(viewModel, acknowledge: true);
       if (!mounted) return;
       await _offerDraftCombine(viewModel);
       return;
     }
 
+    // "Yes" retrieves that place's whole record into this form - what it
+    // already lists AND its stored name, contact details and hours - so the
+    // page says exactly that until the acknowledgement is shown
+    // (user request 2026-09-14: "it will have a loading page, then retrieve
+    // the information into this page, then only the loading page
+    // disappear").
+    _rewordBlockingPage(
+      title: 'Loading what this place already stores…',
+      message:
+          '"${candidate.name}" is already on the map - we are pulling its '
+          'dishes, name, contact details and opening hours into this form. '
+          'Please keep this screen open; the form cannot be edited until '
+          'this finishes.',
+    );
     await viewModel.acceptSimilarPlace();
     if (!mounted) return;
     await _acknowledgeExistingDishes(viewModel, candidate.name);
@@ -595,6 +746,10 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     if (!mounted) return;
 
     if (allExist) {
+      // The form is about to be left for the dashboard: the blocking page
+      // must come down BEFORE the navigation replaces this screen's stack
+      // (see [_takeBlockingPageDown]).
+      _takeBlockingPageDown();
       await viewModel.finishAsAlreadyThere();
       if (!mounted) return;
       // No second notice here: the dialog above already said nothing would be
@@ -667,8 +822,26 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
   /// Called by [Confirm] and, once, when a form resumes an ALREADY-CONFIRMED
   /// draft: no Confirm click happens there, yet two drafts of one restaurant
   /// must still be combinable.
+  ///
+  /// The lookup is a read, so it runs behind the blocking page - shared with
+  /// the calling chain when there already is one - and the page comes down
+  /// before the question renders (a draft-combine question appearing out of
+  /// nowhere, seconds after the tourist went back to editing, is exactly the
+  /// report this fixes).
   Future<void> _offerDraftCombine(AddLandmarkViewModel viewModel) async {
-    final LandmarkDraft? saved = await viewModel.draftForRestaurantMerge();
+    _putBlockingPageUp(
+      title: 'Checking for another incomplete submission…',
+      message:
+          'We are looking for another saved submission for this restaurant. '
+          'Please keep this screen open - the form cannot be edited until '
+          'this finishes.',
+    );
+    final LandmarkDraft? saved;
+    try {
+      saved = await viewModel.draftForRestaurantMerge();
+    } finally {
+      _takeBlockingPageDown();
+    }
     if (!mounted || saved == null) return;
     final bool combine = await showCombineDraftDialog(
       context,
@@ -788,6 +961,19 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                         _addressController.text !=
                             viewModel.restaurantAddress) {
                       _addressController.text = viewModel.restaurantAddress;
+                    }
+
+                    // The phone and website fields: a version change is ALWAYS
+                    // our own fill (the Confirm prefill) - typing never bumps
+                    // it - so the value goes straight into the field, which
+                    // was built empty before the fill ran.
+                    if (_appliedPhoneVersion != viewModel.phoneVersion) {
+                      _phoneController.text = viewModel.restaurantPhoneLocal;
+                      _appliedPhoneVersion = viewModel.phoneVersion;
+                    }
+                    if (_appliedWebsiteVersion != viewModel.websiteVersion) {
+                      _websiteController.text = viewModel.restaurantWebsite;
+                      _appliedWebsiteVersion = viewModel.websiteVersion;
                     }
 
                     return Column(
@@ -2269,8 +2455,9 @@ class _AdditionalFoodsSection extends StatelessWidget {
 }
 
 /// The blocking "we are working on it" page, shown as a modal route while a
-/// network check owns the form - the submission write ([_submit]) or the
-/// near-duplicate check ([_confirmRestaurant]).
+/// network check owns the form - the submission write ([_submit]), or a whole
+/// chain of checks behind Confirm ([_confirmRestaurant]: the photo check, the
+/// near-duplicate question and everything the answer sets off).
 ///
 /// A full-screen barrier covers the whole form - app bar included - so
 /// nothing behind it can be tapped, scrolled or typed into, and the
@@ -2278,54 +2465,68 @@ class _AdditionalFoodsSection extends StatelessWidget {
 /// (a half-written landmark, or a question answered about a name/photo that
 /// changed underneath it, is exactly what this page exists to prevent).
 ///
-/// The copy says the wait is EXPECTED. It also matches [AppDialog]'s frame -
-/// the app's one modal frame - with a progress ring where the icon badge
-/// would sit.
+/// The copy comes from a [ValueListenable], so the running chain can RE-WORD
+/// the page per step (see `_rewordBlockingPage`) - the tourist always reads
+/// what is happening now, and a slow check never looks like a frozen screen.
+///
+/// The frame matches [AppDialog]'s - the app's one modal frame - with a
+/// progress ring where the icon badge would sit.
 class _BlockingPage extends StatelessWidget {
-  const _BlockingPage({required this.title, required this.message});
+  const _BlockingPage({required this.copy});
 
-  /// Centred heading, e.g. "Submitting your landmark…".
-  final String title;
-
-  /// Centred body line under the heading - say what is happening and that it
-  /// is expected to take a moment.
-  final String message;
+  /// The page's live title/message, owned by the owning State.
+  final ValueListenable<({String title, String message})> copy;
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
-      child: Dialog(
-        backgroundColor: AppColors.surface,
-        insetPadding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.xl,
-          vertical: AppSpacing.xxl,
-        ),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(AppRadius.xl)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xl),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const CircularProgressIndicator(),
-              const SizedBox(height: AppSpacing.lg),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: AppTextStyles.titleSmall,
+      child: ValueListenableBuilder<({String title, String message})>(
+        valueListenable: copy,
+        builder:
+            (
+              BuildContext context,
+              ({String title, String message}) value,
+              Widget? child,
+            ) => _buildFrame(context, value),
+      ),
+    );
+  }
+
+  Widget _buildFrame(
+    BuildContext context,
+    ({String title, String message}) value,
+  ) {
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xl,
+        vertical: AppSpacing.xxl,
+      ),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(AppRadius.xl)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const CircularProgressIndicator(),
+            const SizedBox(height: AppSpacing.lg),
+            Text(
+              value.title,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.titleSmall,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              value.message,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary,
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

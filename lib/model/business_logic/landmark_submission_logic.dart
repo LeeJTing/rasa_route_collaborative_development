@@ -12,8 +12,10 @@ import '../../domain_model/place_overwrite_report.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/similar_place_candidate.dart';
+import '../../domain_model/stored_place_details.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
+import '../data_models/signboard_script_check_response.dart';
 import '../repositories/geocoding_repository.dart';
 import '../repositories/landmark_repository_facade.dart';
 import 'dietary_warning.dart';
@@ -42,7 +44,12 @@ class LandmarkSubmissionLogic {
   /// EXACT signboard text, e.g. "海天楼" - the romanised translation is not
   /// appended, and a transcription Gemini "turned" into the other Chinese
   /// style is restyled to the style it reported for the sign (see
-  /// [displaySignboardName]). The tourist can edit the field afterwards.
+  /// [displaySignboardName]). A Chinese name additionally gets a SECOND,
+  /// separately-framed look at the photo (see [applyPaintedScript]): a
+  /// transcription that agrees with its own wrong style label - a Traditional
+  /// signboard read and labelled as Simplified - contradicts nothing, so the
+  /// first reading alone cannot catch it (user report 2026-09-14). The
+  /// tourist can edit the field afterwards.
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<String> analyzeSignboard(List<int> imageBytes) async {
     final response = await repository.recognition.analyzeSignboard(imageBytes);
@@ -65,7 +72,62 @@ class LandmarkSubmissionLogic {
       // auto-fill, the same A7 outcome either way.
       throw Exception('Unable to extract restaurant name from signboard.');
     }
-    return name;
+    return _restorePaintedScript(name, imageBytes: imageBytes);
+  }
+
+  /// Gives a Chinese signboard name the SEPARATELY-FRAMED second look (see
+  /// `SignboardScriptCheckResponse`) and restores the transcription to the
+  /// style that look says is painted.
+  ///
+  /// Asked only when the name actually carries a style-specific glyph
+  /// ([chineseScriptStyleOf] is not "unknown") - for a transcription whose
+  /// glyphs are shared by both styles ("海天") there is nothing any answer
+  /// could restore, so the extra call is not made. Never throws: an
+  /// unanswerable check (offline, quota, timeout) leaves the first reading
+  /// exactly as it was, so this can only ever improve a name, never lose one.
+  Future<String> _restorePaintedScript(
+    String name, {
+    required List<int> imageBytes,
+  }) async {
+    if (chineseScriptStyleOf(name) == 'unknown') return name;
+    final SignboardScriptCheckResponse painted;
+    try {
+      painted = await repository.recognition.verifySignboardScript(
+        imageBytes: imageBytes,
+      );
+    } catch (_) {
+      return name;
+    }
+    return applyPaintedScript(name, painted.paintedStyle);
+  }
+
+  /// [name] RESTORED to the Chinese character style a second look at the photo
+  /// says is PAINTED on the signboard.
+  ///
+  /// The first reading's own `scriptVariant` can only ever be checked against
+  /// its own transcription ([displaySignboardName]): a model that reads a
+  /// Traditional signboard in Simplified characters AND calls the sign
+  /// "simplified" contradicts nothing, so the app had no way to catch it
+  /// (user report 2026-09-14 - "why the gemini return simplified chinese for
+  /// the signboard recognition while the signboard is having traditional
+  /// chinese again"). [paintedStyle] is the answer to that separately framed
+  /// question, and the GLYPHS win: the photo is the evidence, the reading
+  /// follows it.
+  ///
+  /// Conversion is [correctChineseScriptStyle]'s - only glyphs with ONE
+  /// provable counterpart move ("义" -> "義"), while dual-role glyphs (后, 台,
+  /// 面) and ambiguous ones (发) pass through untouched. A style that names
+  /// nothing ("none", "unknown"), a name that already carries the painted
+  /// style, and a name with no style-specific glyph at all all come back
+  /// unchanged.
+  static String applyPaintedScript(String name, String paintedStyle) {
+    if (name.isEmpty) return name;
+    if (paintedStyle != 'traditional' && paintedStyle != 'simplified') {
+      return name;
+    }
+    final String current = chineseScriptStyleOf(name);
+    if (current == 'unknown' || current == paintedStyle) return name;
+    return correctChineseScriptStyle(name, paintedStyle);
   }
 
   /// Similarity an EDITED restaurant name must reach on the captured
@@ -190,6 +252,67 @@ class LandmarkSubmissionLogic {
       return corrected;
     }
     return romanised.isNotEmpty ? romanised : original;
+  }
+
+  /// Readable casing for a name that arrived SHOUTING.
+  ///
+  /// A sign lettered in capitals ("RESTORAN NASI KANDAR") comes back from
+  /// Gemini in capitals too, while the same shop is written "Restoran Nasi
+  /// Kandar" everywhere else - the app used to keep whichever it happened to
+  /// get, so one place was recorded in two different styles (user report
+  /// 2026-09-14).
+  ///
+  /// Identity is NOT at stake: every name lookup goes through `placeNameKey`,
+  /// which lowercases and folds Traditional Chinese, so a case difference can
+  /// never create a second restaurant
+  /// (`RestaurantRepository.findByNameList`, `SubmittedLandmarkRepository
+  /// .findByName`, `namesLookSimilar`). This only stabilises the name
+  /// the app SHOWS and STORES, so "Restoran X" and "RESTORAN X" stop looking
+  /// like two different places on the map and in Supabase.
+  ///
+  /// Deliberately conservative:
+  ///   * a name that already carries a lowercase letter is returned UNCHANGED
+  ///     ("myBurgerLab", "Restoran Ali & Abu") - that casing is the name's
+  ///     own, and only shouting is reshaped;
+  ///   * in a shouting name every word is Title Cased ("KEDAI KOPI" ->
+  ///     "Kedai Kopi");
+  ///   * words that read as a brand, acronym or code keep their capitals: a
+  ///     word of up to three letters with no vowel ("KFC", "SS", "TT") or a
+  ///     word in [_shoutedNameKeeps] ("ABC", "XO") - digits are never
+  ///     touched, so "SS2", "7E" and "24 JAM" survive;
+  ///   * an apostrophe does not start a new word ("ALI'S" -> "Ali's"); every
+  ///     other separator does ("ALI-BABA" -> "Ali-Baba");
+  ///   * scripts without case (Chinese, Tamil, Jawi) pass through untouched,
+  ///     including a mixed name ("海天楼 HAI TIAN LOU" -> "海天楼 Hai Tian Lou").
+  static String normaliseNameCasing(String name) {
+    if (!_hasLatinLetter.hasMatch(name) || _hasLowercaseLetter.hasMatch(name)) {
+      return name;
+    }
+    return name.replaceAllMapped(
+      _latinWord,
+      (Match match) => _readableWord(match[0]!),
+    );
+  }
+
+  /// One word of a Latin name - letters, with any INTERNAL apostrophe kept
+  /// inside the same word ("ALI'S" is one word, so it reads back "Ali's").
+  static final RegExp _latinWord = RegExp(r"[A-Za-z]+(?:'[A-Za-z]+)*");
+  static final RegExp _hasLatinLetter = RegExp(r'[A-Za-z]');
+  static final RegExp _hasLowercaseLetter = RegExp(r'[a-z]');
+  static final RegExp _hasVowel = RegExp(r'[aeiou]');
+
+  /// Words a shouting name keeps AS WRITTEN - brands/acronyms whose capitals
+  /// are part of the name and that the vowel rule above would otherwise title
+  /// case ("ABC" and "XO" carry vowels). Extend as the catalogue teaches.
+  static const Set<String> _shoutedNameKeeps = <String>{'abc', 'xo', 'ttdi'};
+
+  /// Title Cases one ALL-CAPS word, unless it reads as a brand, acronym or
+  /// code (see [normaliseNameCasing]).
+  static String _readableWord(String word) {
+    final String lower = word.toLowerCase();
+    if (_shoutedNameKeeps.contains(lower)) return word;
+    if (word.length <= 3 && !_hasVowel.hasMatch(lower)) return word;
+    return lower[0].toUpperCase() + lower.substring(1);
   }
 
   /// The script-variant CHECK for a signboard transcription: Gemini copies
@@ -1074,6 +1197,62 @@ class LandmarkSubmissionLogic {
     }
   }
 
+  /// The place this submission's [restaurantName] already matches, WITH what
+  /// that record stores - the lookup the Add-Landmark form runs after Confirm
+  /// so the tourist sees (and can correct) the details already on file
+  /// instead of retyping them (user request 2026-09-14).
+  ///
+  /// Same identity as the submit-time merge: a catalogue restaurant by name
+  /// first, else an earlier submitted landmark - and either one only when it
+  /// is within ~100 m of ([latitude], [longitude]), because a same-named shop
+  /// in another town is a different place and must not hand its phone number
+  /// to this form. Null when nothing matches, when there is no fix yet, or
+  /// when the read fails - the form simply stays as the tourist left it.
+  Future<StoredPlaceDetails?> storedPlaceDetails({
+    required String restaurantName,
+    double? latitude,
+    double? longitude,
+  }) async {
+    try {
+      final Restaurant? restaurant = await _findNearbyRestaurant(
+        restaurantName,
+        latitude,
+        longitude,
+      );
+      if (restaurant != null) {
+        return StoredPlaceDetails(
+          name: restaurant.name,
+          phone: restaurant.phone,
+          website: restaurant.website,
+          address: restaurant.address,
+          openingHours: restaurant.openingHours,
+        );
+      }
+      final SubmittedLandmark? nearby = await _findNearbySubmittedLandmark(
+        restaurantName,
+        latitude,
+        longitude,
+      );
+      if (nearby == null) return null;
+      // The by-name lookup returns a light row (id + coordinates only) - the
+      // stored DETAILS need the full read, exactly like [mergeOverwriteReport].
+      final SubmittedLandmark stored =
+          await repository.landmark.getSubmittedLandmarkById(nearby.id) ??
+          nearby;
+      return StoredPlaceDetails(
+        name: stored.name,
+        isRestaurant: false,
+        phone: stored.phone,
+        website: stored.website,
+        address: stored.address,
+        openingHours: stored.openingHours,
+      );
+    } catch (_) {
+      // Best-effort: an unreadable place leaves the form untouched.
+      return null;
+    }
+  }
+
   /// How far the pin must move before it counts as a detail the merge would
   /// replace - GPS jitter between two visits to the same shop is not a change
   /// worth asking about.
@@ -1083,6 +1262,11 @@ class LandmarkSubmissionLogic {
   /// value that differs from what the place stores. A blank field is never
   /// reported - it is not written either (see the `changed*` repository
   /// helpers), so it cannot replace anything.
+  ///
+  /// "Differs" is judged on `detailValueKey`, the same case- and
+  /// spacing-folded key the repository's write filter uses, so "Jalan AMPANG"
+  /// over a stored "Jalan Ampang" is not a change and never raises the
+  /// question (user request 2026-09-14).
   static void _collectChangedContactFields(
     List<String> fields, {
     String? phone,
@@ -1093,9 +1277,8 @@ class LandmarkSubmissionLogic {
     String? storedAddress,
   }) {
     void consider(String label, String? submitted, String? stored) {
-      final String value = submitted?.trim() ?? '';
-      if (value.isEmpty) return;
-      if (value == (stored ?? '').trim()) return;
+      if ((submitted ?? '').trim().isEmpty) return;
+      if (detailValueKey(submitted) == detailValueKey(stored)) return;
       fields.add(label);
     }
 
@@ -1359,8 +1542,9 @@ class LandmarkSubmissionLogic {
   /// The SIGNIFICANT words of a place name: script-folded, lowercased,
   /// everything that is not a letter or digit turned into a space, and the
   /// generic words above dropped. "Restoran Ali & Abu" -> ['ali', 'abu'];
-  /// "Ali and Abu" -> ['ali', 'abu'] - which is exactly why the two qualify
-  /// for a photo comparison while their `placeNameKey`s stay different.
+  /// "Ali and Abu" -> ['ali', 'abu'] - which is exactly why the two share a
+  /// similarity key (see [placeNameSimilarity]) while their `placeNameKey`s
+  /// stay different.
   @visibleForTesting
   static List<String> significantPlaceWords(String value) {
     final String flattened = toSimplifiedChinese(
@@ -1372,38 +1556,85 @@ class LandmarkSubmissionLogic {
     ];
   }
 
-  /// Whether two place names share at least one significant word - the name
-  /// pre-filter for the photo question (the user's rule: filter on the name
-  /// FIRST, then only fetch the photo of what survives).
+  /// How similar two place names must be to be worth a photo comparison - 80%
+  /// (user request 2026-09-14: the pre-filter must work on name SIMILARITY,
+  /// not on an exact match or a single shared word).
+  static const double similarPlaceNameThreshold = 0.8;
+
+  /// How close two place names are, 0..1 - the name pre-filter behind the
+  /// photo question.
   ///
-  /// Chinese names arrive as ONE word (there is nothing to split on), so a
-  /// name that CONTAINS the other's word counts as shared there: "海天楼" and
-  /// "海天楼海鲜" are the same shop's name extended.
+  /// The comparison runs on the SIGNIFICANT words ([significantPlaceWords]:
+  /// script-folded, lowercased, punctuation flattened, the generic shop words
+  /// dropped), so "Restoran Ali & Abu" and "ali, abu" share the key
+  /// "ali abu"; a name that is nothing but generic words falls back to its
+  /// whole folded form.
+  ///
+  /// 1.0 when the keys are equal or one CONTAINS the other - "Tian Yi" and
+  /// "Tian Yi Seafood", "海天楼" and "海天楼海鲜" are one shop's name
+  /// extended, which no character-by-character ratio can see for Chinese.
+  /// Otherwise it is the classic edit-distance ratio
+  /// `1 - distance / longer.length`: "Restoran Ali" and "Restoran Ali 2"
+  /// stay a match (containment) while "Sushi King" and "Sushi Tei" land at
+  /// 0.6 - two different shops that merely share a word.
+  ///
+  /// Edit distance is unforgiving on very SHORT names - three letters leave no
+  /// room for a typo at 80% - so those effectively need to be equal, or one an
+  /// extension of the other.
   @visibleForTesting
-  static bool sharesSignificantNameWord(String a, String b) {
-    final List<String> left = significantPlaceWords(a);
-    if (left.isEmpty) return false;
-    final List<String> right = significantPlaceWords(b);
-    for (final String word in left) {
-      for (final String other in right) {
-        if (word == other) return true;
-        if (_containsCjk(word) &&
-            _containsCjk(other) &&
-            (word.contains(other) || other.contains(word))) {
-          return true;
-        }
-      }
-    }
-    return false;
+  static double placeNameSimilarity(String a, String b) {
+    final String left = _similarityKey(a);
+    final String right = _similarityKey(b);
+    if (left.isEmpty || right.isEmpty) return 0;
+    if (left == right) return 1;
+    if (left.contains(right) || right.contains(left)) return 1;
+    final int longest = math.max(left.length, right.length);
+    return 1 - _editDistance(left, right) / longest;
   }
 
-  static bool _containsCjk(String value) =>
-      RegExp(r'[\u4e00-\u9fff]').hasMatch(value);
+  /// Whether two place names are close enough to be worth a PHOTO comparison:
+  /// at least [similarPlaceNameThreshold] (80%) similar (the user's rule:
+  /// filter on the name first, then let Gemini compare the photos - and the
+  /// tourist decide). This only ever decides who is asked about.
+  @visibleForTesting
+  static bool namesLookSimilar(String a, String b) =>
+      placeNameSimilarity(a, b) >= similarPlaceNameThreshold;
+
+  /// The key [placeNameSimilarity] compares: the significant words joined
+  /// (the generic shop words dropped), or the whole folded name when nothing
+  /// but generic words is left.
+  static String _similarityKey(String value) {
+    final List<String> words = significantPlaceWords(value);
+    return words.isEmpty ? placeNameKey(value) : words.join(' ');
+  }
+
+  /// Plain Levenshtein distance - names are short, so the two-row table costs
+  /// nothing and needs no cleverer algorithm.
+  static int _editDistance(String a, String b) {
+    List<int> previous = List<int>.generate(b.length + 1, (int i) => i);
+    final List<int> current = List<int>.filled(b.length + 1, 0);
+    for (int i = 1; i <= a.length; i++) {
+      current[0] = i;
+      for (int j = 1; j <= b.length; j++) {
+        final int substitution = a.codeUnitAt(i - 1) == b.codeUnitAt(j - 1)
+            ? 0
+            : 1;
+        current[j] = math.min(
+          math.min(current[j - 1] + 1, previous[j] + 1),
+          previous[j - 1] + substitution,
+        );
+      }
+      previous = List<int>.of(current);
+    }
+    return previous[b.length];
+  }
 
   /// Nearby places whose name looks like [name]: a catalogue restaurant or an
-  /// earlier submitted landmark within [maxMetres], sharing a significant
-  /// word with it, and CARRYING A PHOTO (nothing else can be compared).
-  /// Nearest first, capped at [limit].
+  /// earlier submitted landmark within [maxMetres], at least
+  /// [similarPlaceNameThreshold] (80%) SIMILAR to it by name, and CARRYING A
+  /// PHOTO (nothing else can be compared). Nearest first, capped at [limit]
+  /// (every candidate is one Gemini call, so the cap is what keeps Confirm
+  /// fast).
   ///
   /// Never throws: an unreadable list simply means "no candidates", so this
   /// can only ever ADD a question to the Confirm click, never block it.
@@ -1438,7 +1669,7 @@ class LandmarkSubmissionLogic {
             image.isEmpty ||
             lat == null ||
             lon == null ||
-            !sharesSignificantNameWord(name, restaurant.name)) {
+            !namesLookSimilar(name, restaurant.name)) {
           continue;
         }
         found.add(
@@ -1471,7 +1702,7 @@ class LandmarkSubmissionLogic {
             image.isEmpty ||
             lat == null ||
             lon == null ||
-            !sharesSignificantNameWord(name, landmark.name)) {
+            !namesLookSimilar(name, landmark.name)) {
           continue;
         }
         found.add(
@@ -1691,7 +1922,9 @@ class LandmarkSubmissionLogic {
       if (localFoodId <= 0) continue; // Not in the catalogue - nothing to link.
       if ((localFoodId > 0 && existingFoodIds.contains(localFoodId)) ||
           existingNames.contains(key)) {
-        if (!existing.contains(entry.food.name)) {
+        // The report list is deduped on the same case-folded key, so one dish
+        // written two ways is still reported once.
+        if (!existing.any((String name) => name.trim().toLowerCase() == key)) {
           existing.add(entry.food.name);
         }
         continue;
@@ -1774,7 +2007,12 @@ class LandmarkSubmissionLogic {
         ),
       );
       if (alreadyListed) {
-        if (!existing.contains(label)) existing.add(label);
+        final String labelKey = label.trim().toLowerCase();
+        if (!existing.any(
+          (String name) => name.trim().toLowerCase() == labelKey,
+        )) {
+          existing.add(label);
+        }
         continue;
       }
       toAdd.add(

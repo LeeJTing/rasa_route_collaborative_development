@@ -108,6 +108,15 @@ class MockGpsButton extends StatelessWidget {
           ],
         ),
         (
+          state: 'Perlis',
+          spots: <({String label, double lat, double lon})>[
+            (label: 'Kangar', lat: 6.4414, lon: 100.1987),
+            (label: 'Kuala Perlis', lat: 6.4000, lon: 100.1300),
+            (label: 'Arau', lat: 6.4296, lon: 100.2736),
+            (label: 'Padang Besar', lat: 6.6600, lon: 100.3200),
+          ],
+        ),
+        (
           state: 'Other states',
           spots: <({String label, double lat, double lon})>[
             (label: 'Penang', lat: 5.4141, lon: 100.3288),

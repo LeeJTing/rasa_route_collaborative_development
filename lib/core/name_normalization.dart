@@ -151,6 +151,23 @@ String toSimplifiedChinese(String value) {
 String placeNameKey(String value) =>
     toSimplifiedChinese(value.trim()).toLowerCase();
 
+/// The equality key for a free-text DETAIL field (phone, website, address):
+/// trimmed, inner whitespace collapsed, lowercased.
+///
+/// Every check that asks "did this field change?" compares two of these keys
+/// instead of the raw strings: a re-submission carrying "Jalan AMPANG" for a
+/// stored "Jalan Ampang" is the SAME detail, so it must not be reported as a
+/// change, must not raise the merge's overwrite question, and must not rewrite
+/// the row (user request 2026-09-14 - every such check folds case first, "or
+/// else this will happen again and again"). Content differences are still
+/// differences: punctuation is kept, so the same number written with different
+/// separators ("0123456789" vs "012-345 6789") remains a change.
+String detailValueKey(String? value) {
+  final String trimmed = (value ?? '').trim();
+  if (trimmed.isEmpty) return '';
+  return trimmed.replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+}
+
 /// Glyphs that appear ONLY in Traditional Chinese (OpenCC maps them to a
 /// different Simplified glyph) and glyphs that appear ONLY in Simplified
 /// Chinese (the targets of those mappings). Glyphs on both sides - e.g. 干,

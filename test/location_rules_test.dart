@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rasa_route_collaborative_development/domain_model/malaysia_boundary.dart';
+import 'package:rasa_route_collaborative_development/domain_model/region.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/location_rules.dart';
 
 void main() {
@@ -38,6 +40,53 @@ void main() {
           reason: '($lat, $lon) should be inside East Malaysia',
         );
       }
+    });
+
+    test('islands and the Perlis coast are inside too (user report)', () {
+      const List<(double, double)> inside = <(double, double)>[
+        (5.7730, 103.0080), // Pulau Redang, Terengganu
+        (5.9100, 102.7300), // Perhentian Besar
+        (6.4410, 100.1980), // Kangar, Perlis
+        (6.4000, 100.1280), // Kuala Perlis
+        (6.3520, 99.8020), // Kuah, Langkawi
+        (2.7900, 104.1690), // Pulau Tioman, Pahang
+        (4.1150, 118.6290), // Pulau Sipadan, Sabah
+      ];
+      for (final (double lat, double lon) in inside) {
+        expect(
+          LocationRules.isWithinMalaysia(lat, lon),
+          isTrue,
+          reason:
+              '($lat, $lon) is Malaysian land - the map draws it inside the '
+              'country, so the Add-Landmark check must accept it',
+        );
+      }
+    });
+
+    test('the rings the map publishes win while they are set', () {
+      // A spot the built-in polygons reject (Gulf of Thailand)...
+      expect(LocationRules.isWithinMalaysia(6.60, 103.50), isFalse);
+      // ...is accepted once the map has published rings that contain it, so
+      // the form answers with the map's own dataset (see MalaysiaBoundary).
+      MalaysiaBoundary.publishRings(<CountryOutline>[
+        const CountryOutline(
+          name: 'published test ring',
+          ring: <GeoPoint>[
+            GeoPoint(6.90, 103.20),
+            GeoPoint(6.90, 103.80),
+            GeoPoint(6.30, 103.80),
+            GeoPoint(6.30, 103.20),
+          ],
+        ),
+      ]);
+      expect(LocationRules.isWithinMalaysia(6.60, 103.50), isTrue);
+      // Outside the published rings the answer is their "no" - not the
+      // fallback's "yes".
+      expect(LocationRules.isWithinMalaysia(3.1390, 101.6869), isFalse);
+      // With nothing published the built-in polygons answer again.
+      MalaysiaBoundary.forgetRings();
+      expect(LocationRules.isWithinMalaysia(3.1390, 101.6869), isTrue);
+      expect(LocationRules.isWithinMalaysia(6.60, 103.50), isFalse);
     });
 
     test('neighbouring countries and open sea are outside', () {

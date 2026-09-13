@@ -60,5 +60,21 @@ void main() {
       expect(vm.restaurantName, 'Nasi Lemak House');
       vm.dispose();
     });
+
+    test('a shouted signboard reading is stored in readable casing', () {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+
+      // Gemini transcribes a sign AS LETTERED, so the same shop came back as
+      // "Restoran X" or "RESTORAN X" depending on its signboard - the field
+      // (and therefore the saved landmark) keeps one readable spelling
+      // instead of looking like two different places.
+      vm.setExtractedRestaurantName('RESTORAN JELAPANG');
+      expect(vm.restaurantName, 'Restoran Jelapang');
+
+      // A mixed-case name is the name's own casing - never reshaped.
+      vm.setExtractedRestaurantName('myBurgerLab');
+      expect(vm.restaurantName, 'myBurgerLab');
+      vm.dispose();
+    });
   });
 }

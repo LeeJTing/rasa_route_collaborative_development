@@ -1,5 +1,6 @@
 import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
+import '../../domain_model/malaysia_boundary.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/place_closure_rules.dart';
 import '../../domain_model/region.dart';
@@ -280,6 +281,7 @@ class MapRepository {
         .toList(growable: false);
 
     List<CountryOutline> rings;
+    bool fetched = false;
     try {
       final List<Map<String, dynamic>> rows = await api.callFunction(
         APIManager.functionCountryRings,
@@ -288,6 +290,7 @@ class MapRepository {
           .map(_toCountryRing)
           .whereType<CountryOutline>()
           .toList(growable: false);
+      fetched = rings.isNotEmpty;
     } catch (_) {
       rings = const <CountryOutline>[];
     }
@@ -298,10 +301,17 @@ class MapRepository {
           .toList(growable: false);
     }
 
-    return _maskOutlines = List<CountryOutline>.unmodifiable(<CountryOutline>[
-      ...rings,
-      ...islands,
-    ]);
+    final List<CountryOutline> result = List<CountryOutline>.unmodifiable(
+      <CountryOutline>[...rings, ...islands],
+    );
+    // The REAL coastline, when we actually fetched it, is also what the
+    // Add-Landmark land check measures against (see `MalaysiaBoundary`): a
+    // tourist the map is drawing inside Malaysia must never be turned away by
+    // the form. The hand-drawn rings stay that check's offline fallback -
+    // publishing THEM would make the form accept Singapore, which they
+    // deliberately keep visible.
+    if (fetched) MalaysiaBoundary.publishRings(result);
+    return _maskOutlines = result;
   }
 
   /// One `map_country_rings` row: `[[longitude, latitude], ...]`.
