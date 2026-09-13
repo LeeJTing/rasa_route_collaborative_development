@@ -9,6 +9,7 @@ import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../domain_model/report_category.dart';
 import '../../domain_model/restaurant.dart';
+import '../../domain_model/tourist_location.dart';
 import '../../view_models/report_place_view_model.dart';
 import '../../view_models/restaurant_detail_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
@@ -162,14 +163,21 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
 
   /// Opens the full-screen report page (shared by restaurants and landmarks).
   /// The place rides [ReportPlaceHandoff] - routes pass no arguments (see
-  /// `AppNavigator` / the codebase's handoff convention). If the report froze
-  /// or removed the place, the page pops `true` and this screen leaves too so
-  /// the now-hidden pin is no longer shown.
+  /// `AppNavigator` / the codebase's handoff convention). Its coordinates ride
+  /// along too: the address report's map opens on the spot the app currently
+  /// places this restaurant. If the report froze or removed the place, the
+  /// page pops `true` and this screen leaves too so the now-hidden pin is no
+  /// longer shown.
   Future<void> _openReport(Restaurant restaurant) async {
+    final double? latitude = restaurant.latitude;
+    final double? longitude = restaurant.longitude;
     ReportPlaceHandoff()
       ..pendingKind = ReportPlaceKind.restaurant
       ..pendingPlaceId = restaurant.id
-      ..pendingName = restaurant.name;
+      ..pendingName = restaurant.name
+      ..pendingLocation = latitude == null || longitude == null
+          ? TouristLocation.unknown
+          : TouristLocation(latitude: latitude, longitude: longitude);
     final bool? hidPlace = await AppNavigator.push<bool>(AppRoutes.reportPlace);
     if (!mounted || hidPlace != true) return;
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
