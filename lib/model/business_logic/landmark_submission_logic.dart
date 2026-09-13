@@ -1144,7 +1144,10 @@ class LandmarkSubmissionLogic {
           storedLongitude: restaurant.longitude,
         );
         fields.addAll(
-          _changedDayLabels(restaurant.openingHours, operatingHours),
+          _changedDayLabels(
+            assertedOpeningHours(restaurant.openingHours),
+            operatingHours,
+          ),
         );
         if (fields.isEmpty) return null;
         return PlaceOverwriteReport(
@@ -1182,7 +1185,12 @@ class LandmarkSubmissionLogic {
         storedLatitude: stored.latitude,
         storedLongitude: stored.longitude,
       );
-      fields.addAll(_changedDayLabels(stored.openingHours, operatingHours));
+      fields.addAll(
+        _changedDayLabels(
+          assertedOpeningHours(stored.openingHours),
+          operatingHours,
+        ),
+      );
       if (fields.isEmpty) return null;
       return PlaceOverwriteReport(
         id: stored.id,
@@ -1196,6 +1204,20 @@ class LandmarkSubmissionLogic {
       return null;
     }
   }
+
+  /// A place's ASSERTED hours only - the placeholder "Unknown" rows the
+  /// submit writes for an untouched week carry nothing to retrieve or compare.
+  /// The prefill, the overwrite report and every other consumer of a place's
+  /// stored week go through this, so a record whose week was never touched
+  /// (7 placeholder rows) reads as "no hours" instead of looking retrieved
+  /// (user report, 2026-09-14: "the website and operating hour is not
+  /// retrieved").
+  @visibleForTesting
+  static List<OpeningHour> assertedOpeningHours(Iterable<OpeningHour> hours) =>
+      <OpeningHour>[
+        for (final OpeningHour hour in hours)
+          if (hour.status != DayStatus.unknown) hour,
+      ];
 
   /// The place this submission's [restaurantName] already matches, WITH what
   /// that record stores - the lookup the Add-Landmark form runs after Confirm
@@ -1225,7 +1247,7 @@ class LandmarkSubmissionLogic {
           phone: restaurant.phone,
           website: restaurant.website,
           address: restaurant.address,
-          openingHours: restaurant.openingHours,
+          openingHours: assertedOpeningHours(restaurant.openingHours),
         );
       }
       final SubmittedLandmark? nearby = await _findNearbySubmittedLandmark(
@@ -1245,7 +1267,7 @@ class LandmarkSubmissionLogic {
         phone: stored.phone,
         website: stored.website,
         address: stored.address,
-        openingHours: stored.openingHours,
+        openingHours: assertedOpeningHours(stored.openingHours),
       );
     } catch (_) {
       // Best-effort: an unreadable place leaves the form untouched.
