@@ -171,6 +171,21 @@ class _OtpViewState extends State<OtpView> {
                         ),
                       ),
                     ],
+                    // The address was salted (Gmail dots / a "+tag"), so the
+                    // code goes to the mailbox's canonical form instead of the
+                    // spelling just typed - say so, or the line above looks
+                    // like it mailed a stranger.
+                    if (viewModel.emailWasRewritten) ...<Widget>[
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        'The code goes to your mailbox address '
+                        '${viewModel.email}.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ],
                     if (viewModel.hasError) ...<Widget>[
                       const SizedBox(height: AppSpacing.sm),
                       Text(
