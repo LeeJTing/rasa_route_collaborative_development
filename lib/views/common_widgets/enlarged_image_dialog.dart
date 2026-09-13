@@ -68,10 +68,7 @@ Future<void> showEnlargedImage(
               ),
               if (noticeMessage != null) ...<Widget>[
                 const SizedBox(height: AppSpacing.md),
-                FoodNoticeBanner(
-                  message: noticeMessage,
-                  type: noticeType,
-                ),
+                FoodNoticeBanner(message: noticeMessage, type: noticeType),
               ],
             ],
           ),
@@ -132,9 +129,7 @@ Future<void> showRestaurantItemImage(
   noticeMessage: fromLinkedFood
       ? linkedFoodImageNotice
       : restaurantProvidedImageNotice,
-  noticeType: fromLinkedFood
-      ? FoodNoticeType.caution
-      : FoodNoticeType.provided,
+  noticeType: fromLinkedFood ? FoodNoticeType.caution : FoodNoticeType.provided,
 );
 
 /// Wraps a photo so the tourist can open it full-screen: the [child] and the

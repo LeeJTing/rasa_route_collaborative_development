@@ -71,35 +71,35 @@ class RestaurantDiscoveryLogic {
   }
 
   List<Restaurant> _measure(
-      List<Restaurant> restaurants,
-      TouristLocation location,
-      ) => restaurants
+    List<Restaurant> restaurants,
+    TouristLocation location,
+  ) => restaurants
       .map((Restaurant restaurant) {
-    final String visibleCategory = _visibleCategory(restaurant.category);
-    if (!location.isKnown ||
-        restaurant.latitude == null ||
-        restaurant.longitude == null) {
-      return _withDiscoveryValues(restaurant, category: visibleCategory);
-    }
-    return _withDiscoveryValues(
-      restaurant,
-      category: visibleCategory,
-      distanceMetres: _distanceMetres(
-        location.latitude,
-        location.longitude,
-        restaurant.latitude!,
-        restaurant.longitude!,
-      ),
-    );
-  })
+        final String visibleCategory = _visibleCategory(restaurant.category);
+        if (!location.isKnown ||
+            restaurant.latitude == null ||
+            restaurant.longitude == null) {
+          return _withDiscoveryValues(restaurant, category: visibleCategory);
+        }
+        return _withDiscoveryValues(
+          restaurant,
+          category: visibleCategory,
+          distanceMetres: _distanceMetres(
+            location.latitude,
+            location.longitude,
+            restaurant.latitude!,
+            restaurant.longitude!,
+          ),
+        );
+      })
       .toList(growable: false);
 
   Restaurant _withDiscoveryValues(
-      Restaurant restaurant, {
-        required String category,
-        double? distanceMetres,
-        List<RestaurantItem>? items,
-      }) => Restaurant(
+    Restaurant restaurant, {
+    required String category,
+    double? distanceMetres,
+    List<RestaurantItem>? items,
+  }) => Restaurant(
     id: restaurant.id,
     name: restaurant.name,
     category: category,
@@ -126,14 +126,14 @@ class RestaurantDiscoveryLogic {
       .map((String value) => value.trim())
       .where(
         (String value) => !value.toLowerCase().contains(RegExp(r'\bhalal\b')),
-  )
+      )
       .where((String value) => value.isNotEmpty)
       .join(', ');
 
   List<Restaurant> _withinRadius(
-      List<Restaurant> measured, {
-        required double radiusKm,
-      }) {
+    List<Restaurant> measured, {
+    required double radiusKm,
+  }) {
     final List<Restaurant> matches = measured.where((Restaurant restaurant) {
       final double? distance = restaurant.distanceMetres;
       // A place without coordinates cannot be "within" a GPS radius and must
@@ -141,7 +141,7 @@ class RestaurantDiscoveryLogic {
       return distance != null && distance <= radiusKm * 1000;
     }).toList();
     matches.sort(
-          (Restaurant a, Restaurant b) => (a.distanceMetres ?? double.infinity)
+      (Restaurant a, Restaurant b) => (a.distanceMetres ?? double.infinity)
           .compareTo(b.distanceMetres ?? double.infinity),
     );
     return matches;
@@ -237,15 +237,15 @@ class RestaurantDiscoveryLogic {
       repository.getRestrictionIdsByFood(),
     ]);
     final List<FoodOccurrence> occurrences =
-    gathered[0] as List<FoodOccurrence>;
+        gathered[0] as List<FoodOccurrence>;
     final Map<String, List<OpeningHour>> hoursByPlace =
-    gathered[1] as Map<String, List<OpeningHour>>;
+        gathered[1] as Map<String, List<OpeningHour>>;
     final Set<int> activeRestrictionIds =
-    (gathered[2] as List<DietaryRestriction>)
-        .map((DietaryRestriction restriction) => restriction.id)
-        .toSet();
+        (gathered[2] as List<DietaryRestriction>)
+            .map((DietaryRestriction restriction) => restriction.id)
+            .toSet();
     final Map<int, List<int>> restrictionIdsByFood =
-    gathered[3] as Map<int, List<int>>;
+        gathered[3] as Map<int, List<int>>;
 
     final String? normalizedFoodType = foodType?.trim().toLowerCase();
     final bool hasFoodTypeFilter =
@@ -268,7 +268,7 @@ class RestaurantDiscoveryLogic {
     }
 
     final Map<String, List<FoodOccurrence>> byLandmark =
-    <String, List<FoodOccurrence>>{};
+        <String, List<FoodOccurrence>>{};
     for (final FoodOccurrence occurrence in occurrences) {
       if (occurrence.source != FoodOccurrenceSource.submittedLandmark) {
         continue;
@@ -295,7 +295,7 @@ class RestaurantDiscoveryLogic {
     final List<SubmittedLandmarkRecommendation> unconfirmed =
         <SubmittedLandmarkRecommendation>[];
     for (final MapEntry<String, List<FoodOccurrence>> entry
-    in byLandmark.entries) {
+        in byLandmark.entries) {
       final List<OpeningHour> hours =
           hoursByPlace['submittedLandmark:${entry.key}'] ??
           const <OpeningHour>[];
@@ -308,53 +308,55 @@ class RestaurantDiscoveryLogic {
               ? confirmed
               : unconfirmed)
           .add(
-        SubmittedLandmarkRecommendation(
-          id: int.tryParse(entry.key) ?? 0,
-          name: place.placeName,
-          // The category MOST of the landmark's dishes carry - the cards
-          // word it `categoryLabel`, exactly like a restaurant row.
-          category: majorityCategory(
-            dishCategoriesByLandmark[entry.key] ?? const <String>[],
-            fallback: place.placeCategory?.trim() ?? '',
-          ),
-          distanceMetres: _distanceMetres(
-            location.latitude,
-            location.longitude,
-            place.latitude,
-            place.longitude,
-          ),
-          dishes: dishes,
-          imageUrl: place.placeImageUrl,
-          // The tourist-supplied address rides along on the shared model;
-          // quick mode's own card does not show it, Matches' cards do.
-          address: place.placeAddress ?? '',
-          // The starting price is the LOWEST known dish price - the same
-          // "From RM x" rule the restaurant cards use; null while none is
-          // known.
-          price: _startingDishPrice(dishes),
-        ),
-      );
+            SubmittedLandmarkRecommendation(
+              id: int.tryParse(entry.key) ?? 0,
+              name: place.placeName,
+              // The category MOST of the landmark's dishes carry - the cards
+              // word it `categoryLabel`, exactly like a restaurant row.
+              category: majorityCategory(
+                dishCategoriesByLandmark[entry.key] ?? const <String>[],
+                fallback: place.placeCategory?.trim() ?? '',
+              ),
+              distanceMetres: _distanceMetres(
+                location.latitude,
+                location.longitude,
+                place.latitude,
+                place.longitude,
+              ),
+              dishes: dishes,
+              imageUrl: place.placeImageUrl,
+              // The tourist-supplied address rides along on the shared model;
+              // quick mode's own card does not show it, Matches' cards do.
+              address: place.placeAddress ?? '',
+              // The starting price is the LOWEST known dish price - the same
+              // "From RM x" rule the restaurant cards use; null while none is
+              // known.
+              price: _startingDishPrice(dishes),
+            ),
+          );
     }
 
     for (final List<SubmittedLandmarkRecommendation> group
-    in <List<SubmittedLandmarkRecommendation>>[confirmed, unconfirmed]) {
+        in <List<SubmittedLandmarkRecommendation>>[confirmed, unconfirmed]) {
       group.sort(
-        (SubmittedLandmarkRecommendation a, SubmittedLandmarkRecommendation b) =>
-        a.distanceMetres.compareTo(b.distanceMetres),
+        (
+          SubmittedLandmarkRecommendation a,
+          SubmittedLandmarkRecommendation b,
+        ) => a.distanceMetres.compareTo(b.distanceMetres),
       );
     }
     final List<SubmittedLandmarkRecommendation> measured =
-    <SubmittedLandmarkRecommendation>[...confirmed, ...unconfirmed];
+        <SubmittedLandmarkRecommendation>[...confirmed, ...unconfirmed];
 
     double radiusKm = _quickModeInitialRadiusKm;
     List<SubmittedLandmarkRecommendation> available =
-    const <SubmittedLandmarkRecommendation>[];
+        const <SubmittedLandmarkRecommendation>[];
     while (radiusKm <= _quickModeMaximumRadiusKm) {
       available = measured
           .where(
             (SubmittedLandmarkRecommendation landmark) =>
-        landmark.distanceMetres <= radiusKm * 1000,
-      )
+                landmark.distanceMetres <= radiusKm * 1000,
+          )
           .take(_quickModeResultTarget)
           .toList(growable: false);
       if (available.length >= _quickModeResultTarget) return available;
@@ -408,22 +410,22 @@ class RestaurantDiscoveryLogic {
     };
     return selected
         .map((Restaurant measured) {
-      final Restaurant detail = detailById[measured.id] ?? measured;
-      final Set<int> allowedItemIds = measured.items
-          .map((RestaurantItem item) => item.id)
-          .toSet();
-      final List<RestaurantItem> safeDetailedItems = detail.items
-          .where((RestaurantItem item) => allowedItemIds.contains(item.id))
-          .toList(growable: false);
-      return _withDiscoveryValues(
-        detail,
-        category: measured.category,
-        distanceMetres: measured.distanceMetres,
-        items: safeDetailedItems.isEmpty
-            ? measured.items
-            : safeDetailedItems,
-      );
-    })
+          final Restaurant detail = detailById[measured.id] ?? measured;
+          final Set<int> allowedItemIds = measured.items
+              .map((RestaurantItem item) => item.id)
+              .toSet();
+          final List<RestaurantItem> safeDetailedItems = detail.items
+              .where((RestaurantItem item) => allowedItemIds.contains(item.id))
+              .toList(growable: false);
+          return _withDiscoveryValues(
+            detail,
+            category: measured.category,
+            distanceMetres: measured.distanceMetres,
+            items: safeDetailedItems.isEmpty
+                ? measured.items
+                : safeDetailedItems,
+          );
+        })
         .toList(growable: false);
   }
 
@@ -432,17 +434,17 @@ class RestaurantDiscoveryLogic {
     return restaurants
         .where(
           (Restaurant restaurant) =>
-      // Only 'available' places are discovered - a place frozen by a
-      // report (or by a still-running temporary closure) is hidden.
-      // A frozen place whose TEMPORARY closure has passed is available
-      // again (see PlaceClosureRules) and is included on this read.
-      PlaceClosureRules.isEffectivelyAvailable(
-        status: restaurant.status,
-        closedUntil: restaurant.closedUntil,
-        now: currentTime(),
-      ) &&
-          !_isConfidentlyClosed(restaurant, now),
-    )
+              // Only 'available' places are discovered - a place frozen by a
+              // report (or by a still-running temporary closure) is hidden.
+              // A frozen place whose TEMPORARY closure has passed is available
+              // again (see PlaceClosureRules) and is included on this read.
+              PlaceClosureRules.isEffectivelyAvailable(
+                status: restaurant.status,
+                closedUntil: restaurant.closedUntil,
+                now: currentTime(),
+              ) &&
+              !_isConfidentlyClosed(restaurant, now),
+        )
         .toList(growable: false);
   }
 
@@ -479,16 +481,16 @@ class RestaurantDiscoveryLogic {
   ) => OpeningHoursLogic.isConfidentlyClosedAt(hours, malaysiaNow);
 
   Future<List<Restaurant>> _eligibleRestaurants(
-      List<Restaurant> candidates, {
-        String? foodType,
-      }) async {
+    List<Restaurant> candidates, {
+    String? foodType,
+  }) async {
     if (candidates.isEmpty) return const <Restaurant>[];
     final List<RestaurantItem> menuItems = await repository
         .getRestaurantItemsByRestaurantIds(
-      candidates.map((Restaurant restaurant) => restaurant.id).toList(),
-    );
+          candidates.map((Restaurant restaurant) => restaurant.id).toList(),
+        );
     final Map<int, List<RestaurantItem>> itemsByRestaurant =
-    <int, List<RestaurantItem>>{};
+        <int, List<RestaurantItem>>{};
     for (final RestaurantItem item in menuItems) {
       itemsByRestaurant
           .putIfAbsent(item.restaurantId, () => <RestaurantItem>[])
@@ -501,7 +503,7 @@ class RestaurantDiscoveryLogic {
         .map((DietaryRestriction restriction) => restriction.id)
         .toSet();
     final Map<int, List<int>> restrictionIdsByFood =
-    activeRestrictionIds.isEmpty
+        activeRestrictionIds.isEmpty
         ? const <int, List<int>>{}
         : await repository.getRestrictionIdsByFood();
 
@@ -517,25 +519,25 @@ class RestaurantDiscoveryLogic {
       final List<RestaurantItem> typedItems = !hasFoodTypeFilter
           ? items
           : items
-          .where(
-            (RestaurantItem item) =>
-        item.foodType.trim().toLowerCase() == normalizedFoodType,
-      )
-          .toList(growable: false);
+                .where(
+                  (RestaurantItem item) =>
+                      item.foodType.trim().toLowerCase() == normalizedFoodType,
+                )
+                .toList(growable: false);
       if (typedItems.isEmpty) continue;
       final List<RestaurantItem> safeItems = activeRestrictionIds.isEmpty
           ? typedItems
           : typedItems
-          .where(
-            (RestaurantItem item) =>
-        item.localFoodId > 0 &&
-            !_conflictsWithRestrictions(
-              item,
-              activeRestrictionIds: activeRestrictionIds,
-              restrictionIdsByFood: restrictionIdsByFood,
-            ),
-      )
-          .toList(growable: false);
+                .where(
+                  (RestaurantItem item) =>
+                      item.localFoodId > 0 &&
+                      !_conflictsWithRestrictions(
+                        item,
+                        activeRestrictionIds: activeRestrictionIds,
+                        restrictionIdsByFood: restrictionIdsByFood,
+                      ),
+                )
+                .toList(growable: false);
       if (safeItems.isEmpty) continue;
       eligible.add(
         _withDiscoveryValues(
@@ -549,18 +551,18 @@ class RestaurantDiscoveryLogic {
   }
 
   bool _conflictsWithRestrictions(
-      RestaurantItem item, {
-        required Set<int> activeRestrictionIds,
-        required Map<int, List<int>> restrictionIdsByFood,
-      }) => (restrictionIdsByFood[item.localFoodId] ?? const <int>[]).any(
+    RestaurantItem item, {
+    required Set<int> activeRestrictionIds,
+    required Map<int, List<int>> restrictionIdsByFood,
+  }) => (restrictionIdsByFood[item.localFoodId] ?? const <int>[]).any(
     activeRestrictionIds.contains,
   );
 
   bool _occurrenceIsSafe(
-      FoodOccurrence occurrence, {
-        required Set<int> activeRestrictionIds,
-        required Map<int, List<int>> restrictionIdsByFood,
-      }) {
+    FoodOccurrence occurrence, {
+    required Set<int> activeRestrictionIds,
+    required Map<int, List<int>> restrictionIdsByFood,
+  }) {
     if (activeRestrictionIds.isEmpty) return true;
     if (occurrence.localFoodId <= 0) return false;
     return !(restrictionIdsByFood[occurrence.localFoodId] ?? const <int>[]).any(
@@ -574,10 +576,10 @@ class RestaurantDiscoveryLogic {
     final double dLon = _radians(lon2 - lon1);
     final double a =
         math.sin(dLat / 2) * math.sin(dLat / 2) +
-            math.cos(_radians(lat1)) *
-                math.cos(_radians(lat2)) *
-                math.sin(dLon / 2) *
-                math.sin(dLon / 2);
+        math.cos(_radians(lat1)) *
+            math.cos(_radians(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
     return earthRadius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
   }
 
