@@ -1,4 +1,6 @@
+import 'app_tutorial_logic.dart';
 import 'authenticate_logic.dart';
+import '../../domain_model/app_tutorial.dart';
 import '../../domain_model/auth_session.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_preference.dart';
@@ -15,6 +17,7 @@ class TouristInformationLogicFacade {
 
   final AuthenticateLogic authenticate = AuthenticateLogic();
   final UserProfileLogic userProfile = UserProfileLogic();
+  final AppTutorialLogic appTutorial = AppTutorialLogic();
 
   Future<void> sendEmailOtp(String email) => authenticate.sendEmailOtp(email);
 
@@ -94,4 +97,21 @@ class TouristInformationLogicFacade {
   /// Removes one dish from the signed-in tourist's favourites.
   Future<void> removeFavourite(int localFoodId) =>
       userProfile.removeFavourite(localFoodId);
+
+  // ===========================================================================
+  // Guided walkthrough - re-exposed from AppTutorialLogic
+  // ===========================================================================
+
+  /// The walkthrough's cards, in order (REQ107).
+  List<TutorialStep> get tutorialSteps => AppTutorialLogic.steps;
+
+  /// Whether the walkthrough should open now - a first run, a release that
+  /// added a card, or a year since it was last dismissed.
+  bool shouldShowTutorial() => appTutorial.shouldShow();
+
+  /// The tourist reached the end and pressed Finish.
+  Future<void> completeTutorial() => appTutorial.markCompleted();
+
+  /// The tourist pressed Skip. Recorded the same way as finishing.
+  Future<void> skipTutorial() => appTutorial.markSkipped();
 }
