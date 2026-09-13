@@ -67,6 +67,43 @@ class GeminiService {
     );
   }
 
+  /// Sends SEVERAL images with [prompt], in the order given.
+  ///
+  /// The prompt refers to them by position - "the FIRST image", "the SECOND
+  /// image" - which is the order they are attached in. Every other option
+  /// behaves exactly as in [describeImage]; used by the near-duplicate place
+  /// check, which asks one question about two photos at once.
+  Future<String> describeImages({
+    required List<List<int>> imageBytes,
+    required String prompt,
+    String mimeType = 'image/jpeg',
+    String? apiKey,
+    String? model,
+    double? temperature,
+    bool jsonResponse = false,
+    int? thinkingBudget,
+    String? label,
+  }) async {
+    return _generate(
+      <Map<String, Object?>>[
+        <String, Object?>{'text': prompt},
+        for (final List<int> bytes in imageBytes)
+          <String, Object?>{
+            'inline_data': <String, Object?>{
+              'mime_type': mimeType,
+              'data': base64Encode(bytes),
+            },
+          },
+      ],
+      apiKey: apiKey,
+      model: model,
+      temperature: temperature,
+      jsonResponse: jsonResponse,
+      thinkingBudget: thinkingBudget,
+      label: label,
+    );
+  }
+
   /// Sends [prompt] as plain text and returns the model's raw text reply.
   ///
   /// Times out after [Env.apiTimeout] (UC406 requires the caller to handle a
@@ -363,7 +400,7 @@ RULES
    c. Local pairing style: prefer established Malaysian serving and ordering patterns, traditional accompaniments and combinations local diners would recognise as natural.
    d. Flavour compatibility: use sweetness, spice, richness, freshness and texture only as a secondary factor after venue, occasion and local eating style.
 4. A candidate that shares the same venue and meal occasion with SELECTED FOOD MUST rank above a candidate that only provides flavour contrast. Do not recommend an item mainly because it is sweet, cooling, crispy or refreshing.
-5. For a selected drink, prioritise foods commonly ordered with that drink at the same local venue and time of day - its natural partners are the venue's OWN staples first (e.g. kaya toast, half-boiled eggs, roti bakar at a kopitiam), then a light snack or kuih from that same venue. Never pair it with other full rice or noodle mains, and never fill all five slots with kuih or desserts. For a selected main dish, prioritise its usual local sides, drinks, condiments or desserts from the same dining setting.
+5. For a selected drink, prioritise foods commonly ordered with that drink at the same local venue and time of day - its natural partners are the venue's OWN staples first (e.g. kaya toast, half-boiled eggs, roti bakar at a kopitiam), then a light snack or kuih from that same venue. Never pair it with other full rice or noodle mains, and never fill all five slots with kuih or desserts. NEVER pair a drink with another drink: when SELECTED FOOD's food type is Beverage, every recommendation must be Food, Fruit, Dessert or Kuih and never another Beverage - only choose a drink if CANDIDATES holds no non-beverage item at all, and then rank it last with a low matchPercentage. For a selected main dish, prioritise its usual local sides, drinks, condiments or desserts from the same dining setting.
 6. Penalise pairings involving unrelated venue types, packaged standalone snacks, ceremonial or festive foods, and items normally eaten at a different meal occasion, unless the combination is genuinely common in Malaysian food culture.
 7. Use the supplied category, cooking style, meal type and main taste together with reliable knowledge of Malaysian food culture. Infer only a general venue type when needed; do not invent a specific restaurant or claim that every venue serves the item.
 8. TOURIST FOOD PREFERENCES (when present) lists tastes and cuisines/categories the tourist likes. It is a LOW-PRIORITY tie-break ONLY: judge same venue, same meal occasion and local pairing style FIRST, and never let preference matching push an unnatural pairing above a natural one. Do not fill all five slots with preference-matched foods just because they match the tourist's taste; at most one or two may be preference-only picks when nothing more natural is available. When the section is absent, rank only by pairing suitability.

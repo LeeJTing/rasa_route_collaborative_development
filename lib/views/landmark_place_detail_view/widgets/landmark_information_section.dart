@@ -10,9 +10,11 @@ import '../../common_widgets/opening_hours_table.dart';
 /// catalogue restaurant detail's "Restaurant Information" card (white surface,
 /// bordered, section headings in accent brown) - the two place pages present
 /// their facts the same way, INCLUDING the link treatment: a row the tourist
-/// can act on (address, phone, website) is underlined in [AppColors.info]
-/// with an open-in-new icon and opens the matching app; a row with nothing
-/// behind it stays plain text.
+/// can act on (address, phone, website) is underlined in
+/// [AppColors.textPrimary] with an open-in-new icon and opens the matching
+/// app - the same black link text the restaurant card uses (user request,
+/// 2026-09-14: black, not the old blue); a row with nothing behind it stays
+/// plain text.
 ///
 /// One deliberate difference from the restaurant card: a landmark with no
 /// address falls back to its COORDINATES ("3.13900, 101.68690") instead of
@@ -70,6 +72,7 @@ class LandmarkInformationSection extends StatelessWidget {
             icon: Icons.location_on_outlined,
             label: _addressLabel,
             onTap: _addressIsOpenable ? onAddressTap : null,
+            textColor: AppColors.textPrimary,
           ),
           const SizedBox(height: AppSpacing.md),
           InformationRow(
@@ -78,6 +81,7 @@ class LandmarkInformationSection extends StatelessWidget {
                 ? 'Phone unavailable'
                 : landmark.phone,
             onTap: landmark.phone.isEmpty ? null : onPhoneTap,
+            textColor: AppColors.textPrimary,
           ),
           const SizedBox(height: AppSpacing.md),
           InformationRow(
@@ -86,6 +90,7 @@ class LandmarkInformationSection extends StatelessWidget {
                 ? 'Website unavailable'
                 : landmark.website,
             onTap: landmark.website.isEmpty ? null : onWebsiteTap,
+            textColor: AppColors.textPrimary,
           ),
           const SizedBox(height: AppSpacing.lg),
           Text('Opening Hours', style: _sectionStyle(context)),

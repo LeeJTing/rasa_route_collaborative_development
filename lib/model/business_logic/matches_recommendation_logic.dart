@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:meta/meta.dart' show protected;
 
+import '../../core/place_category.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/matches_recommendation.dart';
@@ -26,8 +27,8 @@ class MatchesRecommendationLogic {
   late final DiscoveryRepositoryFacade _repository = createRepository();
 
   Future<MatchesRecommendationResult> recommendations(
-      MatchesRecommendationRequest request,
-      ) async {
+    MatchesRecommendationRequest request,
+  ) async {
     final String touristId = await _repository.currentTouristId() ?? '';
     if (touristId.isEmpty) throw Exception('Sign in to view Matches.');
 
@@ -84,9 +85,12 @@ class MatchesRecommendationLogic {
       for (final Restaurant restaurant in placeData[2] as List<Restaurant>)
         restaurant.id: restaurant,
     };
+    final Map<int, double> restaurantStartingPrices = _restaurantStartingPrices(
+      occurrences,
+    );
 
     final List<MatchedFoodRecommendations> groups =
-    <MatchedFoodRecommendations>[];
+        <MatchedFoodRecommendations>[];
     for (final int foodId in session.likedFoodIds) {
       final LocalFood? food = foodsById[foodId];
       if (food == null) continue;
@@ -108,6 +112,7 @@ class MatchesRecommendationLogic {
             foodsById,
             request,
           ),
+          restaurantStartingPrices: restaurantStartingPrices,
         ),
       );
     }
@@ -124,6 +129,21 @@ class MatchesRecommendationLogic {
       occurrence.source == FoodOccurrenceSource.restaurant
       ? 'restaurant:${occurrence.sourceId}'
       : 'submittedLandmark:${occurrence.sourceId}';
+
+  Map<int, double> _restaurantStartingPrices(List<FoodOccurrence> occurrences) {
+    final Map<int, double> prices = <int, double>{};
+    for (final FoodOccurrence occurrence in occurrences) {
+      if (occurrence.source != FoodOccurrenceSource.restaurant) continue;
+      final int? restaurantId = int.tryParse(occurrence.sourceId);
+      final double? price = occurrence.itemPrice;
+      if (restaurantId == null || price == null || price <= 0) continue;
+      final double? current = prices[restaurantId];
+      if (current == null || price < current) {
+        prices[restaurantId] = price;
+      }
+    }
+    return Map<int, double>.unmodifiable(prices);
+  }
 
   /// A filled heart removes that food from the device-local state match list.
   Future<SwipeSession> removeLike(SwipeSession session, int foodId) async {
@@ -238,11 +258,11 @@ class MatchesRecommendationLogic {
   );
 
   List<SubmittedLandmarkRecommendation> _landmarksFor(
-      List<FoodOccurrence> foodOccurrences,
-      List<FoodOccurrence> allOccurrences,
-      Map<int, LocalFood> foodsById,
-      MatchesRecommendationRequest request,
-      ) {
+    List<FoodOccurrence> foodOccurrences,
+    List<FoodOccurrence> allOccurrences,
+    Map<int, LocalFood> foodsById,
+    MatchesRecommendationRequest request,
+  ) {
     final Map<String, FoodOccurrence> serving = <String, FoodOccurrence>{};
     for (final FoodOccurrence occurrence in foodOccurrences) {
       if (occurrence.source != FoodOccurrenceSource.submittedLandmark) continue;
@@ -251,20 +271,29 @@ class MatchesRecommendationLogic {
     return serving.entries
         .map((MapEntry<String, FoodOccurrence> entry) {
           final FoodOccurrence occurrence = entry.value;
+          // Everything this landmark serves, fetched once: the dishes AND the
+          // categories the majority pick is made from, so the two cannot
+          // disagree (`majorityCategory`).
+          final List<FoodOccurrence> allForLandmark = allOccurrences
+              .where(
+                (FoodOccurrence value) =>
+                    value.source == FoodOccurrenceSource.submittedLandmark &&
+                    value.sourceId == entry.key,
+              )
+              .toList(growable: false);
           final List<SubmittedLandmarkDish> dishes = _dishesOf(
-            allOccurrences.where(
-              (FoodOccurrence value) =>
-                  value.source == FoodOccurrenceSource.submittedLandmark &&
-                  value.sourceId == entry.key,
-            ),
+            allForLandmark,
             foodsById,
           );
           return SubmittedLandmarkRecommendation(
             id: int.tryParse(entry.key) ?? 0,
             name: occurrence.placeName,
-            category: occurrence.placeCategory?.trim().isNotEmpty == true
-                ? occurrence.placeCategory!
-                : 'Submitted Landmark',
+            category: majorityCategory(
+              allForLandmark.map(
+                (FoodOccurrence value) => value.itemFoodCategory ?? '',
+              ),
+              fallback: occurrence.placeCategory?.trim() ?? '',
+            ),
             // The landmark presentation model uses infinity as its sortable
             // "distance unavailable" value, whereas Restaurant can retain
             // null directly. Never calculate from the 0,0 unknown sentinel.
@@ -278,10 +307,12 @@ class MatchesRecommendationLogic {
                 : double.infinity,
             dishes: dishes,
             imageUrl: occurrence.placeImageUrl,
-            // The landmark's headline price is the AVERAGE of its dishes'
-            // known prices - one dish's price would misread a stall with a
-            // menu.
-            price: _averageDishPrice(dishes),
+            // The tourist-supplied address, shown under the name exactly
+            // like a restaurant card's own address row.
+            address: occurrence.placeAddress ?? '',
+            // The starting price is the LOWEST dish price, so the card
+            // reads exactly like a restaurant's "From RM x".
+            price: _startingDishPrice(dishes),
           );
         })
         .toList(growable: false);
@@ -306,27 +337,30 @@ class MatchesRecommendationLogic {
           price: item.itemPrice,
           imageUrl: item.itemImageUrl,
           ingredients: item.itemIngredients,
+          description: item.itemDescription,
         ),
       );
     }
     return dishes;
   }
 
-  /// The AVERAGE of the dishes' known prices - null while none is known.
-  double? _averageDishPrice(List<SubmittedLandmarkDish> dishes) {
-    final List<double> prices = dishes
-        .map((SubmittedLandmarkDish dish) => dish.price)
-        .whereType<double>()
-        .toList(growable: false);
-    if (prices.isEmpty) return null;
-    return prices.fold<double>(0, (double sum, double price) => sum + price) /
-        prices.length;
+  /// The LOWEST of the dishes' known prices - the "From RM x" starting
+  /// price, the same figure a restaurant card shows. Null while no dish has
+  /// a price.
+  double? _startingDishPrice(List<SubmittedLandmarkDish> dishes) {
+    double? lowest;
+    for (final SubmittedLandmarkDish dish in dishes) {
+      final double? price = dish.price;
+      if (price == null || price <= 0) continue;
+      if (lowest == null || price < lowest) lowest = price;
+    }
+    return lowest;
   }
 
   Region? _resolveRegion(
-      List<Region> regions,
-      MatchesRecommendationRequest request,
-      ) {
+    List<Region> regions,
+    MatchesRecommendationRequest request,
+  ) {
     if (request.stateCode.isNotEmpty) {
       for (final Region region in regions) {
         if (region.code == request.stateCode) return region;
@@ -346,9 +380,9 @@ class MatchesRecommendationLogic {
   }
 
   static FoodOccurrence _resolveFood(
-      FoodOccurrence occurrence,
-      List<LocalFood> foods,
-      ) {
+    FoodOccurrence occurrence,
+    List<LocalFood> foods,
+  ) {
     if (occurrence.localFoodId != 0) return occurrence;
     final String dish = _normalise(occurrence.foodName);
     for (final LocalFood food in foods) {
@@ -368,27 +402,29 @@ class MatchesRecommendationLogic {
         placeImageUrl: occurrence.placeImageUrl,
         placeCategory: occurrence.placeCategory,
         placeRating: occurrence.placeRating,
+        placeAddress: occurrence.placeAddress,
         itemPrice: occurrence.itemPrice,
         // The per-dish extras must survive the id resolution - the cards
-        // show this dish's own photo and ingredients.
+        // show this dish's own photo, description and ingredients.
         itemImageUrl: occurrence.itemImageUrl,
         itemIngredients: occurrence.itemIngredients,
+        itemDescription: occurrence.itemDescription,
       );
     }
     return occurrence;
   }
 
   static bool _contains(
-      List<GeoPoint> polygon,
-      double latitude,
-      double longitude,
-      ) {
+    List<GeoPoint> polygon,
+    double latitude,
+    double longitude,
+  ) {
     if (polygon.length < 3) return false;
     bool inside = false;
     for (
-    int current = 0, previous = polygon.length - 1;
-    current < polygon.length;
-    previous = current++
+      int current = 0, previous = polygon.length - 1;
+      current < polygon.length;
+      previous = current++
     ) {
       final GeoPoint a = polygon[current];
       final GeoPoint b = polygon[previous];
@@ -397,28 +433,28 @@ class MatchesRecommendationLogic {
           (b.longitude - a.longitude) *
               (latitude - a.latitude) /
               (b.latitude - a.latitude) +
-              a.longitude;
+          a.longitude;
       if (longitude < intersection) inside = !inside;
     }
     return inside;
   }
 
   static double _distanceMetres(
-      double fromLatitude,
-      double fromLongitude,
-      double toLatitude,
-      double toLongitude,
-      ) {
+    double fromLatitude,
+    double fromLongitude,
+    double toLatitude,
+    double toLongitude,
+  ) {
     if (fromLatitude == 0 && fromLongitude == 0) return 0;
     const double earthRadiusMetres = 6371000;
     final double latitudeDelta = _radians(toLatitude - fromLatitude);
     final double longitudeDelta = _radians(toLongitude - fromLongitude);
     final double value =
         math.sin(latitudeDelta / 2) * math.sin(latitudeDelta / 2) +
-            math.cos(_radians(fromLatitude)) *
-                math.cos(_radians(toLatitude)) *
-                math.sin(longitudeDelta / 2) *
-                math.sin(longitudeDelta / 2);
+        math.cos(_radians(fromLatitude)) *
+            math.cos(_radians(toLatitude)) *
+            math.sin(longitudeDelta / 2) *
+            math.sin(longitudeDelta / 2);
     return earthRadiusMetres *
         2 *
         math.atan2(math.sqrt(value), math.sqrt(1 - value));
@@ -429,7 +465,7 @@ class MatchesRecommendationLogic {
       .map((String value) => value.trim())
       .where(
         (String value) => !value.toLowerCase().contains(RegExp(r'\bhalal\b')),
-  )
+      )
       .where((String value) => value.isNotEmpty)
       .join(', ');
 

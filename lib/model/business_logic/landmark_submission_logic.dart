@@ -7,8 +7,10 @@ import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/place_overwrite_report.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
+import '../../domain_model/similar_place_candidate.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/geocoding_repository.dart';
@@ -62,6 +64,37 @@ class LandmarkSubmissionLogic {
       throw Exception('Unable to extract restaurant name from signboard.');
     }
     return name;
+  }
+
+  /// Similarity an EDITED restaurant name must reach on the captured
+  /// signboard photo (see [nameMatchesSignboard]). 0.95 = "clearly the same
+  /// restaurant": [analyzeSignboard]'s own reading needs no check at all, so
+  /// this only judges a name the tourist typed over it.
+  static const double signboardNameMatchThreshold = 0.95;
+
+  /// Whether an EDITED restaurant name still describes the captured signboard
+  /// photo (UC500). Gemini is asked the second question - the same photo,
+  /// plus [typedName] - and the verdict is its similarity score against
+  /// [signboardNameMatchThreshold].
+  ///
+  /// Only a name that DIFFERS from Gemini's own reading is ever sent here
+  /// (the form keeps [analyzeSignboard]'s result untouched - see
+  /// `AddLandmarkViewModel.confirmRestaurant`), and only when the captured
+  /// photo is a signboard (a stall photo carries no name to compare).
+  ///
+  /// Throws when the question could not be asked at all (A2/timeout, quota,
+  /// no connection) - the caller decides what an unanswered check means; the
+  /// Add-Landmark form deliberately fails OPEN on it, so a weak signal can
+  /// never lock a tourist out of submitting a form they can see is right.
+  Future<bool> nameMatchesSignboard({
+    required List<int> imageBytes,
+    required String typedName,
+  }) async {
+    final response = await repository.recognition.verifySignboardName(
+      imageBytes: imageBytes,
+      typedName: typedName,
+    );
+    return response.matchScore >= signboardNameMatchThreshold;
   }
 
   /// Strips non-name noise Gemini sometimes appends to a signboard name:
@@ -730,6 +763,7 @@ class LandmarkSubmissionLogic {
     String? address,
     required List<FoodSubmission> foods,
     required Map<Weekday, List<OpeningHour>> operatingHours,
+    bool overwriteExistingDetails = false,
   }) async {
     // 1) Same place as a catalogue restaurant (A13) -> merge into it.
     final Restaurant? existingRestaurant = await _findNearbyRestaurant(
@@ -744,6 +778,19 @@ class LandmarkSubmissionLogic {
         longitude: longitude,
         matchedRestaurant: existingRestaurant,
       );
+      // The restaurant keeps its CURATED data unless the tourist explicitly
+      // chose to replace the stored details (see [mergeOverwriteReport]).
+      if (overwriteExistingDetails) {
+        await _overwriteRestaurantDetails(
+          existingRestaurant,
+          phone: phone,
+          website: website,
+          address: address,
+          latitude: latitude,
+          longitude: longitude,
+          operatingHours: operatingHours,
+        );
+      }
       return LandmarkSubmitResult.mergedIntoRestaurant(
         restaurantId: existingRestaurant.id,
         targetName: existingRestaurant.name,
@@ -761,31 +808,21 @@ class LandmarkSubmissionLogic {
         longitude: longitude,
         matchedRestaurant: null,
       );
-      // The merge only attaches dishes - but if the tourist supplied contact/
-      // address details this time, persist them onto the existing row too
-      // (they would otherwise be silently dropped). Best-effort: a contact
-      // save failure must not fail the already-succeeded merge.
-      try {
-        await repository.landmark.updateContactFields(
-          existingLandmark.id,
+      // The merge attaches dishes - contact/address/hours are written only
+      // when the tourist CHOSE to replace the stored details (see
+      // [mergeOverwriteReport]); "keep" leaves the stored record completely
+      // untouched. Best-effort: a details-save failure must not fail the
+      // already-succeeded merge.
+      if (overwriteExistingDetails) {
+        await _overwriteLandmarkDetails(
+          existingLandmark,
           phone: phone,
-          website: website == null ? null : sanitiseWebsiteForSave(website),
+          website: website,
           address: address,
+          latitude: latitude,
+          longitude: longitude,
+          operatingHours: operatingHours,
         );
-      } catch (_) {
-        // Ignored - the merge itself succeeded.
-      }
-      // Opening hours follow the SAME per-field merge rule as contact data:
-      // only days the re-submission actually asserted (Open/Closed) and that
-      // changed are written onto the existing landmark - days left Unknown
-      // keep their stored hours. Best-effort like the contact write.
-      try {
-        await repository.landmark.updateOpeningHoursOnMerge(
-          existingLandmark.id,
-          operatingHours,
-        );
-      } catch (_) {
-        // Ignored - the merge itself succeeded.
       }
       return LandmarkSubmitResult.mergedIntoLandmark(
         landmarkId: existingLandmark.id,
@@ -866,6 +903,304 @@ class LandmarkSubmissionLogic {
     return nearestLandmarkWithinMetres(candidates, latitude, longitude);
   }
 
+  /// What a same-place merge would REPLACE on the existing record - the
+  /// details that place already stores which this form would write over - or
+  /// null when there is no such place (a brand-new landmark is created) or
+  /// nothing would change.
+  ///
+  /// The tourist is asked before any of it is written (see
+  /// `AddLandmarkViewModel.checkDetailsOverwrite`): the merge is otherwise
+  /// silent, and a curated phone number or address must not vanish because a
+  /// second visitor entered something different. Answering "keep" leaves the
+  /// stored record completely untouched - `submitLandmark` takes
+  /// `overwriteExistingDetails: false` and writes none of it.
+  ///
+  /// Fields are reported in the form's own order: phone, website, address,
+  /// location (the map pin, when it genuinely moves - see [pinMovedMetres]),
+  /// then each weekday whose hours this form asserts differently.
+  Future<PlaceOverwriteReport?> mergeOverwriteReport({
+    required String restaurantName,
+    required double? latitude,
+    required double? longitude,
+    String? phone,
+    String? website,
+    String? address,
+    Map<Weekday, List<OpeningHour>> operatingHours =
+        const <Weekday, List<OpeningHour>>{},
+  }) async {
+    final List<String> fields = <String>[];
+    try {
+      final Restaurant? restaurant = await _findNearbyRestaurant(
+        restaurantName,
+        latitude,
+        longitude,
+      );
+      if (restaurant != null) {
+        _collectChangedContactFields(
+          fields,
+          phone: phone,
+          website: website,
+          address: address,
+          storedPhone: restaurant.phone,
+          storedWebsite: restaurant.website,
+          storedAddress: restaurant.address,
+        );
+        _collectMovedPin(
+          fields,
+          latitude: latitude,
+          longitude: longitude,
+          storedLatitude: restaurant.latitude,
+          storedLongitude: restaurant.longitude,
+        );
+        fields.addAll(
+          _changedDayLabels(restaurant.openingHours, operatingHours),
+        );
+        if (fields.isEmpty) return null;
+        return PlaceOverwriteReport(
+          id: restaurant.id,
+          name: restaurant.name,
+          isRestaurant: true,
+          fields: fields,
+        );
+      }
+
+      final SubmittedLandmark? nearby = await _findNearbySubmittedLandmark(
+        restaurantName,
+        latitude,
+        longitude,
+      );
+      if (nearby == null) return null;
+      // The lookup above returns a light row (id + coordinates only) - the
+      // stored DETAILS need the full read.
+      final SubmittedLandmark stored =
+          await repository.landmark.getSubmittedLandmarkById(nearby.id) ??
+          nearby;
+      _collectChangedContactFields(
+        fields,
+        phone: phone,
+        website: website,
+        address: address,
+        storedPhone: stored.phone,
+        storedWebsite: stored.website,
+        storedAddress: stored.address,
+      );
+      _collectMovedPin(
+        fields,
+        latitude: latitude,
+        longitude: longitude,
+        storedLatitude: stored.latitude,
+        storedLongitude: stored.longitude,
+      );
+      fields.addAll(_changedDayLabels(stored.openingHours, operatingHours));
+      if (fields.isEmpty) return null;
+      return PlaceOverwriteReport(
+        id: stored.id,
+        name: stored.name,
+        isRestaurant: false,
+        fields: fields,
+      );
+    } catch (_) {
+      // Unreadable stored details -> no question, and the merge then keeps
+      // the stored record (the safe direction).
+      return null;
+    }
+  }
+
+  /// How far the pin must move before it counts as a detail the merge would
+  /// replace - GPS jitter between two visits to the same shop is not a change
+  /// worth asking about.
+  static const double pinMovedMetres = 15;
+
+  /// Adds the contact labels this form would replace: a NON-EMPTY submitted
+  /// value that differs from what the place stores. A blank field is never
+  /// reported - it is not written either (see the `changed*` repository
+  /// helpers), so it cannot replace anything.
+  static void _collectChangedContactFields(
+    List<String> fields, {
+    String? phone,
+    String? website,
+    String? address,
+    String? storedPhone,
+    String? storedWebsite,
+    String? storedAddress,
+  }) {
+    void consider(String label, String? submitted, String? stored) {
+      final String value = submitted?.trim() ?? '';
+      if (value.isEmpty) return;
+      if (value == (stored ?? '').trim()) return;
+      fields.add(label);
+    }
+
+    consider('phone', phone, storedPhone);
+    consider('website', website, storedWebsite);
+    consider('address', address, storedAddress);
+  }
+
+  /// Adds 'location' when this form's pin is more than [pinMovedMetres] from
+  /// the stored one (both must be known).
+  static void _collectMovedPin(
+    List<String> fields, {
+    required double? latitude,
+    required double? longitude,
+    required double? storedLatitude,
+    required double? storedLongitude,
+  }) {
+    if (latitude == null ||
+        longitude == null ||
+        storedLatitude == null ||
+        storedLongitude == null) {
+      return;
+    }
+    final double moved = _distanceMetres(
+      latitude,
+      longitude,
+      storedLatitude,
+      storedLongitude,
+    );
+    if (moved > pinMovedMetres) fields.add('location');
+  }
+
+  /// The weekdays whose hours this form asserts DIFFERENTLY from what the
+  /// place stores ("Monday hours", ...). A day left in the form's default
+  /// Unknown state asserts nothing and never appears.
+  static List<String> _changedDayLabels(
+    List<OpeningHour> stored,
+    Map<Weekday, List<OpeningHour>> submitted,
+  ) {
+    final List<String> labels = <String>[];
+    for (final MapEntry<Weekday, List<OpeningHour>> entry
+        in submitted.entries) {
+      final List<OpeningHour> mine = entry.value
+          .where((OpeningHour row) => row.status != DayStatus.unknown)
+          .toList(growable: false);
+      if (mine.isEmpty) continue;
+      final List<OpeningHour> theirs = stored
+          .where((OpeningHour row) => row.day == entry.key)
+          .toList(growable: false);
+      if (_daySignature(theirs) == _daySignature(mine)) continue;
+      labels.add('${_dayNames[entry.key]} hours');
+    }
+    return labels;
+  }
+
+  /// One day's own hours as a comparable signature (status + times, order
+  /// independent).
+  static String _daySignature(List<OpeningHour> rows) => (<String>[
+    for (final OpeningHour row in rows)
+      '${row.status.name}:${row.opensAt ?? -1}-${row.closesAt ?? -1}',
+  ]..sort()).join('|');
+
+  /// "Overwrite the stored details" on an existing submitted landmark:
+  /// contact fields, the address + pin, then the asserted hours. Best-effort,
+  /// like every other merge write - a failure here must not fail the merge
+  /// that already succeeded.
+  ///
+  /// A field the form left EMPTY is NOT a detail to replace: the tourist's
+  /// decision (2026-09-13) is that blanks never erase what is stored - a
+  /// blank field means "I did not provide this", not "delete this" (the form
+  /// cannot tell the two apart, and losing a curated phone number because
+  /// nobody retyped it is not recoverable). So only non-empty values are
+  /// written, and only the days the form actually asserted.
+  Future<void> _overwriteLandmarkDetails(
+    SubmittedLandmark landmark, {
+    String? phone,
+    String? website,
+    String? address,
+    required double? latitude,
+    required double? longitude,
+    required Map<Weekday, List<OpeningHour>> operatingHours,
+  }) async {
+    try {
+      await repository.landmark.updateContactFields(
+        landmark.id,
+        phone: phone,
+        website: website == null ? null : sanitiseWebsiteForSave(website),
+        address: address,
+      );
+    } catch (_) {
+      // Ignored - the merge itself succeeded.
+    }
+    final String trimmedAddress = address?.trim() ?? '';
+    if (trimmedAddress.isNotEmpty) {
+      try {
+        await repository.landmark.updateLandmarkAddress(
+          landmark.id,
+          trimmedAddress,
+          latitude: latitude,
+          longitude: longitude,
+        );
+      } catch (_) {
+        // Ignored - the merge itself succeeded.
+      }
+    }
+    try {
+      await repository.landmark.updateOpeningHoursOnMerge(
+        landmark.id,
+        operatingHours,
+      );
+    } catch (_) {
+      // Ignored - the merge itself succeeded.
+    }
+  }
+
+  /// Restaurant twin of [_overwriteLandmarkDetails] - the CURATED row takes
+  /// the tourist's details only when they said so. Address and pin go through
+  /// `updateRestaurantAddress`, and only the days this form asserts
+  /// differently replace that day's stored rows. The non-blanking rule is the
+  /// same: an empty form field replaces nothing.
+  Future<void> _overwriteRestaurantDetails(
+    Restaurant restaurant, {
+    String? phone,
+    String? website,
+    String? address,
+    required double? latitude,
+    required double? longitude,
+    required Map<Weekday, List<OpeningHour>> operatingHours,
+  }) async {
+    try {
+      await repository.restaurant.updateRestaurantContactFields(
+        restaurant.id,
+        phone: phone,
+        website: website == null ? null : sanitiseWebsiteForSave(website),
+      );
+    } catch (_) {
+      // Ignored - the merge itself succeeded.
+    }
+    final String trimmedAddress = address?.trim() ?? '';
+    if (trimmedAddress.isNotEmpty) {
+      try {
+        await repository.restaurant.updateRestaurantAddress(
+          restaurant.id,
+          trimmedAddress,
+          latitude: latitude,
+          longitude: longitude,
+        );
+      } catch (_) {
+        // Ignored - the merge itself succeeded.
+      }
+    }
+    for (final MapEntry<Weekday, List<OpeningHour>> entry
+        in operatingHours.entries) {
+      final List<OpeningHour> rows = entry.value
+          .where((OpeningHour row) => row.status != DayStatus.unknown)
+          .toList(growable: false);
+      if (rows.isEmpty) continue;
+      final List<OpeningHour> stored = restaurant.openingHours
+          .where((OpeningHour row) => row.day == entry.key)
+          .toList(growable: false);
+      if (_daySignature(stored) == _daySignature(rows)) continue;
+      try {
+        await repository.restaurant.replaceRestaurantOpeningHourDay(
+          restaurant.id,
+          entry.key,
+          rows,
+        );
+      } catch (_) {
+        // Ignored - the merge itself succeeded.
+      }
+    }
+  }
+
   /// Pure "nearest candidate within [maxMetres]" selector - unit-testable
   /// geometry shared by the merge flow (no repository/network needed).
   /// Candidates without coordinates are ignored. null when nothing is within
@@ -913,6 +1248,273 @@ class LandmarkSubmissionLogic {
       }
     }
     return nearest;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Near-duplicate place check (Confirm): a nearby place whose name LOOKS
+  // like this form's, judged by PHOTO. See `SimilarPlaceCandidate`.
+  // ---------------------------------------------------------------------------
+
+  /// How many nearby places the near-duplicate check may compare photos with
+  /// (nearest first, and only the ones carrying a photo): every candidate is
+  /// one Gemini call inside the blocked wait on Confirm.
+  static const int similarPlaceCandidateLimit = 5;
+
+  /// How far the near-duplicate check looks - the same 100 m the A13 merge
+  /// uses for "the same place", because it asks the same question and only
+  /// the name's spelling differs.
+  static const double similarPlaceRangeMetres = 100;
+
+  /// The generic words almost every Malaysian shop name carries. Two names
+  /// sharing ONLY these are not "similar": "Restoran Ali" and "Kedai Abu"
+  /// must never reach the photo question.
+  static const Set<String> _genericPlaceWords = <String>{
+    'restoran',
+    'restaurant',
+    'kedai',
+    'kopitiam',
+    'makanan',
+    'selera',
+    'warung',
+    'cafe',
+    'the',
+    'and',
+    'sdn',
+    'bhd',
+    'enterprise',
+    'trading',
+  };
+
+  /// The SIGNIFICANT words of a place name: script-folded, lowercased,
+  /// everything that is not a letter or digit turned into a space, and the
+  /// generic words above dropped. "Restoran Ali & Abu" -> ['ali', 'abu'];
+  /// "Ali and Abu" -> ['ali', 'abu'] - which is exactly why the two qualify
+  /// for a photo comparison while their `placeNameKey`s stay different.
+  @visibleForTesting
+  static List<String> significantPlaceWords(String value) {
+    final String flattened = toSimplifiedChinese(
+      value.toLowerCase(),
+    ).replaceAll(RegExp(r'[^\p{L}\p{N}]+', unicode: true), ' ');
+    return <String>[
+      for (final String word in flattened.split(' '))
+        if (word.isNotEmpty && !_genericPlaceWords.contains(word)) word,
+    ];
+  }
+
+  /// Whether two place names share at least one significant word - the name
+  /// pre-filter for the photo question (the user's rule: filter on the name
+  /// FIRST, then only fetch the photo of what survives).
+  ///
+  /// Chinese names arrive as ONE word (there is nothing to split on), so a
+  /// name that CONTAINS the other's word counts as shared there: "海天楼" and
+  /// "海天楼海鲜" are the same shop's name extended.
+  @visibleForTesting
+  static bool sharesSignificantNameWord(String a, String b) {
+    final List<String> left = significantPlaceWords(a);
+    if (left.isEmpty) return false;
+    final List<String> right = significantPlaceWords(b);
+    for (final String word in left) {
+      for (final String other in right) {
+        if (word == other) return true;
+        if (_containsCjk(word) &&
+            _containsCjk(other) &&
+            (word.contains(other) || other.contains(word))) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  static bool _containsCjk(String value) =>
+      RegExp(r'[\u4e00-\u9fff]').hasMatch(value);
+
+  /// Nearby places whose name looks like [name]: a catalogue restaurant or an
+  /// earlier submitted landmark within [maxMetres], sharing a significant
+  /// word with it, and CARRYING A PHOTO (nothing else can be compared).
+  /// Nearest first, capped at [limit].
+  ///
+  /// Never throws: an unreadable list simply means "no candidates", so this
+  /// can only ever ADD a question to the Confirm click, never block it.
+  Future<List<SimilarPlaceCandidate>> similarNearbyPlaces({
+    required String name,
+    required double? latitude,
+    required double? longitude,
+    double maxMetres = similarPlaceRangeMetres,
+    int limit = similarPlaceCandidateLimit,
+  }) async {
+    if (latitude == null ||
+        longitude == null ||
+        limit <= 0 ||
+        significantPlaceWords(name).isEmpty) {
+      return const <SimilarPlaceCandidate>[];
+    }
+    final double maximumDistanceKm = maxMetres / 1000;
+    final List<SimilarPlaceCandidate> found = <SimilarPlaceCandidate>[];
+
+    try {
+      final List<Restaurant> restaurants = await repository.restaurant
+          .getRestaurantsNear(
+            latitude: latitude,
+            longitude: longitude,
+            maximumDistanceKm: maximumDistanceKm,
+          );
+      for (final Restaurant restaurant in restaurants) {
+        final String? image = restaurant.imageUrl;
+        final double? lat = restaurant.latitude;
+        final double? lon = restaurant.longitude;
+        if (image == null ||
+            image.isEmpty ||
+            lat == null ||
+            lon == null ||
+            !sharesSignificantNameWord(name, restaurant.name)) {
+          continue;
+        }
+        found.add(
+          SimilarPlaceCandidate(
+            id: restaurant.id,
+            name: restaurant.name,
+            isRestaurant: true,
+            distanceMetres: _distanceMetres(latitude, longitude, lat, lon),
+            imageUrl: image,
+            address: restaurant.address,
+          ),
+        );
+      }
+    } catch (_) {
+      // Ignored - see the doc: no candidates, never a blocked Confirm.
+    }
+
+    try {
+      final List<SubmittedLandmark> landmarks = await repository.landmark
+          .findNearby(
+            latitude: latitude,
+            longitude: longitude,
+            maximumDistanceKm: maximumDistanceKm,
+          );
+      for (final SubmittedLandmark landmark in landmarks) {
+        final String? image = landmark.imageUrl;
+        final double? lat = landmark.latitude;
+        final double? lon = landmark.longitude;
+        if (image == null ||
+            image.isEmpty ||
+            lat == null ||
+            lon == null ||
+            !sharesSignificantNameWord(name, landmark.name)) {
+          continue;
+        }
+        found.add(
+          SimilarPlaceCandidate(
+            id: landmark.id,
+            name: landmark.name,
+            isRestaurant: false,
+            distanceMetres: _distanceMetres(latitude, longitude, lat, lon),
+            imageUrl: image,
+            address: landmark.address,
+          ),
+        );
+      }
+    } catch (_) {
+      // Ignored - see above.
+    }
+
+    found.sort(
+      (SimilarPlaceCandidate a, SimilarPlaceCandidate b) =>
+          a.distanceMetres.compareTo(b.distanceMetres),
+    );
+    return List<SimilarPlaceCandidate>.unmodifiable(found.take(limit));
+  }
+
+  /// Whether the tourist's captured photo and [candidate]'s stored photo show
+  /// the SAME restaurant (the second Gemini question on the Confirm click).
+  ///
+  /// False for every "cannot answer": no stored photo, a photo that will not
+  /// download, a timeout, no connection. The question exists to HELP spot a
+  /// duplicate the name alone missed, so an unanswered one must never add a
+  /// question the tourist cannot get past.
+  Future<bool> photosShowSamePlace({
+    required List<int> imageBytes,
+    required SimilarPlaceCandidate candidate,
+  }) async {
+    final String? url = candidate.imageUrl;
+    if (url == null || url.isEmpty || imageBytes.isEmpty) return false;
+    final List<int>? stored = await repository.links.fetchImageBytes(url);
+    if (stored == null || stored.isEmpty) return false;
+    try {
+      final response = await repository.recognition.comparePlacePhotos(
+        imageBytes: imageBytes,
+        otherImageBytes: stored,
+      );
+      return response.samePlace;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Which of the form's [dishes] the place already lists - asked AFTER the
+  /// tourist has agreed that place is the same one, so the form can say what
+  /// would not be added a second time.
+  ///
+  /// [dishes] are the form's own entries (the dish name shown to the tourist,
+  /// its variant and its catalogue id when the dish is curated). The identity
+  /// comparison is the ONE rule used everywhere else
+  /// ([sameDishAndVariantIdentity]): catalogue id when both sides have one,
+  /// else the script-folded name - plus the variant. An unreadable place
+  /// returns no names (nothing is dropped on a failed read).
+  Future<List<String>> dishesAlreadyAtPlace({
+    required SimilarPlaceCandidate candidate,
+    required List<({String name, String variant, int localFoodId})> dishes,
+  }) async {
+    if (dishes.isEmpty) return const <String>[];
+    final List<({String dish, String variant, int localFoodId})> there =
+        <({String dish, String variant, int localFoodId})>[];
+    try {
+      if (candidate.isRestaurant) {
+        final List<RestaurantItem> items = await repository.restaurant
+            .getReportableItems(candidate.id);
+        for (final RestaurantItem item in items) {
+          if (item.isRemoved) continue;
+          // `restaurant_item` carries no variant column - a menu row is the
+          // plain dish.
+          there.add((
+            dish: item.foodName,
+            variant: '',
+            localFoodId: item.localFoodId,
+          ));
+        }
+      } else {
+        final SubmittedLandmark? landmark = await repository.landmark
+            .getSubmittedLandmarkById(candidate.id);
+        for (final LandmarkItem item
+            in landmark?.items ?? const <LandmarkItem>[]) {
+          if (item.isRemoved) continue;
+          there.add((
+            dish: item.dish,
+            variant: item.variant,
+            localFoodId: item.localFoodId,
+          ));
+        }
+      }
+    } catch (_) {
+      return const <String>[];
+    }
+
+    return <String>[
+      for (final ({String name, String variant, int localFoodId}) dish
+          in dishes)
+        if (there.any(
+          (({String dish, String variant, int localFoodId}) row) =>
+              sameDishAndVariantIdentity(
+                dish: row.dish,
+                localFoodId: row.localFoodId,
+                variant: row.variant,
+                otherDish: dish.name,
+                otherLocalFoodId: dish.localFoodId,
+                otherVariant: dish.variant,
+              ),
+        ))
+          dish.name,
+    ];
   }
 
   /// Reactivates a place the tourist just re-confirmed exists (A20), in BOTH

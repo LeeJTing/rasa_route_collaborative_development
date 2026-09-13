@@ -2,7 +2,9 @@ import '../../domain_model/local_food.dart';
 import '../../domain_model/origin_verification.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../data_models/food_analysis_response.dart';
+import '../data_models/place_photo_match_response.dart';
 import '../data_models/signboard_analysis_response.dart';
+import '../data_models/signboard_name_match_response.dart';
 import '../data_models/stall_analysis_response.dart';
 
 /// A recognised food plus Gemini's suggested MYR price range for it. The
@@ -278,4 +280,28 @@ class RecognitionRepository {
   /// Stall photo - frame validation only, no auto-fill (UC500, A8/A15).
   Future<StallAnalysisResponse> analyzeStall(List<int> imageBytes) =>
       api.geminiLandmark.analyzeStallImage(imageBytes: imageBytes);
+
+  /// The SIGNBOARD photo asked a second question (UC500): the form is
+  /// holding a name the tourist EDITED, so how well does [typedName] match
+  /// the name painted on the signboard? See
+  /// `LandmarkSubmissionLogic.nameMatchesSignboard`.
+  Future<SignboardNameMatchResponse> verifySignboardName({
+    required List<int> imageBytes,
+    required String typedName,
+  }) => api.geminiLandmark.verifySignboardName(
+    imageBytes: imageBytes,
+    typedName: typedName,
+  );
+
+  /// Two photos, one question (UC500): the tourist's own capture against the
+  /// stored photo of a NEARBY place whose name looks like theirs - do they
+  /// show the same restaurant? See
+  /// `LandmarkSubmissionLogic.photosShowSamePlace`.
+  Future<PlacePhotoMatchResponse> comparePlacePhotos({
+    required List<int> imageBytes,
+    required List<int> otherImageBytes,
+  }) => api.geminiLandmark.comparePlacePhotos(
+    imageBytes: imageBytes,
+    otherImageBytes: otherImageBytes,
+  );
 }

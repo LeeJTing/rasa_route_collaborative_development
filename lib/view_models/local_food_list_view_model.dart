@@ -30,8 +30,6 @@ class LocalFoodListViewModel extends BaseViewModel {
           'Chinese',
           'Indian',
           'Nyonya',
-          'Sabah',
-          'Sarawak',
         ],
         FoodFilterGroup.mealType: <String>[
           'All-Day Dining',
@@ -89,6 +87,7 @@ class LocalFoodListViewModel extends BaseViewModel {
   final Set<int> _favouriteUpdates = <int>{};
   bool _isSelecting = false;
   int _loadGeneration = 0;
+  int _favouriteRefreshGeneration = 0;
 
   String get query => _query;
   FoodSortOrder get sortOrder => _sortOrder;
@@ -129,10 +128,9 @@ class LocalFoodListViewModel extends BaseViewModel {
     return result;
   }
 
-  int _byName(LocalFood a, LocalFood b) =>
-      _sortOrder == FoodSortOrder.ascending
-          ? a.name.compareTo(b.name)
-          : b.name.compareTo(a.name);
+  int _byName(LocalFood a, LocalFood b) => _sortOrder == FoodSortOrder.ascending
+      ? a.name.compareTo(b.name)
+      : b.name.compareTo(a.name);
 
   bool _matchesFilters(LocalFood food) {
     final Map<FoodFilterGroup, Set<String>> values =
@@ -256,26 +254,30 @@ class LocalFoodListViewModel extends BaseViewModel {
   }
 
   void updateFavourite(int id, bool isFavourite) {
-    _foods = _foods.map((LocalFood food) {
-      return food.id == id
-          ? food.copyWith(isFavourite: isFavourite)
-          : food;
-    }).toList(growable: false);
+    _foods = _foods
+        .map((LocalFood food) {
+          return food.id == id ? food.copyWith(isFavourite: isFavourite) : food;
+        })
+        .toList(growable: false);
 
     safeNotifyListeners();
   }
 
-  Future<void> refreshFavourite() async {
-    final Set<int> favouriteIds = await foodLogic.favouriteFoodIds();
-
-    _foods = _foods
-        .map(
-          (LocalFood food) => food.copyWith(
-        isFavourite: favouriteIds.contains(food.id),
-      ),
-    )
-        .toList(growable: false);
-
-    notifyListeners();
+  Future<String?> refreshFavourite() async {
+    final int generation = ++_favouriteRefreshGeneration;
+    try {
+      final Set<int> favouriteIds = await foodLogic.favouriteFoodIds();
+      if (generation != _favouriteRefreshGeneration) return null;
+      _foods = _foods
+          .map(
+            (LocalFood food) =>
+                food.copyWith(isFavourite: favouriteIds.contains(food.id)),
+          )
+          .toList(growable: false);
+      safeNotifyListeners();
+      return null;
+    } catch (_) {
+      return 'Could not refresh favourite foods. Please try again.';
+    }
   }
 }

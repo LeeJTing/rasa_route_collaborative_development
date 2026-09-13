@@ -1,3 +1,4 @@
+import '../core/place_category.dart';
 import 'local_food.dart';
 import 'opening_hour.dart';
 
@@ -72,19 +73,10 @@ class SubmittedLandmark {
   /// stable for a given dish order. Falls back to the stored [category]
   /// column when no dish carries a category at all, and to '' when neither
   /// does.
-  String get displayCategory {
-    final Map<String, int> counts = <String, int>{};
-    String best = '';
-    for (final LandmarkItem item in items) {
-      final String category = item.foodCategory.trim();
-      if (category.isEmpty) continue;
-      final int count = (counts[category] ?? 0) + 1;
-      counts[category] = count;
-      // Strictly greater, so the FIRST category to reach a count keeps it.
-      if (best.isEmpty || count > counts[best]!) best = category;
-    }
-    return best.isNotEmpty ? best : category.trim();
-  }
+  String get displayCategory => majorityCategory(
+    items.map((LandmarkItem item) => item.foodCategory),
+    fallback: category,
+  );
 
   /// [displayCategory] worded the way the catalogue's own places read theirs:
   /// the restaurant table stores the full phrase ("Chinese restaurant"), so
@@ -92,13 +84,7 @@ class SubmittedLandmark {
   /// (user request, 2026-09-13). A category that already says "restaurant" is
   /// left alone, and an unknown category stays empty rather than inventing
   /// "restaurant" on its own.
-  String get displayCategoryLabel {
-    final String category = displayCategory;
-    if (category.isEmpty) return '';
-    return category.toLowerCase().contains('restaurant')
-        ? category
-        : '$category restaurant';
-  }
+  String get displayCategoryLabel => placeCategoryLabel(displayCategory);
 }
 
 /// Moderation state of a submission - `submitted_landmark.status` is free

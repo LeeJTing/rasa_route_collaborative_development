@@ -38,16 +38,51 @@ class PlaceSuggestion {
   /// Carried so that picking a restaurant out of the search results can open
   /// **that** restaurant, rather than dropping the tourist on a map full of
   /// pins and leaving them to work out which one they just searched for.
+  ///
+  /// **Internal.** It is a database key and never reaches the screen; the list
+  /// shows [name] and [subtitle].
   final String? referenceId;
 
   /// Which table [referenceId] belongs to. Meaningless when it is null; the
   /// two id spaces overlap, so this is what tells them apart (C21).
   final bool isRestaurant;
 
+  /// What this result points at: a restaurant row, a submitted-landmark row,
+  /// or a place on the map that has no row of its own.
+  ///
+  /// A keyword like "Nasi Lemak" can match a dish, a restaurant and a landmark
+  /// all at once, and those three ids mean three different things. Reading the
+  /// type off the result - rather than off the text the tourist typed - is what
+  /// lets a picked result narrow the map to the one place it names.
+  SearchResultType get resultType {
+    if (entityId == null) return SearchResultType.location;
+    return isRestaurant
+        ? SearchResultType.restaurant
+        : SearchResultType.landmark;
+  }
+
+  /// [referenceId] as the integer key it is, or null when this result is a
+  /// state, city, town or area - which has no row to point at.
+  ///
+  /// Parsed here rather than at each call site: the id arrives as text from the
+  /// row, and every caller that wanted it was writing the same `int.tryParse`
+  /// and the same null check.
+  int? get entityId {
+    final String? raw = referenceId?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    return int.tryParse(raw);
+  }
+
   /// Whether picking this result can open a place's detail sheet.
-  bool get isPlaceOnTheMap =>
-      referenceId != null && referenceId!.trim().isNotEmpty;
+  bool get isPlaceOnTheMap => entityId != null;
 }
+
+/// Which id space a search result's key belongs to.
+///
+/// The third case matters as much as the first two: a state or a city is a
+/// perfectly good result, but it is a camera position rather than a place, so
+/// there is nothing on the map for it to highlight.
+enum SearchResultType { restaurant, landmark, location }
 
 /// One place name matched by Postgres, with the score it earned.
 ///

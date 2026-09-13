@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; 
 
 import 'app/app.dart';
 import 'app/config/env.dart';
@@ -20,6 +21,12 @@ Future<void> main() async {
   await Env.load();
   await LocalStorageManager().initialise();
   await SupabaseService.initialise();
+
+  // 3. Restrict the orientation to portrait only
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   runApp(const RasaRouteApp());
 

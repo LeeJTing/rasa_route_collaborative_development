@@ -68,10 +68,7 @@ Future<void> showEnlargedImage(
               ),
               if (noticeMessage != null) ...<Widget>[
                 const SizedBox(height: AppSpacing.md),
-                FoodNoticeBanner(
-                  message: noticeMessage,
-                  type: noticeType,
-                ),
+                FoodNoticeBanner(message: noticeMessage, type: noticeType),
               ],
             ],
           ),
@@ -102,6 +99,21 @@ const String linkedFoodImageNotice =
 const String restaurantProvidedImageNotice =
     "Provided by the restaurant — this is the restaurant's own dish photo.";
 
+const String landmarkCaptureNotice =
+    'User submitted photo — this photo was submitted with a landmark by a '
+    'tourist, not by the place itself.';
+
+Future<void> showLandmarkImage(
+  BuildContext context, {
+  required String semanticLabel,
+  required String? source,
+}) => showEnlargedImage(
+  context,
+  semanticLabel: semanticLabel,
+  source: source,
+  noticeMessage: landmarkCaptureNotice,
+);
+
 /// Opens a restaurant menu item's photo, labelled with where the picture came
 /// from: the restaurant's own dish photo (green) or the linked local-food
 /// catalogue image used as a stand-in (yellow, reference only).
@@ -117,9 +129,7 @@ Future<void> showRestaurantItemImage(
   noticeMessage: fromLinkedFood
       ? linkedFoodImageNotice
       : restaurantProvidedImageNotice,
-  noticeType: fromLinkedFood
-      ? FoodNoticeType.caution
-      : FoodNoticeType.provided,
+  noticeType: fromLinkedFood ? FoodNoticeType.caution : FoodNoticeType.provided,
 );
 
 /// Wraps a photo so the tourist can open it full-screen: the [child] and the

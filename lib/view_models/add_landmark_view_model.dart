@@ -10,6 +10,8 @@ import '../domain_model/address_suggestion.dart';
 import '../domain_model/landmark_draft.dart';
 import '../domain_model/local_food.dart';
 import '../domain_model/opening_hour.dart';
+import '../domain_model/place_overwrite_report.dart';
+import '../domain_model/similar_place_candidate.dart';
 import '../domain_model/submitted_landmark.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
@@ -249,6 +251,14 @@ class AddLandmarkViewModel extends BaseViewModel
   @override
   void onCurrentLocationChanged(TouristLocation location) {
     _currentLocation = location;
+    // A capture the 50 m rule rejected names the spot it was captured at
+    // ([_captureRejected]): a LATER fix means the tourist has moved - or a
+    // dev GPS mock was stopped - so that verdict no longer describes where
+    // they are and must not keep sitting under the Submit bar.
+    if (_captureRejected && location.isKnown) {
+      _submitError = null;
+      _captureRejected = false;
+    }
     // The address may still be waiting for its first fix (a name-typed food
     // carries no capture spot). Fill it as soon as a fix arrives - unless it
     // was typed or already filled.
@@ -256,6 +266,20 @@ class AddLandmarkViewModel extends BaseViewModel
       _scheduleMapAddressLookup();
     }
     safeNotifyListeners();
+  }
+
+  /// Whether [submitError] is the 50 m capture rejection from
+  /// [_acceptCaptureLocation] rather than a field/submit problem - see
+  /// [onCurrentLocationChanged].
+  bool _captureRejected = false;
+
+  /// Drops the 50 m capture rejection, if that is what [submitError] holds:
+  /// it described one capture at one spot, and the attempt that produced it
+  /// is over (a new capture is starting, or the fix has moved on).
+  void _clearCaptureRejection() {
+    if (!_captureRejected) return;
+    _captureRejected = false;
+    _submitError = null;
   }
 
   String? _locationError;
@@ -416,6 +440,44 @@ class AddLandmarkViewModel extends BaseViewModel
   /// tourist's own typing (which must not fight the field).
   int _extractedRestaurantNameVersion = 0;
 
+  /// The name Gemini read off the signboard THIS form captured (see
+  /// [setExtractedRestaurantName]) - the baseline [hasEditedSignboardName]
+  /// compares the field against. Null while no signboard reading belongs to
+  /// the photo the form is holding: a stall capture, a cancelled photo, or a
+  /// resumed draft (a draft stores the photo, not the reading).
+  String? _signboardDetectedName;
+
+  /// True when [confirmRestaurant] refused the click because the name the
+  /// tourist typed does not match the captured signboard. One-shot: the View
+  /// takes it with [takeSignboardNameMismatch] and says so in a dialog.
+  bool _signboardNameMismatch = false;
+
+  /// True while a Confirm click is waiting on that same check (a Gemini
+  /// call): the Confirm row shows progress and refuses a second click rather
+  /// than firing the question twice.
+  bool _isConfirming = false;
+
+  /// True while the near-duplicate check is running - the nearby search plus
+  /// one photo download + Gemini call per candidate. The View blocks the form
+  /// (name and images included) for as long as it is set: nothing on the form
+  /// may change while the question about THIS name/photo is being decided.
+  bool _isCheckingSimilarPlace = false;
+
+  /// The nearby place whose stored photo Gemini judged to be the SAME
+  /// restaurant as this form's capture - the "did you mean this restaurant?"
+  /// question, waiting for the tourist's answer. Null when there is none.
+  SimilarPlaceCandidate? _similarPlacePrompt;
+
+  /// The form's dishes the chosen place ALREADY lists (see
+  /// [acceptSimilarPlace]) - what the acknowledgement must name before they
+  /// are dropped from this submission.
+  List<String> _existingDishNames = const <String>[];
+
+  /// True when EVERY dish this form holds already exists at the chosen place:
+  /// nothing would be written, so the form leaves for the dashboard instead of
+  /// submitting (see [finishAsAlreadyThere]).
+  bool _allDishesExist = false;
+
   /// Every weekday always has at least one row here. A Closed/Unknown day
   /// has exactly one row (times null); an Open day can have more than one
   /// - matching the real `OpeningHours` table directly, where each row is
@@ -461,17 +523,6 @@ class AddLandmarkViewModel extends BaseViewModel
   /// overlapping saves.
   bool _draftSaving = false;
   bool get isSavingDraft => _draftSaving;
-
-  /// Set when a BACKGROUND save (the app went to the background) succeeded -
-  /// the View shows a "draft saved, kept for 24 hours" note when the tourist
-  /// comes back, then clears this via [takeAutoDraftSavedNotice].
-  bool _autoDraftSaved = false;
-
-  bool takeAutoDraftSavedNotice() {
-    final bool saved = _autoDraftSaved;
-    _autoDraftSaved = false;
-    return saved;
-  }
 
   /// Set when an "Add More Food" result was REJECTED because the same dish
   /// (same variant) is already on this form - the View shows a snackbar and
@@ -644,6 +695,146 @@ class AddLandmarkViewModel extends BaseViewModel
   /// See [_extractedRestaurantNameVersion].
   int get extractedRestaurantNameVersion => _extractedRestaurantNameVersion;
 
+  /// The name Gemini read off the captured signboard, or null when the photo
+  /// brought no reading of its own (stall capture, cancelled photo, resumed
+  /// draft). See [_signboardDetectedName].
+  String? get signboardDetectedName => _signboardDetectedName;
+
+  /// Whether the tourist replaced Gemini's signboard reading with a name of
+  /// their own - the case [confirmRestaurant] sends back to the signboard
+  /// for a second opinion. False when there is no reading to differ from.
+  bool get hasEditedSignboardName {
+    final String? detected = _signboardDetectedName;
+    return detected != null && _restaurantName.trim() != detected.trim();
+  }
+
+  /// True while a Confirm click is waiting on the signboard-name check - see
+  /// [confirmRestaurant]. The Confirm row shows progress while it is set.
+  bool get isConfirming => _isConfirming;
+
+  /// True while the near-duplicate check runs - see [_isCheckingSimilarPlace].
+  /// The View blocks the form (name and images included) while it is set.
+  bool get isCheckingSimilarPlace => _isCheckingSimilarPlace;
+
+  /// See [_similarPlacePrompt]. The View asks the question while it is
+  /// non-null: a nearby place whose stored photo looks like this form's
+  /// capture, under a name that only LOOKS similar.
+  SimilarPlaceCandidate? get similarPlacePrompt => _similarPlacePrompt;
+
+  /// The form's dishes the chosen place already lists - see
+  /// [_existingDishNames].
+  List<String> get existingDishNames => _existingDishNames;
+
+  /// True when every dish on this form is already listed at the chosen place
+  /// - see [_allDishesExist].
+  bool get allDishesExist => _allDishesExist;
+
+  /// The same-place details a merge would replace, waiting for the tourist's
+  /// answer - see [checkDetailsOverwrite] / [resolveOverwrite]. Non-null only
+  /// while the question is outstanding.
+  PlaceOverwriteReport? _overwritePrompt;
+
+  /// See [_overwritePrompt].
+  PlaceOverwriteReport? get overwritePrompt => _overwritePrompt;
+
+  /// The tourist's answer: true = write this form's details over the stored
+  /// ones, false = leave the stored record completely untouched. Null while
+  /// unanswered - and a merge then keeps the stored record (the safe way).
+  bool? _overwriteExistingDetails;
+
+  /// See [_overwriteExistingDetails].
+  bool? get overwriteExistingDetails => _overwriteExistingDetails;
+
+  /// The relevant values the answer was given for (see [_detailsSignature]):
+  /// editing any of them after answering asks again.
+  String? _overwriteAnsweredFor;
+
+  /// Whether this form carries anything a same-place merge could overwrite:
+  /// a contact detail, or hours for at least one day.
+  bool get hasDetailsToMerge =>
+      _phone.trim().isNotEmpty ||
+      _website.trim().isNotEmpty ||
+      _address.trim().isNotEmpty ||
+      _operatingHours.values.any(
+        (List<OpeningHour> rows) =>
+            rows.any((OpeningHour row) => row.status != DayStatus.unknown),
+      );
+
+  /// Whether the same place already stores details this form would REPLACE -
+  /// true when the question is now pending: the View shows
+  /// [overwritePrompt] and calls [resolveOverwrite]. False when there is
+  /// nothing to ask (no relevant entry, no same-place record, nothing would
+  /// change, or the tourist already answered for these exact values).
+  ///
+  /// Asked at Confirm and again just before the write (see
+  /// [submitLandmark]): the merge is otherwise silent, and a curated phone
+  /// number, address or set of hours must not vanish without the tourist
+  /// saying so.
+  Future<bool> checkDetailsOverwrite() async {
+    if (!hasDetailsToMerge) return false;
+    if (_overwriteAnsweredFor == _detailsSignature) return false;
+    final TouristLocation location = _adjustedLocation.isKnown
+        ? _adjustedLocation
+        : baseLocation;
+    try {
+      final PlaceOverwriteReport? report = await landmarkLogic
+          .mergeOverwriteReport(
+            restaurantName: _restaurantName,
+            latitude: location.isKnown ? location.latitude : null,
+            longitude: location.isKnown ? location.longitude : null,
+            phone: _phone,
+            website: _website,
+            address: _address,
+            operatingHours: _operatingHours,
+          );
+      if (report == null) {
+        // Nothing would be replaced - remember that for these values so the
+        // submit path does not ask again.
+        _overwriteExistingDetails = false;
+        _overwriteAnsweredFor = _detailsSignature;
+        return false;
+      }
+      _overwritePrompt = report;
+      safeNotifyListeners();
+      return true;
+    } catch (_) {
+      // Unreadable stored details: no question, and the merge then keeps the
+      // stored record.
+      return false;
+    }
+  }
+
+  /// The tourist's answer to [overwritePrompt].
+  void resolveOverwrite(bool overwrite) {
+    if (_overwritePrompt == null) return;
+    _overwritePrompt = null;
+    _overwriteExistingDetails = overwrite;
+    _overwriteAnsweredFor = _detailsSignature;
+    safeNotifyListeners();
+  }
+
+  /// The values the details question is about, as one comparable string - an
+  /// edit after answering changes it, so the question is asked again.
+  String get _detailsSignature {
+    final TouristLocation location = _adjustedLocation.isKnown
+        ? _adjustedLocation
+        : baseLocation;
+    final List<String> days = <String>[
+      for (final Weekday day in Weekday.values)
+        for (final OpeningHour row
+            in _operatingHours[day] ?? const <OpeningHour>[])
+          '${row.status.name}:${row.opensAt ?? -1}-${row.closesAt ?? -1}',
+    ];
+    return <String>[
+      _phone.trim(),
+      _website.trim(),
+      _address.trim(),
+      location.isKnown ? location.latitude.toStringAsFixed(5) : '',
+      location.isKnown ? location.longitude.toStringAsFixed(5) : '',
+      days.join(','),
+    ].join('|');
+  }
+
   String get restaurantPhone => _phone;
   String get restaurantWebsite => _website;
   String get restaurantAddress => _address;
@@ -750,18 +941,18 @@ class AddLandmarkViewModel extends BaseViewModel
   /// True while the debounced website-link probe is running.
   bool get isCheckingWebsiteLink => _websiteLinkChecking;
 
-  /// True when the last probe could not open the link. ADVISORY only -
-  /// [submitLandmark] re-probes and blocks on its own result.
+  /// True when the last probe could not open the link. This DISABLES Submit
+  /// (see [canSubmit]) and is what [canSubmitReason] reports; the status line
+  /// under the field says the same thing. [submitLandmark] still re-probes
+  /// and blocks on its own result, which stays the authority.
   bool get websiteLinkUnreachable => _websiteLinkUnreachable;
 
   /// The live status line under the website field: "Checking this link…"
-  /// while the probe runs, then a "could not open" note when it failed.
+  /// while the probe runs, then the unable-to-open note when it failed.
   /// Null while idle or after a successful probe.
   String? get websiteLinkStatus {
     if (_websiteLinkChecking) return 'Checking this link…';
-    if (_websiteLinkUnreachable) {
-      return "We couldn't open this link. Check the address and try again.";
-    }
+    if (_websiteLinkUnreachable) return _websiteUnreachableMessage;
     return null;
   }
 
@@ -833,6 +1024,11 @@ class AddLandmarkViewModel extends BaseViewModel
       restaurantNameError == null &&
       restaurantPhoneError == null &&
       restaurantWebsiteError == null &&
+      // A link the live probe could not open blocks Submit as well - it is
+      // the same strict check [submitLandmark] runs, surfaced before the tap
+      // instead of after it (see [websiteLinkUnreachable]). Editing the
+      // field re-runs the probe, so a fixed link re-enables the button.
+      !_websiteLinkUnreachable &&
       restaurantAddressError == null &&
       _primaryFood != null &&
       _primaryFood!.price != null &&
@@ -876,6 +1072,9 @@ class AddLandmarkViewModel extends BaseViewModel
     if (phoneError != null) return phoneError;
     final String? websiteError = restaurantWebsiteError;
     if (websiteError != null) return websiteError;
+    // The link is well-formed but the live probe could not open it - the
+    // button stays disabled until the field is edited (which re-probes).
+    if (_websiteLinkUnreachable) return _websiteUnreachableMessage;
     final String? addressError = restaurantAddressError;
     if (addressError != null) return addressError;
     final String? hoursError = _operatingHoursError();
@@ -890,6 +1089,12 @@ class AddLandmarkViewModel extends BaseViewModel
   /// the Restaurant Name - they must verify the name first.
   static const String _confirmRestaurantReason =
       'Please press Confirm to check the restaurant name first.';
+
+  /// The ONE sentence for a website link that cannot be opened - shared by
+  /// the live status line under the field, the Submit bar's reason and the
+  /// submit-time error, so the three can never drift apart.
+  static const String _websiteUnreachableMessage =
+      "We couldn't open this website. Check the address and try again.";
 
   // --- COMMANDS ---
 
@@ -1026,6 +1231,7 @@ class AddLandmarkViewModel extends BaseViewModel
   /// so the camera can reject a signboard shot taken too far away (50 m
   /// same-restaurant rule); the check is repeated here as a backstop.
   Future<void> openSignboardCapture() async {
+    _clearCaptureRejection();
     LandmarkDraftHandoff().pendingPurpose = FoodRecognitionPurpose.signboard;
     LandmarkDraftHandoff().pendingReferenceLocation = baseLocation.isKnown
         ? baseLocation
@@ -1056,6 +1262,7 @@ class AddLandmarkViewModel extends BaseViewModel
 
   /// Same as [openSignboardCapture], in stall-capture mode - no auto-fill.
   Future<void> openStallCapture() async {
+    _clearCaptureRejection();
     LandmarkDraftHandoff().pendingPurpose = FoodRecognitionPurpose.stall;
     LandmarkDraftHandoff().pendingReferenceLocation = baseLocation.isKnown
         ? baseLocation
@@ -1086,6 +1293,7 @@ class AddLandmarkViewModel extends BaseViewModel
       return true;
     }
     _submitError = landmarkLogic.captureTooFarMessage(capturedWhat);
+    _captureRejected = true;
     safeNotifyListeners();
     return false;
   }
@@ -1093,6 +1301,12 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Set captured image (signboard or stall), plus where THAT photo was taken
   /// ([captureLocation] - its own fix, not the first food's).
   /// Automatically disables the other button.
+  ///
+  /// A NEW photo takes the restaurant confirmation back (see
+  /// [confirmRestaurant]): the click is what checked THIS signboard/stall
+  /// photo, so replacing the photo - a "Retake", or the other capture mode
+  /// after cancelling - makes that click stale even when the restaurant name
+  /// itself does not change.
   void setCapturedImage(
     XFile image,
     String imageType, {
@@ -1111,6 +1325,12 @@ class AddLandmarkViewModel extends BaseViewModel
     } else if (imageType == 'stall') {
       _isSignboardDisabled = true; // Can't capture signboard after stall
     }
+    // The previous photo's reading goes with the previous photo: the new
+    // capture supplies its own (see [setExtractedRestaurantName]), and until
+    // it does there is nothing for an edited name to be checked against.
+    _signboardDetectedName = null;
+    _signboardNameMismatch = false;
+    _restaurantConfirmed = false;
     safeNotifyListeners();
   }
 
@@ -1119,7 +1339,8 @@ class AddLandmarkViewModel extends BaseViewModel
   /// "Retake" (which keeps the mutual-exclusion lock and just re-opens the
   /// same capture mode) - this undoes the choice altogether. Doesn't touch
   /// `_restaurantName` even if it was auto-filled from a signboard - the
-  /// tourist may still want to keep that.
+  /// tourist may still want to keep that - but DOES take the confirmation
+  /// back, because the photo that click checked is now gone.
   void clearCapturedImage() {
     // A stored draft photo is dropped with the capture - never resurrect it
     // on the next save.
@@ -1130,6 +1351,9 @@ class AddLandmarkViewModel extends BaseViewModel
     _capturedImageLocation = TouristLocation.unknown;
     _isSignboardDisabled = false;
     _isStallDisabled = false;
+    _signboardDetectedName = null;
+    _signboardNameMismatch = false;
+    _restaurantConfirmed = false;
     safeNotifyListeners();
   }
 
@@ -1139,6 +1363,9 @@ class AddLandmarkViewModel extends BaseViewModel
   /// so `AddLandmarkView` can force its text field to show this name even
   /// while the field is still focused (the focus-guarded sync alone would
   /// skip it, leaving the tourist's typed name on screen).
+  ///
+  /// The reading is kept as [_signboardDetectedName]: an EDIT of it is what
+  /// [confirmRestaurant] re-checks against the photo.
   void setExtractedRestaurantName(String? name) {
     if (name != null && name.trim().isNotEmpty) {
       final String next = _clampTo(
@@ -1149,6 +1376,7 @@ class AddLandmarkViewModel extends BaseViewModel
       // click was given for the PREVIOUS name (see [confirmRestaurant]).
       if (next != _restaurantName) _restaurantConfirmed = false;
       _restaurantName = next;
+      _signboardDetectedName = next;
       _extractedRestaurantNameVersion++;
       safeNotifyListeners();
     }
@@ -1179,21 +1407,255 @@ class AddLandmarkViewModel extends BaseViewModel
   /// (the confirmation does not take), or null once confirmed.
   ///
   /// Confirming survives later edits to the OTHER fields (the tourist's
-  /// choice), but a CHANGE of the restaurant name takes it back - the click
-  /// validated the previous name and it is the moment another unfinished
-  /// submission for the same restaurant (same name + first food spot within
-  /// 100 m) was looked up (see [draftForRestaurantMerge] /
-  /// [mergeExistingDraft]); a new name wants its OWN check.
-  String? confirmRestaurant() {
+  /// choice), but two things take it back - both are what the click itself
+  /// checked:
+  ///   * a CHANGE of the restaurant name (the click validated the previous
+  ///     name, and it is the moment another unfinished submission for the
+  ///     same restaurant - same name + first food spot within 100 m - was
+  ///     looked up; see [draftForRestaurantMerge] / [mergeExistingDraft]);
+  ///   * a CHANGE of the signboard/stall photo ([setCapturedImage] - the
+  ///     click is what checked that photo, and what enforced "one of the
+  ///     two" - or [clearCapturedImage], which removes it).
+  ///
+  /// The click itself now also re-checks an EDITED name against the
+  /// signboard photo ([hasEditedSignboardName]): Gemini's own reading needs
+  /// no second opinion, but a name the tourist typed over it must still score
+  /// [LandmarkSubmissionLogic.signboardNameMatchThreshold] on the same photo
+  /// (see [nameMatchesSignboard]). A name that fails is NOT confirmed -
+  /// [takeSignboardNameMismatch] reports it so the View can say so and offer
+  /// [useSignboardName], and the field stays editable for another try.
+  ///
+  /// An unanswered check (offline, timeout, quota) fails OPEN: the form is
+  /// confirmed as before, so a bad connection can never lock a tourist out.
+  ///
+  /// Returns the problem to show (the confirmation does not take), or null
+  /// once confirmed.
+  Future<String?> confirmRestaurant() async {
     if (!hasImageCaptured) {
       return 'Please capture a signboard or stall image.';
     }
     if (_restaurantName.trim().isEmpty) {
       return 'Enter the restaurant name before confirming.';
     }
+    if (hasEditedSignboardName && _capturedImage != null) {
+      _isConfirming = true;
+      safeNotifyListeners();
+      final bool matches = await _editedNameMatchesSignboard();
+      _isConfirming = false;
+      if (!matches) {
+        _signboardNameMismatch = true;
+        _restaurantConfirmed = false;
+        safeNotifyListeners();
+        return null;
+      }
+    }
+    // LAST: is this restaurant already on the map under a name that only
+    // LOOKS different ("Ali & Abu" vs "Ali and Abu")? The photos decide, and
+    // the tourist has the final word - so the confirmation waits for that
+    // answer (see [acceptSimilarPlace] / [rejectSimilarPlace]).
+    final SimilarPlaceCandidate? similar = await _findSimilarPlace();
+    if (similar != null) {
+      _similarPlacePrompt = similar;
+      _restaurantConfirmed = false;
+      safeNotifyListeners();
+      return null;
+    }
     _restaurantConfirmed = true;
     safeNotifyListeners();
     return null;
+  }
+
+  /// The nearby place (within the same 100 m the merge uses) whose stored
+  /// photo Gemini judges to be the SAME restaurant as this form's capture -
+  /// nearest first, name-filtered before any photo is fetched. Null when
+  /// there is no location, no capture, or nothing matches - and for every
+  /// unanswerable check (offline, timeout, a photo that will not download):
+  /// this can only ever ADD a question, never block a form the tourist can
+  /// see is right.
+  Future<SimilarPlaceCandidate?> _findSimilarPlace() async {
+    final XFile? image = _capturedImage;
+    final String name = _restaurantName.trim();
+    if (image == null || name.isEmpty) return null;
+    // Search only while the form is actually watched (the View subscribes
+    // through the provider): headless and pure unit-test flows must never
+    // fire network calls - the same rule the website probe follows.
+    if (!hasListeners) return null;
+    final TouristLocation location = _adjustedLocation.isKnown
+        ? _adjustedLocation
+        : baseLocation;
+    if (!location.isKnown) return null;
+
+    _isCheckingSimilarPlace = true;
+    safeNotifyListeners();
+    try {
+      final List<SimilarPlaceCandidate> candidates = await landmarkLogic
+          .similarNearbyPlaces(
+            name: name,
+            latitude: location.latitude,
+            longitude: location.longitude,
+          );
+      if (candidates.isEmpty) return null;
+      // The photo is read once - every candidate is compared with the SAME
+      // capture.
+      final List<int> bytes = await image.readAsBytes();
+      for (final SimilarPlaceCandidate candidate in candidates) {
+        final bool same = await landmarkLogic.photosShowSamePlace(
+          imageBytes: bytes,
+          candidate: candidate,
+        );
+        if (same) return candidate;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      _isCheckingSimilarPlace = false;
+      safeNotifyListeners();
+    }
+  }
+
+  /// The tourist answered \"yes, that is the same place\". The form adopts
+  /// that place's NAME - the whole submit path resolves the place by name
+  /// (A13's same-name + 100 m lookup, the per-field hours/contact merge), so
+  /// adopting it is what makes this submission join that place instead of
+  /// creating a second record - then asks which of this form's dishes that
+  /// place already lists (see [existingDishNames] / [allDishesExist]).
+  Future<void> acceptSimilarPlace() async {
+    final SimilarPlaceCandidate? candidate = _similarPlacePrompt;
+    if (candidate == null) return;
+    _similarPlacePrompt = null;
+    if (candidate.name.trim().isNotEmpty &&
+        candidate.name.trim() != _restaurantName) {
+      // Also clears the confirmation (the name changed) - it is set again
+      // below, now that the tourist has settled which place this is.
+      setRestaurantName(candidate.name);
+    }
+    try {
+      _existingDishNames = await landmarkLogic.dishesAlreadyAtPlace(
+        candidate: candidate,
+        dishes: formDishIdentities,
+      );
+    } catch (_) {
+      _existingDishNames = const <String>[];
+    }
+    final List<({String name, String variant, int localFoodId})> dishes =
+        formDishIdentities;
+    _allDishesExist =
+        dishes.isNotEmpty && _existingDishNames.length == dishes.length;
+    _restaurantConfirmed = true;
+    safeNotifyListeners();
+  }
+
+  /// The tourist answered \"no, it is a different place\": nothing is adopted
+  /// and the form carries on as before - the confirmation is taken, so the
+  /// click simply continues (the draft-combine offer included).
+  void rejectSimilarPlace() {
+    if (_similarPlacePrompt == null) return;
+    _similarPlacePrompt = null;
+    _restaurantConfirmed = true;
+    safeNotifyListeners();
+  }
+
+  /// Drops the dishes the chosen place already lists from THIS form, after
+  /// the acknowledgement - the additional foods go, and the names that were
+  /// removed come back so the View can say so.
+  ///
+  /// A PRIMARY dish that already exists is deliberately NOT removed: it is
+  /// what makes the form submittable, and the A13 merge skips it at write
+  /// time anyway, so it never lands in the place twice either way.
+  List<String> dropExistingDishes() {
+    final List<String> existing = _existingDishNames;
+    if (existing.isEmpty) return const <String>[];
+    final List<String> removed = <String>[];
+    for (final LandmarkFoodEntry entry in List<LandmarkFoodEntry>.of(
+      _additionalFoods,
+    )) {
+      if (!existing.contains(entry.food.name)) continue;
+      removed.add(entry.food.name);
+      removeAdditionalFood(entry.entryId);
+    }
+    _existingDishNames = const <String>[];
+    _allDishesExist = false;
+    safeNotifyListeners();
+    return removed;
+  }
+
+  /// The \"nothing to add\" ending: every dish on this form is already listed
+  /// at the chosen place, so no submission is written. The incomplete
+  /// submission is dropped with it (nothing is worth keeping - the dishes are
+  /// on the map already) and the View leaves the form for the dashboard.
+  Future<void> finishAsAlreadyThere() async {
+    _existingDishNames = const <String>[];
+    _allDishesExist = false;
+    _restaurantConfirmed = false;
+    safeNotifyListeners();
+    await discardDraft();
+  }
+
+  /// The form's dishes in the shape the \"already listed there\" check takes:
+  /// the name the tourist sees, the variant, and the catalogue id when the
+  /// dish is curated (see `LandmarkSubmissionLogic.dishesAlreadyAtPlace`).
+  List<({String name, String variant, int localFoodId})>
+  get formDishIdentities => <({String name, String variant, int localFoodId})>[
+    if (_primaryFood != null)
+      (
+        name: _primaryFood!.food.name,
+        variant: _recognizedFoodVariant,
+        localFoodId: _primaryFood!.food.id,
+      ),
+    for (final LandmarkFoodEntry entry in _additionalFoods)
+      (
+        name: entry.food.name,
+        variant: entry.variant,
+        localFoodId: entry.food.id,
+      ),
+  ];
+
+  /// The plain message under the mismatch dialog (see
+  /// [takeSignboardNameMismatch]). Deliberately non-technical: no score, no
+  /// model talk - the tourist edited a name, and it is not the name on their
+  /// photo.
+  static const String signboardNameMismatchMessage =
+      'The name you entered does not look like the name on your signboard '
+      'photo. Please use the name shown on the signboard, or check your '
+      'spelling.';
+
+  /// Whether the last [confirmRestaurant] click was refused because the name
+  /// no longer matches the signboard (see [signboardNameMismatchMessage]).
+  /// One-shot, like the other take-style notices on this form.
+  bool takeSignboardNameMismatch() {
+    if (!_signboardNameMismatch) return false;
+    _signboardNameMismatch = false;
+    return true;
+  }
+
+  /// Puts Gemini's own signboard reading back into the name field - the
+  /// "Use the signboard name" action on the mismatch dialog. The reading is
+  /// restored through [setExtractedRestaurantName], so the field is
+  /// force-synced even while focused and [hasEditedSignboardName] becomes
+  /// false again (the name IS the reading, so the click needs no re-check).
+  void useSignboardName() {
+    final String? detected = _signboardDetectedName;
+    if (detected == null) return;
+    setExtractedRestaurantName(detected);
+  }
+
+  /// Asks Gemini whether the edited name still names the restaurant on the
+  /// captured signboard. Unanswerable checks fail OPEN (true): the photo is
+  /// re-looked-up only to REJECT a name, never to block the form on a network
+  /// problem - the same fail-open choice [draftForRestaurantMerge] makes.
+  Future<bool> _editedNameMatchesSignboard() async {
+    final XFile? image = _capturedImage;
+    if (image == null) return true;
+    try {
+      final List<int> bytes = await image.readAsBytes();
+      return await landmarkLogic.nameMatchesSignboard(
+        imageBytes: bytes,
+        typedName: _restaurantName,
+      );
+    } catch (_) {
+      return true;
+    }
   }
 
   /// The saved incomplete submission for THIS restaurant - same name
@@ -1392,8 +1854,9 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Debounced live probe of the website field: after typing pauses and the
   /// value is a well-formed link, the app tries to open it - a dead or
   /// mistyped address surfaces while the tourist is still on the form, not
-  /// only at submit. The result is ADVISORY ([websiteLinkStatus]);
-  /// [submitLandmark] always re-probes and blocks on its own result.
+  /// only at submit. A failed probe DISABLES Submit (see [canSubmit] and
+  /// [websiteLinkStatus]); [submitLandmark] still re-probes and blocks on its
+  /// own result, which stays the authority.
   void _scheduleWebsiteLinkCheck() {
     _websiteLinkDebounce?.cancel();
     _websiteLinkChecking = false;
@@ -1851,6 +2314,7 @@ class AddLandmarkViewModel extends BaseViewModel
   /// spot is handed over as the reference location so the camera can block a
   /// capture taken more than 50 m away; the check is repeated here.
   Future<void> openAddMoreFood() async {
+    _clearCaptureRejection();
     LandmarkDraftHandoff().pendingPurpose =
         FoodRecognitionPurpose.additionalFood;
     LandmarkDraftHandoff().pendingReferenceLocation = baseLocation.isKnown
@@ -2192,9 +2656,11 @@ class AddLandmarkViewModel extends BaseViewModel
   /// the camera's "continue" prompt or the profile's incomplete-submission
   /// list. A second save updates the SAME row.
   ///
-  /// [background] marks a save triggered by the app going to the background:
+  /// [background] marks a save triggered by the app going to the background -
   /// the tourist is not looking, so a failure stays quiet and a success is
-  /// reported through [takeAutoDraftSavedNotice] when they return.
+  /// NOT announced at all: the form is still on screen, untouched, and the
+  /// saved row is visible in Profile -> Incomplete Submissions (user request
+  /// 2026-09-13: no "saved" snackbar).
   /// Returns whether anything was written.
   Future<bool> saveDraft({bool background = false}) async {
     if (_draftSaving) return false;
@@ -2210,7 +2676,6 @@ class AddLandmarkViewModel extends BaseViewModel
       // The combined-away drafts' rows go with this save - their dishes are
       // now on THIS form (see [mergeExistingDraft]).
       await _deleteAbsorbedDrafts();
-      if (background) _autoDraftSaved = true;
       return true;
     } catch (_) {
       // Saving a draft must never block leaving the form - report the
@@ -2444,8 +2909,7 @@ class AddLandmarkViewModel extends BaseViewModel
         // Surface the finding under the field as well, so the submit error
         // and the live status agree.
         _websiteLinkUnreachable = true;
-        _submitError =
-            "We couldn't open this website. Check the address and try again.";
+        _submitError = _websiteUnreachableMessage;
         _isSubmitting = false;
         safeNotifyListeners();
         return;
@@ -2526,6 +2990,7 @@ class AddLandmarkViewModel extends BaseViewModel
             ),
         ],
         operatingHours: _operatingHours,
+        overwriteExistingDetails: _overwriteExistingDetails ?? false,
       );
       _submitMerged = result.merged;
       _submitTargetName = result.targetName;

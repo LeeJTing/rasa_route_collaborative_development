@@ -168,16 +168,20 @@ class RecommendationRepository {
   static const String _defaultWarning =
       'Allergen or preparation information is incomplete; confirm with the seller before ordering.';
 
-  /// "If you liked X, try Y" - dishes sharing category / cooking style / meal
-  /// type with [food], ranked by how many attributes they share.
   Future<List<FoodSimilarity>> getSimilar(
     LocalFood food,
     List<LocalFood> catalogue,
   ) async {
     final List<FoodSimilarity> results = <FoodSimilarity>[];
+    final String selectedType = food.foodType.trim().toLowerCase();
 
     for (final LocalFood other in catalogue) {
       if (other.id == food.id) continue;
+
+      if (selectedType.isNotEmpty &&
+          other.foodType.trim().toLowerCase() != selectedType) {
+        continue;
+      }
 
       final List<String> shared = <String>[
         if (food.category.isNotEmpty && food.category == other.category)

@@ -1,4 +1,5 @@
 import 'dart:developer' as developer;
+import 'dart:math' as math;
 
 import '../../core/json_model.dart';
 import '../../core/name_normalization.dart';
@@ -597,6 +598,68 @@ class SubmittedLandmarkRepository {
     return matches;
   }
 
+  /// Every submitted landmark inside a coordinate box around
+  /// ([latitude], [longitude]) - the same cheap Supabase pre-filter
+  /// `RestaurantRepository.getRestaurantsNear` uses, with the precise
+  /// Haversine radius applied by business logic afterwards.
+  ///
+  /// Used by the Add-Landmark near-duplicate check (UC500): a nearby landmark
+  /// whose NAME looks like the one being added is compared by photo. Rows
+  /// here are lightweight but carry what that check needs - the name, the
+  /// coordinates and the stored photo (`image_url`).
+  Future<List<SubmittedLandmark>> findNearby({
+    required double latitude,
+    required double longitude,
+    required double maximumDistanceKm,
+  }) async {
+    if (maximumDistanceKm <= 0) return const <SubmittedLandmark>[];
+    const double kilometresPerLatitudeDegree = 110.574;
+    const double kilometresPerLongitudeDegreeAtEquator = 111.320;
+    final double latitudeDelta =
+        maximumDistanceKm / kilometresPerLatitudeDegree;
+    final double longitudeScale = math.cos(latitude * math.pi / 180).abs();
+    final double longitudeDelta =
+        maximumDistanceKm /
+        (kilometresPerLongitudeDegreeAtEquator *
+            math.max(longitudeScale, 0.01));
+
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableSubmittedLandmark,
+      columns:
+          'landmark_id, landmark_name, latitude, longitude, address, '
+          'reported_count, status, image_url, image_category',
+      gte: <String, num>{
+        'latitude': latitude - latitudeDelta,
+        'longitude': longitude - longitudeDelta,
+      },
+      lte: <String, num>{
+        'latitude': latitude + latitudeDelta,
+        'longitude': longitude + longitudeDelta,
+      },
+    );
+    return <SubmittedLandmark>[
+      for (final Map<String, dynamic> row in rows)
+        SubmittedLandmark(
+          id: (row['landmark_id'] as num).toInt(),
+          name: row['landmark_name'] as String? ?? '',
+          latitude: (row['latitude'] as num?)?.toDouble(),
+          longitude: (row['longitude'] as num?)?.toDouble(),
+          category: '',
+          reportedCount: (row['reported_count'] as num?)?.toInt() ?? 0,
+          status:
+              (row['status'] as String? ?? '').toLowerCase() ==
+                  LandmarkStatus.frozen.name
+              ? LandmarkStatus.frozen
+              : LandmarkStatus.available,
+          imageUrl: row['image_url'] as String?,
+          imageCategory: row['image_category'] as String?,
+          address: row['address'] as String? ?? '',
+          items: const <LandmarkItem>[],
+          openingHours: const <OpeningHour>[],
+        ),
+    ];
+  }
+
   /// Reads ONE submitted landmark with everything its detail screen needs:
   /// the `submitted_landmark` row, its `landmark_item` dishes and its
   /// `opening_hours`. Returns null when no such landmark exists. Rows are
@@ -630,7 +693,12 @@ class SubmittedLandmarkRepository {
         ),
       ]);
       landmarkRow = results[0] as Map<String, dynamic>?;
-      itemRows = results[1] as List<Map<String, dynamic>>;
+      // Soft-removed dishes (`softRemoveLandmarkItem`, applied once a report
+      // claim passes its count validation) are NOT part of the place's
+      // detail - the row stays in the table, the dish stops being shown.
+      itemRows = (results[1] as List<Map<String, dynamic>>)
+          .where((Map<String, dynamic> row) => row['is_removed'] != true)
+          .toList(growable: false);
       hourRows = results[2] as List<Map<String, dynamic>>;
     } catch (error, stackTrace) {
       developer.log(
@@ -848,6 +916,9 @@ class SubmittedLandmarkRepository {
       final Map<int, List<Map<String, dynamic>>> itemRowsById =
           <int, List<Map<String, dynamic>>>{};
       for (final Map<String, dynamic> row in itemRows) {
+        // Same rule as the detail screen: a soft-removed dish is not shown,
+        // so it must not count towards the landmark's dish list either.
+        if (row['is_removed'] == true) continue;
         final int landmarkId = JsonReader.asInt(row['landmark_id']);
         itemRowsById
             .putIfAbsent(landmarkId, () => <Map<String, dynamic>>[])
