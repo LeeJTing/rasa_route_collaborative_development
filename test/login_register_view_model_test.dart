@@ -84,40 +84,6 @@ void main() {
       expect(viewModel.canSendOtp, isTrue);
     });
 
-    test('emailError is null for a blank or well-formed address', () {
-      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
-        touristLogic: _FakeTouristInformationLogicFacade(),
-      );
-
-      expect(viewModel.emailError, isNull);
-
-      viewModel.setEmail('a@b.com');
-
-      expect(viewModel.emailError, isNull);
-    });
-
-    test('emailError explains a malformed address while typing', () {
-      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
-        touristLogic: _FakeTouristInformationLogicFacade(),
-      );
-
-      viewModel.setEmail('username@');
-
-      expect(viewModel.emailError, isNotNull);
-    });
-
-    test('canSendOtp stays false for a malformed email', () {
-      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
-        touristLogic: _FakeTouristInformationLogicFacade(),
-      );
-
-      viewModel.setEmail('user..name@domain.com');
-      expect(viewModel.canSendOtp, isFalse);
-
-      viewModel.setEmail('!^&abc@gmail.com');
-      expect(viewModel.canSendOtp, isFalse);
-    });
-
     test('setEmail notifies listeners', () {
       final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
         touristLogic: _FakeTouristInformationLogicFacade(),

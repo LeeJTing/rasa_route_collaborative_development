@@ -42,6 +42,7 @@ class OtpViewModel extends BaseViewModel {
   String _email = '';
   String _token = '';
   bool _verified = false;
+  bool _isVerifying = false;
   bool _needsProfileSetup = false;
   bool _reusingExistingCode = false;
   int _resendCooldown = 0;
@@ -50,6 +51,14 @@ class OtpViewModel extends BaseViewModel {
   String get email => _email;
   String get token => _token;
   bool get verified => _verified;
+
+  /// True while the entered code is being checked against the backend.
+  ///
+  /// The View locks the code boxes for the duration: the verification request
+  /// already carries the digits that are on screen, so a backspace landing
+  /// mid-flight would leave the boxes disagreeing with the request that was
+  /// sent (and that request cannot be cancelled).
+  bool get isVerifying => _isVerifying;
 
   /// C3 first-run gate: true when the verified tourist has configured no
   /// profile yet, so the View routes them to set-up before the dashboard.
@@ -77,10 +86,11 @@ class OtpViewModel extends BaseViewModel {
 
   @override
   Future<void> onInit() async {
-    _email = (emailArgument.isNotEmpty
-            ? emailArgument
-            : touristLogic.pendingAuthEmail)
-        .trim();
+    _email =
+        (emailArgument.isNotEmpty
+                ? emailArgument
+                : touristLogic.pendingAuthEmail)
+            .trim();
     if (_email.isEmpty) {
       setError(StateError('Enter your email address before verifying a code.'));
       return;
@@ -159,18 +169,32 @@ class OtpViewModel extends BaseViewModel {
   }
 
   Future<void> verifyEmailOtp() async {
+    // Re-entry guard: a second submit while one is in flight would send the
+    // same code to the backend twice.
+    if (_isVerifying) return;
     _verified = false;
-    await runGuarded(() async {
-      final session = await touristLogic.verifyEmailOtp(
-        email: _email,
-        token: _token,
-      );
-      if (session == null) {
-        throw StateError('That verification code is invalid or has expired.');
+    _isVerifying = true;
+    safeNotifyListeners();
+    try {
+      await runGuarded(() async {
+        final session = await touristLogic.verifyEmailOtp(
+          email: _email,
+          token: _token,
+        );
+        if (session == null) {
+          throw StateError('That verification code is invalid or has expired.');
+        }
+        _verified = true;
+        _needsProfileSetup = await touristLogic.needsProfileSetup();
+      });
+    } finally {
+      // Stay locked after a SUCCESS: the View is already navigating away, and
+      // unlocking here would reopen the very window this guards.
+      if (!_verified) {
+        _isVerifying = false;
+        safeNotifyListeners();
       }
-      _verified = true;
-      _needsProfileSetup = await touristLogic.needsProfileSetup();
-    });
+    }
   }
 
   /// Requests another code. No-op while the resend countdown is still

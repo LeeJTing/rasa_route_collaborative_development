@@ -133,7 +133,13 @@ class _EditFoodPreferenceViewState extends State<EditFoodPreferenceView> {
 
 /// One group of options (Taste / Culture): title + selected count badge,
 /// the chosen options on top, a "More options" divider, then the rest.
-class _PreferenceCard extends StatelessWidget {
+///
+/// The chevron in the title row switches the option area between that compact
+/// two-row layout and ONE vertical grid holding every option - the same grid
+/// the dietary-restriction editor uses. Showing both groups compactly on entry
+/// keeps taste and culture reachable at a glance, while the grid stays one tap
+/// away when the tourist is picking several options in a row.
+class _PreferenceCard extends StatefulWidget {
   const _PreferenceCard({
     required this.icon,
     required this.title,
@@ -151,6 +157,19 @@ class _PreferenceCard extends StatelessWidget {
   final List<FoodPreference> moreLabels;
   final bool Function(FoodPreference) isSelected;
   final ValueChanged<FoodPreference> onToggle;
+
+  @override
+  State<_PreferenceCard> createState() => _PreferenceCardState();
+}
+
+class _PreferenceCardState extends State<_PreferenceCard> {
+  /// False = the compact layout (two horizontal rows); true = the full grid.
+  bool _isExpanded = false;
+
+  void _setExpanded(bool value) {
+    if (_isExpanded == value) return;
+    setState(() => _isExpanded = value);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -181,13 +200,13 @@ class _PreferenceCard extends StatelessWidget {
                     Row(
                       children: <Widget>[
                         Icon(
-                          icon,
+                          widget.icon,
                           size: AppSizes.iconMedium,
                           color: AppColors.accentBrown,
                         ),
                         const SizedBox(width: AppSpacing.xs),
                         Text(
-                          title,
+                          widget.title,
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
@@ -201,40 +220,63 @@ class _PreferenceCard extends StatelessWidget {
                   ],
                 ),
               ),
-              _SelectedBadge(count: selectedCount),
+              _SelectedBadge(count: widget.selectedCount),
+              // ">" collapses to "v" once the grid is open.
+              _ExpandToggle(
+                isExpanded: _isExpanded,
+                onTap: () => _setExpanded(!_isExpanded),
+                semanticLabel: _isExpanded
+                    ? 'Collapse ${widget.title}'
+                    : 'Show all ${widget.title} options in a grid',
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          if (selectedLabels.isNotEmpty) ...<Widget>[
-            _OptionsRow(
-              labels: selectedLabels,
-              isSelected: isSelected,
-              onToggle: onToggle,
-            ),
-            const SizedBox(height: AppSpacing.md),
-          ],
-          Row(
-            children: <Widget>[
-              const Expanded(child: Divider()),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                child: Text(
-                  'More options',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: AppColors.accentBrown,
-                    fontWeight: FontWeight.w600,
+          if (_isExpanded)
+            // Selected options stay first, so the grid still reads
+            // "selected items appear on top".
+            _OptionsGrid(
+              labels: <FoodPreference>[
+                ...widget.selectedLabels,
+                ...widget.moreLabels,
+              ],
+              isSelected: widget.isSelected,
+              onToggle: widget.onToggle,
+            )
+          else ...<Widget>[
+            if (widget.selectedLabels.isNotEmpty) ...<Widget>[
+              _OptionsRow(
+                labels: widget.selectedLabels,
+                isSelected: widget.isSelected,
+                onToggle: widget.onToggle,
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
+            Row(
+              children: <Widget>[
+                const Expanded(child: Divider()),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                  ),
+                  child: Text(
+                    'More options',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: AppColors.accentBrown,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
-              const Expanded(child: Divider()),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          _OptionsRow(
-            labels: moreLabels,
-            isSelected: isSelected,
-            onToggle: onToggle,
-          ),
+                const Expanded(child: Divider()),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            _OptionsRow(
+              labels: widget.moreLabels,
+              isSelected: widget.isSelected,
+              onToggle: widget.onToggle,
+            ),
+          ],
         ],
       ),
     );
@@ -275,6 +317,102 @@ class _OptionsRow extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The expanded layout: every option in ONE vertical grid, identical to the
+/// dietary-restriction picker (`EditDietaryRestrictionView`) - 4 per row, a
+/// fixed cell height, and long names wrapping inside their cell instead of
+/// widening it.
+///
+/// The grid deliberately does NOT scroll itself: it shares the page's single
+/// vertical scroll (shrink-wrapped, never-scrollable), so the arrow expands
+/// the card in place rather than opening a second, nested scroll area.
+class _OptionsGrid extends StatelessWidget {
+  const _OptionsGrid({
+    required this.labels,
+    required this.isSelected,
+    required this.onToggle,
+  });
+
+  final List<FoodPreference> labels;
+  final bool Function(FoodPreference) isSelected;
+  final ValueChanged<FoodPreference> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: AppLayoutRatios.profileOptionGridCrossAxisCount,
+        mainAxisSpacing: AppSpacing.lg,
+        crossAxisSpacing: AppSpacing.md,
+        // Same fixed cell as the dietary grid, so a two-line name cannot
+        // overflow its box.
+        mainAxisExtent: AppLayoutRatios.profileOptionGridMainAxisExtent,
+      ),
+      children: <Widget>[
+        for (final FoodPreference preference in labels)
+          PreferenceOptionCard(
+            label: preference.name,
+            iconAsset: PreferenceIcons.foodPreferenceIconAsset(preference.name),
+            isSelected: isSelected(preference),
+            onTap: () => onToggle(preference),
+          ),
+      ],
+    );
+  }
+}
+
+/// The ">" / "v" control in a preference card's title row.
+///
+/// It is a real button (its own tap target with a semantic label), so the
+/// arrow can be pressed without toggling an option by mistake. The chevron
+/// rotates a quarter turn when the grid opens, so it always points at what the
+/// next tap will do.
+class _ExpandToggle extends StatelessWidget {
+  const _ExpandToggle({
+    required this.isExpanded,
+    required this.onTap,
+    required this.semanticLabel,
+  });
+
+  final bool isExpanded;
+  final VoidCallback onTap;
+  final String semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: Material(
+        // Transparent, but it MUST be here: the ripple is painted by the
+        // nearest Material ancestor, and the card's own surface is opaque - so
+        // without this the tap would give no visual feedback at all.
+        color: AppColors.transparent,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Padding(
+            // 24pt glyph + 12pt padding = a 48pt touch target.
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: AnimatedRotation(
+              turns: isExpanded ? 0.25 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: Icon(
+                Icons.chevron_right,
+                size: AppSizes.iconMedium,
+                color: AppColors.accentBrown,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -126,6 +126,11 @@ class _OtpViewState extends State<OtpView> {
                     const SizedBox(height: AppSpacing.xl),
                     OtpCodeField(
                       codeLength: OtpViewModel.otpLength,
+                      // Locked while the code is being checked: the digits on
+                      // screen are the ones the in-flight request carries, so
+                      // backspace must not be able to delete one of them (the
+                      // request cannot be cancelled).
+                      enabled: !viewModel.isVerifying,
                       onChanged: (String code) {
                         viewModel.setToken(code);
                         if (viewModel.canVerify) {
@@ -133,6 +138,17 @@ class _OtpViewState extends State<OtpView> {
                         }
                       },
                     ),
+                    if (viewModel.isVerifying) ...<Widget>[
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        'Verifying your code…',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
                     if (viewModel.isSendingCode) ...<Widget>[
                       const SizedBox(height: AppSpacing.sm),
                       Text(
