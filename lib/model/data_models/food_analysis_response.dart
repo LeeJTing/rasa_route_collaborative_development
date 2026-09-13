@@ -1,5 +1,23 @@
 import '../../core/json_model.dart';
 
+/// The curated `local_food` facts the app ALREADY knows for the dish an
+/// analysis call is about - sent WITH the request, not returned by it.
+///
+/// The analysis prompts use it as the STORED CATALOGUE RECORD: when the photo
+/// shows exactly that dish the model returns these values unchanged, so the
+/// app keeps the catalogue's own text ("use local food if it is really
+/// valid"); when the photo shows a VARIANT ("Siew Yoke Nasi Lemak" over
+/// "Nasi Lemak") the model ADAPTS the category / description / ingredients /
+/// cultural background to the dish actually shown. Built from the matched
+/// `LocalFood` row by `RecognitionRepository` (id 0 = no stored row yet).
+typedef StoredDishPrompt = ({
+  String name,
+  String category,
+  String description,
+  String ingredients,
+  String culturalBackground,
+});
+
 /// Response from Gemini food image analysis.
 ///
 /// Wire format: what Gemini API returns after analyzing a food image.

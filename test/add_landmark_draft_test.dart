@@ -265,44 +265,54 @@ void main() {
   );
 
   group('the live website-link probe gates Submit', () {
-    test('an unopenable link disables Submit and says why', () async {
-      final AddLandmarkViewModel vm = await _readyToSubmit(
-        websiteReachability: (String url) async =>
-            url == 'https://works.example',
-      );
-      // The form is on screen, so the debounced probe may run at all.
-      vm.addListener(() {});
-      vm.setDayStatus(Weekday.monday, DayStatus.open);
-      vm.setRangeTime(Weekday.monday, 0, true, 9 * 60);
-      vm.setRangeTime(Weekday.monday, 0, false, 17 * 60);
-      vm.setRestaurantWebsite('https://gone.example');
+    test(
+      'an unverified or unopenable link disables Submit and says why',
+      () async {
+        final AddLandmarkViewModel vm = await _readyToSubmit(
+          websiteReachability: (String url) async =>
+              url == 'https://works.example',
+        );
+        // The form is on screen, so the debounced probe may run at all.
+        vm.addListener(() {});
+        vm.setDayStatus(Weekday.monday, DayStatus.open);
+        vm.setRangeTime(Weekday.monday, 0, true, 9 * 60);
+        vm.setRangeTime(Weekday.monday, 0, false, 17 * 60);
+        vm.setRestaurantWebsite('https://gone.example');
 
-      // The link's shape is fine, so nothing blocks while the probe is still
-      // behind its debounce.
-      expect(vm.canSubmit, isTrue);
+        // UNVERIFIED while the debounce/probe is pending: the field is
+        // editable but Submit waits for the check (user report, 2026-09-14 -
+        // the button used to be clickable here).
+        expect(vm.isWebsiteLinkSettling, isTrue);
+        expect(vm.canSubmit, isFalse);
+        expect(vm.canSubmitReason, 'Checking this link…');
 
-      await Future<void>.delayed(
-        AddLandmarkViewModel.websiteLinkCheckDelay +
-            const Duration(milliseconds: 100),
-      );
-      expect(vm.websiteLinkUnreachable, isTrue);
-      expect(vm.canSubmit, isFalse);
-      expect(
-        vm.canSubmitReason,
-        "We couldn't open this website. Check the address and try again.",
-      );
+        await Future<void>.delayed(
+          AddLandmarkViewModel.websiteLinkCheckDelay +
+              const Duration(milliseconds: 100),
+        );
+        expect(vm.websiteLinkUnreachable, isTrue);
+        expect(vm.isWebsiteLinkSettling, isFalse);
+        expect(vm.canSubmit, isFalse);
+        expect(
+          vm.canSubmitReason,
+          "We couldn't open this website. Check the address and try again.",
+        );
 
-      // Editing the field re-probes: a link that answers unblocks Submit.
-      vm.setRestaurantWebsite('https://works.example');
-      await Future<void>.delayed(
-        AddLandmarkViewModel.websiteLinkCheckDelay +
-            const Duration(milliseconds: 100),
-      );
-      expect(vm.websiteLinkUnreachable, isFalse);
-      expect(vm.canSubmitReason, isNull);
-      expect(vm.canSubmit, isTrue);
+        // Editing the field re-probes: still settling until the new probe
+        // answers, then a link that works unblocks Submit.
+        vm.setRestaurantWebsite('https://works.example');
+        expect(vm.canSubmit, isFalse);
+        await Future<void>.delayed(
+          AddLandmarkViewModel.websiteLinkCheckDelay +
+              const Duration(milliseconds: 100),
+        );
+        expect(vm.websiteLinkUnreachable, isFalse);
+        expect(vm.isWebsiteLinkSettling, isFalse);
+        expect(vm.canSubmitReason, isNull);
+        expect(vm.canSubmit, isTrue);
 
-      vm.dispose();
-    });
+        vm.dispose();
+      },
+    );
   });
 }

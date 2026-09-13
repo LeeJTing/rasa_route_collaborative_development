@@ -169,4 +169,31 @@ void main() {
       expect(tester.widget<TextField>(field).controller!.text.length, 50);
     },
   );
+
+  testWidgets(
+    'the typo notice names the typed text and the corrected spelling',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RecognitionResultCard(
+              food: _food('Pork Belly'),
+              typoNotice:
+                  "'prok belly' looks like a typo of 'Pork Belly' - "
+                  'the correct spelling is used instead.',
+              foodNameMaxLength: LandmarkSubmissionLogic.maxFoodNameLength,
+              foodNameWarning: (_) => null,
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.textContaining("looks like a typo of 'Pork Belly'"),
+        findsOneWidget,
+      );
+      // Informational only - no keep button, no blocked state.
+      expect(find.textContaining('Keep '), findsNothing);
+    },
+  );
 }

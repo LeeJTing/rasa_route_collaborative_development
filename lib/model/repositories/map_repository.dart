@@ -1,6 +1,7 @@
 import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/place_closure_rules.dart';
 import '../../domain_model/region.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../../shared_client/local_storage_manager/local_storage_manager.dart';
@@ -919,7 +920,7 @@ class MapRepository {
               orderBy: 'landmark_id',
               columns:
                   'landmark_id, landmark_name, latitude, longitude, status, '
-                  'image_url, category, address',
+                  'image_url, category, address, closed_until',
             ),
             api.selectEvery(
               APIManager.tableLandmarkItem,
@@ -938,15 +939,49 @@ class MapRepository {
       );
     }
 
-    // A landmark that reached the report threshold is frozen (`status`
-    // 'frozen') and excluded from map pins, search results and
-    // recommendations - only 'available' landmarks are shown.
-    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{
-      for (final Map<String, dynamic> row in landmarks)
-        if (_asInt(row['landmark_id']) != 0 &&
-            _asString(row['status']).trim().toLowerCase() == 'available')
-          _asInt(row['landmark_id']): row,
-    };
+    // A landmark frozen by reports is excluded from map pins, search results
+    // and recommendations - EXCEPT one frozen by a TEMPORARY closure whose
+    // `closed_until` has already passed: that one is available again (the
+    // same read-time rule `PlaceClosureRules` gives restaurants), and this
+    // read writes the change back so the DB catches up.
+    final DateTime now = DateTime.now().toUtc();
+    final Map<int, Map<String, dynamic>> byId = <int, Map<String, dynamic>>{};
+    final List<int> expiredClosures = <int>[];
+    for (final Map<String, dynamic> row in landmarks) {
+      final int landmarkId = _asInt(row['landmark_id']);
+      if (landmarkId == 0) continue;
+      final String status = _asString(row['status']);
+      final DateTime? closedUntil = _asDateTimeOrNull(row['closed_until']);
+      if (!PlaceClosureRules.isEffectivelyAvailable(
+        status: status,
+        closedUntil: closedUntil,
+        now: now,
+      )) {
+        continue;
+      }
+      byId[landmarkId] = row;
+      if (PlaceClosureRules.needsReactivation(
+        status: status,
+        closedUntil: closedUntil,
+        now: now,
+      )) {
+        expiredClosures.add(landmarkId);
+      }
+    }
+    // Best-effort write-back - a failed write must not take discovery down;
+    // the landmarks above are already treated as available on this read
+    // regardless (mirrors `RestaurantDiscoveryLogic._reactivateExpiredClosures`).
+    for (final int landmarkId in expiredClosures) {
+      try {
+        await api.updateRow(
+          APIManager.tableSubmittedLandmark,
+          <String, Object?>{'status': 'available', 'closed_until': null},
+          eq: <String, Object?>{'landmark_id': landmarkId},
+        );
+      } catch (_) {
+        // Best-effort - see above.
+      }
+    }
 
     final List<FoodOccurrence> out = <FoodOccurrence>[];
     for (final Map<String, dynamic> item in items) {
@@ -1257,6 +1292,10 @@ class MapRepository {
     if (value is num) return value.toDouble();
     return double.tryParse('$value');
   }
+
+  /// A timestamptz column -> UTC DateTime; null when absent/unparseable.
+  static DateTime? _asDateTimeOrNull(Object? value) =>
+      value is String ? DateTime.tryParse(value)?.toUtc() : null;
 
   static String _asString(Object? value) => value == null ? '' : '$value';
 
