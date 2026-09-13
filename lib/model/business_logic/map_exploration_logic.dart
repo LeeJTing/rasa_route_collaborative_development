@@ -220,6 +220,33 @@ class MapExplorationLogic {
   ///  * zooming in splits cells, and places drop out of their clusters as pins
   ///    exactly when there is room to draw them.
 
+  /// The width of one clustering cell, in screen pixels.
+  ///
+  /// **This number lives twice** - here and in `map_food_markers`, which is
+  /// what actually groups. Postgres owns the grouping; this copy exists so the
+  /// client can answer "is this place inside that badge?" without a round trip,
+  /// and the two must be changed together.
+  static const double clusterCellPixels = 56;
+
+  /// The same cell in degrees at [zoom]. A tile map covers 360 / (256 * 2^z)
+  /// degrees per pixel, so 56 px is 78.75 / 2^z.
+  static double clusterCellDegrees(double zoom) => math.max(
+    clusterCellPixels * 1.40625 / math.pow(2, math.max(zoom, 0)),
+    1e-7,
+  );
+
+  /// Whether [pin] is one of the places [cluster] stands for.
+  ///
+  /// Exact, not a distance guess: both sides are snapped to the same grid the
+  /// function grouped by. The centroid of a cell is a convex combination of
+  /// points inside it, so it always falls in its own cell - which is what
+  /// makes a badge's own position enough to recover the cell it came from.
+  static bool clusterHolds(MapCluster cluster, MapPin pin, double zoom) {
+    final double cell = clusterCellDegrees(zoom);
+    return (cluster.latitude / cell).floor() == (pin.latitude / cell).floor() &&
+        (cluster.longitude / cell).floor() == (pin.longitude / cell).floor();
+  }
+
   /// How far outside the visible box to query, as a fraction of its size.
   ///
   /// REQ102_41 - panning a short way should find its markers already loaded
@@ -560,6 +587,7 @@ class MapExplorationLogic {
       northLatitude: north + latitudePad,
       eastLongitude: east + longitudePad,
       zoom: zoom,
+      maximumZoom: maximumZoom,
       foodIds: resolvedFoodIds,
       limit: cap,
       search: search,
@@ -584,12 +612,22 @@ class MapExplorationLogic {
               )
               .toList(growable: false);
 
+    // REQ102_41 - at the deepest zoom Postgres answers with one marker per
+    // place and no clusters at all, which is only half of "individually":
+    // two stalls at the same recorded coordinates would still be two pins on
+    // the same point, and only the last drawn would take a tap. Same spread
+    // an opened cluster already uses - a few metres, drawn position only,
+    // `referenceId` untouched.
+    final List<MapPin> drawable = zoom >= maximumZoom
+        ? _spreadColliding(withDistance, zoom)
+        : withDistance;
+
     return MapPinPage(
-      pins: List<MapPin>.unmodifiable(withDistance),
+      pins: List<MapPin>.unmodifiable(drawable),
       clusters: markers.clusters,
       // Markers produced, not places found - `placesRepresented` is the second
       // number, and it counts what is inside the clusters too.
-      totalInView: withDistance.length + markers.clusters.length,
+      totalInView: drawable.length + markers.clusters.length,
       limit: cap,
     );
   }
@@ -1205,6 +1243,56 @@ class MapExplorationLogic {
 
     return true;
   }
+
+  // ===========================================================================
+  // Search history (REQ102_104)
+  // ===========================================================================
+  //
+  // Beside the search rather than inside it: nothing below reads the index,
+  // queries the catalogue or touches a result. `search()` is exactly the
+  // method it was, and a device with no history searches identically to one
+  // with five entries.
+
+  /// How many keywords a device keeps. Five is what fits under the search box
+  /// without the panel becoming a screen of its own.
+  static const int recentSearchLimit = 5;
+
+  /// What this device searched for, most recent first.
+  List<String> recentSearches() => repository.searchHistory.read();
+
+  /// Records [keyword] as the newest entry and returns the list that results.
+  ///
+  /// Returned rather than re-read so the caller repaints from the same answer
+  /// it just wrote, and one search is one storage write.
+  ///
+  /// **One entry per term.** Matching is case- and whitespace-insensitive, so
+  /// "nasi lemak", "Nasi Lemak" and " Nasi Lemak " are the same search; the
+  /// newest spelling wins, because that is the one the tourist just typed.
+  /// Searching something already in the list moves it to the top rather than
+  /// adding a second copy.
+  Future<List<String>> rememberSearch(String keyword) async {
+    final String term = keyword.trim();
+    if (term.isEmpty) return recentSearches();
+
+    final String key = _historyKey(term);
+    final List<String> next = <String>[term];
+    for (final String existing in repository.searchHistory.read()) {
+      if (_historyKey(existing) == key) continue;
+      if (next.length >= recentSearchLimit) break;
+      next.add(existing);
+    }
+
+    await repository.searchHistory.write(next);
+    return List<String>.unmodifiable(next);
+  }
+
+  /// A15-1 - forgets every remembered keyword.
+  Future<void> clearSearchHistory() => repository.searchHistory.clear();
+
+  /// Collapses a term to what makes two searches "the same" for the history:
+  /// case and runs of whitespace are not a difference a tourist means.
+  static String _historyKey(String term) =>
+      term.toLowerCase().split(RegExp(r'\s+')).join(' ');
 
   // ===========================================================================
   // Search (A8, REQ102_18 - REQ102_22, REQ102_30, REQ102_31)

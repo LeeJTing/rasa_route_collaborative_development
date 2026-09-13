@@ -9,6 +9,7 @@ import 'package:rasa_route_collaborative_development/views/food_detail_view/widg
 import 'package:rasa_route_collaborative_development/views/local_food_list_view/widgets/food_search_bar.dart';
 import 'package:rasa_route_collaborative_development/views/local_food_list_view/widgets/local_food_card.dart';
 import 'package:rasa_route_collaborative_development/views/restaurant_recommendation_view/widgets/restaurant_card.dart';
+import 'package:rasa_route_collaborative_development/views/restaurant_recommendation_view/widgets/restaurant_expanded_info.dart';
 
 void main() {
   group('owned-module hostile input', () {
@@ -148,6 +149,44 @@ void main() {
         ),
       );
 
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('menu price stays at the right without reserving half the row', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        _host(
+          SizedBox(
+            width: 360,
+            child: RestaurantExpandedInfo(
+              items: <RestaurantItem>[
+                RestaurantItem(
+                  id: 1,
+                  restaurantId: 1,
+                  localFoodId: 1,
+                  foodName: 'Nasi Lemak',
+                  price: 8.90,
+                  currency: 'RM',
+                  foodCategory: 'Malay',
+                ),
+              ],
+              onFoodImageTap: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      final Rect name = tester.getRect(find.text('Nasi Lemak'));
+      final Rect price = tester.getRect(find.text('RM 8.90'));
+      final Finder rowLayout = find.descendant(
+        of: find.byType(RestaurantExpandedInfo),
+        matching: find.byType(LayoutBuilder),
+      );
+      final Rect available = tester.getRect(rowLayout.first);
+
+      expect(name.width, greaterThan(price.width * 2));
+      expect(price.right, closeTo(available.right, 1));
       expect(tester.takeException(), isNull);
     });
 

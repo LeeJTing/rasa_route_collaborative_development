@@ -86,7 +86,8 @@ class _RestaurantRecommendationViewState
                                   vm.errorMessage ??
                                   'Check your connection and location, then try again.',
                               actionLabel: 'Try again',
-                              onAction: vm.loadNearbyRestaurants,
+                              onAction: () =>
+                                  vm.loadNearbyRestaurants(forceRefresh: true),
                             )
                           : vm.selectedSourceIsEmpty
                           ? _EmptySource(source: vm.source)

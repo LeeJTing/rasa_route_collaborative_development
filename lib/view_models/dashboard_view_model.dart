@@ -339,12 +339,26 @@ class DashboardViewModel extends BaseViewModel {
   void _rebuildVisibleMarkers() {
     final MapCluster? expanded = _expandedCluster;
 
+    // An opened cluster loses its badge while its members are drawn.
+    final List<MapCluster> badges = expanded == null
+        ? _clusters
+        : _clusters
+              .where((MapCluster c) => c.key != expanded.key)
+              .toList(growable: false);
+
     // One list. The members of an opened cluster join the pins that were
     // already drawn, and each one carries its own type, so nothing here has to
     // know which of them a keyword is responsible for.
-    final List<MapPin> drawn = _expandedPins.isEmpty
-        ? _pins
-        : <MapPin>[..._pins, ..._expandedPins];
+    //
+    // **One marker per place.** The two lists can name the same restaurant -
+    // open a badge, pan a little, and the members are still held here while
+    // the fresh answer draws some of them as ordinary pins - and a place drawn
+    // twice is two markers fighting for the same tap.
+    final List<MapPin> drawn = <MapPin>[];
+    final Set<String> placed = <String>{};
+    for (final MapPin pin in <MapPin>[..._pins, ..._expandedPins]) {
+      if (placed.add(_placeKey(pin))) drawn.add(pin);
+    }
 
     // **The open place always has a marker.** The pins come from the viewport
     // query, which answers the current filter and zoom cap - so a restaurant
@@ -352,24 +366,41 @@ class DashboardViewModel extends BaseViewModel {
     // over a map with nothing at the centre, because the query that filled the
     // map was never asked about it. Whatever is selected is drawn, whether or
     // not the query returned it.
+    //
+    // Unless a badge already counts it. Then it is not missing from the map,
+    // it is inside something - and drawing it as well would put the same place
+    // on screen twice, once in the count and once beside it, which is the
+    // stray pin sitting on top of a cluster (user report, 2026-09-13). The
+    // badge is at the centre of the screen with the sheet open, and opening it
+    // is how the tourist reaches the pin itself.
     final MapPin? selected = _selectedPin;
-    final bool alreadyDrawn =
-        selected == null ||
-        drawn.any(
-          (MapPin pin) =>
-              pin.referenceId == selected.referenceId &&
-              pin.kind == selected.kind,
-        );
+    if (selected != null &&
+        !placed.contains(_placeKey(selected)) &&
+        !badges.any(
+          (MapCluster c) => discoveryLogic.clusterHolds(c, selected, _zoom),
+        )) {
+      drawn.add(selected);
+    }
 
-    _visiblePins = List<MapPin>.unmodifiable(
-      alreadyDrawn ? drawn : <MapPin>[...drawn, selected],
+    _visiblePins = List<MapPin>.unmodifiable(drawn);
+    _visibleClusters = List<MapCluster>.unmodifiable(badges);
+  }
+
+  /// What makes two markers the same place. The drawn position is not part of
+  /// it: an opened cluster spreads its members by a few metres, and a spread
+  /// copy is still the restaurant it was.
+  static String _placeKey(MapPin pin) => '${pin.kind.name}:${pin.referenceId}';
+
+  /// Keeps an opened cluster only while the answer on screen still contains
+  /// it. Panning within the same grid keeps the badge and its members; any
+  /// change that re-cuts the cells drops both together.
+  void _dropExpansionIfItsClusterIsGone() {
+    final MapCluster? expanded = _expandedCluster;
+    if (expanded == null) return;
+    final bool stillThere = _clusters.any(
+      (MapCluster cluster) => cluster.key == expanded.key,
     );
-    // An opened cluster loses its badge while its members are drawn.
-    _visibleClusters = expanded == null
-        ? _clusters
-        : List<MapCluster>.unmodifiable(
-            _clusters.where((MapCluster c) => c.key != expanded.key),
-          );
+    if (!stillThere) _collapseExpandedCluster();
   }
 
   void _collapseExpandedCluster() {
@@ -550,6 +581,21 @@ class DashboardViewModel extends BaseViewModel {
   /// A8.2 / M2 - shown under the search field when nothing matched.
   String? _searchMessage;
   String? get searchMessage => _searchMessage;
+
+  /// REQ102_104 - the keywords this device searched for, most recent first.
+  /// Read from device storage once in [onInit] and kept here; the store is
+  /// written through, never read on a repaint.
+  List<String> _recentSearches = const <String>[];
+  List<String> get recentSearches => _recentSearches;
+
+  /// Whether the history belongs on screen: the box is open on an empty
+  /// field, and there is something to remember.
+  ///
+  /// The exact complement of the condition that shows the result list, so the
+  /// two can never appear together: the first typed character hides the
+  /// history, the last deleted one brings it back.
+  bool get showSearchHistory =>
+      _searchPanelOpen && _searchKeyword.isEmpty && _recentSearches.isNotEmpty;
 
   static const String noResultMessage =
       'No location or local food matches your input. Please try again.';
@@ -838,6 +884,9 @@ class DashboardViewModel extends BaseViewModel {
 
   @override
   Future<void> onInit() async {
+    // Device storage, already in memory - no await, so the search box has its
+    // history before the first map request is even sent.
+    _recentSearches = discoveryLogic.recentSearches();
     await _loadCountryOutlines();
     await _loadHeatmap();
     await locateTourist();
@@ -1535,7 +1584,9 @@ class DashboardViewModel extends BaseViewModel {
     // A8 - the keyword takes the map, so the Target Frame gives it back.
     _suspendSwipeModeForSearch();
     safeNotifyListeners();
-    _runSearch(keyword, ++_searchRevision);
+    // Remembered, because this one is the tourist asking rather than the
+    // debounce firing - see [_runSearch].
+    _runSearch(keyword, ++_searchRevision, remember: true);
   }
 
   /// A8-1 / A8-2 / A8-3 - one keyword, matched against locations and food.
@@ -1579,7 +1630,19 @@ class DashboardViewModel extends BaseViewModel {
     );
   }
 
-  Future<void> _runSearch(String keyword, int revision) async {
+  /// [remember] records the keyword in the history when the search comes back
+  /// with something (REQ102_104).
+  ///
+  /// Only an explicit search sets it. Every keystroke runs one of these, so
+  /// recording them all would fill the history with the prefixes of one word:
+  /// typing "nasi lemak" and pausing twice would remember "nasi" and "nasi l"
+  /// alongside what the tourist actually meant. Pressing Search, and picking a
+  /// result, are the two moments a search is finished.
+  Future<void> _runSearch(
+    String keyword,
+    int revision, {
+    bool remember = false,
+  }) async {
     try {
       final ExplorationSearchResults results = await discoveryLogic
           .searchExploration(keyword);
@@ -1598,6 +1661,10 @@ class DashboardViewModel extends BaseViewModel {
       // The same answer fills two things: the result list, and the markers the
       // keyword adds to the map. They are filled together and cleared apart.
       _applySearchSelection(results);
+
+      // A8.2 is not a search worth repeating, so nothing that matched nothing
+      // is remembered.
+      if (remember && _searchMessage == null) _rememberSearch(keyword);
     } catch (error, stackTrace) {
       if (revision != _searchRevision) return;
       setError(error, stackTrace);
@@ -1607,6 +1674,45 @@ class DashboardViewModel extends BaseViewModel {
         safeNotifyListeners();
       }
     }
+  }
+
+  /// A15 - the tourist tapped a remembered keyword.
+  ///
+  /// It goes through [submitSearch], which is the same path the keyboard
+  /// Search key takes: the field is filled from `searchKeyword` on the next
+  /// build, and the existing search runs on it unchanged. Searching it again
+  /// also moves it back to the top of the history, which is what "recent"
+  /// means.
+  void useRecentSearch(String term) => submitSearch(term);
+
+  /// A15-1 - forgets every remembered keyword.
+  ///
+  /// The list goes first and the store follows: the panel closes on the tap
+  /// rather than after a disk write, and there is nothing to put back if the
+  /// write fails - the tourist asked for this to be gone.
+  Future<void> clearSearchHistory() async {
+    if (_recentSearches.isEmpty) return;
+    _recentSearches = const <String>[];
+    safeNotifyListeners();
+    await discoveryLogic.clearSearchHistory();
+  }
+
+  /// Records one keyword. Dedupe, order and the five-entry cap belong to the
+  /// logic layer; this only repaints when the answer differs from what is
+  /// already on screen, so re-searching the newest term costs no rebuild.
+  Future<void> _rememberSearch(String keyword) async {
+    final List<String> next = await discoveryLogic.rememberSearch(keyword);
+    if (_sameHistory(next, _recentSearches)) return;
+    _recentSearches = next;
+    safeNotifyListeners();
+  }
+
+  static bool _sameHistory(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   Timer? _searchDebounce;
@@ -1634,6 +1740,9 @@ class DashboardViewModel extends BaseViewModel {
     _searchKeyword = place.name;
     _searchResults = ExplorationSearchResults.empty;
     _searchMessage = null;
+    // REQ102_104 - picking a result is a search that worked, and the name
+    // that lands in the field is the term worth offering again.
+    _rememberSearch(place.name);
     // A restaurant or landmark result opens its sheet over the bottom of the
     // map a moment after this move lands, so the pin cannot go to the middle
     // of the screen - it has to go to the middle of what will still be
@@ -1696,6 +1805,9 @@ class DashboardViewModel extends BaseViewModel {
     _searchKeyword = food.name;
     _searchResults = ExplorationSearchResults.empty;
     _searchMessage = null;
+    // REQ102_104 - picking a result is a search that worked, and the name
+    // that lands in the field is the term worth offering again.
+    _rememberSearch(food.name);
 
     // The dish narrows the **heatmap** (REQ102_33) and adds a **layer** to the
     // detailed map - it no longer replaces the pins the filter chips are
@@ -1947,8 +2059,18 @@ class DashboardViewModel extends BaseViewModel {
   /// enough to feel immediate, long enough that one pinch is one query.
   static const Duration _pinRefreshDelay = Duration(milliseconds: 350);
 
-  /// Degrees of travel that justify refetching the pins for a new viewport.
-  static const double _pinRefreshDelta = 0.05;
+  /// How far the centre may travel before the markers are refetched, as a
+  /// fraction of the viewport that is on screen.
+  ///
+  /// It used to be a flat 0.05 degrees at every zoom, which is two different
+  /// bugs in one constant: at street level 0.05 degrees is about five and a
+  /// half kilometres, so a tourist could pan a dozen screens into ground the
+  /// query never covered and keep the markers of where they started; from the
+  /// whole-country view it is a nudge, and refetched an answer that had not
+  /// changed. A fraction of the box is the same question at every zoom, and it
+  /// sits inside `viewportBuffer` (25% each way), so the new ground is already
+  /// loaded by the time it is exposed.
+  static const double _pinRefreshTravel = 0.2;
 
   /// Zoom change that justifies the same. A tenth of a level is below what
   /// anyone can pinch deliberately, so in practice any real zoom refetches.
@@ -2240,6 +2362,13 @@ class DashboardViewModel extends BaseViewModel {
     _clusters = page.clusters;
     _pinsInView = page.totalInView;
     _pinLimit = page.limit;
+    // **A new answer is a new grid.** Zooming, panning far enough or changing
+    // the chips re-cuts every cell, so the members held from an earlier badge
+    // describe a grouping that no longer exists: they were drawn on top of the
+    // fresh markers, and their own badge - whose key no longer matched
+    // anything in `_clusters` - came back beside them. The expansion survives
+    // only while the badge it belongs to is still in the answer.
+    _dropExpansionIfItsClusterIsGone();
     _rebuildVisibleMarkers();
     await _refreshRegionInView(revision);
 
@@ -2376,9 +2505,22 @@ class DashboardViewModel extends BaseViewModel {
     if (lastLatitude == null || lastLongitude == null || lastZoom == null) {
       return true;
     }
-    return (lastLatitude - _centreLatitude).abs() > _pinRefreshDelta ||
-        (lastLongitude - _centreLongitude).abs() > _pinRefreshDelta ||
-        (lastZoom - _zoom).abs() > _pinRefreshZoomDelta;
+    if ((lastZoom - _zoom).abs() > _pinRefreshZoomDelta) return true;
+
+    // A different zoom is a different grid, so that alone is enough, above.
+    // Travel is measured against the box on screen rather than in absolute
+    // degrees - see [_pinRefreshTravel].
+    final double? south = _viewportSouth;
+    final double? west = _viewportWest;
+    final double? north = _viewportNorth;
+    final double? east = _viewportEast;
+    if (south == null || west == null || north == null || east == null) {
+      return true;
+    }
+    final double latitudeRoom = (north - south).abs() * _pinRefreshTravel;
+    final double longitudeRoom = (east - west).abs() * _pinRefreshTravel;
+    return (lastLatitude - _centreLatitude).abs() > latitudeRoom ||
+        (lastLongitude - _centreLongitude).abs() > longitudeRoom;
   }
 
   /// REQ102_14 - the whole-country fallback.
