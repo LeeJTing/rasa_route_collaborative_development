@@ -306,7 +306,12 @@ class _DashboardViewState extends State<DashboardView> {
         if (viewModel.showQuickModeButton)
           Positioned(
             left: AppSpacing.lg,
-            bottom: _swipePanelHeight(viewModel) + AppSpacing.sm,
+            // Sits on the bar when there is one. There is not one while a
+            // keyword is active, and the button has to drop with it rather
+            // than float over empty map.
+            bottom: viewModel.showSwipePanel
+                ? _swipePanelHeight(viewModel) + AppSpacing.sm
+                : AppSpacing.lg,
             child: MapQuickModeButton(onTap: () => viewModel.openQuickMode()),
           ),
 

@@ -97,7 +97,7 @@ class MapSearchBar extends StatelessWidget {
               textInputAction: TextInputAction.search,
               style: AppTextStyles.bodyMedium,
               inputFormatters: [
-                LengthLimitingTextInputFormatter(30), // Sets the limit to 10 characters
+                LengthLimitingTextInputFormatter(150),
               ],
               decoration: InputDecoration(
                 isDense: true,

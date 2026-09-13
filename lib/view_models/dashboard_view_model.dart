@@ -514,6 +514,21 @@ class DashboardViewModel extends BaseViewModel {
   bool _searching = false;
   bool get searching => _searching;
 
+  /// Whether a keyword is currently driving the map.
+  ///
+  /// Distinct from [searching], which means "a request is in flight". This is
+  /// true from the first character typed until the field is cleared - and it
+  /// stays true after a result has been picked, because picking one leaves the
+  /// keyword in the box and its markers on the map.
+  ///
+  /// **Swipe Mode is unavailable while this is true.** The Target Frame and a
+  /// keyword are two claims on the same map: the frame narrows every marker to
+  /// one dish, the keyword adds markers the chips never asked for, and a
+  /// tourist looking at both has no way to tell which one is answering. The
+  /// search is what the tourist asked for most recently, so it wins; the
+  /// Discovery Layer Bar comes back the moment the search is cleared.
+  bool get hasActiveSearch => _searchKeyword.trim().isNotEmpty;
+
   /// A8.2 / M2 - shown under the search field when nothing matched.
   String? _searchMessage;
   String? get searchMessage => _searchMessage;
@@ -523,6 +538,13 @@ class DashboardViewModel extends BaseViewModel {
 
   static const String notInMalaysiaMessage =
       'You are not in Malaysia, you are not allowed to use Quick Mode.';
+
+  /// Shown when a search closes an open Discovery Layer Bar. Named rather
+  /// than written inline, so the banner can be taken down again by the code
+  /// that puts the bar back, and only when it is this banner that is up.
+  static const String swipePausedNotice =
+      'Swipe Mode is paused while you are searching. '
+      'Clear the search to carry on swiping.';
 
   /// The dish the map is currently narrowed to (REQ102_32, REQ102_33).
   ///
@@ -665,6 +687,10 @@ class DashboardViewModel extends BaseViewModel {
   bool get swipePanelExpanded => _swipePanelExpanded;
 
   void toggleSwipePanel() {
+    // The bar is off screen while a keyword is active, so this cannot be
+    // reached by tapping it. It is the guard for any other route in, and for
+    // a tap racing the keystroke that started the search.
+    if (hasActiveSearch) return;
     _swipePanelExpanded = !_swipePanelExpanded;
     safeNotifyListeners();
     if (_swipePanelExpanded) {
@@ -750,8 +776,12 @@ class DashboardViewModel extends BaseViewModel {
     }, showLoading: false);
   }
 
-  /// REQ102_10 - the Discovery Layer Bar appears with the detailed map view.
-  bool get showSwipePanel => isDetailedView;
+  /// REQ102_10 - the Discovery Layer Bar appears with the detailed map view,
+  /// and only while no keyword is active.
+  ///
+  /// A search owns the map and so does Swipe Mode; they cannot both have it.
+  /// See [hasActiveSearch].
+  bool get showSwipePanel => isDetailedView && !hasActiveSearch;
 
   /// REQ102_11 / A9 - the tourist starts Quick Mode from the detailed map.
   /// Permission, a fresh fix and the Malaysia boundary are checked on tap.
@@ -1055,7 +1085,9 @@ class DashboardViewModel extends BaseViewModel {
       // Moving the map changes the visible pins, not the active Swipe deck.
       // Re-localising an expanded deck here would replace its state-scoped
       // session and reopen the Continue/New prompt while the tourist pans.
-      if (!_swipePanelExpanded) await _refreshSwipeModeRegion();
+      if (!_swipePanelExpanded && !hasActiveSearch) {
+        await _refreshSwipeModeRegion();
+      }
       if (_swipePanelExpanded) _offerSwipeQueueUpdateIfViewportChanged();
       if (_mode != DashboardMapMode.detailed) return;
       // One load, whether or not a keyword is active: the search half rides
@@ -1427,6 +1459,8 @@ class DashboardViewModel extends BaseViewModel {
     _searchMessage = null;
     _searchPanelOpen = true;
     _searching = true;
+    // A8 - the keyword takes the map, so the Target Frame gives it back.
+    _suspendSwipeModeForSearch();
     safeNotifyListeners();
     _runSearch(keyword, ++_searchRevision);
   }
@@ -1453,12 +1487,16 @@ class DashboardViewModel extends BaseViewModel {
       // of the marker query and what is left is the filtered map - which is
       // what it was all along, since the keyword only ever joined it.
       _clearSearchSelection();
+      // The keyword is gone, so Swipe Mode can have the map back.
+      _resumeSwipeModeAfterSearch();
       safeNotifyListeners();
       return;
     }
 
     _searchPanelOpen = true;
     _searching = true;
+    // Only the first keystroke does anything here; the rest return early.
+    _suspendSwipeModeForSearch();
     safeNotifyListeners();
 
     final int revision = ++_searchRevision;
@@ -1619,6 +1657,8 @@ class DashboardViewModel extends BaseViewModel {
     // The keyword leaves the marker query and the filtered markers remain.
     // Nothing is "restored": they were never replaced, only joined.
     _clearSearchSelection();
+    // The bar comes back, with the deck it had before the search.
+    _resumeSwipeModeAfterSearch();
     safeNotifyListeners();
     if (hadFood) _reloadActiveView();
   }
@@ -1819,6 +1859,11 @@ class DashboardViewModel extends BaseViewModel {
 
   Future<void> _prepareSwipeModeForActiveState() async {
     if (!isDetailedView) return;
+    // Nothing to prepare for a bar that is not on screen - and this is the
+    // most expensive call in the module, so it is worth not making. The queue
+    // is built lazily when the bar is expanded, which is the path a tourist
+    // takes after clearing the search.
+    if (hasActiveSearch) return;
     final int revision = ++_swipePrepareRevision;
     _swipeLoading = true;
     _swipeError = null;
@@ -1912,6 +1957,55 @@ class DashboardViewModel extends BaseViewModel {
     return message.startsWith('Exception: ')
         ? message.substring('Exception: '.length)
         : message;
+  }
+
+  /// A keyword has taken the map, so Swipe Mode stands down (A8).
+  ///
+  /// **Collapse, not teardown.** [_leaveSwipeModeForHeatmap] throws the
+  /// preparation and the session away, which is right when the tourist leaves
+  /// the detailed view - but rebuilding them costs the largest read in the
+  /// application, and a search is a detour, not a departure. The deck, its
+  /// likes and its state binding all survive; the panel closes and the Target
+  /// Frame lets go of the map.
+  void _suspendSwipeModeForSearch() {
+    if (!_swipePanelExpanded) return;
+    // True only when the frame was actually narrowing the markers - an open
+    // panel with no card yet was not, and needs no reload.
+    final bool heldTheMap = _targetFrameOwnsSelection && _selectedFood != null;
+
+    _swipePanelExpanded = false;
+    // The prompt belonged to a deck that is no longer on screen.
+    _swipeQueueUpdatePending = false;
+    _swipeQueueProfileChanged = false;
+    if (_targetFrameOwnsSelection) {
+      _selectedFood = null;
+      _targetFrameOwnsSelection = false;
+    }
+    // Said out loud, because a panel that vanishes mid-swipe otherwise reads
+    // as lost work. Nothing is lost - the deck and its likes are still here.
+    _notice = swipePausedNotice;
+    // `_activePinFoodId` has just become null, so the markers the frame was
+    // narrowing must be asked for again. `_applySearchSelection` cannot be
+    // relied on to do it: a keyword that matches nothing changes no selection
+    // and triggers no load, and the map would keep one dish's pins under a
+    // search asking about something else.
+    if (heldTheMap) _reloadActiveView();
+  }
+
+  /// The keyword is gone and the Discovery Layer Bar is back (A8.3).
+  ///
+  /// One thing can have gone stale while the bar was hidden: which state the
+  /// deck belongs to. `_schedulePinRefresh` skips its region check during a
+  /// search, so a tourist who panned into another state while searching would
+  /// otherwise reopen the bar on the previous state's queue. This is one
+  /// cached `regionAt`, and it re-prepares only when the state really changed.
+  void _resumeSwipeModeAfterSearch() {
+    // The banner explained a bar that is back on screen; leaving it up would
+    // make it a lie. Compared rather than cleared outright, so a location or
+    // navigation notice raised since is not swallowed.
+    if (_notice == swipePausedNotice) _notice = null;
+    if (!isDetailedView || _swipePreparation == null) return;
+    _refreshSwipeModeRegion();
   }
 
   void _leaveSwipeModeForHeatmap() {
