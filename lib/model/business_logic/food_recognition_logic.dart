@@ -575,7 +575,16 @@ class FoodRecognitionLogic {
       final LocalFood? match = await _matchCatalogue(candidate.dish);
       final LocalFood food =
           match ?? _nameOnlyFood(candidate.dish, quick.foodCategory);
-      if (!candidates.any((LocalFood f) => f.name == food.name)) {
+      // Deduped on the same script-folded, case-insensitive name key every
+      // other name check uses: Gemini can offer the same dish twice spelled
+      // differently ("Nasi Lemak" and "nasi lemak"), and the tourist must
+      // never be asked to choose between two spellings of one dish
+      // (user request 2026-09-14).
+      if (!candidates.any(
+        (LocalFood f) =>
+            FoodNameMatcher.normalize(f.name) ==
+            FoodNameMatcher.normalize(food.name),
+      )) {
         candidates.add(food);
       }
     }

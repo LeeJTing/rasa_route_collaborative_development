@@ -1,20 +1,31 @@
+import '../../domain_model/malaysia_boundary.dart';
+import '../../domain_model/region.dart';
+
 /// Geographic rules for the Add Landmark location (UC500, A9).
 ///
-/// Pure geometry - no Flutter, no network, no dependencies - so both the
-/// logic layer and its tests can reason about a coordinate without a device.
+/// Pure geometry - no Flutter, no network, no clients - so both the logic
+/// layer and its tests can reason about a coordinate without a device.
 ///
-/// Both predicates are point-in-polygon tests (ray casting) against
-/// simplified Malaysia land polygons:
-///   * Peninsular Malaysia and East Malaysia (Sabah + Sarawak) are two
-///     separate land masses, so each has its own polygon; a point is inside
-///     Malaysia if it is inside either.
-///   * The polygons follow the coastline, so a point inside the boundary is
-///     on Malaysian land and a point in the sea falls outside.
+/// Both predicates are point-in-polygon tests (ray casting), answered in two
+/// steps so the form can never disagree with the map:
+///   1. [MalaysiaBoundary.publishedRings] - the rings the MAP fetched for
+///      itself (the real coastline, buffered ~2 km, plus the islands no
+///      boundary dataset has). The map publishes them once per process, so a
+///      dot the map draws inside Malaysia is a location the form accepts.
+///   2. The built-in polygons below, used until then (cold start with no
+///      connection, unit tests): Peninsular Malaysia, East Malaysia, and the
+///      island rings the map had to add for exactly this reason - Langkawi,
+///      Tioman, Redang and Perhentian, the Semporna islands, Payar - copied
+///      from `MalaysiaOutlineDataModel` (`maskCatalogue` /
+///      `outlyingIslands`).
 ///
 /// NOTE: these are deliberately simplified validation boundaries, not
-/// survey-grade borders. They are accurate to roughly a few kilometres and
-/// exist to reject obvious out-of-country / at-sea coordinates (A9), not to
-/// arbitrate a contested border.
+/// survey-grade borders. They exist to reject obvious out-of-country /
+/// at-sea coordinates (A9), not to arbitrate a contested border - and a
+/// tourist whose dot the map draws inside Malaysia must never be turned away
+/// (user report 2026-09-14: mocked fixes on Pulau Redang and in Perlis were
+/// rejected because the hand-drawn polygon had no island and clipped Perlis's
+/// west coast).
 class LocationRules {
   const LocationRules._();
 
@@ -23,8 +34,11 @@ class LocationRules {
   static const List<List<(double, double)>> _peninsular =
       <List<(double, double)>>[
         <(double, double)>[
-          (6.70, 100.22),
-          (6.42, 100.22),
+          // Perlis's west coast runs at ~100.11-100.15: the old edge at
+          // 100.22 put Kangar (6.44, 100.20) and Kuala Perlis (6.40, 100.13)
+          // in the sea (user report 2026-09-14).
+          (6.72, 100.11),
+          (6.42, 100.11),
           (6.10, 100.15),
           (5.90, 100.20),
           (5.60, 100.20),
@@ -109,11 +123,65 @@ class LocationRules {
         ],
       ];
 
-  static const List<List<(double, double)>> _allPolygons =
-      <List<(double, double)>>[..._peninsular, ..._eastMalaysia];
+  /// The island rings the coastline tracing misses - copied from the map's
+  /// own data (`MalaysiaOutlineDataModel.maskCatalogue` + `outlyingIslands`),
+  /// because a tourist standing on one of them is plainly in Malaysia: without
+  /// these a mocked Pulau Redang fix was rejected (user report 2026-09-14).
+  /// Keep them in step with the map's rings.
+  static const List<List<(double, double)>> _islands = <List<(double, double)>>[
+    // Langkawi.
+    <(double, double)>[
+      (6.520, 99.580),
+      (6.520, 99.980),
+      (6.130, 99.980),
+      (6.130, 99.580),
+    ],
+    // Tioman.
+    <(double, double)>[
+      (2.950, 104.020),
+      (2.950, 104.300),
+      (2.620, 104.300),
+      (2.620, 104.020),
+    ],
+    // Redang and Perhentian.
+    <(double, double)>[
+      (6.000, 102.620),
+      (6.000, 103.120),
+      (5.680, 103.120),
+      (5.680, 102.620),
+    ],
+    // Sipadan, Mabul and Ligitan, off Semporna.
+    <(double, double)>[
+      (4.350, 118.500),
+      (4.350, 118.750),
+      (4.050, 118.750),
+      (4.050, 118.500),
+    ],
+    // Pulau Payar, the marine park south of Langkawi.
+    <(double, double)>[
+      (6.150, 99.850),
+      (6.150, 100.020),
+      (5.980, 100.020),
+      (5.980, 99.850),
+    ],
+  ];
 
-  /// True when (lat, lon) is inside Malaysia's (simplified) land boundary.
+  static const List<List<(double, double)>> _allPolygons =
+      <List<(double, double)>>[..._peninsular, ..._eastMalaysia, ..._islands];
+
+  /// True when (lat, lon) is inside Malaysia's land boundary.
+  ///
+  /// The map's own rings win while they are published (see
+  /// [MalaysiaBoundary]): they are the real coastline, and the Add-Landmark
+  /// form must give the same answer the map draws.
   static bool isWithinMalaysia(double lat, double lon) {
+    final List<CountryOutline>? published = MalaysiaBoundary.publishedRings;
+    if (published != null) {
+      for (final CountryOutline outline in published) {
+        if (_pointInOutline(lat, lon, outline.ring)) return true;
+      }
+      return false;
+    }
     for (final List<(double, double)> polygon in _allPolygons) {
       if (_pointInPolygon(lat, lon, polygon)) return true;
     }
@@ -131,15 +199,23 @@ class LocationRules {
   static bool isOnLand(double lat, double lon) => isWithinMalaysia(lat, lon);
 
   /// Ray-casting point-in-polygon test. Lat is treated as y, lon as x.
-  static bool _pointInPolygon(
+  ///
+  /// Shared by both datasets - the built-in `(lat, lon)` tuples and the
+  /// published [GeoPoint] rings - so the two can never differ in HOW a point
+  /// is judged, only in WHICH boundary they judge it against.
+  static bool _pointInRing<T>(
     double lat,
     double lon,
-    List<(double, double)> polygon,
+    List<T> ring,
+    double Function(T point) latOf,
+    double Function(T point) lonOf,
   ) {
     bool inside = false;
-    for (int i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      final (double latI, double lonI) = polygon[i];
-      final (double latJ, double lonJ) = polygon[j];
+    for (int i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      final double latI = latOf(ring[i]);
+      final double lonI = lonOf(ring[i]);
+      final double latJ = latOf(ring[j]);
+      final double lonJ = lonOf(ring[j]);
       final bool crosses =
           ((latI > lat) != (latJ > lat)) &&
           (lon < (lonJ - lonI) * (lat - latI) / (latJ - latI) + lonI);
@@ -147,4 +223,25 @@ class LocationRules {
     }
     return inside;
   }
+
+  static bool _pointInPolygon(
+    double lat,
+    double lon,
+    List<(double, double)> polygon,
+  ) => _pointInRing<(double, double)>(
+    lat,
+    lon,
+    polygon,
+    ((double, double) point) => point.$1,
+    ((double, double) point) => point.$2,
+  );
+
+  static bool _pointInOutline(double lat, double lon, List<GeoPoint> ring) =>
+      _pointInRing<GeoPoint>(
+        lat,
+        lon,
+        ring,
+        (GeoPoint point) => point.latitude,
+        (GeoPoint point) => point.longitude,
+      );
 }

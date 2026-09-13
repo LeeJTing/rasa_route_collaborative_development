@@ -1,6 +1,8 @@
+import '../../core/json_model.dart';
 import '../../domain_model/report_claim.dart';
 import '../../domain_model/tourist_location.dart';
 import '../../shared_client/api_manager/api_manager.dart';
+import '../data_models/report_claim_data_model.dart';
 
 /// Writes to the ONE shared `report` table (see the migrations that create and
 /// reshape it). A row is one CLAIM: `(kind, place_id, reason, item_kind?,
@@ -40,7 +42,9 @@ class ReportRepository {
     // A claim past its one-year lifetime no longer blocks the tourist (the
     // report "expired" - see `reportClaimLifetime`), so a stale row alone
     // must not read as "already reported".
-    return rows.any((Map<String, dynamic> row) => !_isExpired(row));
+    return rows
+        .map(ReportClaimDataModel.fromJson)
+        .any((ReportClaimDataModel row) => !_isExpired(row));
   }
 
   /// Records ONE claim row. [touristId] is null only for anonymous reporters
@@ -49,22 +53,29 @@ class ReportRepository {
     required ReportClaim claim,
     String? touristId,
   }) async {
-    await api.insertRow(APIManager.tableReport, <String, dynamic>{
-      'kind': claim.placeKind.columnValue,
-      'place_id': claim.placeId,
-      'reason': claim.category.name,
-      'item_kind': claim.itemKind?.columnValue,
-      'item_id': claim.itemId,
-      'day': claim.day?.name,
-      'payload': claim.payload,
-      // The report page's pin, on the address claim only (null everywhere
-      // else) - see `ReportClaim.latitude`.
-      'latitude': claim.latitude,
-      'longitude': claim.longitude,
-      // Whether the reporter was on site - only valid claims count.
-      'location_valid': claim.locationValid,
-      'tourist_id': touristId,
-    });
+    // The row is built through the data model, so the column names live in
+    // ONE place - and `compact()` drops the columns this insert does not
+    // own (`report_id` / `created_at` are the DB's; an unset nullable column
+    // keeps its default instead of being written as an explicit null).
+    await api.insertRow(
+      APIManager.tableReport,
+      ReportClaimDataModel(
+        kind: claim.placeKind.columnValue,
+        placeId: claim.placeId,
+        reason: claim.category.name,
+        itemKind: claim.itemKind?.columnValue,
+        itemId: claim.itemId,
+        day: claim.day?.name,
+        payload: claim.payload,
+        // The report page's pin, on the address claim only (null everywhere
+        // else) - see `ReportClaim.latitude`.
+        latitude: claim.latitude,
+        longitude: claim.longitude,
+        // Whether the reporter was on site - only valid claims count.
+        locationValid: claim.locationValid,
+        touristId: touristId,
+      ).toJson().compact(),
+    );
   }
 
   /// How many DISTINCT tourists have made the identical claim (same issue,
@@ -74,32 +85,36 @@ class ReportRepository {
   /// claims past their one-year lifetime never count
   /// (`reportClaimLifetime`).
   Future<int> countIdentical(ReportClaim claim) async {
-    final List<Map<String, dynamic>> rows = await api.selectAll(
-      APIManager.tableReport,
-      columns: 'report_id, created_at',
-      eq: <String, Object?>{
-        ..._issueEq(claim),
-        'payload': claim.payload,
-        'location_valid': true,
-      },
+    final List<ReportClaimDataModel> rows = _toRows(
+      await api.selectAll(
+        APIManager.tableReport,
+        columns: 'report_id, created_at',
+        eq: <String, Object?>{
+          ..._issueEq(claim),
+          'payload': claim.payload,
+          'location_valid': true,
+        },
+      ),
     );
-    return rows.where((Map<String, dynamic> row) => !_isExpired(row)).length;
+    return rows.where((ReportClaimDataModel row) => !_isExpired(row)).length;
   }
 
   /// How many DISTINCT tourists have claimed this ISSUE at all (regardless of
   /// payload) - used by categories whose claims accumulate across different
   /// payloads and only agree on the payload at apply time. Today that is
-  /// [ReportCategory.closedTemporarily]: a place reported "closed
+  /// `ReportCategory.closedTemporarily`: a place reported "closed
   /// temporarily" with different durations still counts toward ONE threshold
   /// of 10; the agreed END DATE is resolved only when the fix is applied
   /// (see `ReportModerationRules.resolveClosureUntil`).
   Future<int> countIssue(ReportClaim claim) async {
-    final List<Map<String, dynamic>> rows = await api.selectAll(
-      APIManager.tableReport,
-      columns: 'report_id, created_at',
-      eq: <String, Object?>{..._issueEq(claim), 'location_valid': true},
+    final List<ReportClaimDataModel> rows = _toRows(
+      await api.selectAll(
+        APIManager.tableReport,
+        columns: 'report_id, created_at',
+        eq: <String, Object?>{..._issueEq(claim), 'location_valid': true},
+      ),
     );
-    return rows.where((Map<String, dynamic> row) => !_isExpired(row)).length;
+    return rows.where((ReportClaimDataModel row) => !_isExpired(row)).length;
   }
 
   /// Every VALID pin recorded for [claim]'s identical group - the raw
@@ -107,24 +122,21 @@ class ReportRepository {
   /// `consensusLocation`), read at apply time because the rows are cleared
   /// once the fix lands.
   Future<List<TouristLocation>> locationsForIssue(ReportClaim claim) async {
-    final List<Map<String, dynamic>> rows = await api.selectAll(
-      APIManager.tableReport,
-      columns: 'latitude, longitude, created_at',
-      eq: <String, Object?>{
-        ..._issueEq(claim),
-        'payload': claim.payload,
-        'location_valid': true,
-      },
+    final List<ReportClaimDataModel> rows = _toRows(
+      await api.selectAll(
+        APIManager.tableReport,
+        columns: 'latitude, longitude, created_at',
+        eq: <String, Object?>{
+          ..._issueEq(claim),
+          'payload': claim.payload,
+          'location_valid': true,
+        },
+      ),
     );
     return <TouristLocation>[
-      for (final Map<String, dynamic> row in rows)
-        if (!_isExpired(row) &&
-            row['latitude'] is num &&
-            row['longitude'] is num)
-          TouristLocation(
-            latitude: (row['latitude'] as num).toDouble(),
-            longitude: (row['longitude'] as num).toDouble(),
-          ),
+      for (final ReportClaimDataModel row in rows)
+        if (!_isExpired(row) && row.latitude != null && row.longitude != null)
+          TouristLocation(latitude: row.latitude!, longitude: row.longitude!),
     ];
   }
 
@@ -138,19 +150,19 @@ class ReportRepository {
   /// date without contributing to the threshold, and expired claims are
   /// dropped (`reportClaimLifetime`).
   Future<List<ClosureClaim>> closureClaimsForIssue(ReportClaim claim) async {
-    final List<Map<String, dynamic>> rows = await api.selectAll(
-      APIManager.tableReport,
-      columns: 'payload, created_at',
-      eq: <String, Object?>{..._issueEq(claim), 'location_valid': true},
+    final List<ReportClaimDataModel> rows = _toRows(
+      await api.selectAll(
+        APIManager.tableReport,
+        columns: 'payload, created_at',
+        eq: <String, Object?>{..._issueEq(claim), 'location_valid': true},
+      ),
     );
     final List<ClosureClaim> claims = <ClosureClaim>[];
-    for (final Map<String, dynamic> row in rows) {
+    for (final ReportClaimDataModel row in rows) {
       if (_isExpired(row)) continue;
-      final Object? payload = row['payload'];
-      final Object? created = row['created_at'];
-      if (payload is! String || created is! String) continue;
-      final DateTime? at = DateTime.tryParse(created);
-      if (at == null) continue;
+      final String? payload = row.payload;
+      final DateTime? at = row.createdAt;
+      if (payload == null || at == null) continue;
       claims.add(ClosureClaim(payload: payload, createdAt: at));
     }
     return claims;
@@ -183,12 +195,15 @@ class ReportRepository {
     if (claim.day != null) 'day': claim.day!.name,
   };
 
+  /// Rows -> data models. Every read goes through here, so a raw Supabase
+  /// payload never travels past this repository (the data model ↔ domain
+  /// model conversion this layer owns).
+  static List<ReportClaimDataModel> _toRows(List<Map<String, dynamic>> rows) =>
+      rows.map(ReportClaimDataModel.fromJson).toList(growable: false);
+
   /// `report.created_at` -> expired? Claims stop counting (and stop blocking
   /// their tourist) one year after they were filed - see
   /// `reportClaimLifetime`.
-  bool _isExpired(Map<String, dynamic> row) {
-    final Object? raw = row['created_at'];
-    final DateTime? created = raw is String ? DateTime.tryParse(raw) : null;
-    return isReportClaimExpired(created, DateTime.now());
-  }
+  bool _isExpired(ReportClaimDataModel row) =>
+      isReportClaimExpired(row.createdAt, DateTime.now());
 }

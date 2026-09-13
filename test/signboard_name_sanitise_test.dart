@@ -307,4 +307,145 @@ void main() {
       );
     });
   });
+
+  group('LandmarkSubmissionLogic.normaliseNameCasing (shouted signboards)', () {
+    test('reads an ALL-CAPS name back in Title Case', () {
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('RESTORAN NASI KANDAR'),
+        'Restoran Nasi Kandar',
+      );
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('SIGNBOARD MOCKUP'),
+        'Signboard Mockup',
+      );
+    });
+
+    test('leaves a name that already uses lower case alone', () {
+      // The name's own casing - an ordinary spelling or a mixed-case brand
+      // - is never reshaped: only SHOUTING is.
+      for (final String name in <String>[
+        'Restoran Nasi Kandar',
+        'myBurgerLab',
+        '海天楼 Hai Tian Lou',
+      ]) {
+        expect(LandmarkSubmissionLogic.normaliseNameCasing(name), name);
+      }
+    });
+
+    test('keeps brands, acronyms and codes capitalised', () {
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('KEDAI KFC'),
+        'Kedai KFC',
+      );
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('KEDAI ABC 88'),
+        'Kedai ABC 88',
+      );
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('MAMAK SS2'),
+        'Mamak SS2',
+      );
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('NASI KANDAR 24 JAM'),
+        'Nasi Kandar 24 Jam',
+      );
+    });
+
+    test('an apostrophe stays inside its word', () {
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing("RESTORAN ALI'S CORNER"),
+        "Restoran Ali's Corner",
+      );
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('KEDAI ALI-BABA'),
+        'Kedai Ali-Baba',
+      );
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('MING & YAN KITCHEN'),
+        'Ming & Yan Kitchen',
+      );
+    });
+
+    test('script-only names pass through untouched', () {
+      expect(LandmarkSubmissionLogic.normaliseNameCasing('海天楼海鲜'), '海天楼海鲜');
+      expect(
+        LandmarkSubmissionLogic.normaliseNameCasing('海天楼 HAI TIAN LOU'),
+        '海天楼 Hai Tian Lou',
+      );
+      expect(LandmarkSubmissionLogic.normaliseNameCasing('88'), '88');
+    });
+  });
+
+  group('LandmarkSubmissionLogic.applyPaintedScript (second look)', () {
+    test('a Traditional sign restores a Simplified transcription', () {
+      // The exact report: the model returned Simplified characters (and
+      // called the sign simplified), while the signboard paints Traditional -
+      // the separately-framed second look says which glyphs are painted, and
+      // the transcription is restored to them.
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('海天楼记', 'traditional'),
+        '海天樓記',
+      );
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('义记', 'traditional'),
+        '義記',
+      );
+    });
+
+    test('a glyph with two Traditional origins is never guessed', () {
+      // 馆 is the Simplified form of BOTH 館 and 舘, so restoring it could
+      // invent a glyph the sign never painted - it stays as read, while the
+      // provable 义 IS restored on the same name (a partial conversion).
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('义馆', 'traditional'),
+        '義馆',
+      );
+    });
+
+    test('a Simplified sign folds a Traditional transcription too', () {
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('海天樓記', 'simplified'),
+        '海天楼记',
+      );
+    });
+
+    test('a name already in the painted style is left alone', () {
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('海天樓記', 'traditional'),
+        '海天樓記',
+      );
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('海天楼记', 'simplified'),
+        '海天楼记',
+      );
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('Tian Yi', 'traditional'),
+        'Tian Yi',
+      );
+    });
+
+    test('glyphs shared by both styles never decide anything', () {
+      // "海天" reads the same either way - nothing to restore, whichever
+      // style the second look names.
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('海天', 'traditional'),
+        '海天',
+      );
+      // "后" is a legitimate Traditional glyph as well (皇后), so it must
+      // never be "restored" to 後.
+      expect(
+        LandmarkSubmissionLogic.applyPaintedScript('皇后', 'traditional'),
+        '皇后',
+      );
+    });
+
+    test('an answer that names no style changes nothing', () {
+      for (final String answer in <String>['none', 'unknown', '']) {
+        expect(
+          LandmarkSubmissionLogic.applyPaintedScript('海天楼记', answer),
+          '海天楼记',
+        );
+      }
+    });
+  });
 }
