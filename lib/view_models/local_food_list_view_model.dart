@@ -30,8 +30,6 @@ class LocalFoodListViewModel extends BaseViewModel {
           'Chinese',
           'Indian',
           'Nyonya',
-          'Sabah',
-          'Sarawak',
         ],
         FoodFilterGroup.mealType: <String>[
           'All-Day Dining',

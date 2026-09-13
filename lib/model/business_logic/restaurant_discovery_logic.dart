@@ -149,6 +149,11 @@ class RestaurantDiscoveryLogic {
   /// Quick Mode starts at 1 km and expands silently until 20 nearest
   /// eligible restaurants are found or the 10 km Use Case boundary is reached.
   ///
+  /// Places with a confirmed open schedule are listed first; a restaurant
+  /// whose opening hours are merely UNKNOWN is kept in the results but ranked
+  /// behind all of them, so an unconfirmed place never outranks a confirmed
+  /// one and still appears when the confirmed places do not fill the list.
+  ///
   /// [foodType] narrows eligibility to restaurants with at least one menu
   /// item of that type (Food, Beverage, Fruit, Dessert or Kuih). Passing a
   /// different value re-runs the whole radius expansion against that type -
@@ -169,30 +174,49 @@ class RestaurantDiscoveryLogic {
     );
     await _reactivateExpiredClosures(allMeasured);
     final DateTime now = currentTime();
-    final List<Restaurant> measured = _availableSummaries(allMeasured)
-        .where(
-          (Restaurant restaurant) =>
-              _isConfidentlyOpenHours(restaurant.openingHours, now),
-        )
-        .toList(growable: false);
     final List<Restaurant> eligible = await _eligibleRestaurants(
-      _withinRadius(measured, radiusKm: _quickModeMaximumRadiusKm),
+      _withinRadius(
+        _availableSummaries(allMeasured),
+        radiusKm: _quickModeMaximumRadiusKm,
+      ),
       foodType: foodType,
     );
+    // Confirmed open first, then the places whose hours are simply unknown.
+    // Both keep their nearest-first order inside their own group.
+    final List<Restaurant> confirmed = <Restaurant>[];
+    final List<Restaurant> unconfirmed = <Restaurant>[];
+    for (final Restaurant restaurant in eligible) {
+      (OpeningHoursLogic.isConfidentlyOpenAt(restaurant.openingHours, now)
+              ? confirmed
+              : unconfirmed)
+          .add(restaurant);
+    }
+    return _hydrateSelected(
+      _expandRadius(<Restaurant>[...confirmed, ...unconfirmed]),
+    );
+  }
+
+  /// Widens from the 1 km start until the nearest 20 results are in hand or
+  /// the 10 km Use Case boundary is reached.
+  ///
+  /// [priorityOrdered] is left as the caller ranked it - the radius only
+  /// decides which of those places are near enough, never their order.
+  List<Restaurant> _expandRadius(List<Restaurant> priorityOrdered) {
     double radiusKm = _quickModeInitialRadiusKm;
     List<Restaurant> available = const <Restaurant>[];
     while (radiusKm <= _quickModeMaximumRadiusKm) {
-      final List<Restaurant> results = _withinRadius(
-        eligible,
-        radiusKm: radiusKm,
-      ).take(_quickModeResultTarget).toList(growable: false);
+      final List<Restaurant> results = priorityOrdered
+          .where((Restaurant restaurant) {
+            final double? distance = restaurant.distanceMetres;
+            return distance != null && distance <= radiusKm * 1000;
+          })
+          .take(_quickModeResultTarget)
+          .toList(growable: false);
       available = results;
-      if (results.length >= _quickModeResultTarget || !location.isKnown) {
-        return _hydrateSelected(results);
-      }
+      if (results.length >= _quickModeResultTarget) return results;
       radiusKm += _quickModeRadiusStepKm;
     }
-    return _hydrateSelected(available);
+    return available;
   }
 
   /// Submitted-landmark half of Quick Mode, using the same map occurrences
@@ -249,21 +273,24 @@ class RestaurantDiscoveryLogic {
     }
 
     final DateTime now = currentTime();
-    final List<SubmittedLandmarkRecommendation> measured =
-    <SubmittedLandmarkRecommendation>[];
+    final List<SubmittedLandmarkRecommendation> confirmed =
+        <SubmittedLandmarkRecommendation>[];
+    final List<SubmittedLandmarkRecommendation> unconfirmed =
+        <SubmittedLandmarkRecommendation>[];
     for (final MapEntry<String, List<FoodOccurrence>> entry
     in byLandmark.entries) {
-      if (entry.value.isEmpty ||
-          _isConfidentlyClosedHours(
-            hoursByPlace['submittedLandmark:${entry.key}'] ??
-                const <OpeningHour>[],
-            now,
-          )) {
+      final List<OpeningHour> hours =
+          hoursByPlace['submittedLandmark:${entry.key}'] ??
+          const <OpeningHour>[];
+      if (entry.value.isEmpty || _isConfidentlyClosedHours(hours, now)) {
         continue;
       }
       final FoodOccurrence place = entry.value.first;
       final List<SubmittedLandmarkDish> dishes = _dishesOf(entry.value);
-      measured.add(
+      (OpeningHoursLogic.isConfidentlyOpenAt(hours, now)
+              ? confirmed
+              : unconfirmed)
+          .add(
         SubmittedLandmarkRecommendation(
           id: int.tryParse(entry.key) ?? 0,
           name: place.placeName,
@@ -285,10 +312,16 @@ class RestaurantDiscoveryLogic {
         ),
       );
     }
-    measured.sort(
-          (SubmittedLandmarkRecommendation a, SubmittedLandmarkRecommendation b) =>
-          a.distanceMetres.compareTo(b.distanceMetres),
-    );
+
+    for (final List<SubmittedLandmarkRecommendation> group
+    in <List<SubmittedLandmarkRecommendation>>[confirmed, unconfirmed]) {
+      group.sort(
+        (SubmittedLandmarkRecommendation a, SubmittedLandmarkRecommendation b) =>
+        a.distanceMetres.compareTo(b.distanceMetres),
+      );
+    }
+    final List<SubmittedLandmarkRecommendation> measured =
+    <SubmittedLandmarkRecommendation>[...confirmed, ...unconfirmed];
 
     double radiusKm = _quickModeInitialRadiusKm;
     List<SubmittedLandmarkRecommendation> available =
@@ -418,11 +451,6 @@ class RestaurantDiscoveryLogic {
     List<OpeningHour> hours,
     DateTime malaysiaNow,
   ) => OpeningHoursLogic.isConfidentlyClosedAt(hours, malaysiaNow);
-
-  bool _isConfidentlyOpenHours(
-    List<OpeningHour> hours,
-    DateTime malaysiaNow,
-  ) => OpeningHoursLogic.isConfidentlyOpenAt(hours, malaysiaNow);
 
   Future<List<Restaurant>> _eligibleRestaurants(
       List<Restaurant> candidates, {

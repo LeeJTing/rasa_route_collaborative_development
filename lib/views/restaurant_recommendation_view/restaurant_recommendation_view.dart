@@ -142,7 +142,7 @@ class _RestaurantRecommendationViewState
                                       _openLandmarkDetails(context, landmark),
                                   onImageTap:
                                       (String? source, String semanticLabel) =>
-                                          showEnlargedImage(
+                                          showLandmarkImage(
                                             context,
                                             semanticLabel: semanticLabel,
                                             source: source,
