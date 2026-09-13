@@ -38,6 +38,9 @@ class ReportClaim {
     this.itemKind,
     this.itemId,
     this.day,
+    this.latitude,
+    this.longitude,
+    this.locationValid = false,
     required this.payload,
   });
 
@@ -53,6 +56,29 @@ class ReportClaim {
   /// Set when the claim is about one weekday's hours
   /// ([ReportCategory.operatingHours]).
   final Weekday? day;
+
+  /// Set by an ADDRESS claim: the exact spot the tourist pinned on the report
+  /// page's map.
+  ///
+  /// The address text is usually the OpenStreetMap wording for that spot -
+  /// approximate, because OSM addresses are - so the pin is the part that is
+  /// exact, and the fix applies it to the place along with the text. It is
+  /// deliberately NOT part of [payload]: two tourists correcting the same
+  /// place tap different pixels, and identical claims have to keep grouping
+  /// by the address text for the threshold to work.
+  final double? latitude;
+  final double? longitude;
+
+  /// Whether the tourist was ON SITE when they reported: their own fix was
+  /// within the on-site radius of the PLACE'S ORIGINAL LOCATION - where the
+  /// app places the landmark/restaurant they are reporting - for every
+  /// category (see `ReportModerationRules.isWithinOnsiteRange`).
+  ///
+  /// Set when the claim is built, stored on the row, and FALSE whenever the
+  /// device had no fix - an unverifiable claim is kept for the record and for
+  /// the one-claim-per-tourist dedupe, but it never counts toward a threshold
+  /// and can never move a place. The tourist is told nothing about it.
+  final bool locationValid;
 
   /// Canonical proposed value, stored verbatim in `report.payload`. Identical
   /// claims (same issue + same payload) count toward the threshold.

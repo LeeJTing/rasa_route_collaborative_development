@@ -8,7 +8,9 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
+import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
+import 'package:meta/meta.dart' show protected;
 import 'package:string_similarity/string_similarity.dart';
 
 import '../repositories/discovery_repository_facade.dart';
@@ -32,7 +34,10 @@ import 'dart:math' as math;
 class MapExplorationLogic {
   MapExplorationLogic();
 
-  final DiscoveryRepositoryFacade repository = DiscoveryRepositoryFacade();
+  @protected
+  DiscoveryRepositoryFacade createRepository() => DiscoveryRepositoryFacade();
+
+  late final DiscoveryRepositoryFacade repository = createRepository();
 
   // ===========================================================================
   // Dev GPS mock (Android-only presenter tool)
@@ -494,6 +499,7 @@ class MapExplorationLogic {
   Future<MapPinPage> pins({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
+
     /// The dishes to constrain to, when the caller has already worked them out.
     ///
     /// Overrides [filter] and [localFoodId] rather than narrowing them - the
@@ -509,6 +515,7 @@ class MapExplorationLogic {
     double? fromLongitude,
     double zoom = detailedViewZoom,
     int? limit,
+
     /// What a keyword is asking about, grouped into the same grid as the
     /// filter's answer rather than queried separately.
     MapSearchSelection search = MapSearchSelection.none,
@@ -525,8 +532,7 @@ class MapExplorationLogic {
     // empty list, which is "a filter is on and nothing matches it" - the first
     // skips the menu lookup, the second is an empty map.
     final List<int>? resolvedFoodIds =
-        foodIds ??
-        await _foodIdsFor(filter: filter, localFoodId: localFoodId);
+        foodIds ?? await _foodIdsFor(filter: filter, localFoodId: localFoodId);
 
     // REQ102_41 - a little wider than the screen, so panning a short way finds
     // its markers already loaded instead of flashing an empty edge.
@@ -548,8 +554,8 @@ class MapExplorationLogic {
 
     // Distance to the tourist is the one thing Postgres was not asked for: it
     // changes with every GPS fix, and recomputing it here costs nothing.
-    final List<MapPin> withDistance = fromLatitude == null ||
-            fromLongitude == null
+    final List<MapPin> withDistance =
+        fromLatitude == null || fromLongitude == null
         ? markers.pins
         : markers.pins
               .map(
@@ -649,8 +655,7 @@ class MapExplorationLogic {
     MapSearchSelection search = MapSearchSelection.none,
   }) async {
     final List<int>? resolvedFoodIds =
-        foodIds ??
-        await _foodIdsFor(filter: filter, localFoodId: localFoodId);
+        foodIds ?? await _foodIdsFor(filter: filter, localFoodId: localFoodId);
 
     final ({double? splitZoom, int memberCount}) probe = await repository.map
         .clusterSplitZoom(
@@ -807,7 +812,14 @@ class MapExplorationLogic {
   }) async {
     final int? id = int.tryParse(pin.referenceId);
     if (id == null || id <= 0) return pin;
-    if (pin.kind != MapPinKind.restaurant) return pin;
+    if (pin.kind != MapPinKind.restaurant) {
+      return _landmarkPinDetail(
+        pin,
+        id,
+        filter: filter,
+        localFoodId: localFoodId,
+      );
+    }
 
     final Restaurant? restaurant;
     final List<RestaurantItem> items;
@@ -816,9 +828,7 @@ class MapExplorationLogic {
       final List<Object?> gathered = await Future.wait(<Future<Object?>>[
         repository.getRestaurantById(id),
         repository.getRestaurantItemsByRestaurantIds(<int>[id]),
-        repository.openingHoursByPlace(
-          placeKeys: <String>{'restaurant:$id'},
-        ),
+        repository.openingHoursByPlace(placeKeys: <String>{'restaurant:$id'}),
       ]);
       restaurant = gathered[0] as Restaurant?;
       items = gathered[1] as List<RestaurantItem>;
@@ -876,6 +886,103 @@ class MapExplorationLogic {
       priceRange: _priceRangeOf(prices),
       openNow: _openNow(hours['restaurant:$id']),
       distanceMetres: pin.distanceMetres,
+    );
+  }
+
+  /// The landmark half of [pinDetail].
+  ///
+  /// A submitted landmark's sheet answers the same three questions a
+  /// restaurant's does: what kind of place it is (the category its primary
+  /// dish was submitted with), what it costs (the range across its recorded
+  /// dish prices) and whether it is open. The markers carry none of that
+  /// (REQ102_47), and this path used to skip landmarks entirely - so every
+  /// landmark sheet said "Landmark submitted by a tourist" and "Unknown" no
+  /// matter what was on record (user report, 2026-09-13).
+  ///
+  /// Returns [pin] unchanged when the landmark cannot be read, so a tap
+  /// always opens a sheet with at least the name and photo on the marker.
+  Future<MapPin> _landmarkPinDetail(
+    MapPin pin,
+    int id, {
+    required ExplorationFilter filter,
+    required int? localFoodId,
+  }) async {
+    final SubmittedLandmark? landmark;
+    final Map<String, List<OpeningHour>> hours;
+    try {
+      final List<Object?> gathered = await Future.wait(<Future<Object?>>[
+        repository.getSubmittedLandmarkById(id),
+        repository.openingHoursByPlace(
+          placeKeys: <String>{'submittedLandmark:$id'},
+        ),
+      ]);
+      landmark = gathered[0] as SubmittedLandmark?;
+      hours = gathered[1] as Map<String, List<OpeningHour>>;
+    } catch (_) {
+      return pin;
+    }
+    if (landmark == null) return pin;
+
+    // The same "Serves: ..." rule as the restaurant sheet: catalogue names
+    // preferred over the submission's own spelling, and narrowed to what the
+    // tourist is looking for when a dish or a filter is active.
+    final List<LocalFood> catalogue = await repository.getLocalFoods();
+    final Map<int, String> nameById = <int, String>{
+      for (final LocalFood food in catalogue) food.id: food.name,
+    };
+    final Set<int> wanted = <int>{
+      for (final LocalFood food in catalogue)
+        if ((localFoodId == null || food.id == localFoodId) &&
+            matchesFilter(food, filter))
+          food.id,
+    };
+    final bool narrowed = localFoodId != null || filter.selectionCount > 0;
+
+    final List<String> served = <String>[];
+    final List<double> prices = <double>[];
+    for (final LandmarkItem item in landmark.items) {
+      final bool matches = wanted.contains(item.localFoodId);
+      if (narrowed && !matches) continue;
+      final String name = (nameById[item.localFoodId] ?? item.dish).trim();
+      if (name.isNotEmpty && !served.contains(name)) served.add(name);
+      final double? price = item.price;
+      if (price != null && price > 0) {
+        prices.add(price);
+      } else if (item.priceMin > 0 && item.priceMax > 0) {
+        // No price recorded on the dish - the band the form showed for it is
+        // the next best answer, and the range still brackets it.
+        prices.add(item.priceMin);
+        prices.add(item.priceMax);
+      }
+    }
+
+    // The landmark's own category: the food category MOST of its dishes
+    // carry (see `SubmittedLandmark.displayCategory`), worded the way the
+    // restaurant table stores its own ("Chinese restaurant"), so a landmark
+    // whose dishes disagree still says what it mostly is rather than what
+    // its first submission happened to be.
+    final String category = landmark.displayCategoryLabel;
+
+    return MapPin(
+      referenceId: pin.referenceId,
+      kind: pin.kind,
+      latitude: pin.latitude,
+      longitude: pin.longitude,
+      label: landmark.name.isEmpty ? pin.label : landmark.name,
+      weight: served.isEmpty ? pin.weight : served.length,
+      imageUrl: landmark.imageUrl ?? pin.imageUrl,
+      thumbnailUrl: pin.thumbnailUrl,
+      category: category.isEmpty ? null : category,
+      rating: pin.rating,
+      servedFoods: List<String>.unmodifiable(
+        served.length > maximumServedFoods
+            ? served.sublist(0, maximumServedFoods)
+            : served,
+      ),
+      priceRange: _priceRangeOf(prices),
+      openNow: _openNow(hours['submittedLandmark:$id']),
+      distanceMetres: pin.distanceMetres,
+      isSearchResult: pin.isSearchResult,
     );
   }
 
@@ -987,9 +1094,7 @@ class MapExplorationLogic {
       final String dishMeal = food.mealType.toLowerCase().trim();
       final bool matches =
           dishMeal.contains('all-day') ||
-          meals.any(
-            (String meal) => meal.toLowerCase().trim() == dishMeal,
-          );
+          meals.any((String meal) => meal.toLowerCase().trim() == dishMeal);
       if (!matches) return false;
     }
 
@@ -1292,10 +1397,8 @@ class MapExplorationLogic {
   ///
   /// Letters and digits are kept by category rather than by an `a-z0-9` range,
   /// so an accented name is folded, not gutted.
-  static String searchNormalise(String value) => value
-      .toLowerCase()
-      .replaceAll(_punctuation, ' ')
-      .trim();
+  static String searchNormalise(String value) =>
+      value.toLowerCase().replaceAll(_punctuation, ' ').trim();
 
   /// [searchNormalise] with the spaces taken out too.
   ///
@@ -1411,7 +1514,8 @@ class MapExplorationLogic {
     _variantCache[value] = variants;
   }
 
-  static final Map<String, List<String>> _variantCache = <String, List<String>>{};
+  static final Map<String, List<String>> _variantCache =
+      <String, List<String>>{};
 
   /// How alike two dish names are, 0..1, over every spelling of both.
   ///
