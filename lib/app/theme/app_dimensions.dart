@@ -401,6 +401,10 @@ abstract final class AppLayoutRatios {
   static const double catalogueFilterSheetInitial = 0.8;
   static const double catalogueFilterSheetMaximum = 0.92;
 
+  /// Normal menu prices use their natural width; unusually long prices may
+  /// use at most this share so the dish name still has room on narrow screens.
+  static const double restaurantMenuPriceMaxWidthFraction = 0.4;
+
   // ===========================================================================
   // Tourist profile (ChinShunYon) - edit-screen option grid
   // ===========================================================================

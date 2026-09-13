@@ -78,34 +78,50 @@ class RestaurantExpandedInfo extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Expanded(
-                                child: Text(
-                                  item.foodName,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.titleSmall,
+                          LayoutBuilder(
+                            builder:
+                                (
+                                  BuildContext context,
+                                  BoxConstraints constraints,
+                                ) => Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Expanded(
+                                      child: Text(
+                                        item.foodName,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleSmall,
+                                      ),
+                                    ),
+                                    if (item.price != null) ...<Widget>[
+                                      const SizedBox(width: AppSpacing.sm),
+                                      ConstrainedBox(
+                                        constraints: BoxConstraints(
+                                          maxWidth:
+                                              constraints.maxWidth *
+                                              AppLayoutRatios
+                                                  .restaurantMenuPriceMaxWidthFraction,
+                                        ),
+                                        child: Text(
+                                          '${item.currency} '
+                                          '${item.price!.toStringAsFixed(2)}',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.end,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleSmall
+                                              ?.copyWith(
+                                                color: AppColors.accentRust,
+                                              ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                              ),
-                              if (item.price != null) ...<Widget>[
-                                const SizedBox(width: AppSpacing.md),
-                                Flexible(
-                                  child: Text(
-                                    '${item.currency} '
-                                    '${item.price!.toStringAsFixed(2)}',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.end,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(color: AppColors.accentRust),
-                                  ),
-                                ),
-                              ],
-                            ],
                           ),
                           if (displayText != null) ...<Widget>[
                             const SizedBox(height: AppSpacing.xs),
