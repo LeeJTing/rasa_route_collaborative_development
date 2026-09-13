@@ -92,10 +92,16 @@ class FoodRecommendationLogic {
     );
     if (ranked.length >= 3) return ranked;
     final Set<int> rankedIds = ranked.map((LocalFood food) => food.id).toSet();
+
+    final String selectedType = selected.foodType.trim().toLowerCase();
     return <LocalFood>[
       ...ranked,
       ...catalogue.where(
-        (LocalFood food) => food.id != foodId && !rankedIds.contains(food.id),
+        (LocalFood food) =>
+            food.id != foodId &&
+            !rankedIds.contains(food.id) &&
+            (selectedType.isEmpty ||
+                food.foodType.trim().toLowerCase() == selectedType),
       ),
     ].take(3).toList(growable: false);
   }
