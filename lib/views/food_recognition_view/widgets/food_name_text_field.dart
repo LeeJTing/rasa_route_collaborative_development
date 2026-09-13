@@ -15,6 +15,10 @@ import '../../../app/theme/app_text_styles.dart';
 /// typed name gets long. Both values come from the logic layer
 /// (`LandmarkSubmissionLogic.maxFoodNameLength` / `foodNameLengthWarning`),
 /// surfaced by `FoodRecognitionViewModel` - this widget only renders them.
+///
+/// The input itself is restricted to LETTERS, DIGITS and SPACES - no special
+/// characters (user request, 2026-09-14: "only allow characters, no special
+/// characters, numbers are allowed") - see [_FoodNameCharactersFormatter].
 class FoodNameTextField extends StatefulWidget {
   const FoodNameTextField({
     super.key,
@@ -65,6 +69,10 @@ class _FoodNameTextFieldState extends State<FoodNameTextField> {
           enabled: widget.enabled,
           maxLength: widget.maxLength,
           maxLengthEnforcement: MaxLengthEnforcement.enforced,
+          // Letters, digits and spaces only - see the formatter's doc.
+          inputFormatters: const <TextInputFormatter>[
+            _FoodNameCharactersFormatter(),
+          ],
           textInputAction: TextInputAction.done,
           onChanged: _onChanged,
           onSubmitted: (_) => widget.onSubmitted(),
@@ -82,6 +90,45 @@ class _FoodNameTextFieldState extends State<FoodNameTextField> {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// Keeps the typed food name to LETTERS, DIGITS and SPACES - no special
+/// characters, no punctuation, no emoji (user request, 2026-09-14: "only
+/// allow characters, no special characters, numbers are allowed").
+///
+/// Letters and digits pass in ANY script (the same Unicode property escapes
+/// the name rules use), so "Nasi Goreng", "Roti 2 Keping" and "炒粿条" all
+/// type fine, while "Nasi@#$!" cannot be entered OR pasted - formatters run
+/// on both. A rejected edit returns the surviving text with the caret at
+/// the end; an edit that changes nothing is passed through untouched so
+/// the selection and any IME composing region are preserved.
+class _FoodNameCharactersFormatter extends TextInputFormatter {
+  const _FoodNameCharactersFormatter();
+
+  static final RegExp _allowed = RegExp(r'[\p{L}\p{N} ]', unicode: true);
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    bool blocked = false;
+    final StringBuffer kept = StringBuffer();
+    for (final int rune in newValue.text.runes) {
+      final String character = String.fromCharCode(rune);
+      if (_allowed.hasMatch(character)) {
+        kept.write(character);
+      } else {
+        blocked = true;
+      }
+    }
+    if (!blocked) return newValue;
+    final String text = kept.toString();
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
   }
 }

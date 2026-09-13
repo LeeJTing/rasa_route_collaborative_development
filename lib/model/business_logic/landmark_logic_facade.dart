@@ -60,6 +60,8 @@ class LandmarkLogicFacade {
       bool fitsCatalogueCategory,
       String observedFood,
       List<String> dietaryRestrictions,
+      bool typedNameIsTypo,
+      String correctedName,
     })
   >
   resolveByName(List<int> imageBytes, String name) =>

@@ -13,6 +13,11 @@ import '../../shared_client/api_manager/api_manager.dart';
 /// and skip the duplicate. Identical claims (same issue, same canonical
 /// [ReportClaim.payload]) are counted with [countIdentical]; the matched rows
 /// are cleared with [deleteIdentical] once the fix is applied.
+///
+/// EXPIRY: a claim older than `reportClaimLifetime` (one year) no longer
+/// counts toward its threshold AND no longer blocks its tourist from
+/// reporting the issue again - every read filters expired rows out
+/// (user request, 2026-09-14).
 class ReportRepository {
   ReportRepository();
 
@@ -29,11 +34,13 @@ class ReportRepository {
   }) async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableReport,
-      columns: 'report_id',
+      columns: 'report_id, created_at',
       eq: <String, Object?>{..._issueEq(claim), 'tourist_id': touristId},
-      limit: 1,
     );
-    return rows.isNotEmpty;
+    // A claim past its one-year lifetime no longer blocks the tourist (the
+    // report "expired" - see `reportClaimLifetime`), so a stale row alone
+    // must not read as "already reported".
+    return rows.any((Map<String, dynamic> row) => !_isExpired(row));
   }
 
   /// Records ONE claim row. [touristId] is null only for anonymous reporters
@@ -63,18 +70,20 @@ class ReportRepository {
   /// How many DISTINCT tourists have made the identical claim (same issue,
   /// same canonical payload) - the value the threshold is checked against.
   ///
-  /// Only claims the on-site check verified count (`location_valid`).
+  /// Only claims the on-site check verified count (`location_valid`), and
+  /// claims past their one-year lifetime never count
+  /// (`reportClaimLifetime`).
   Future<int> countIdentical(ReportClaim claim) async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableReport,
-      columns: 'report_id',
+      columns: 'report_id, created_at',
       eq: <String, Object?>{
         ..._issueEq(claim),
         'payload': claim.payload,
         'location_valid': true,
       },
     );
-    return rows.length;
+    return rows.where((Map<String, dynamic> row) => !_isExpired(row)).length;
   }
 
   /// How many DISTINCT tourists have claimed this ISSUE at all (regardless of
@@ -82,15 +91,15 @@ class ReportRepository {
   /// payloads and only agree on the payload at apply time. Today that is
   /// [ReportCategory.closedTemporarily]: a place reported "closed
   /// temporarily" with different durations still counts toward ONE threshold
-  /// of 10; the most-common reported duration is picked only when the fix is
-  /// applied (see `ReportModerationRules.resolveMostCommonClosure`).
+  /// of 10; the agreed END DATE is resolved only when the fix is applied
+  /// (see `ReportModerationRules.resolveClosureUntil`).
   Future<int> countIssue(ReportClaim claim) async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableReport,
-      columns: 'report_id',
+      columns: 'report_id, created_at',
       eq: <String, Object?>{..._issueEq(claim), 'location_valid': true},
     );
-    return rows.length;
+    return rows.where((Map<String, dynamic> row) => !_isExpired(row)).length;
   }
 
   /// Every VALID pin recorded for [claim]'s identical group - the raw
@@ -100,7 +109,7 @@ class ReportRepository {
   Future<List<TouristLocation>> locationsForIssue(ReportClaim claim) async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableReport,
-      columns: 'latitude, longitude',
+      columns: 'latitude, longitude, created_at',
       eq: <String, Object?>{
         ..._issueEq(claim),
         'payload': claim.payload,
@@ -109,7 +118,9 @@ class ReportRepository {
     );
     return <TouristLocation>[
       for (final Map<String, dynamic> row in rows)
-        if (row['latitude'] is num && row['longitude'] is num)
+        if (!_isExpired(row) &&
+            row['latitude'] is num &&
+            row['longitude'] is num)
           TouristLocation(
             latitude: (row['latitude'] as num).toDouble(),
             longitude: (row['longitude'] as num).toDouble(),
@@ -117,19 +128,32 @@ class ReportRepository {
     ];
   }
 
-  /// Every claim payload recorded for [claim]'s issue (regardless of the
-  /// caller's own payload) - used to resolve the most-common temporary-closure
-  /// duration at apply time.
-  Future<List<String>> payloadsForIssue(ReportClaim claim) async {
+  /// Every temporary-closure claim of [claim]'s ISSUE (regardless of the
+  /// caller's own payload), each with its `created_at` - the raw material for
+  /// the closure resolution (`ReportModerationRules.resolveClosureUntil`),
+  /// which normalises every claim to the END DATE the voter meant.
+  ///
+  /// Mirrors [countIssue]'s filter: only on-site-verified claims
+  /// (`location_valid`) vote, so an off-site claim can never steer the end
+  /// date without contributing to the threshold, and expired claims are
+  /// dropped (`reportClaimLifetime`).
+  Future<List<ClosureClaim>> closureClaimsForIssue(ReportClaim claim) async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableReport,
-      columns: 'payload',
-      eq: _issueEq(claim),
+      columns: 'payload, created_at',
+      eq: <String, Object?>{..._issueEq(claim), 'location_valid': true},
     );
-    return <String>[
-      for (final Map<String, dynamic> row in rows)
-        if (row['payload'] is String) row['payload'] as String,
-    ];
+    final List<ClosureClaim> claims = <ClosureClaim>[];
+    for (final Map<String, dynamic> row in rows) {
+      if (_isExpired(row)) continue;
+      final Object? payload = row['payload'];
+      final Object? created = row['created_at'];
+      if (payload is! String || created is! String) continue;
+      final DateTime? at = DateTime.tryParse(created);
+      if (at == null) continue;
+      claims.add(ClosureClaim(payload: payload, createdAt: at));
+    }
+    return claims;
   }
 
   /// Deletes every row matching the identical claim (same issue + same
@@ -158,4 +182,13 @@ class ReportRepository {
     if (claim.itemId != null) 'item_id': claim.itemId,
     if (claim.day != null) 'day': claim.day!.name,
   };
+
+  /// `report.created_at` -> expired? Claims stop counting (and stop blocking
+  /// their tourist) one year after they were filed - see
+  /// `reportClaimLifetime`.
+  bool _isExpired(Map<String, dynamic> row) {
+    final Object? raw = row['created_at'];
+    final DateTime? created = raw is String ? DateTime.tryParse(raw) : null;
+    return isReportClaimExpired(created, DateTime.now());
+  }
 }
