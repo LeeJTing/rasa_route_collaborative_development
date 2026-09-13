@@ -59,7 +59,6 @@ class LocalFoodListViewModel extends BaseViewModel {
           'Roasted',
           'Fresh',
           'Herbal',
-          'Nutty',
           'Earthy',
           'Fermented',
           'Tangy',
