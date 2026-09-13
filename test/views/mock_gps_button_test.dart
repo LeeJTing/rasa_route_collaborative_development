@@ -82,7 +82,7 @@ void main() {
 
       expect(
         states.keys,
-        containsAll(<String>['Kuala Lumpur', 'Selangor', 'Johor']),
+        containsAll(<String>['Kuala Lumpur', 'Selangor', 'Johor', 'Perlis']),
       );
       expect(
         states['Kuala Lumpur'],
@@ -95,6 +95,12 @@ void main() {
       expect(
         states['Johor'],
         containsAll(<String>['Johor Bahru', 'Skudai', 'Batu Pahat']),
+      );
+      // The northern-most state, added so the "Perlis is still Malaysia"
+      // case can be demoed by tapping it (user request, 2026-09-14).
+      expect(
+        states['Perlis'],
+        containsAll(<String>['Kangar', 'Kuala Perlis', 'Arau', 'Padang Besar']),
       );
     });
 

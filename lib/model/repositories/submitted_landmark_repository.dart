@@ -142,7 +142,12 @@ class SubmittedLandmarkRepository {
       // Not supplied (null/blank) -> never touch the stored value.
       if (trimmed == null || trimmed.isEmpty) return;
       // Unchanged -> skip; only an actual change on this field is written.
-      if (trimmed == (stored ?? '').trim()) return;
+      // Compared on `detailValueKey` (trimmed, inner whitespace collapsed,
+      // lowercased), so a case- or spacing-only difference ("Jalan AMPANG"
+      // over "Jalan Ampang") is not a change and the row is left alone - the
+      // SAME rule the merge's overwrite question uses (user request
+      // 2026-09-14).
+      if (detailValueKey(trimmed) == detailValueKey(stored)) return;
       values[column] = trimmed;
     }
 

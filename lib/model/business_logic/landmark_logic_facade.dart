@@ -7,6 +7,7 @@ import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/place_overwrite_report.dart';
 import '../../domain_model/similar_place_candidate.dart';
+import '../../domain_model/stored_place_details.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import 'food_recognition_logic.dart';
@@ -167,6 +168,19 @@ class LandmarkLogicFacade {
     website: website,
     address: address,
     operatingHours: operatingHours,
+  );
+
+  /// What the place this form's name already matches STORES - the details the
+  /// form fills itself with after Confirm (UC500). See
+  /// `LandmarkSubmissionLogic.storedPlaceDetails`.
+  Future<StoredPlaceDetails?> storedPlaceDetails({
+    required String restaurantName,
+    double? latitude,
+    double? longitude,
+  }) => submission.storedPlaceDetails(
+    restaurantName: restaurantName,
+    latitude: latitude,
+    longitude: longitude,
   );
 
   /// Which of the form's dishes [candidate]'s place already lists - asked
@@ -430,6 +444,16 @@ class LandmarkLogicFacade {
 
   bool containsControlCharacters(String value) =>
       submission.containsControlCharacters(value);
+
+  /// Readable casing for a name that arrived SHOUTING ("RESTORAN ALI" ->
+  /// "Restoran Ali") - every signboard reading and every name adopted from a
+  /// place on record goes through it, so one shop is never stored as
+  /// "RESTORAN X" here and "Restoran X" there (see
+  /// `LandmarkSubmissionLogic.normaliseNameCasing`). A name that already uses
+  /// lower case is returned unchanged, and identity is unaffected: name
+  /// matching ignores case.
+  String normaliseNameCasing(String name) =>
+      LandmarkSubmissionLogic.normaliseNameCasing(name);
 
   /// Add-Landmark field caps (mirrored in the View as TextField maxLength).
   int get maxRestaurantNameLength =>
