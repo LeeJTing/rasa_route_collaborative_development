@@ -13,7 +13,7 @@ import 'current_location_facade.dart';
 
 enum MatchesRestaurantSort { distance, price, preference, rating }
 
-enum MatchesLandmarkSort { distance, name }
+enum MatchesLandmarkSort { distance, price, name }
 
 enum MatchesSortDirection { ascending, descending }
 
@@ -374,13 +374,18 @@ class MatchesRecommendationViewModel extends BaseViewModel {
           second.distanceMetres.isFinite ? second.distanceMetres : null,
           _landmarkSortDirection,
         ),
+        MatchesLandmarkSort.price => _compareNullable(
+          first.price,
+          second.price,
+          _landmarkSortDirection,
+        ),
         MatchesLandmarkSort.name => first.name.toLowerCase().compareTo(
           second.name.toLowerCase(),
         ),
       };
-      final int directed = _landmarkSort == MatchesLandmarkSort.distance
-          ? comparison
-          : _applyDirection(comparison, _landmarkSortDirection);
+      final int directed = _landmarkSort == MatchesLandmarkSort.name
+          ? _applyDirection(comparison, _landmarkSortDirection)
+          : comparison;
       if (directed != 0) return directed;
       return first.id.compareTo(second.id);
     });

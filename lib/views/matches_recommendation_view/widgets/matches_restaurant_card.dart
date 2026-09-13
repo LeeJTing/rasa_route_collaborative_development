@@ -64,6 +64,7 @@ class MatchesRestaurantCard extends StatelessWidget {
                       Wrap(
                         spacing: AppSpacing.md,
                         runSpacing: AppSpacing.xs,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: <Widget>[
                           _IconLabel(
                             icon: Icons.star,
@@ -76,6 +77,11 @@ class MatchesRestaurantCard extends StatelessWidget {
                             icon: Icons.location_on_outlined,
                             label: _distanceLabel(restaurant.distanceMetres),
                           ),
+                          if (restaurant.category.isNotEmpty)
+                            AppTagChip(
+                              label: restaurant.category,
+                              style: AppTagStyle.category,
+                            ),
                         ],
                       ),
                     ],
@@ -113,16 +119,6 @@ class MatchesRestaurantCard extends StatelessWidget {
               ],
             ),
           ),
-          if (restaurant.category.isNotEmpty) ...<Widget>[
-            const SizedBox(height: AppSpacing.sm),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: AppTagChip(
-                label: restaurant.category,
-                style: AppTagStyle.category,
-              ),
-            ),
-          ],
           const SizedBox(height: AppSpacing.sm),
           FilledButton.icon(
             onPressed: onTap,
