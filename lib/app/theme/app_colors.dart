@@ -138,6 +138,18 @@ abstract final class AppColors {
   static const Color tagDietaryText = Color(0xFF3182CE);
 
   // ===========================================================================
+  // Tourist profile (ChinShunYon) - option cards
+  // ===========================================================================
+
+  /// Green halo under a SELECTED option box.
+  ///
+  /// The option artwork is a full-colour photo now, so it cannot be tinted to
+  /// signal selection the way the old SVGs were. The border plus this glow
+  /// carry the state instead - same green as [success], at 30% so it reads as a
+  /// glow rather than a second border.
+  static const Color profileOptionSelectedGlow = Color(0x4D3FA34D);
+
+  // ===========================================================================
   // End of Tourist profile (ChinShunYon)
   // ===========================================================================
 

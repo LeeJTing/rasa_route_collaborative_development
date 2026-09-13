@@ -355,14 +355,29 @@ abstract final class AppSizes {
   /// [Figma] Square icon box inside a preference/restriction option card.
   static const double profileOptionBox = 72;
 
-  /// [Figma] Placeholder icon inside [profileOptionBox] (images not added).
+  /// Size of the fallback Material glyph inside a card with no photo. The photo
+  /// path ignores it - a real image fills [profileOptionBox] minus
+  /// [profileOptionPhotoInset] instead.
   static const double profileOptionIcon = 32;
+
+  /// Neutral rim between the photo and the option box's frame line. The photo
+  /// is inset by this much and rounded to match, so the box's own fill shows
+  /// as a margin around it: a 1pt frame drawn straight onto photo pixels is
+  /// cream-on-photo and stops being visible.
+  static const double profileOptionPhotoInset = 4;
 
   /// Long-label max width - matches the 72px option box so the card never
   /// grows wider than its box. A wider label (e.g. "No Coriander/Cilantro")
   /// is what pushed a 4-per-row Wrap onto a new line; capping the label to
   /// the box width keeps every card the same size.
   static const double profileOptionLabelMaxWidth = 72;
+
+  /// Blur radius and vertical offset of the green halo under a SELECTED option
+  /// box (see [AppColors.profileOptionSelectedGlow]). Soft and shallow on
+  /// purpose: the border already states the selection, so this only has to lift
+  /// the box off the card behind it.
+  static const double profileOptionSelectedGlowBlur = 10;
+  static const double profileOptionSelectedGlowOffsetY = 2;
 
   /// Leading icon inside the Profile screen's list rows and email card.
   static const double profileListIconSize = 22;
