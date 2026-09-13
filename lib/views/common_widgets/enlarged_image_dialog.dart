@@ -7,6 +7,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
 import 'app_image.dart';
+import 'food_notice_banner.dart';
 
 /// Shows a photo full-screen over a dark scrim, pinch/drag to zoom.
 ///
@@ -22,6 +23,10 @@ import 'app_image.dart';
 ///
 /// [semanticLabel] describes the photo for screen readers.
 ///
+/// [noticeMessage] adds a banner under the photo - the yellow caution one by
+/// default (see [linkedFoodImageNotice]), or the green one when
+/// [noticeType] is [FoodNoticeType.provided].
+///
 /// RULE (view layer): presentation only. The caller decides WHEN this is
 /// appropriate (a tap on a thumbnail, see `RecognisedFoodCard.onImageTap`)
 /// and owns where the photo comes from.
@@ -30,6 +35,8 @@ Future<void> showEnlargedImage(
   required String semanticLabel,
   XFile? file,
   String? source,
+  String? noticeMessage,
+  FoodNoticeType noticeType = FoodNoticeType.caution,
 }) => showDialog<void>(
   context: context,
   barrierColor: AppColors.scrim,
@@ -39,15 +46,34 @@ Future<void> showEnlargedImage(
     child: Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        InteractiveViewer(
-          minScale: 1,
-          maxScale: 4,
-          child: Center(
-            child: _FullImage(
-              file: file,
-              source: source,
-              semanticLabel: semanticLabel,
-            ),
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Flexible(
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: Align(
+                    alignment: Alignment.center,
+                    heightFactor: 1,
+                    child: _FullImage(
+                      file: file,
+                      source: source,
+                      semanticLabel: semanticLabel,
+                    ),
+                  ),
+                ),
+              ),
+              if (noticeMessage != null) ...<Widget>[
+                const SizedBox(height: AppSpacing.md),
+                FoodNoticeBanner(
+                  message: noticeMessage,
+                  type: noticeType,
+                ),
+              ],
+            ],
           ),
         ),
         Positioned(
@@ -66,6 +92,34 @@ Future<void> showEnlargedImage(
       ],
     ),
   ),
+);
+
+const String linkedFoodImageNotice =
+    'For reference only — this photo is the local food image, not this '
+    "restaurant's own.";
+
+/// Shown when the enlarged photo really is the restaurant's own dish photo.
+const String restaurantProvidedImageNotice =
+    "Provided by the restaurant — this is the restaurant's own dish photo.";
+
+/// Opens a restaurant menu item's photo, labelled with where the picture came
+/// from: the restaurant's own dish photo (green) or the linked local-food
+/// catalogue image used as a stand-in (yellow, reference only).
+Future<void> showRestaurantItemImage(
+  BuildContext context, {
+  required String semanticLabel,
+  required String? source,
+  required bool fromLinkedFood,
+}) => showEnlargedImage(
+  context,
+  semanticLabel: semanticLabel,
+  source: source,
+  noticeMessage: fromLinkedFood
+      ? linkedFoodImageNotice
+      : restaurantProvidedImageNotice,
+  noticeType: fromLinkedFood
+      ? FoodNoticeType.caution
+      : FoodNoticeType.provided,
 );
 
 /// Wraps a photo so the tourist can open it full-screen: the [child] and the

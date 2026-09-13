@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../../app/theme/app_colors.dart';
-import '../../../app/theme/app_dimensions.dart';
+import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_dimensions.dart';
 
-enum FoodNoticeType { allergy, caution, degraded }
+enum FoodNoticeType { allergy, caution, degraded, provided }
 
 class FoodNoticeBanner extends StatelessWidget {
   const FoodNoticeBanner({
@@ -37,6 +37,13 @@ class FoodNoticeBanner extends StatelessWidget {
         AppColors.bannerCautionBackground,
         AppColors.bannerCautionText,
         Icons.warning_amber_rounded,
+      ),
+      // Positive confirmation (e.g. the photo really came from the restaurant
+      // itself). Green, the same banner family the app already uses.
+      FoodNoticeType.provided => (
+        AppColors.bannerInfoBackground,
+        AppColors.bannerInfoText,
+        Icons.verified_outlined,
       ),
     };
     return Material(
