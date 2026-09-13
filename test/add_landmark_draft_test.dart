@@ -117,7 +117,7 @@ void main() {
       // the Incomplete Submissions screen, not in the leave dialog.
       expect(vm.hasSavedDraft, isTrue);
       expect(vm.restaurantName, 'Kopitiam Ali');
-      expect(vm.restaurantPhone, '+60 12-345 6789');
+      expect(vm.restaurantPhone, '012-345 6789');
       expect(vm.restaurantAddress, '12 Jalan Makan');
       expect(vm.captureLocation.latitude, closeTo(3.1390, 0.00001));
       expect(vm.baseLocation.latitude, closeTo(3.1390, 0.00001));

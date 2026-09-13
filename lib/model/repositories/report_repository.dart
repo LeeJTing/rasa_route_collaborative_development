@@ -1,4 +1,5 @@
 import '../../domain_model/report_claim.dart';
+import '../../domain_model/tourist_location.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 
 /// Writes to the ONE shared `report` table (see the migrations that create and
@@ -49,17 +50,29 @@ class ReportRepository {
       'item_id': claim.itemId,
       'day': claim.day?.name,
       'payload': claim.payload,
+      // The report page's pin, on the address claim only (null everywhere
+      // else) - see `ReportClaim.latitude`.
+      'latitude': claim.latitude,
+      'longitude': claim.longitude,
+      // Whether the reporter was on site - only valid claims count.
+      'location_valid': claim.locationValid,
       'tourist_id': touristId,
     });
   }
 
   /// How many DISTINCT tourists have made the identical claim (same issue,
   /// same canonical payload) - the value the threshold is checked against.
+  ///
+  /// Only claims the on-site check verified count (`location_valid`).
   Future<int> countIdentical(ReportClaim claim) async {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableReport,
       columns: 'report_id',
-      eq: <String, Object?>{..._issueEq(claim), 'payload': claim.payload},
+      eq: <String, Object?>{
+        ..._issueEq(claim),
+        'payload': claim.payload,
+        'location_valid': true,
+      },
     );
     return rows.length;
   }
@@ -75,9 +88,33 @@ class ReportRepository {
     final List<Map<String, dynamic>> rows = await api.selectAll(
       APIManager.tableReport,
       columns: 'report_id',
-      eq: _issueEq(claim),
+      eq: <String, Object?>{..._issueEq(claim), 'location_valid': true},
     );
     return rows.length;
+  }
+
+  /// Every VALID pin recorded for [claim]'s identical group - the raw
+  /// material for the pin consensus (`ReportModerationRules`
+  /// `consensusLocation`), read at apply time because the rows are cleared
+  /// once the fix lands.
+  Future<List<TouristLocation>> locationsForIssue(ReportClaim claim) async {
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tableReport,
+      columns: 'latitude, longitude',
+      eq: <String, Object?>{
+        ..._issueEq(claim),
+        'payload': claim.payload,
+        'location_valid': true,
+      },
+    );
+    return <TouristLocation>[
+      for (final Map<String, dynamic> row in rows)
+        if (row['latitude'] is num && row['longitude'] is num)
+          TouristLocation(
+            latitude: (row['latitude'] as num).toDouble(),
+            longitude: (row['longitude'] as num).toDouble(),
+          ),
+    ];
   }
 
   /// Every claim payload recorded for [claim]'s issue (regardless of the

@@ -14,6 +14,7 @@ import '../data_models/restaurant_item_data_model.dart';
 import '../data_models/local_food_data_model.dart';
 import '../data_models/local_food_image_data_model.dart';
 import '../data_models/opening_hours_data_model.dart';
+import 'opening_hours_rows.dart';
 
 /// Supabase-backed restaurant catalogue used by Quick Mode.
 ///
@@ -382,6 +383,7 @@ class RestaurantRepository {
           final List<Map<String, dynamic>> rows = await api.selectAll(
             APIManager.tableRestaurantItem,
             columns: _itemSummaryColumns,
+            eq: const <String, Object?>{'is_removed': false},
             inFilter: <String, List<Object?>>{
               'restaurant_id': batch.cast<Object?>(),
             },
@@ -673,11 +675,26 @@ class RestaurantRepository {
     invalidate();
   }
 
-  /// 3 address: rewrites the restaurant's address to the reported value.
-  Future<void> updateRestaurantAddress(int restaurantId, String address) async {
+  /// 3 address: rewrites the restaurant's address to the reported value, and -
+  /// when the claim carried the report page's pin - the exact spot the tourist
+  /// pointed at. The address text is usually the OpenStreetMap wording for
+  /// that spot, which is approximate; the pin is what is exact, so it is
+  /// applied too (null keeps the restaurant's own coordinates).
+  Future<void> updateRestaurantAddress(
+    int restaurantId,
+    String address, {
+    double? latitude,
+    double? longitude,
+  }) async {
     await api.updateRow(
       APIManager.tableRestaurant,
-      <String, Object?>{'address': address},
+      <String, Object?>{
+        'address': address,
+        if (latitude != null && longitude != null) ...<String, Object?>{
+          'latitude': latitude,
+          'longitude': longitude,
+        },
+      },
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
     invalidate();
@@ -713,13 +730,40 @@ class RestaurantRepository {
   }
 
   /// 1 operating hours: replaces ONE weekday's stored rows with the reported
-  /// proposal (delete that day's rows, insert the proposed rows). Used when a
-  /// day's hours claim reaches its threshold - only that day is touched.
+  /// proposal (delete that day's rows - plus the tail it previously wrote
+  /// onto the next day - then insert the proposed rows, overnight tails
+  /// included). Used when a day's hours claim reaches its threshold - only
+  /// that day is touched.
   Future<void> replaceRestaurantOpeningHourDay(
     int restaurantId,
     Weekday day,
     List<OpeningHour> rows,
   ) async {
+    final List<Map<String, dynamic>> storedRows = await api.selectAll(
+      APIManager.tableOpeningHours,
+      columns:
+          'opening_hours_id, day, status, opening_time, closing_time, '
+          'landmark_id, restaurant_id',
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    final Map<Weekday, List<OpeningHour>> storedByDay =
+        <Weekday, List<OpeningHour>>{};
+    for (final OpeningHour hour in openingHoursFromRows(storedRows)) {
+      storedByDay.putIfAbsent(hour.day, () => <OpeningHour>[]).add(hour);
+    }
+
+    final OpeningHour? oldTail = OpeningHoursRows.tailOf(storedByDay, day);
+    if (oldTail != null) {
+      await api.deleteRows(
+        APIManager.tableOpeningHours,
+        eq: <String, Object?>{
+          'restaurant_id': restaurantId,
+          'day': _dayName(OpeningHoursRows.dayAfter(day)),
+          'opening_time': '00:00:00',
+          'closing_time': _formatTime(oldTail.closesAt!),
+        },
+      );
+    }
     await api.deleteRows(
       APIManager.tableOpeningHours,
       eq: <String, Object?>{
@@ -730,6 +774,15 @@ class RestaurantRepository {
     if (rows.isNotEmpty) {
       await _insertOpeningHours(restaurantId, rows);
     }
+    // Restore the tail the PREVIOUS day wrote onto this day's morning - the
+    // delete above removed it with the day's own rows.
+    final OpeningHour? incomingTail = OpeningHoursRows.tailOf(
+      storedByDay,
+      OpeningHoursRows.dayBefore(day),
+    );
+    if (incomingTail != null) {
+      await _insertOpeningHours(restaurantId, <OpeningHour>[incomingTail]);
+    }
     invalidate();
   }
 
@@ -739,20 +792,24 @@ class RestaurantRepository {
   ) async {
     int nextId = await _nextOpeningHoursId();
     for (final OpeningHour hour in hours) {
-      final bool isOpen = hour.status == DayStatus.open;
-      await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
-        'opening_hours_id': nextId++,
-        'day': _dayName(hour.day),
-        'status': hour.status.name,
-        'opening_time': isOpen && hour.opensAt != null
-            ? _formatTime(hour.opensAt!)
-            : null,
-        'closing_time': isOpen && hour.closesAt != null
-            ? _formatTime(hour.closesAt!)
-            : null,
-        'landmark_id': null,
-        'restaurant_id': restaurantId,
-      });
+      // An overnight row is split into its end-of-day row plus the next-day
+      // tail - see `OpeningHoursRows` for the convention.
+      for (final OpeningHour stored in OpeningHoursRows.splitForStorage(hour)) {
+        final bool isOpen = stored.status == DayStatus.open;
+        await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
+          'opening_hours_id': nextId++,
+          'day': _dayName(stored.day),
+          'status': stored.status.name,
+          'opening_time': isOpen && stored.opensAt != null
+              ? _formatTime(stored.opensAt!)
+              : null,
+          'closing_time': isOpen && stored.closesAt != null
+              ? _formatTime(stored.closesAt!)
+              : null,
+          'landmark_id': null,
+          'restaurant_id': restaurantId,
+        });
+      }
     }
   }
 
@@ -825,14 +882,15 @@ class RestaurantRepository {
     for (final Map<String, dynamic> row in rows) {
       final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
       final Weekday? day = _weekday(data.day);
-      final DayStatus? status = _dayStatus(data.status);
-      if (day == null || status == null) continue;
+      final DayStatus? storedStatus = _dayStatus(data.status);
+      if (day == null || storedStatus == null) continue;
       int? opensAt = _minutesOfDay(data.openingTime);
       int? closesAt = _minutesOfDay(data.closingTime);
-      if (status == DayStatus.open && opensAt == null && closesAt == null) {
-        opensAt = 0;
-        closesAt = 1440;
-      } else if (status == DayStatus.open &&
+      final DayStatus status =
+          storedStatus == DayStatus.open && opensAt == null && closesAt == null
+          ? DayStatus.unknown
+          : storedStatus;
+      if (status == DayStatus.open &&
           opensAt == 0 &&
           data.closingTime?.startsWith('23:59') == true) {
         closesAt = 1440;
@@ -847,12 +905,17 @@ class RestaurantRepository {
         ),
       );
     }
-    hours.sort((OpeningHour a, OpeningHour b) {
-      final int dayOrder = a.day.index.compareTo(b.day.index);
-      if (dayOrder != 0) return dayOrder;
-      return (a.opensAt ?? -1).compareTo(b.opensAt ?? -1);
-    });
-    return List<OpeningHour>.unmodifiable(hours);
+    // Overnight tails fold back into the day that owns them, so the detail
+    // page shows "Monday 10:00 AM - 2:00 AM" instead of a separate Tuesday
+    // 12:00 AM - 2:00 AM row (see `OpeningHoursRows`).
+    final List<OpeningHour> merged = OpeningHoursRows.mergeTails(hours);
+    final List<OpeningHour> sorted = List<OpeningHour>.of(merged)
+      ..sort((OpeningHour a, OpeningHour b) {
+        final int dayOrder = a.day.index.compareTo(b.day.index);
+        if (dayOrder != 0) return dayOrder;
+        return (a.opensAt ?? -1).compareTo(b.opensAt ?? -1);
+      });
+    return List<OpeningHour>.unmodifiable(sorted);
   }
 
   Weekday? _weekday(String value) {
@@ -936,7 +999,8 @@ class RestaurantRepository {
       foodName: data.restaurantItemName.isEmpty
           ? localFood?.foodName ?? 'Local food'
           : data.restaurantItemName,
-      ingredients: data.ingredients ?? localFood?.description,
+      description: localFood?.description,
+      ingredients: data.ingredients,
       imageUrl: api.resolveImageUrl(
         imageName,
         bucket: APIManager.storageBucketFoodImages,
@@ -987,6 +1051,7 @@ class RestaurantRepository {
   List<RestaurantItem> _deduplicateRestaurantItems(List<RestaurantItem> items) {
     final Map<String, RestaurantItem> byMenuEntry = <String, RestaurantItem>{};
     for (final RestaurantItem item in items) {
+      if (item.isRemoved) continue;
       final String key = <String>[
         item.restaurantId.toString(),
         _normaliseMenuEntryName(item.foodName),

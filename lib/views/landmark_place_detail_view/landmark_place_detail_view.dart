@@ -7,9 +7,9 @@ import '../../app/routing/app_routes.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
-import '../../domain_model/opening_hour.dart';
 import '../../domain_model/report_category.dart';
 import '../../domain_model/submitted_landmark.dart';
+import '../../domain_model/tourist_location.dart';
 import '../../view_models/dashboard_view_model.dart' show MapSelectionHandoff;
 import '../../view_models/landmark_place_detail_view_model.dart';
 import '../../view_models/report_place_view_model.dart';
@@ -19,6 +19,8 @@ import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';
 import '../common_widgets/food_image_fallback.dart';
 import '../common_widgets/landmark_item_formatting.dart';
+import '../common_widgets/place_menu_section.dart';
+import 'widgets/landmark_information_section.dart';
 
 /// Full details of a tourist-submitted landmark (A11-4 "View Landmark"),
 /// reached from the dashboard map's pin sheet. Shows the landmark's photo,
@@ -62,14 +64,21 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
 
   /// Opens the full-screen report page (shared by restaurants and landmarks).
   /// The place rides [ReportPlaceHandoff] - routes pass no arguments (see
-  /// `AppNavigator` / the codebase's handoff convention). If the report froze
-  /// or removed the landmark, the page pops `true` and this screen leaves too
-  /// so the now-hidden pin is no longer shown.
+  /// `AppNavigator` / the codebase's handoff convention). Its coordinates ride
+  /// along too: the address report's map opens on the spot the app currently
+  /// places this landmark. If the report froze or removed the landmark, the
+  /// page pops `true` and this screen leaves too so the now-hidden pin is no
+  /// longer shown.
   Future<void> _openReport(SubmittedLandmark landmark) async {
+    final double? latitude = landmark.latitude;
+    final double? longitude = landmark.longitude;
     ReportPlaceHandoff()
       ..pendingKind = ReportPlaceKind.landmark
       ..pendingPlaceId = landmark.id
-      ..pendingName = landmark.name;
+      ..pendingName = landmark.name
+      ..pendingLocation = latitude == null || longitude == null
+          ? TouristLocation.unknown
+          : TouristLocation(latitude: latitude, longitude: longitude);
     final bool? hidPlace = await AppNavigator.push<bool>(AppRoutes.reportPlace);
     if (!mounted || hidPlace != true) return;
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
@@ -79,44 +88,84 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<LandmarkPlaceDetailViewModel>.value(
       value: _viewModel,
-      child: Scaffold(
-        appBar: const AppTopBar(title: 'Landmark'),
-        body: SafeArea(
-          child: Consumer<LandmarkPlaceDetailViewModel>(
-            builder:
-                (
-                  BuildContext context,
-                  LandmarkPlaceDetailViewModel viewModel,
-                  Widget? _,
-                ) {
-                  if (viewModel.isBusy) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (viewModel.hasError) {
-                    return AsyncMessage(
-                      icon: Icons.error_outline,
-                      title: "Couldn't load this landmark",
-                      message: viewModel.errorMessage,
-                      actionLabel: 'Retry',
-                      onAction: viewModel.load,
-                    );
-                  }
-                  final SubmittedLandmark? landmark = viewModel.landmark;
-                  if (landmark == null) {
-                    return const AsyncMessage(
-                      icon: Icons.location_off_outlined,
-                      title: 'No landmark to show',
-                    );
-                  }
-                  return _LandmarkDetails(
-                    landmark: landmark,
-                    distanceMetres: viewModel.landmarkDistanceMetres,
-                    onReport: () => _openReport(landmark),
-                  );
-                },
-          ),
-        ),
+      // The bar lives INSIDE the consumer so it can carry the landmark's own
+      // name, exactly like `RestaurantDetailView` does - a bare "Landmark"
+      // title told the tourist nothing about which place they had opened.
+      // The placeholder shows until the fetch lands.
+      child: Consumer<LandmarkPlaceDetailViewModel>(
+        builder:
+            (
+              BuildContext context,
+              LandmarkPlaceDetailViewModel viewModel,
+              Widget? _,
+            ) {
+              final SubmittedLandmark? landmark = viewModel.landmark;
+              return Scaffold(
+                appBar: AppTopBar(
+                  title: landmark == null || landmark.name.trim().isEmpty
+                      ? 'Landmark Details'
+                      : landmark.name,
+                ),
+                body: SafeArea(child: _body(viewModel, landmark)),
+                // Pinned to the bottom of the screen, exactly like the
+                // catalogue restaurant page's "Report Restaurant" bar - the
+                // tourist must not have to scroll past every dish to find the
+                // way to flag a wrong pin. Only once there is something to
+                // report.
+                bottomNavigationBar: landmark == null
+                    ? null
+                    : SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.lg,
+                            AppSpacing.sm,
+                            AppSpacing.lg,
+                            AppSpacing.md,
+                          ),
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openReport(landmark),
+                            icon: const Icon(
+                              Icons.flag_outlined,
+                              color: AppColors.error,
+                            ),
+                            label: const Text('Report Landmark'),
+                          ),
+                        ),
+                      ),
+              );
+            },
       ),
+    );
+  }
+
+  /// The body's states: loading, failed, nothing-to-show, or the details.
+  /// (The app bar above shows the name as soon as [landmark] exists.)
+  Widget _body(
+    LandmarkPlaceDetailViewModel viewModel,
+    SubmittedLandmark? landmark,
+  ) {
+    if (viewModel.isBusy) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (viewModel.hasError) {
+      return AsyncMessage(
+        icon: Icons.error_outline,
+        title: "Couldn't load this landmark",
+        message: viewModel.errorMessage,
+        actionLabel: 'Retry',
+        onAction: viewModel.load,
+      );
+    }
+    if (landmark == null) {
+      return const AsyncMessage(
+        icon: Icons.location_off_outlined,
+        title: 'No landmark to show',
+      );
+    }
+    return _LandmarkDetails(
+      landmark: landmark,
+      distanceMetres: viewModel.landmarkDistanceMetres,
     );
   }
 }
@@ -127,13 +176,14 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
 /// information card holding its contact details and opening hours, and its
 /// dishes. Two deliberate differences: no rating/reviews (tourists do not
 /// rate submitted landmarks - the header row shows the DISTANCE instead),
-/// and the header keeps its "Open Google Maps" link, because getting to a
-/// submitted pin is the main reason to open this page.
+/// and no separate "Open Google Maps" link of its own in the header: the
+/// address row in the information card IS the way to the map (it falls back
+/// to the coordinates), exactly like the restaurant page (user report,
+/// 2026-09-13).
 class _LandmarkDetails extends StatelessWidget {
   const _LandmarkDetails({
     required this.landmark,
     required this.distanceMetres,
-    required this.onReport,
   });
 
   final SubmittedLandmark landmark;
@@ -141,10 +191,6 @@ class _LandmarkDetails extends StatelessWidget {
   /// Straight-line metres from the tourist, or null when unknown - see
   /// `LandmarkPlaceDetailViewModel.landmarkDistanceMetres`.
   final double? distanceMetres;
-
-  /// Opens the report sheet - wired in `_LandmarkPlaceDetailViewState` so it
-  /// can reach the ViewModel's `submitReport` and show the confirmation.
-  final VoidCallback onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -160,37 +206,31 @@ class _LandmarkDetails extends StatelessWidget {
       children: <Widget>[
         _LandmarkHeader(landmark: landmark, distanceMetres: distanceMetres),
         const SizedBox(height: AppSpacing.xl),
-        _LandmarkInformationSection(landmark: landmark),
-        const SizedBox(height: AppSpacing.xl),
-        Text(
-          'Dishes',
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(color: AppColors.accentBrown),
+        LandmarkInformationSection(
+          landmark: landmark,
+          // Same actions the restaurant page gives the same rows: the address
+          // opens Google Maps (at the landmark's coordinates - that is what a
+          // submitted pin IS - else searched by its address text), the phone
+          // the dialler, the website the browser.
+          onAddressTap: () => _openMapsQuery(context, _mapsQueryFor(landmark)),
+          onPhoneTap: () => _openPhone(context, landmark.phone),
+          onWebsiteTap: () => _openWebsite(context, landmark.website),
         ),
-        const SizedBox(height: AppSpacing.md),
-        if (landmark.items.isEmpty)
-          Text(
-            'No dishes recorded for this landmark yet.',
-            style: AppTextStyles.bodyMedium.copyWith(
-              color: AppColors.textSecondary,
-            ),
-          )
-        else
-          for (final LandmarkItem item in landmark.items) ...<Widget>[
-            // Display-only, exactly like the restaurant page's menu rows -
-            // there is no way into a dish's details from here anymore.
-            _DishCard(item: item),
-            const SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: AppSpacing.xl),
+        // The SAME section the catalogue's restaurant page shows, wording and
+        // collapse included - only the rows differ, because they read a
+        // different model (user request: "the landmark should display the
+        // same way").
+        PlaceMenuSection(
+          itemCount: landmark.items.length,
+          emptyMessage: 'No dishes recorded for this landmark yet.',
+          children: <Widget>[
+            for (final LandmarkItem item in landmark.items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                child: _DishCard(item: item),
+              ),
           ],
-        const SizedBox(height: AppSpacing.lg),
-        // Report affordance - mirrors the catalogue restaurant detail's
-        // "Report Restaurant" button: lets a tourist flag an incorrect
-        // submitted-landmark pin. UI-only for now, like the restaurant one.
-        OutlinedButton.icon(
-          onPressed: onReport,
-          icon: const Icon(Icons.flag_outlined, color: AppColors.error),
-          label: const Text('Report Landmark'),
         ),
       ],
     );
@@ -207,6 +247,12 @@ class _LandmarkHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The category MOST of its dishes carry (`displayCategory`), worded the
+    // way the catalogue's own places read theirs ("Chinese restaurant"), and
+    // shown as the restaurant page shows it: one chip under the name. No
+    // fallback text when there is genuinely nothing - "Landmark submitted by
+    // a tourist" said nothing about the place (user report, 2026-09-13).
+    final String category = landmark.displayCategoryLabel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -217,22 +263,15 @@ class _LandmarkHeader extends StatelessWidget {
           style: Theme.of(context).textTheme.headlineSmall,
         ),
         const SizedBox(height: AppSpacing.sm),
-        _MetaRow(landmark: landmark, distanceMetres: distanceMetres),
+        _MetaRow(distanceMetres: distanceMetres),
         const SizedBox(height: AppSpacing.md),
-        if (landmark.category.isNotEmpty)
+        if (category.isNotEmpty)
           Wrap(
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
             children: <Widget>[
-              AppTagChip(label: landmark.category, style: AppTagStyle.category),
+              AppTagChip(label: category, style: AppTagStyle.category),
             ],
-          )
-        else
-          Text(
-            'Landmark submitted by a tourist',
-            style: AppTextStyles.bodySmall.copyWith(
-              color: AppColors.textSecondary,
-            ),
           ),
         if (landmark.status == LandmarkStatus.frozen) ...<Widget>[
           const SizedBox(height: AppSpacing.sm),
@@ -292,16 +331,22 @@ class _Photo extends StatelessWidget {
   );
 }
 
-/// Distance + Google Maps line under the header, laid out like the
-/// restaurant detail's row: the "Open Google Maps" link sits on the LEFT,
-/// and the location icon + how far away the landmark is on the RIGHT - the
-/// same side and icon+text style the restaurant uses for its distance. No
-/// rating/reviews (a tourist cannot rate a submitted landmark) and no
-/// report count (moderation data the tourist does not need to see).
+/// The distance line under the header, left-aligned with the name and the
+/// category chip below it (same icon + text style the restaurant page uses
+/// for its own distance). No rating/reviews (a tourist cannot rate a
+/// submitted landmark) and no report count (moderation data the tourist
+/// does not need to see).
+///
+/// It carries no "Open Google Maps" link of its own any more - the address
+/// row in the information card below opens the map (at the landmark's
+/// coordinates, or searched by its address), so a second link to the same
+/// destination only crowded the header. While that link existed it filled
+/// the left half of this row and the distance sat on the right; with the link
+/// gone the right-aligned distance left an empty band above the chip, so the
+/// distance moved in line with the text above and below it (user report:
+/// "the Category have a gap with whatever is above it").
 class _MetaRow extends StatelessWidget {
-  const _MetaRow({required this.landmark, required this.distanceMetres});
-
-  final SubmittedLandmark landmark;
+  const _MetaRow({required this.distanceMetres});
 
   /// Straight-line metres from the tourist, or null when there is no fix or
   /// the landmark has no coordinates - see
@@ -309,48 +354,14 @@ class _MetaRow extends StatelessWidget {
   final double? distanceMetres;
 
   @override
-  Widget build(BuildContext context) {
-    final double? lat = landmark.latitude;
-    final double? lon = landmark.longitude;
-    final bool hasLocation = lat != null && lon != null;
-    return Row(
-      children: <Widget>[
-        if (hasLocation)
-          InkWell(
-            borderRadius: BorderRadius.circular(AppRadius.sm),
-            onTap: () => _openInGoogleMaps(context, lat, lon),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.xs,
-                vertical: 2,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  const Icon(
-                    Icons.near_me,
-                    size: AppSizes.inlineNoticeIconSize,
-                    color: AppColors.primary,
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Text(
-                    'Open Google Maps',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        const Spacer(),
-        const Icon(Icons.location_on_outlined),
-        const SizedBox(width: AppSpacing.xs),
-        Text(_distanceLabel(distanceMetres)),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: <Widget>[
+      const Icon(Icons.location_on_outlined),
+      const SizedBox(width: AppSpacing.xs),
+      Text(_distanceLabel(distanceMetres)),
+    ],
+  );
 
   /// Same wording and format as the restaurant header's distance label
   /// (`RestaurantDetailHeader._distanceLabel`), so the two place pages read
@@ -362,165 +373,87 @@ class _MetaRow extends StatelessWidget {
   }
 }
 
-/// Opens Google Maps centred on ([lat], [lon]) via the universal web link
-/// (`google.com/maps/search`), which opens the Google Maps app if it's
-/// installed, or falls back to a browser otherwise - the same behaviour on
-/// Android and iOS without needing platform-specific URI schemes.
-Future<void> _openInGoogleMaps(
+/// The Google Maps query for a landmark: its coordinates when known (that is
+/// what a submitted pin IS), its address text otherwise.
+String _mapsQueryFor(SubmittedLandmark landmark) {
+  final double? latitude = landmark.latitude;
+  final double? longitude = landmark.longitude;
+  if (latitude != null && longitude != null) return '$latitude,$longitude';
+  return landmark.address.trim();
+}
+
+/// Opens a Google Maps search ([query] = "lat,lon" or an address) via the
+/// universal web link (`google.com/maps/search`), which opens the Google Maps
+/// app if it's installed, or falls back to a browser otherwise - the same
+/// behaviour on Android and iOS without needing platform-specific URI
+/// schemes.
+Future<void> _openMapsQuery(BuildContext context, String query) => _launchUri(
+  context,
+  Uri.https('www.google.com', '/maps/search/', <String, String>{
+    'api': '1',
+    'query': query,
+  }),
+  'Unable to open Google Maps.',
+);
+
+/// Opens the dialler on [phone] (a `tel:` link).
+Future<void> _openPhone(BuildContext context, String phone) => _launchUri(
+  context,
+  Uri(scheme: 'tel', path: phone.trim()),
+  'Unable to open the phone app.',
+);
+
+/// Opens a website link, adding the scheme when the stored value has none -
+/// the same normalisation the restaurant page applies.
+Future<void> _openWebsite(BuildContext context, String rawWebsite) {
+  final String value = rawWebsite.trim();
+  final Uri? parsed = Uri.tryParse(value);
+  final Uri? uri =
+      parsed != null && (parsed.scheme == 'http' || parsed.scheme == 'https')
+      ? parsed
+      : Uri.tryParse('https://$value');
+  if (uri == null || uri.host.isEmpty) {
+    _showLaunchFailure(context, 'This landmark website is invalid.');
+    return Future<void>.value();
+  }
+  return _launchUri(context, uri, 'Unable to open the website.');
+}
+
+/// One launcher for every external link on this page - the "could not open"
+/// snackbar lives here, so the address, phone and website rows all fail the
+/// same way.
+Future<void> _launchUri(
   BuildContext context,
-  double lat,
-  double lon,
+  Uri uri,
+  String failureMessage,
 ) async {
-  final Uri uri = Uri.parse(
-    'https://www.google.com/maps/search/?api=1&query=$lat,$lon',
-  );
-  final bool launched = await launchUrl(
-    uri,
-    mode: LaunchMode.externalApplication,
-  );
-  if (!launched && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Unable to open Google Maps.')),
+  try {
+    final bool launched = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
     );
-  }
-}
-
-/// The landmark's contact details and opening hours in ONE card, matching
-/// the catalogue restaurant detail's "Restaurant Information" card (white
-/// surface, bordered, section headings in accent brown) - the two place
-/// pages must present their facts the same way. Absent fields degrade to
-/// the same "unavailable" wording the restaurant card uses rather than
-/// vanishing.
-class _LandmarkInformationSection extends StatelessWidget {
-  const _LandmarkInformationSection({required this.landmark});
-
-  final SubmittedLandmark landmark;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: AppSpacing.cardPadding,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border.all(color: AppColors.cardBorder),
-        borderRadius: AppRadius.cardRadius,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text('Landmark Information', style: _sectionStyle(context)),
-          const SizedBox(height: AppSpacing.md),
-          _InformationRow(
-            icon: Icons.location_on_outlined,
-            label: landmark.address.isEmpty
-                ? 'Address unavailable'
-                : landmark.address,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          _InformationRow(
-            icon: Icons.phone_outlined,
-            label: landmark.phone.isEmpty
-                ? 'Phone unavailable'
-                : landmark.phone,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          _InformationRow(
-            icon: Icons.language_outlined,
-            label: landmark.website.isEmpty
-                ? 'Website unavailable'
-                : landmark.website,
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          Text('Opening Hours', style: _sectionStyle(context)),
-          const SizedBox(height: AppSpacing.md),
-          _OpeningHoursList(hours: landmark.openingHours),
-        ],
-      ),
-    );
-  }
-
-  TextStyle? _sectionStyle(BuildContext context) => Theme.of(
-    context,
-  ).textTheme.titleMedium?.copyWith(color: AppColors.accentBrown);
-}
-
-class _InformationRow extends StatelessWidget {
-  const _InformationRow({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Icon(icon, color: AppColors.accentBrown),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(child: Text(label)),
-      ],
-    );
-  }
-}
-
-/// The landmark's recorded hours, one bare row per day (day left, time
-/// right) exactly like the restaurant detail's opening-hours table - the
-/// enclosing [_LandmarkInformationSection] card is what frames them now.
-/// Honours all three [DayStatus] states (matching the add-landmark form's
-/// wording): an Open row shows its time range, a day recorded as Unknown
-/// reads "Hours not known" - never "Closed" - and only a day the submitter
-/// confirmed closed reads "Closed". The app does not tell a tourist a place
-/// is shut when it does not know (the same rule the map's "Hours unknown"
-/// label follows).
-class _OpeningHoursList extends StatelessWidget {
-  const _OpeningHoursList({required this.hours});
-
-  final List<OpeningHour> hours;
-
-  @override
-  Widget build(BuildContext context) {
-    if (hours.isEmpty) {
-      return Text(
-        'Opening hours are not available yet.',
-        style: AppTextStyles.bodyMedium.copyWith(
-          color: AppColors.textSecondary,
-        ),
-      );
+    if (!launched && context.mounted) {
+      _showLaunchFailure(context, failureMessage);
     }
-    return Column(
-      children: <Widget>[
-        for (final OpeningHour hour in hours)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Row(
-              children: <Widget>[
-                Expanded(child: Text(_dayName(hour.day))),
-                Text(_hoursLabel(hour)),
-              ],
-            ),
-          ),
-      ],
-    );
+  } catch (_) {
+    if (context.mounted) _showLaunchFailure(context, failureMessage);
   }
-
-  String _hoursLabel(OpeningHour hour) => switch (hour.status) {
-    DayStatus.open when hour.opensAt != null && hour.closesAt != null =>
-      '${_clock(hour.opensAt!)} - ${_clock(hour.closesAt!)}',
-    DayStatus.unknown => 'Hours not known',
-    _ => 'Closed',
-  };
 }
 
-/// One dish attached to the landmark - presented exactly as the catalogue
-/// restaurant detail's menu rows are (square photo, dish name, category,
-/// price in rust) and, like those rows, NOT tappable: the restaurant page
-/// offers no way into a dish's details either, so the two place pages
-/// present their dishes identically. The NAME shown is the VARIANT the
-/// tourist actually photographed / typed ("Cendol Jagung") when one was
-/// recorded - the landmark lists what was captured - falling back to the
-/// dictionary dish (the `local_food` row it links to). Origin, cooking
-/// style, cultural background, meal type and the description are not shown
+void _showLaunchFailure(BuildContext context, String message) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+}
+
+/// One dish attached to the landmark - the SAME row the catalogue restaurant
+/// detail's menu shows (square photo, dish name, a two-line description when
+/// one was recorded, the food category, price in rust) and, like those rows,
+/// NOT tappable: the restaurant page offers no way into a dish's details
+/// either, so the two place pages present their dishes identically. The NAME
+/// shown is the VARIANT the tourist actually photographed / typed ("Cendol
+/// Jagung") when one was recorded - the landmark lists what was captured -
+/// falling back to the dictionary dish (the `local_food` row it links to).
+/// Origin, cooking style, cultural background and meal type are not shown
 /// here.
 class _DishCard extends StatelessWidget {
   const _DishCard({required this.item});
@@ -533,6 +466,7 @@ class _DishCard extends StatelessWidget {
     final String name = item.displayName.isEmpty
         ? 'Unnamed dish'
         : item.displayName;
+    final String description = item.description.trim();
     return Container(
       padding: AppSpacing.cardPadding,
       decoration: BoxDecoration(
@@ -557,6 +491,17 @@ class _DishCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(name, style: Theme.of(context).textTheme.titleSmall),
+                if (description.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
                 if (item.foodCategory.isNotEmpty)
                   Text(
                     item.foodCategory,
@@ -576,25 +521,4 @@ class _DishCard extends StatelessWidget {
       ),
     );
   }
-}
-
-String _dayName(Weekday day) => switch (day) {
-  Weekday.monday => 'Monday',
-  Weekday.tuesday => 'Tuesday',
-  Weekday.wednesday => 'Wednesday',
-  Weekday.thursday => 'Thursday',
-  Weekday.friday => 'Friday',
-  Weekday.saturday => 'Saturday',
-  Weekday.sunday => 'Sunday',
-};
-
-/// Minutes since midnight -> "1:30 AM" - the same clock format the
-/// restaurant detail's opening-hours table uses, so the two place pages do
-/// not disagree about how a time reads.
-String _clock(int minutes) {
-  final int h = minutes ~/ 60;
-  final int m = minutes % 60;
-  final String period = h >= 12 ? 'PM' : 'AM';
-  final int displayHour = h % 12 == 0 ? 12 : h % 12;
-  return '$displayHour:${m.toString().padLeft(2, '0')} $period';
 }

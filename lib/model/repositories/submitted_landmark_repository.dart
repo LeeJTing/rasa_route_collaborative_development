@@ -8,6 +8,7 @@ import '../../shared_client/api_manager/api_manager.dart';
 import '../data_models/landmark_item_data_model.dart';
 import '../data_models/opening_hours_data_model.dart';
 import '../data_models/submitted_landmark_data_model.dart';
+import 'opening_hours_rows.dart';
 
 /// Tourist-contributed landmarks and the dishes attached to them.
 ///
@@ -158,14 +159,17 @@ class SubmittedLandmarkRepository {
   /// an earlier one stored (e.g. Tue-Fri 09:00-14:00 survive a second
   /// submission that only changes Monday).
   ///
-  /// Each changed day is replaced row-for-row: the stored rows for that day
-  /// are deleted and the submitted rows inserted (a day can carry several
-  /// rows when Open - one per range). See [changedOpeningHourDays] for the
-  /// pure per-day decision. Best-effort: a failure here is swallowed by the
-  /// merge caller. Requires the `opening_hours_delete` RLS policy (see
-  /// migration 20260910000000_grant_opening_hours_landmark_delete.sql) - it
-  /// only allows deleting rows that belong to a submitted landmark, never
-  /// curated restaurant hours.
+  /// Each changed day is replaced row-for-row, OVERNIGHT TAILS INCLUDED (see
+  /// `OpeningHoursRows`): the day's rows AND the tail it previously wrote
+  /// onto the next day are deleted first, the new rows are inserted (an
+  /// overnight row splits into end-of-day + next-day tail), and a tail the
+  /// PREVIOUS day wrote onto this day's morning is restored when that day is
+  /// not itself being replaced. See [changedOpeningHourDays] for the pure
+  /// per-day decision. Best-effort: a failure here is swallowed by the merge
+  /// caller. Requires the `opening_hours_delete` RLS policy (see migration
+  /// 20260910000000_grant_opening_hours_landmark_delete.sql) - it only allows
+  /// deleting rows that belong to a submitted landmark, never curated
+  /// restaurant hours.
   Future<void> updateOpeningHoursOnMerge(
     int landmarkId,
     Map<Weekday, List<OpeningHour>> submitted,
@@ -177,28 +181,85 @@ class SubmittedLandmarkRepository {
           'landmark_id, restaurant_id',
       eq: <String, Object?>{'landmark_id': landmarkId},
     );
-    final Map<Weekday, List<OpeningHour>> storedByDay =
-        <Weekday, List<OpeningHour>>{};
-    for (final Map<String, dynamic> row in storedRows) {
-      final OpeningHour? hour = _toOpeningHour(row);
-      if (hour == null) continue;
-      storedByDay.putIfAbsent(hour.day, () => <OpeningHour>[]).add(hour);
-    }
+    final Map<Weekday, List<OpeningHour>> storedByDay = _mergedByDay(
+      storedRows,
+    );
 
     final Set<Weekday> changedDays = changedOpeningHourDays(
       storedByDay: storedByDay,
       submitted: submitted,
     );
     if (changedDays.isEmpty) return;
+
+    // Phase 1: delete each changed day's rows AND the tail it previously
+    // wrote onto the next day - before any insert, so a day's fresh tail can
+    // never be removed by the next day's own replacement.
     for (final Weekday day in changedDays) {
-      await api.deleteRows(
-        APIManager.tableOpeningHours,
-        eq: <String, Object?>{'landmark_id': landmarkId, 'day': _dayName(day)},
-      );
+      await _deleteOpeningHourDay(landmarkId, day, storedByDay);
+    }
+
+    // Phase 2: write the new rows (overnight ones split - see
+    // `_insertOpeningHours`).
+    for (final Weekday day in changedDays) {
       final List<OpeningHour> rows = submitted[day] ?? const <OpeningHour>[];
       if (rows.isEmpty) continue;
       await _insertOpeningHours(landmarkId, rows);
     }
+
+    // Phase 3: deleting a day's rows also removed the tail the PREVIOUS day
+    // wrote onto its morning - put it back unless that day is itself being
+    // rewritten (its phase-2 insert already wrote the new tail).
+    for (final Weekday day in changedDays) {
+      final Weekday previous = OpeningHoursRows.dayBefore(day);
+      if (changedDays.contains(previous)) continue;
+      final OpeningHour? tail = OpeningHoursRows.tailOf(storedByDay, previous);
+      if (tail != null) {
+        await _insertOpeningHours(landmarkId, <OpeningHour>[tail]);
+      }
+    }
+  }
+
+  /// One weekday's rows in the MERGED view (tails folded into the day that
+  /// owns them - see `OpeningHoursRows.mergeTails`), keyed by day.
+  Map<Weekday, List<OpeningHour>> _mergedByDay(
+    List<Map<String, dynamic>> rows,
+  ) {
+    final List<OpeningHour> merged = OpeningHoursRows.mergeTails(<OpeningHour>[
+      for (final Map<String, dynamic> row in rows)
+        if (_toOpeningHour(row) case final OpeningHour hour) hour,
+    ]);
+    final Map<Weekday, List<OpeningHour>> byDay =
+        <Weekday, List<OpeningHour>>{};
+    for (final OpeningHour hour in merged) {
+      byDay.putIfAbsent(hour.day, () => <OpeningHour>[]).add(hour);
+    }
+    return byDay;
+  }
+
+  /// Deletes one weekday's stored rows AND the tail row that day previously
+  /// wrote onto the NEXT day (matched by value - the tail row's id is
+  /// deliberately not carried on merged rows; see `OpeningHoursRows`).
+  Future<void> _deleteOpeningHourDay(
+    int landmarkId,
+    Weekday day,
+    Map<Weekday, List<OpeningHour>> storedByDay,
+  ) async {
+    final OpeningHour? oldTail = OpeningHoursRows.tailOf(storedByDay, day);
+    if (oldTail != null) {
+      await api.deleteRows(
+        APIManager.tableOpeningHours,
+        eq: <String, Object?>{
+          'landmark_id': landmarkId,
+          'day': _dayName(OpeningHoursRows.dayAfter(day)),
+          'opening_time': '00:00:00',
+          'closing_time': _formatTime(oldTail.closesAt!),
+        },
+      );
+    }
+    await api.deleteRows(
+      APIManager.tableOpeningHours,
+      eq: <String, Object?>{'landmark_id': landmarkId, 'day': _dayName(day)},
+    );
   }
 
   /// Pure per-day merge decision for [updateOpeningHoursOnMerge]: given the
@@ -412,11 +473,26 @@ class SubmittedLandmarkRepository {
     );
   }
 
-  /// 3 address: rewrites the landmark's address to the reported value.
-  Future<void> updateLandmarkAddress(int landmarkId, String address) async {
+  /// 3 address: rewrites the landmark's address to the reported value, and -
+  /// when the claim carried the report page's pin - the exact spot the tourist
+  /// pointed at. The address text is usually the OpenStreetMap wording for
+  /// that spot, which is approximate; the pin is what is exact, so it is
+  /// applied too (null keeps the landmark's own coordinates).
+  Future<void> updateLandmarkAddress(
+    int landmarkId,
+    String address, {
+    double? latitude,
+    double? longitude,
+  }) async {
     await api.updateRow(
       APIManager.tableSubmittedLandmark,
-      <String, Object?>{'address': address},
+      <String, Object?>{
+        'address': address,
+        if (latitude != null && longitude != null) ...<String, Object?>{
+          'latitude': latitude,
+          'longitude': longitude,
+        },
+      },
       eq: <String, Object?>{'landmark_id': landmarkId},
     );
   }
@@ -446,19 +522,38 @@ class SubmittedLandmarkRepository {
   }
 
   /// 1 operating hours: replaces ONE weekday's stored rows with the reported
-  /// proposal (delete that day's rows, insert the proposed rows). Used when a
-  /// day's hours claim reaches its threshold - only that day is touched.
+  /// proposal (delete that day's rows - plus the tail it previously wrote
+  /// onto the next day - then insert the proposed rows, overnight tails
+  /// included). Used when a day's hours claim reaches its threshold - only
+  /// that day is touched; see `_deleteOpeningHourDay`.
   Future<void> replaceLandmarkOpeningHourDay(
     int landmarkId,
     Weekday day,
     List<OpeningHour> rows,
   ) async {
-    await api.deleteRows(
+    final List<Map<String, dynamic>> storedRows = await api.selectAll(
       APIManager.tableOpeningHours,
-      eq: <String, Object?>{'landmark_id': landmarkId, 'day': _dayName(day)},
+      columns:
+          'opening_hours_id, day, status, opening_time, closing_time, '
+          'landmark_id, restaurant_id',
+      eq: <String, Object?>{'landmark_id': landmarkId},
     );
-    if (rows.isEmpty) return;
-    await _insertOpeningHours(landmarkId, rows);
+    final Map<Weekday, List<OpeningHour>> storedByDay = _mergedByDay(
+      storedRows,
+    );
+    await _deleteOpeningHourDay(landmarkId, day, storedByDay);
+    if (rows.isNotEmpty) {
+      await _insertOpeningHours(landmarkId, rows);
+    }
+    // Restore the tail the PREVIOUS day wrote onto this day's morning - the
+    // delete above removed it with the day's own rows.
+    final OpeningHour? incomingTail = OpeningHoursRows.tailOf(
+      storedByDay,
+      OpeningHoursRows.dayBefore(day),
+    );
+    if (incomingTail != null) {
+      await _insertOpeningHours(landmarkId, <OpeningHour>[incomingTail]);
+    }
   }
 
   /// Every submitted landmark whose name equals [name] (trimmed,
@@ -587,10 +682,10 @@ class SubmittedLandmarkRepository {
       for (final Map<String, dynamic> itemRow in itemRows)
         _toItem(LandmarkItemDataModel.fromJson(itemRow)),
     ];
-    final List<OpeningHour> hours = <OpeningHour>[
+    final List<OpeningHour> hours = OpeningHoursRows.mergeTails(<OpeningHour>[
       for (final Map<String, dynamic> hourRow in hourRows)
         if (_toOpeningHour(hourRow) case final OpeningHour hour) hour,
-    ];
+    ]);
     return SubmittedLandmark(
       id: landmark.landmarkId,
       name: landmark.landmarkName ?? '',
@@ -841,19 +936,24 @@ class SubmittedLandmarkRepository {
     List<OpeningHour> hours,
   ) async {
     for (final OpeningHour hour in hours) {
-      final bool isOpen = hour.status == DayStatus.open;
-      await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
-        'day': _dayName(hour.day),
-        'status': hour.status.name,
-        'opening_time': isOpen && hour.opensAt != null
-            ? _formatTime(hour.opensAt!)
-            : null,
-        'closing_time': isOpen && hour.closesAt != null
-            ? _formatTime(hour.closesAt!)
-            : null,
-        'landmark_id': landmarkId,
-        'restaurant_id': null,
-      });
+      // An overnight row is split into its end-of-day row plus the next-day
+      // tail - see `OpeningHoursRows` for the convention. No id is passed: the
+      // primary key is left to the identity column (see the note above).
+      for (final OpeningHour stored in OpeningHoursRows.splitForStorage(hour)) {
+        final bool isOpen = stored.status == DayStatus.open;
+        await api.insertRow(APIManager.tableOpeningHours, <String, dynamic>{
+          'day': _dayName(stored.day),
+          'status': stored.status.name,
+          'opening_time': isOpen && stored.opensAt != null
+              ? _formatTime(stored.opensAt!)
+              : null,
+          'closing_time': isOpen && stored.closesAt != null
+              ? _formatTime(stored.closesAt!)
+              : null,
+          'landmark_id': landmarkId,
+          'restaurant_id': null,
+        });
+      }
     }
   }
 

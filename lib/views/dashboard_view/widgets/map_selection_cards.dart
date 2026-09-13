@@ -192,17 +192,15 @@ class _Header extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.xs),
               _MetaRow(pin: pin),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                pin.category?.isNotEmpty == true
-                    ? pin.category!
-                    : (isLandmark
-                          ? 'Landmark submitted by a tourist'
-                          : 'Restaurant from the system catalogue'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.bodySmall,
-              ),
+              if (_categoryLine() case final String line) ...<Widget>[
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  line,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodySmall,
+                ),
+              ],
               const SizedBox(height: AppSpacing.xs),
               _PriceAndStatus(pin: pin),
             ],
@@ -210,6 +208,21 @@ class _Header extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// The line under the name: what kind of place this is.
+  ///
+  /// A submitted landmark shows the category it was submitted with (the food
+  /// category of its primary dish, e.g. "Chinese" - see
+  /// `MapExplorationLogic._landmarkPinDetail`). There is deliberately no
+  /// fallback text for landmarks any more: "Landmark submitted by a tourist"
+  /// told the tourist nothing about the place they were looking at (user
+  /// report, 2026-09-13), so an unknown category simply leaves the line out.
+  /// The catalogue's own places keep their neutral fallback.
+  String? _categoryLine() {
+    final String? category = pin.category;
+    if (category != null && category.isNotEmpty) return category;
+    return isLandmark ? null : 'Restaurant from the system catalogue';
   }
 
   /// The place photo in its fixed 102-square frame. A missing DB value ("No
@@ -302,10 +315,15 @@ class _PriceAndStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool? openNow = pin.openNow;
+    // The same line for every place: the price when one is on record, then
+    // the open/closed state - and "Unknown" when the hours are genuinely not
+    // on record, which is what the `MapPin.openNow` contract says to show.
+    // Landmarks used to drop the state instead, which left the line reading
+    // as if the place had no information at all (user report, 2026-09-13).
     final String status = openNow == null
         ? 'Unknown'
         : openNow
-        ? 'Opening'
+        ? 'Open'
         : 'Closed';
     final Color statusColour = openNow == null
         ? AppColors.textSecondary
