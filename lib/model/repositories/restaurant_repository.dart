@@ -711,7 +711,8 @@ class RestaurantRepository {
       APIManager.tableRestaurant,
       <String, Object?>{
         'status': 'frozen',
-        if (closedUntil != null) 'closed_until': closedUntil.toUtc(),
+        if (closedUntil != null)
+          'closed_until': closedUntil.toUtc().toIso8601String(),
       },
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );

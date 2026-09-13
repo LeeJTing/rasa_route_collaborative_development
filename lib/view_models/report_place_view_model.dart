@@ -665,9 +665,12 @@ class ReportPlaceViewModel extends BaseViewModel
       } else {
         _reportSubmitted = outcome.submittedCount > 0;
         _placeHiddenNow = outcome.placeHiddenNow;
-        if (outcome.placeHiddenNow) {
-          // The place is no longer 'available' - every live dashboard drops
-          // its caches and re-reads so the hidden pin disappears.
+        if (outcome.applied.isNotEmpty) {
+          // An applied correction can change what the map draws: an address
+          // moves a pin, corrected hours can change current availability, an
+          // item removal can change a food-filtered map, and a closure hides
+          // the place. Every live dashboard therefore drops its map caches
+          // and re-reads its active view after any applied correction.
           mapRefresh.publishOwnMapDataChanged();
         }
         if (outcome.applied.isNotEmpty) {
