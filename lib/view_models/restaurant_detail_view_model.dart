@@ -29,7 +29,6 @@ class RestaurantDetailViewModel extends BaseViewModel {
 
   Restaurant? _restaurant;
   int? _restaurantId;
-
   Restaurant? get restaurant => _restaurant;
 
   void selectRestaurant(int? restaurantId) {
