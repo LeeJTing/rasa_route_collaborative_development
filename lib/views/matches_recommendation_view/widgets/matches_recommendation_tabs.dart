@@ -19,7 +19,7 @@ class MatchesRecommendationTabs extends StatelessWidget {
         ButtonSegment<MatchesRecommendationTab>(
           value: MatchesRecommendationTab.restaurants,
           icon: Icon(Icons.restaurant_outlined),
-          label: Text('Google-Sourced Restaurant'),
+          label: Text('Restaurants'),
         ),
         ButtonSegment<MatchesRecommendationTab>(
           value: MatchesRecommendationTab.submittedLandmarks,
@@ -28,6 +28,12 @@ class MatchesRecommendationTabs extends StatelessWidget {
         ),
       ],
       selected: <MatchesRecommendationTab>{selectedTab},
+      style: ButtonStyle(
+        textStyle: WidgetStatePropertyAll<TextStyle?>(
+          Theme.of(context).textTheme.labelMedium,
+        ),
+        visualDensity: VisualDensity.compact,
+      ),
       onSelectionChanged: (Set<MatchesRecommendationTab> selection) {
         onChanged(selection.first);
       },

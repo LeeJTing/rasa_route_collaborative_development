@@ -57,110 +57,111 @@ class _RestaurantRecommendationViewState
         body: Consumer<RestaurantRecommendationViewModel>(
           builder:
               (
-              BuildContext context,
-              RestaurantRecommendationViewModel vm,
-              Widget? child,
+                BuildContext context,
+                RestaurantRecommendationViewModel vm,
+                Widget? child,
               ) {
-            return Column(
-              children: <Widget>[
-                const _NearbyBanner(),
+                return Column(
+                  children: <Widget>[
+                    const _NearbyBanner(),
 
-                _SourceTabs(source: vm.source, onChanged: vm.selectSource),
+                    _SourceTabs(source: vm.source, onChanged: vm.selectSource),
 
-                RestaurantFoodTypeFilter(
-                  options:
-                  RestaurantRecommendationViewModel.foodTypeOptions,
-                  selected: vm.selectedFoodType,
-                  onSelected: vm.selectFoodType,
-                ),
-
-                Expanded(
-                  child: vm.isLoadingResult
-                      ? const Center(child: CircularProgressIndicator())
-                      : vm.state == ViewState.error &&
-                      vm.selectedSourceIsEmpty
-                      ? AsyncMessage(
-                    icon: Icons.location_off_outlined,
-                    title: 'Unable to load nearby places',
-                    message:
-                    vm.errorMessage ??
-                        'Check your connection and location, then try again.',
-                    actionLabel: 'Try again',
-                    onAction: vm.loadNearbyRestaurants,
-                  )
-                      : vm.selectedSourceIsEmpty
-                      ? _EmptySource(source: vm.source)
-                      : ListView.separated(
-                    padding: AppSpacing.screenPadding.copyWith(
-                      bottom: AppSpacing.xl,
+                    RestaurantFoodTypeFilter(
+                      options:
+                          RestaurantRecommendationViewModel.foodTypeOptions,
+                      selected: vm.selectedFoodType,
+                      onSelected: vm.selectFoodType,
                     ),
-                    itemCount: vm.source == RestaurantSource.google
-                        ? vm.visibleRestaurants.length
-                        : vm.landmarks.length,
-                    separatorBuilder: (_, _) =>
-                    const SizedBox(height: AppSpacing.md),
-                    itemBuilder: (BuildContext context, int index) {
-                      if (vm.source == RestaurantSource.google) {
-                        final Restaurant restaurant =
-                        vm.visibleRestaurants[index];
 
-                        return RestaurantCard(
-                          restaurant: restaurant,
-                          distanceLabel: vm.distanceLabel(restaurant),
-                          expanded: vm.isRestaurantExpanded(
-                            restaurant.id,
-                          ),
-                          onExpand: () => vm.toggleRestaurantExpanded(
-                            restaurant.id,
-                          ),
-                          onTap: () => Navigator.pushNamed(
-                            context,
-                            AppRoutes.restaurantDetail,
-                            arguments: restaurant.id,
-                          ),
-                          onFoodImageTap: (RestaurantItem item) =>
-                              showRestaurantItemImage(
-                                context,
-                                semanticLabel: item.foodName,
-                                source: item.imageUrl,
-                                fromLinkedFood: item.imageFromLinkedFood,
+                    Expanded(
+                      child: vm.isLoadingResult
+                          ? const Center(child: CircularProgressIndicator())
+                          : vm.state == ViewState.error &&
+                                vm.selectedSourceIsEmpty
+                          ? AsyncMessage(
+                              icon: Icons.location_off_outlined,
+                              title: 'Unable to load nearby places',
+                              message:
+                                  vm.errorMessage ??
+                                  'Check your connection and location, then try again.',
+                              actionLabel: 'Try again',
+                              onAction: vm.loadNearbyRestaurants,
+                            )
+                          : vm.selectedSourceIsEmpty
+                          ? _EmptySource(source: vm.source)
+                          : ListView.separated(
+                              padding: AppSpacing.screenPadding.copyWith(
+                                bottom: AppSpacing.xl,
                               ),
-                        );
-                      }
+                              itemCount: vm.source == RestaurantSource.google
+                                  ? vm.visibleRestaurants.length
+                                  : vm.landmarks.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: AppSpacing.md),
+                              itemBuilder: (BuildContext context, int index) {
+                                if (vm.source == RestaurantSource.google) {
+                                  final Restaurant restaurant =
+                                      vm.visibleRestaurants[index];
 
-                      final SubmittedLandmarkRecommendation landmark =
-                      vm.landmarks[index];
+                                  return RestaurantCard(
+                                    restaurant: restaurant,
+                                    distanceLabel: vm.distanceLabel(restaurant),
+                                    expanded: vm.isRestaurantExpanded(
+                                      restaurant.id,
+                                    ),
+                                    onExpand: () => vm.toggleRestaurantExpanded(
+                                      restaurant.id,
+                                    ),
+                                    onTap: () => Navigator.pushNamed(
+                                      context,
+                                      AppRoutes.restaurantDetail,
+                                      arguments: restaurant.id,
+                                    ),
+                                    onFoodImageTap: (RestaurantItem item) =>
+                                        showRestaurantItemImage(
+                                          context,
+                                          semanticLabel: item.foodName,
+                                          source: item.imageUrl,
+                                          fromLinkedFood:
+                                              item.imageFromLinkedFood,
+                                        ),
+                                  );
+                                }
 
-                      return SubmittedLandmarkCard(
-                        landmark: landmark,
-                        expanded: vm.isLandmarkExpanded(landmark.id),
-                        onExpand: () =>
-                            vm.toggleLandmarkExpanded(landmark.id),
-                        onTap: () =>
-                            _openLandmarkDetails(context, landmark),
-                        onImageTap:
-                            (String? source, String semanticLabel) =>
-                            showEnlargedImage(
-                              context,
-                              semanticLabel: semanticLabel,
-                              source: source,
+                                final SubmittedLandmarkRecommendation landmark =
+                                    vm.landmarks[index];
+
+                                return SubmittedLandmarkCard(
+                                  landmark: landmark,
+                                  expanded: vm.isLandmarkExpanded(landmark.id),
+                                  onExpand: () =>
+                                      vm.toggleLandmarkExpanded(landmark.id),
+                                  onTap: () =>
+                                      _openLandmarkDetails(context, landmark),
+                                  onImageTap:
+                                      (String? source, String semanticLabel) =>
+                                          showEnlargedImage(
+                                            context,
+                                            semanticLabel: semanticLabel,
+                                            source: source,
+                                          ),
+                                );
+                              },
                             ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            );
-          },
+                    ),
+                  ],
+                );
+              },
         ),
       ),
     );
   }
 
   void _openLandmarkDetails(
-      BuildContext context,
-      SubmittedLandmarkRecommendation landmark,
-      ) {
+    BuildContext context,
+    SubmittedLandmarkRecommendation landmark,
+  ) {
     if (landmark.id <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Landmark details are unavailable.')),
@@ -230,14 +231,22 @@ class _SourceTabs extends StatelessWidget {
       segments: const <ButtonSegment<RestaurantSource>>[
         ButtonSegment(
           value: RestaurantSource.google,
-          label: Text('Google-Sourced Restaurant'),
+          icon: Icon(Icons.restaurant_outlined),
+          label: Text('Restaurants'),
         ),
         ButtonSegment(
           value: RestaurantSource.submitted,
-          label: Text('Submitted Landmark'),
+          icon: Icon(Icons.add_location_alt_outlined),
+          label: Text('Submitted Landmarks'),
         ),
       ],
       selected: <RestaurantSource>{source},
+      style: ButtonStyle(
+        textStyle: WidgetStatePropertyAll<TextStyle?>(
+          Theme.of(context).textTheme.labelMedium,
+        ),
+        visualDensity: VisualDensity.compact,
+      ),
       onSelectionChanged: (Set<RestaurantSource> value) =>
           onChanged(value.first),
     ),
