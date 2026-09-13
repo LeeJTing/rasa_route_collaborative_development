@@ -20,6 +20,7 @@ import 'widgets/map_controls.dart';
 import 'widgets/map_filter_panel.dart';
 import 'widgets/map_search_bar.dart';
 import 'widgets/map_search_results_panel.dart';
+import 'widgets/search_history_panel.dart';
 import 'widgets/map_update_banner.dart';
 import 'widgets/heatmap_scale.dart';
 import 'widgets/map_selection_cards.dart';
@@ -564,6 +565,16 @@ class _DashboardViewState extends State<DashboardView> {
                   onPlaceSelected: viewModel.selectPlace,
                   onFoodSelected: viewModel.selectSearchedFood,
                 ),
+
+              // REQ102_104 - the same slot, while the field is still empty.
+              // `showSearchHistory` is the exact complement of the condition
+              // above, so one panel hangs under the box at a time.
+              if (viewModel.showSearchHistory)
+                SearchHistoryPanel(
+                  terms: viewModel.recentSearches,
+                  onSelected: viewModel.useRecentSearch,
+                  onClear: viewModel.clearSearchHistory,
+                ),
             ],
           ),
         ),
@@ -891,7 +902,7 @@ class _ClusterMarker extends StatelessWidget {
     child: DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: _allSearch ? AppColors.clusterSearchFill : AppColors.primary,
+        color: _allSearch ? AppColors.clusterSearchFill : AppColors.primary.withOpacity(0.5),
         border: Border.fromBorderSide(
           BorderSide(
             // A mixed cell keeps the map's fill and takes the search colour as
