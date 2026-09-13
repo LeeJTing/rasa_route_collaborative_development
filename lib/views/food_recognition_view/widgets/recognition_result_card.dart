@@ -51,6 +51,7 @@ class RecognitionResultCard extends StatelessWidget {
     this.promptText = 'Would you like to add this as a new landmark?',
     this.nameMismatch = false,
     this.typedName,
+    this.typoNotice,
     this.onDismissNameMismatch,
     this.dietaryConflicts = const <String>[],
     this.blockMessage,
@@ -107,6 +108,14 @@ class RecognitionResultCard extends StatelessWidget {
   /// verification call's observation - the observation names a third dish
   /// that the app does not switch to.
   final VoidCallback? onDismissNameMismatch;
+
+  /// The "that was a typo - the correct spelling is used" notice shown when
+  /// a manual entry was auto-corrected (`FoodRecognitionViewModel
+  /// .typedNameTypoNotice`): the typed text was a misspelling of the dish
+  /// the photo shows. Informational only - there is nothing to act on, and
+  /// it never coexists with [nameMismatch]. Null when nothing was
+  /// corrected.
+  final String? typoNotice;
 
   /// The signed-in tourist's dietary restrictions this recognised food
   /// conflicts with (e.g. "No Pork"). When non-empty a warning is shown -
@@ -268,6 +277,27 @@ class RecognitionResultCard extends StatelessWidget {
                           ),
                       ],
                     ),
+                  ),
+                ],
+                if (typoNotice != null) ...<Widget>[
+                  const SizedBox(height: AppSpacing.sm),
+                  Row(
+                    children: <Widget>[
+                      const Icon(
+                        Icons.spellcheck,
+                        size: AppSizes.inlineNoticeIconSize,
+                        color: AppColors.warning,
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          typoNotice!,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.warning,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
                 if (dietaryConflicts.isNotEmpty) ...<Widget>[

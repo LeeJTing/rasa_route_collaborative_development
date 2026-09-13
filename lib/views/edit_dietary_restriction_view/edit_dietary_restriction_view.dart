@@ -294,10 +294,19 @@ class _RestrictionCard extends StatelessWidget {
                           color: AppColors.accentBrown,
                         ),
                         const SizedBox(width: AppSpacing.xs),
-                        Text(
-                          title,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
+                        // Expanded so the title can wrap inside the space left by
+                        // the count badge. A plain Text takes its full intrinsic
+                        // width in a Row, which is how the same header on the
+                        // food-preference screen overflowed by a few pixels.
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines:
+                                AppLayoutRatios.profileSectionTitleMaxLines,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
                         ),
                       ],
                     ),

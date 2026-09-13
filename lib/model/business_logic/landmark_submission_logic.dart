@@ -4,6 +4,7 @@ import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../core/name_normalization.dart';
 import '../../domain_model/address_suggestion.dart';
+import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
@@ -15,6 +16,7 @@ import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/geocoding_repository.dart';
 import '../repositories/landmark_repository_facade.dart';
+import 'dietary_warning.dart';
 import 'food_name_matcher.dart';
 import 'location_rules.dart';
 
@@ -278,6 +280,72 @@ class LandmarkSubmissionLogic {
   /// matches nothing.
   Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) =>
       repository.landmark.getSubmittedLandmarkById(landmarkId);
+
+  Future<SubmittedLandmark?> getLandmarkPlaceDetail(int landmarkId) async {
+    final SubmittedLandmark? landmark = await repository.landmark
+        .getSubmittedLandmarkById(landmarkId);
+    if (landmark == null || landmark.items.isEmpty) return landmark;
+    return _withDietaryWarnings(landmark);
+  }
+
+  Future<SubmittedLandmark> _withDietaryWarnings(
+    SubmittedLandmark landmark,
+  ) async {
+    final List<DietaryRestriction> restrictions = await repository
+        .getCurrentDietaryRestrictions();
+    if (restrictions.isEmpty) return landmark;
+    final Map<int, List<int>> restrictionIdsByFood = await repository
+        .getRestrictionIdsByFood();
+    final Map<int, String> labelsById = <int, String>{
+      for (final DietaryRestriction restriction in restrictions)
+        restriction.id: DietaryWarning.label(restriction.name),
+    };
+    return landmark.copyWith(
+      items: landmark.items
+          .map(
+            (LandmarkItem item) => item.copyWith(
+              dietaryWarning: _dietaryWarning(
+                item,
+                labelsById: labelsById,
+                restrictionIdsByFood: restrictionIdsByFood,
+                picks: restrictions,
+              ),
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  /// The warning for one dish, or null when nothing is known to clash.
+  String? _dietaryWarning(
+    LandmarkItem item, {
+    required Map<int, String> labelsById,
+    required Map<int, List<int>> restrictionIdsByFood,
+    required List<DietaryRestriction> picks,
+  }) {
+    final List<String> clashes = <String>[];
+    for (final int id
+        in restrictionIdsByFood[item.localFoodId] ?? const <int>[]) {
+      final String? label = labelsById[id];
+      if (label != null && !clashes.contains(label)) clashes.add(label);
+    }
+    // The item's own tags - the only evidence for a dish that never matched a
+    // catalogue row.
+    for (final String tag in item.dietaryRestrictions) {
+      for (final DietaryRestriction pick in picks) {
+        if (!DietaryWarning.matches(tag, pick.name)) continue;
+        final String label = DietaryWarning.label(pick.name);
+        if (!clashes.contains(label)) clashes.add(label);
+      }
+    }
+    final String? warning = DietaryWarning.forLabels(clashes);
+    if (warning != null) return warning;
+    // Nothing clashed - but nothing was checked either.
+    if (item.localFoodId <= 0 && item.dietaryRestrictions.isEmpty) {
+      return DietaryWarning.unknown;
+    }
+    return null;
+  }
 
   /// Every submitted landmark [touristId] has contributed dishes to, newest
   /// first - flat passthrough to the repository (see the repository doc for
@@ -1257,8 +1325,11 @@ class LandmarkSubmissionLogic {
 
   /// How many nearby places the near-duplicate check may compare photos with
   /// (nearest first, and only the ones carrying a photo): every candidate is
-  /// one Gemini call inside the blocked wait on Confirm.
-  static const int similarPlaceCandidateLimit = 5;
+  /// one Gemini call inside the blocked wait on Confirm. Raised 5 -> 10 on
+  /// the user's request (2026-09-14): with the old cap a same-place
+  /// candidate could fall outside the compared set, and the duplicate
+  /// question then never came up.
+  static const int similarPlaceCandidateLimit = 10;
 
   /// How far the near-duplicate check looks - the same 100 m the A13 merge
   /// uses for "the same place", because it asks the same question and only
@@ -1807,6 +1878,10 @@ class LandmarkSubmissionLogic {
   /// tourist to keep the dish name short: a dish name is a LABEL, not a
   /// description, and an over-long one would be written into the landmark
   /// item, the catalogue row and the database column behind them.
+  ///
+  /// Characters are restricted too: the field blocks special characters -
+  /// letters (any script), digits and spaces only (enforced in
+  /// `FoodNameTextField`, user request 2026-09-14).
   static const int maxFoodNameLength = 50;
   static const int foodNameWarnFromLength = 45;
 

@@ -702,10 +702,17 @@ class AddLandmarkViewModel extends BaseViewModel
 
   /// Whether the tourist replaced Gemini's signboard reading with a name of
   /// their own - the case [confirmRestaurant] sends back to the signboard
-  /// for a second opinion. False when there is no reading to differ from.
+  /// for a second opinion. False when there is no reading to differ from -
+  /// and false for a CASE-only difference: the same letters with different
+  /// capitals are not an edit, their case follows the reading (see
+  /// [_adoptSignboardCasing], user request 2026-09-14).
   bool get hasEditedSignboardName {
     final String? detected = _signboardDetectedName;
-    return detected != null && _restaurantName.trim() != detected.trim();
+    if (detected == null) return false;
+    final String current = _restaurantName.trim();
+    final String reading = detected.trim();
+    if (current == reading) return false;
+    return current.toLowerCase() != reading.toLowerCase();
   }
 
   /// True while a Confirm click is waiting on the signboard-name check - see
@@ -941,6 +948,14 @@ class AddLandmarkViewModel extends BaseViewModel
   /// True while the debounced website-link probe is running.
   bool get isCheckingWebsiteLink => _websiteLinkChecking;
 
+  /// True while the website field's value is still settling: the debounce is
+  /// waiting for typing to pause, or the probe is running. Submit stays
+  /// disabled for this whole window - the link is not verified yet, so a tap
+  /// here would only race the probe (user report, 2026-09-14: Submit was
+  /// clickable while the website was being edited).
+  bool get isWebsiteLinkSettling =>
+      _websiteLinkChecking || (_websiteLinkDebounce?.isActive ?? false);
+
   /// True when the last probe could not open the link. This DISABLES Submit
   /// (see [canSubmit]) and is what [canSubmitReason] reports; the status line
   /// under the field says the same thing. [submitLandmark] still re-probes
@@ -951,10 +966,14 @@ class AddLandmarkViewModel extends BaseViewModel
   /// while the probe runs, then the unable-to-open note when it failed.
   /// Null while idle or after a successful probe.
   String? get websiteLinkStatus {
-    if (_websiteLinkChecking) return 'Checking this link…';
+    if (_websiteLinkChecking) return _websiteCheckingMessage;
     if (_websiteLinkUnreachable) return _websiteUnreachableMessage;
     return null;
   }
+
+  /// The "in progress" sentence for the website link - shared by the field's
+  /// status line and the Submit bar's reason, so the two cannot drift.
+  static const String _websiteCheckingMessage = 'Checking this link…';
 
   /// Optional address. The whole judgement - the shape rules (allowed
   /// characters, no leading/trailing or repeated specials, at least one digit
@@ -1028,7 +1047,11 @@ class AddLandmarkViewModel extends BaseViewModel
       // the same strict check [submitLandmark] runs, surfaced before the tap
       // instead of after it (see [websiteLinkUnreachable]). Editing the
       // field re-runs the probe, so a fixed link re-enables the button.
+      // The button ALSO waits out the settling window (typing pause +
+      // probe): an unverified link is not submittable (user report,
+      // 2026-09-14 - see [isWebsiteLinkSettling]).
       !_websiteLinkUnreachable &&
+      !isWebsiteLinkSettling &&
       restaurantAddressError == null &&
       _primaryFood != null &&
       _primaryFood!.price != null &&
@@ -1075,6 +1098,9 @@ class AddLandmarkViewModel extends BaseViewModel
     // The link is well-formed but the live probe could not open it - the
     // button stays disabled until the field is edited (which re-probes).
     if (_websiteLinkUnreachable) return _websiteUnreachableMessage;
+    // Still typing (debounce) or probing: the same sentence the field's own
+    // status line shows, so the disabled button and the field agree.
+    if (isWebsiteLinkSettling) return _websiteCheckingMessage;
     final String? addressError = restaurantAddressError;
     if (addressError != null) return addressError;
     final String? hoursError = _operatingHoursError();
@@ -1423,7 +1449,9 @@ class AddLandmarkViewModel extends BaseViewModel
   /// [LandmarkSubmissionLogic.signboardNameMatchThreshold] on the same photo
   /// (see [nameMatchesSignboard]). A name that fails is NOT confirmed -
   /// [takeSignboardNameMismatch] reports it so the View can say so and offer
-  /// [useSignboardName], and the field stays editable for another try.
+  /// [useSignboardName], and the field stays editable for another try. A
+  /// CASE-only difference is not an edit at all: the reading's own capitals
+  /// are adopted first (see [_adoptSignboardCasing]).
   ///
   /// An unanswered check (offline, timeout, quota) fails OPEN: the form is
   /// confirmed as before, so a bad connection can never lock a tourist out.
@@ -1437,6 +1465,11 @@ class AddLandmarkViewModel extends BaseViewModel
     if (_restaurantName.trim().isEmpty) {
       return 'Enter the restaurant name before confirming.';
     }
+    // A case-only difference from the signboard reading is not an edit: the
+    // name's upper/lowercase follows what Gemini read off the sign (user
+    // request, 2026-09-14). Adopt the reading's capitals here, so the check
+    // below only ever sees real spelling edits.
+    _adoptSignboardCasing();
     if (hasEditedSignboardName && _capturedImage != null) {
       _isConfirming = true;
       safeNotifyListeners();
@@ -1463,6 +1496,24 @@ class AddLandmarkViewModel extends BaseViewModel
     _restaurantConfirmed = true;
     safeNotifyListeners();
     return null;
+  }
+
+  /// Adopts the signboard reading's own capitals when the typed name has the
+  /// SAME letters with different case ("CUSTOM N BANNER" over the reading
+  /// "CUSTOM n BAnnER"). The signboard is authoritative for how the name is
+  /// written, and a case-only difference must not read as an edit - it would
+  /// otherwise be sent back to Gemini for a second opinion it does not need
+  /// (user request, 2026-09-14).
+  ///
+  /// Applied through [setExtractedRestaurantName], so the field force-syncs
+  /// even while focused and the tourist SEES the adopted capitals.
+  void _adoptSignboardCasing() {
+    final String? detected = _signboardDetectedName;
+    if (detected == null) return;
+    final String reading = detected.trim();
+    if (_restaurantName == reading) return;
+    if (_restaurantName.trim().toLowerCase() != reading.toLowerCase()) return;
+    setExtractedRestaurantName(reading);
   }
 
   /// The nearby place (within the same 100 m the merge uses) whose stored
@@ -2810,6 +2861,12 @@ class AddLandmarkViewModel extends BaseViewModel
   /// Supabase (used while verifying the insert flow works).
   /// Errors: A13 (restaurant exists), A16 (price invalid), M6 (no image)
   Future<void> submitLandmark({bool isFake = false}) async {
+    // Re-entrancy guard: the View disables the button while a submission
+    // runs, but the submit flow's network pre-flight (see
+    // `_AddLandmarkViewState._submit`) and direct callers can still race it -
+    // a parallel second run would re-upload the photos and double-write the
+    // place.
+    if (_isSubmitting) return;
     _submitMerged = false;
     _submitTargetName = null;
     _submitAddedDishNames = const <String>[];

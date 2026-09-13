@@ -102,9 +102,21 @@ class RecognitionRepository {
   /// Full call - phase 2, only reached when the dish isn't already in the
   /// catalogue (`FoodKnowledgeRepository`). Returns the domain `LocalFood`
   /// directly, built here from Gemini's `FoodAnalysisResponse`.
-  Future<FoodAnalysis> analyzeFoodFull(List<int> imageBytes) async {
+  ///
+  /// [storedDish] is the curated row the app already matched for this dish,
+  /// when there is one: it rides the prompt as the STORED CATALOGUE RECORD so
+  /// the analysis answers with the dish AS SHOWN - the stored text echoed
+  /// where it still holds, adapted where a variant changes it (see
+  /// `GeminiLandmarkService._storedDishRules`).
+  Future<FoodAnalysis> analyzeFoodFull(
+    List<int> imageBytes, {
+    LocalFood? storedDish,
+  }) async {
     final FoodAnalysisResponse response = await api.geminiLandmark
-        .analyzeFoodImage(imageBytes: imageBytes);
+        .analyzeFoodImage(
+          imageBytes: imageBytes,
+          storedDish: _storedDishPrompt(storedDish),
+        );
     return (
       food: _toLocalFood(response),
       priceMin: response.priceMin,
@@ -131,12 +143,21 @@ class RecognitionRepository {
   /// a match Gemini sets `dish` to the typed dish, on a mismatch it sets it
   /// to the dish it actually saw, so a food's name and its details always
   /// describe the same dish.
+  ///
+  /// [storedDish] is the curated row the typed name already matches, when
+  /// there is one - its text rides the prompt as the STORED CATALOGUE RECORD,
+  /// so a typed VARIANT comes back adapted to the dish actually shown.
   Future<FoodAnalysis> analyzeFoodByName(
     List<int> imageBytes,
-    String name,
-  ) async {
+    String name, {
+    LocalFood? storedDish,
+  }) async {
     final FoodAnalysisResponse response = await api.geminiLandmark
-        .analyzeFoodWithName(imageBytes: imageBytes, name: name);
+        .analyzeFoodWithName(
+          imageBytes: imageBytes,
+          name: name,
+          storedDish: _storedDishPrompt(storedDish),
+        );
     return (
       food: _toLocalFood(response),
       priceMin: response.priceMin,
@@ -155,6 +176,21 @@ class RecognitionRepository {
       dietaryRestrictions: response.dietaryRestrictions,
     );
   }
+
+  /// Spelling check behind the manual-entry flow's typo gate: is
+  /// [typedName] a MISSPELLING of the dish the photo showed
+  /// ([observedFood])? Text-only - Gemini confirmed the photo matches the
+  /// typed dish by the time this runs (see `FoodRecognitionLogic
+  /// .resolveByName`). `isTypo` is only meaningful together with a non-empty
+  /// `correctedName`; a verdict without a correction comes back as "no
+  /// typo" (see `GeminiLandmarkService.checkTypedNameSpelling`).
+  Future<({bool isTypo, String correctedName})> checkTypedNameSpelling({
+    required String typedName,
+    required String observedFood,
+  }) => api.geminiLandmark.checkTypedNameSpelling(
+    typedName: typedName,
+    observedFood: observedFood,
+  );
 
   /// 3-step origin verification for a dish name - the Option C gate before a
   /// genuinely-new food is written to `local_food` (see
@@ -253,6 +289,20 @@ class RecognitionRepository {
             : <String>[response.variant],
         aliases: response.aliases,
       );
+
+  /// The curated row as the analysis prompts' STORED CATALOGUE RECORD (see
+  /// [StoredDishPrompt]), or null when there is nothing stored to send - a
+  /// brand-new dish carries `id == 0` and has no row yet.
+  static StoredDishPrompt? _storedDishPrompt(LocalFood? food) {
+    if (food == null || food.id == 0) return null;
+    return (
+      name: food.name,
+      category: food.category,
+      description: food.description,
+      ingredients: food.ingredients,
+      culturalBackground: food.culturalBackground,
+    );
+  }
 
   /// Gemini's dish-type classification -> a valid catalogue `food_type`
   /// value (proper case). Unknown / "none" / blank falls back to "Food" so a

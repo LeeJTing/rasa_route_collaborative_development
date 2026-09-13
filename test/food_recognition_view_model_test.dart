@@ -31,6 +31,8 @@ class _FakeFoodRecognitionLogic extends FoodRecognitionLogic {
       bool fitsCatalogueCategory,
       String observedFood,
       List<String> dietaryRestrictions,
+      bool typedNameIsTypo,
+      String correctedName,
     })
   >
   Function(List<int> bytes, String name)?
@@ -72,6 +74,8 @@ class _FakeFoodRecognitionLogic extends FoodRecognitionLogic {
       bool fitsCatalogueCategory,
       String observedFood,
       List<String> dietaryRestrictions,
+      bool typedNameIsTypo,
+      String correctedName,
     })
   >
   resolveByName(List<int> imageBytes, String name) =>
@@ -528,6 +532,8 @@ void main() {
         fitsCatalogueCategory: true,
         observedFood: '',
         dietaryRestrictions: const <String>[],
+        typedNameIsTypo: false,
+        correctedName: '',
       );
       final FoodRecognitionViewModel vm = _buildViewModel(logic);
       await vm.captureAndRecognize(_image()); // populates _capturedImage
@@ -559,6 +565,8 @@ void main() {
         fitsCatalogueCategory: true,
         observedFood: '',
         dietaryRestrictions: const <String>[],
+        typedNameIsTypo: false,
+        correctedName: '',
       );
       final FoodRecognitionViewModel vm = _buildViewModel(logic);
       await vm.captureAndRecognize(_image());
@@ -591,6 +599,8 @@ void main() {
         fitsCatalogueCategory: true,
         observedFood: 'Roti Canai',
         dietaryRestrictions: const <String>[],
+        typedNameIsTypo: false,
+        correctedName: '',
       );
       final FoodRecognitionViewModel vm = _buildViewModel(logic);
       await vm.captureAndRecognize(_image()); // populates _capturedImage
@@ -630,6 +640,8 @@ void main() {
         fitsCatalogueCategory: true,
         observedFood: 'Roti Canai',
         dietaryRestrictions: const <String>[],
+        typedNameIsTypo: false,
+        correctedName: '',
       );
       final FoodRecognitionViewModel vm = _buildViewModel(logic);
       await vm.captureAndRecognize(_image());
@@ -673,6 +685,8 @@ void main() {
           fitsCatalogueCategory: false,
           observedFood: '',
           dietaryRestrictions: const <String>[],
+          typedNameIsTypo: false,
+          correctedName: '',
         );
         final FoodRecognitionViewModel vm = _buildViewModel(logic);
         await vm.captureAndRecognize(_image()); // populates _capturedImage
@@ -689,6 +703,58 @@ void main() {
         expect(LandmarkDraftHandoff().pendingRecognizedFood, isNull);
       },
     );
+
+    test('a misspelled typed name is applied with its corrected spelling '
+        'and a notice', () async {
+      final _FakeFoodRecognitionLogic logic = _FakeFoodRecognitionLogic();
+      logic.onRecognize = (_) async => FoodRecognitionResult(
+        isLocalFood: true,
+        candidates: <LocalFood>[_food('Roti Canai')],
+      );
+      logic.onResolveByName = (List<int> bytes, String name) async => (
+        food: _food('Pork Belly'),
+        variant: '',
+        priceMin: 0.0,
+        priceMax: 0.0,
+        nameMatchesPhoto: true,
+        matchConfidence: 0.9,
+        isLocalFood: true,
+        fitsCatalogueCategory: true,
+        observedFood: 'Pork Belly',
+        dietaryRestrictions: const <String>[],
+        typedNameIsTypo: true,
+        correctedName: 'Pork Belly',
+      );
+      final FoodRecognitionViewModel vm = _buildViewModel(logic);
+      await vm.captureAndRecognize(_image()); // populates _capturedImage
+
+      await vm.enterFoodName('prok belly');
+
+      // The typo never becomes the dish - the logic already resolved the
+      // corrected spelling - and the card is told what happened.
+      expect(vm.recognizedFood?.name, 'Pork Belly');
+      expect(vm.nameMismatch, isFalse);
+      expect(vm.typedNameTypoNotice, contains("'prok belly'"));
+      expect(vm.typedNameTypoNotice, contains("'Pork Belly'"));
+
+      // The next attempt clears the notice.
+      logic.onResolveByName = (List<int> bytes, String name) async => (
+        food: _food(name),
+        variant: '',
+        priceMin: 0.0,
+        priceMax: 0.0,
+        nameMatchesPhoto: true,
+        matchConfidence: 1.0,
+        isLocalFood: true,
+        fitsCatalogueCategory: true,
+        observedFood: '',
+        dietaryRestrictions: const <String>[],
+        typedNameIsTypo: false,
+        correctedName: '',
+      );
+      await vm.enterFoodName('Murtabak');
+      expect(vm.typedNameTypoNotice, isNull);
+    });
   });
 
   group('non-local food must never become a landmark', () {

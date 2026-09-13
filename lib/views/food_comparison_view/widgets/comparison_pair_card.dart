@@ -17,8 +17,8 @@ class _BulkPack {
 
 final RegExp _bulkPackPattern = RegExp(
   r'(?:'
-  r'(\d+)\s*\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set)\b'
-  r'|\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set)\b\s*(\d+)'
+  r'(\d+)\s*\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set|pcs?|pieces?)\b'
+  r'|\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set|pcs?|pieces?)\b\s*(\d+)'
   r')',
   caseSensitive: false,
 );

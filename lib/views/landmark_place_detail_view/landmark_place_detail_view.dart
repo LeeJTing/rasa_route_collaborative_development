@@ -126,10 +126,7 @@ class _LandmarkPlaceDetailViewState extends State<LandmarkPlaceDetailView> {
                           ),
                           child: OutlinedButton.icon(
                             onPressed: () => _openReport(landmark),
-                            icon: const Icon(
-                              Icons.flag_outlined,
-                              color: AppColors.error,
-                            ),
+                            icon: const Icon(Icons.flag_outlined),
                             label: const Text('Report Landmark'),
                           ),
                         ),
@@ -264,16 +261,16 @@ class _LandmarkHeader extends StatelessWidget {
           style: Theme.of(context).textTheme.headlineSmall,
         ),
         const SizedBox(height: AppSpacing.sm),
-        _MetaRow(distanceMetres: distanceMetres),
-        const SizedBox(height: AppSpacing.md),
-        if (category.isNotEmpty)
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: <Widget>[
+        Wrap(
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.sm,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            _MetaRow(distanceMetres: distanceMetres),
+            if (category.isNotEmpty)
               AppTagChip(label: category, style: AppTagStyle.category),
-            ],
-          ),
+          ],
+        ),
         if (landmark.status == LandmarkStatus.frozen) ...<Widget>[
           const SizedBox(height: AppSpacing.sm),
           Text(
@@ -343,20 +340,20 @@ class _Photo extends StatelessWidget {
   );
 }
 
-/// The distance line under the header, left-aligned with the name and the
-/// category chip below it (same icon + text style the restaurant page uses
-/// for its own distance). No rating/reviews (a tourist cannot rate a
-/// submitted landmark) and no report count (moderation data the tourist
-/// does not need to see).
+/// The distance line, on the SAME line as the category chip (the same
+/// wrap the restaurant header uses for its rating / distance / category) -
+/// the icon + text style the restaurant page uses for its own distance. No
+/// rating/reviews (a tourist cannot rate a submitted landmark) and no report
+/// count (moderation data the tourist does not need to see).
 ///
 /// It carries no "Open Google Maps" link of its own any more - the address
 /// row in the information card below opens the map (at the landmark's
 /// coordinates, or searched by its address), so a second link to the same
 /// destination only crowded the header. While that link existed it filled
 /// the left half of this row and the distance sat on the right; with the link
-/// gone the right-aligned distance left an empty band above the chip, so the
-/// distance moved in line with the text above and below it (user report:
-/// "the Category have a gap with whatever is above it").
+/// gone the distance moved in line with the text above it (user report:
+/// "the Category have a gap with whatever is above it"), and it now shares
+/// that line with the chip itself (user request, 2026-09-14).
 class _MetaRow extends StatelessWidget {
   const _MetaRow({required this.distanceMetres});
 
@@ -460,8 +457,10 @@ void _showLaunchFailure(BuildContext context, String message) {
 /// One dish attached to the landmark - the SAME row the catalogue restaurant
 /// detail's menu shows (square photo, dish name, the whole description when
 /// one was recorded, the food category, price in rust). Both rows grew when
-/// the description stopped being truncated, so the same sizes and the same
-/// top-aligned layout are used on both. Like those rows, the PHOTO opens
+/// the description stopped being truncated, so the same sizes, the same
+/// top-aligned layout and the same DIETARY WARNING treatment are used on both:
+/// a dish the tourist's restrictions clash with is not hidden, it is marked on
+/// the card ([LandmarkItem.dietaryWarning]). Like those rows, the PHOTO opens
 /// full-screen when tapped - with the "User submitted photo" note, because a
 /// landmark's dish photo is the tourist's own capture (the same treatment the
 /// quick-mode landmark rows give it). The NAME shown is the VARIANT the
@@ -478,6 +477,7 @@ class _DishCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String? price = landmarkItemPriceLabel(item);
+    final String warning = item.dietaryWarning?.trim() ?? '';
     final String name = item.displayName.isEmpty
         ? 'Unnamed dish'
         : item.displayName;
@@ -485,62 +485,96 @@ class _DishCard extends StatelessWidget {
     return Container(
       padding: AppSpacing.cardPadding,
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border.all(color: AppColors.cardBorder),
+        color: warning.isEmpty
+            ? AppColors.surface
+            : AppColors.cardWarningBackground,
+        border: Border.all(
+          color: warning.isEmpty
+              ? AppColors.cardBorder
+              : AppColors.cardWarningBorder,
+        ),
         borderRadius: AppRadius.cardRadius,
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          InkWell(
-            onTap: item.imageUrl?.trim().isNotEmpty == true
-                ? () => showLandmarkImage(
-                    context,
-                    semanticLabel: name,
-                    source: item.imageUrl,
-                  )
-                : null,
-            borderRadius: AppRadius.cardRadius,
-            child: SizedBox.square(
-              dimension: AppSizes.menuItemImage,
-              child: AppImage(
-                source: item.imageUrl,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              InkWell(
+                onTap: item.imageUrl?.trim().isNotEmpty == true
+                    ? () => showLandmarkImage(
+                        context,
+                        semanticLabel: name,
+                        source: item.imageUrl,
+                      )
+                    : null,
                 borderRadius: AppRadius.cardRadius,
-                semanticLabel: name,
-                fallback: const FoodImageFallback(),
+                child: SizedBox.square(
+                  dimension: AppSizes.menuItemImage,
+                  child: AppImage(
+                    source: item.imageUrl,
+                    borderRadius: AppRadius.cardRadius,
+                    semanticLabel: name,
+                    fallback: const FoodImageFallback(),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(name, style: Theme.of(context).textTheme.titleSmall),
+                    if (description.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        description,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                    if (item.foodCategory.isNotEmpty)
+                      Text(
+                        item.foodCategory,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
+                ),
+              ),
+              if (price != null)
+                Text(
+                  price,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(color: AppColors.accentRust),
+                ),
+            ],
           ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
+          if (warning.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(name, style: Theme.of(context).textTheme.titleSmall),
-                if (description.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    description,
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: AppSizes.inlineNoticeIconSize,
+                  color: AppColors.bannerWarningText,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Text(
+                    warning,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.textSecondary,
+                      color: AppColors.bannerWarningText,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ],
-                if (item.foodCategory.isNotEmpty)
-                  Text(
-                    item.foodCategory,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                ),
               ],
             ),
-          ),
-          if (price != null)
-            Text(
-              price,
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(color: AppColors.accentRust),
-            ),
+          ],
         ],
       ),
     );

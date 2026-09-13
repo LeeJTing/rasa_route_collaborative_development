@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:meta/meta.dart' show protected;
 
 import '../../core/place_category.dart';
+import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/matches_recommendation.dart';
@@ -59,13 +60,17 @@ class MatchesRecommendationLogic {
       _repository.foodOccurrences(),
       _repository.openingHoursByPlace(),
       _repository.getRestaurants(),
+      _repository.getCurrentDietaryRestrictions(),
+      _repository.getRestrictionIdsByFood(),
     ]);
     final Map<String, List<OpeningHour>> hoursByPlace =
         placeData[1] as Map<String, List<OpeningHour>>;
     final DateTime malaysiaNow = currentTime().toUtc().add(
       const Duration(hours: 8),
     );
-    final List<FoodOccurrence> occurrences =
+    // Everything on the map for this state - BEFORE the dietary rules, which
+    // must not change a landmark's category (see `_landmarksFor`).
+    final List<FoodOccurrence> allOccurrences =
         (placeData[0] as List<FoodOccurrence>)
             .map((FoodOccurrence value) => _resolveFood(value, foods))
             .where((FoodOccurrence value) => value.localFoodId != 0)
@@ -81,6 +86,26 @@ class MatchesRecommendationLogic {
                   ),
             )
             .toList(growable: false);
+    // The user's dietary restrictions, applied exactly like Quick Mode
+    // (`RestaurantDiscoveryLogic._occurrenceIsSafe`): with active
+    // restrictions, a dish is shown only when its catalogue profile is
+    // KNOWN and does not conflict - a conflicting dish, and any place left
+    // with none to show, never reaches a card (user request, 2026-09-14).
+    final Set<int> activeRestrictionIds =
+        (placeData[3] as List<DietaryRestriction>)
+            .map((DietaryRestriction restriction) => restriction.id)
+            .toSet();
+    final Map<int, List<int>> restrictionIdsByFood =
+        placeData[4] as Map<int, List<int>>;
+    final List<FoodOccurrence> occurrences = allOccurrences
+        .where(
+          (FoodOccurrence value) => _occurrenceIsSafe(
+            value,
+            activeRestrictionIds: activeRestrictionIds,
+            restrictionIdsByFood: restrictionIdsByFood,
+          ),
+        )
+        .toList(growable: false);
     final Map<int, Restaurant> restaurantsById = <int, Restaurant>{
       for (final Restaurant restaurant in placeData[2] as List<Restaurant>)
         restaurant.id: restaurant,
@@ -108,9 +133,11 @@ class MatchesRecommendationLogic {
           ),
           submittedLandmarks: _landmarksFor(
             foodOccurrences,
-            occurrences,
+            allOccurrences,
             foodsById,
             request,
+            activeRestrictionIds: activeRestrictionIds,
+            restrictionIdsByFood: restrictionIdsByFood,
           ),
           restaurantStartingPrices: restaurantStartingPrices,
         ),
@@ -129,6 +156,23 @@ class MatchesRecommendationLogic {
       occurrence.source == FoodOccurrenceSource.restaurant
       ? 'restaurant:${occurrence.sourceId}'
       : 'submittedLandmark:${occurrence.sourceId}';
+
+  /// Whether [occurrence]'s dish may be shown under the active dietary
+  /// restrictions - the SAME rule Quick Mode applies
+  /// (`RestaurantDiscoveryLogic._occurrenceIsSafe`): no active restrictions
+  /// means everything is safe; otherwise the dish needs a KNOWN catalogue
+  /// profile (`localFoodId > 0`) with no restricted link.
+  bool _occurrenceIsSafe(
+    FoodOccurrence occurrence, {
+    required Set<int> activeRestrictionIds,
+    required Map<int, List<int>> restrictionIdsByFood,
+  }) {
+    if (activeRestrictionIds.isEmpty) return true;
+    if (occurrence.localFoodId <= 0) return false;
+    return !(restrictionIdsByFood[occurrence.localFoodId] ?? const <int>[]).any(
+      activeRestrictionIds.contains,
+    );
+  }
 
   Map<int, double> _restaurantStartingPrices(List<FoodOccurrence> occurrences) {
     final Map<int, double> prices = <int, double>{};
@@ -261,8 +305,10 @@ class MatchesRecommendationLogic {
     List<FoodOccurrence> foodOccurrences,
     List<FoodOccurrence> allOccurrences,
     Map<int, LocalFood> foodsById,
-    MatchesRecommendationRequest request,
-  ) {
+    MatchesRecommendationRequest request, {
+    required Set<int> activeRestrictionIds,
+    required Map<int, List<int>> restrictionIdsByFood,
+  }) {
     final Map<String, FoodOccurrence> serving = <String, FoodOccurrence>{};
     for (final FoodOccurrence occurrence in foodOccurrences) {
       if (occurrence.source != FoodOccurrenceSource.submittedLandmark) continue;
@@ -281,8 +327,20 @@ class MatchesRecommendationLogic {
                     value.sourceId == entry.key,
               )
               .toList(growable: false);
+          // The DISHES listed on the card obey the dietary rules (Quick Mode
+          // parity); the category above still counts EVERY dish - it must
+          // not change when a filter changes (Quick Mode's own note).
+          final List<FoodOccurrence> safeForLandmark = allForLandmark
+              .where(
+                (FoodOccurrence value) => _occurrenceIsSafe(
+                  value,
+                  activeRestrictionIds: activeRestrictionIds,
+                  restrictionIdsByFood: restrictionIdsByFood,
+                ),
+              )
+              .toList(growable: false);
           final List<SubmittedLandmarkDish> dishes = _dishesOf(
-            allForLandmark,
+            safeForLandmark,
             foodsById,
           );
           return SubmittedLandmarkRecommendation(

@@ -19,6 +19,7 @@ class RestaurantItem {
     required this.foodCategory,
     this.foodType = '',
     this.isRemoved = false,
+    this.dietaryWarning,
   });
 
   final int id;
@@ -42,4 +43,22 @@ class RestaurantItem {
   /// tourists reported this item does not exist. Removed items are excluded
   /// from the menu, the report picker and the map.
   final bool isRemoved;
+  final String? dietaryWarning;
+
+  RestaurantItem copyWith({String? dietaryWarning}) => RestaurantItem(
+    id: id,
+    restaurantId: restaurantId,
+    localFoodId: localFoodId,
+    foodName: foodName,
+    description: description,
+    ingredients: ingredients,
+    imageUrl: imageUrl,
+    imageFromLinkedFood: imageFromLinkedFood,
+    price: price,
+    currency: currency,
+    foodCategory: foodCategory,
+    foodType: foodType,
+    isRemoved: isRemoved,
+    dietaryWarning: dietaryWarning ?? this.dietaryWarning,
+  );
 }
