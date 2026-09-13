@@ -383,7 +383,7 @@ class _ServesStrip extends StatelessWidget {
       ),
       child: Text(
         foods.isEmpty
-            ? 'No matching local food listed here yet'
+            ? 'No local food listed here yet'
             : 'Serves: ${foods.join(', ')}',
         maxLines: 2,
         overflow: TextOverflow.ellipsis,

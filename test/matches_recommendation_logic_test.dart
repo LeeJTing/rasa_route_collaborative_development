@@ -35,6 +35,9 @@ void main() {
         expect(result.groups.single.food.id, 1);
         expect(result.groups.single.restaurants.single.id, 10);
         expect(result.groups.single.restaurants.single.items, hasLength(1));
+        // The headline price is restaurant-wide: the RM2.50 item belongs to a
+        // different food, but it is still the restaurant's cheapest item.
+        expect(result.groups.single.restaurantStartingPrices[10], 2.5);
         expect(
           result.groups.single.restaurants.single.items.single.localFoodId,
           1,
@@ -110,6 +113,7 @@ void main() {
             result.groups.single.restaurants.single.items;
         expect(items, hasLength(1));
         expect(items.single.price, 9.5);
+        expect(result.groups.single.restaurantStartingPrices[10], 2.5);
       },
     );
 
@@ -292,6 +296,17 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           latitude: 1,
           longitude: 1.001,
           itemPrice: 9.5,
+        ),
+        FoodOccurrence(
+          sourceId: '10',
+          source: FoodOccurrenceSource.restaurant,
+          placeName: 'Actual Restaurant',
+          localFoodId: 2,
+          foodName: 'Cheaper Unmatched Item',
+          foodType: 'Food',
+          latitude: 1,
+          longitude: 1.001,
+          itemPrice: 2.5,
         ),
         FoodOccurrence(
           sourceId: '20',

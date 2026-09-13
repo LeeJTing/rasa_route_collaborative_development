@@ -3,6 +3,7 @@ import 'package:meta/meta.dart' show protected;
 import '../../domain_model/exploration_filter.dart';
 import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
+import '../../domain_model/local_food.dart';
 import '../../domain_model/map.dart';
 import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/region.dart';
@@ -299,6 +300,19 @@ class DiscoveryLogicFacade {
   /// the keyword owns.
   MapSearchSelection searchSelection(ExplorationSearchResults results) =>
       MapExplorationLogic.searchSelectionFor(results);
+
+  /// The same, narrowed to the one place the tourist picked out of the list -
+  /// that restaurant id, or that landmark id, and nothing else.
+  ///
+  /// Empty for a state or a city, which is a camera position rather than a
+  /// place and has nothing on the map to mark.
+  MapSearchSelection searchSelectionForPlace(PlaceSuggestion place) =>
+      MapExplorationLogic.searchSelectionForPlace(place);
+
+  /// The same, narrowed to the one dish the tourist picked - every available
+  /// place serving it, by id.
+  MapSearchSelection searchSelectionForFood(LocalFood food) =>
+      MapExplorationLogic.searchSelectionForFood(food);
 
   /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
