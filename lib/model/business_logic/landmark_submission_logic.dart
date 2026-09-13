@@ -11,6 +11,7 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
+import '../repositories/geocoding_repository.dart';
 import '../repositories/landmark_repository_facade.dart';
 import 'food_name_matcher.dart';
 import 'location_rules.dart';
@@ -1531,15 +1532,30 @@ class LandmarkSubmissionLogic {
   Future<List<AddressSuggestion>?> searchAddresses({
     required String query,
     required TouristLocation around,
+  }) => searchAddressesWith(repository.geocoding, query: query, around: around);
+
+  /// [searchAddresses] against a geocoder the CALLER owns.
+  ///
+  /// The Add-Landmark form searches through its own [GeocodingRepository];
+  /// the report page searches through its logic class's own - both get the
+  /// same query rules, distance measuring and nearest-first ordering from
+  /// here, so the two screens can never disagree about what an address looks
+  /// like or how close it is.
+  static Future<List<AddressSuggestion>?> searchAddressesWith(
+    GeocodingRepository geocoding, {
+    required String query,
+    required TouristLocation around,
   }) async {
     final String trimmed = query.trim();
     if (trimmed.length < minAddressSearchLength) {
       return const <AddressSuggestion>[];
     }
-    final List<AddressSuggestion>? results = await repository.geocoding
-        .searchAddresses(query: trimmed, around: around);
+    final List<AddressSuggestion>? results = await geocoding.searchAddresses(
+      query: trimmed,
+      around: around,
+    );
     if (results == null) return null;
-    return measureAndSortSuggestions(results, around);
+    return sortSuggestionsByDistance(results, around);
   }
 
   /// Measures every suggestion from [around] and sorts them NEAREST FIRST.
@@ -1547,17 +1563,23 @@ class LandmarkSubmissionLogic {
   List<AddressSuggestion> measureAndSortSuggestions(
     List<AddressSuggestion> suggestions,
     TouristLocation around,
+  ) => sortSuggestionsByDistance(suggestions, around);
+
+  /// The static core of [measureAndSortSuggestions] - shared with the report
+  /// page's address field through `ReportModerationLogic`.
+  static List<AddressSuggestion> sortSuggestionsByDistance(
+    List<AddressSuggestion> suggestions,
+    TouristLocation around,
   ) {
     final List<AddressSuggestion> measured =
         <AddressSuggestion>[
           for (final AddressSuggestion suggestion in suggestions)
             suggestion.withDistance(
-              distanceMetres(
-                around,
-                TouristLocation(
-                  latitude: suggestion.latitude,
-                  longitude: suggestion.longitude,
-                ),
+              _distanceMetres(
+                around.latitude,
+                around.longitude,
+                suggestion.latitude,
+                suggestion.longitude,
               ),
             ),
         ]..sort(
@@ -1578,7 +1600,11 @@ class LandmarkSubmissionLogic {
   /// ("350 m"), one decimal below 10 km ("1.2 km"), whole kilometres above
   /// ("14 km"). A value that would round up to 1000 m crosses into the km
   /// format instead ("1.0 km").
-  String formatDistance(double metres) {
+  String formatDistance(double metres) => formatDistanceLabel(metres);
+
+  /// The static core of [formatDistance] - shared with the report page's
+  /// address suggestions through `ReportModerationLogic`.
+  static String formatDistanceLabel(double metres) {
     if (metres.isNaN || metres.isInfinite || metres < 0) return '';
     if (metres < 1000) {
       final int rounded = metres.round();

@@ -2,9 +2,109 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/report_category.dart';
 import 'package:rasa_route_collaborative_development/domain_model/report_claim.dart';
+import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/report_moderation_rules.dart';
 
+/// One degree of latitude is ~111.32 km, so these offsets are metres.
+double _northMetres(double metres) => metres / 111320;
+
 void main() {
+  group('on-site validity', () {
+    const TouristLocation spot = TouristLocation(
+      latitude: 3.14,
+      longitude: 101.69,
+    );
+
+    test('a reporter next to the spot is valid', () {
+      expect(
+        ReportModerationRules.isWithinOnsiteRange(
+          TouristLocation(latitude: 3.14 + _northMetres(40), longitude: 101.69),
+          spot,
+        ),
+        isTrue,
+      );
+    });
+
+    test('a reporter 60 m away is not', () {
+      expect(
+        ReportModerationRules.isWithinOnsiteRange(
+          TouristLocation(latitude: 3.14 + _northMetres(60), longitude: 101.69),
+          spot,
+        ),
+        isFalse,
+      );
+    });
+
+    test('no fix on either side is never valid', () {
+      expect(
+        ReportModerationRules.isWithinOnsiteRange(
+          TouristLocation.unknown,
+          spot,
+        ),
+        isFalse,
+      );
+      expect(
+        ReportModerationRules.isWithinOnsiteRange(
+          spot,
+          TouristLocation.unknown,
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('pin consensus', () {
+    TouristLocation pin(double northMetres) => TouristLocation(
+      latitude: 3.14 + _northMetres(northMetres),
+      longitude: 101.69,
+    );
+
+    test('three agreeing pins give the median of those three', () {
+      final TouristLocation? agreed = ReportModerationRules.consensusLocation(
+        <TouristLocation>[pin(0), pin(10), pin(20)],
+      );
+
+      expect(agreed, isNotNull);
+      expect(agreed!.latitude, closeTo(3.14 + _northMetres(10), 1e-9));
+      expect(agreed.longitude, closeTo(101.69, 1e-9));
+    });
+
+    test('two agreeing pins are not a consensus', () {
+      expect(
+        ReportModerationRules.consensusLocation(<TouristLocation>[
+          pin(0),
+          pin(5),
+          pin(400),
+        ]),
+        isNull,
+      );
+    });
+
+    test('dissenters are left out of the applied spot', () {
+      final TouristLocation? agreed = ReportModerationRules.consensusLocation(
+        <TouristLocation>[pin(0), pin(10), pin(20), pin(500)],
+      );
+
+      expect(agreed, isNotNull);
+      // The median of the three who agree - not of all four.
+      expect(agreed!.latitude, closeTo(3.14 + _northMetres(10), 1e-9));
+    });
+
+    test('below three pins there is nothing to agree on', () {
+      expect(
+        ReportModerationRules.consensusLocation(<TouristLocation>[
+          pin(0),
+          pin(5),
+        ]),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.consensusLocation(const <TouristLocation>[]),
+        isNull,
+      );
+    });
+  });
+
   group('thresholds', () {
     test('each category has the approved threshold', () {
       expect(

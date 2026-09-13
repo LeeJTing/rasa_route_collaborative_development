@@ -473,11 +473,26 @@ class SubmittedLandmarkRepository {
     );
   }
 
-  /// 3 address: rewrites the landmark's address to the reported value.
-  Future<void> updateLandmarkAddress(int landmarkId, String address) async {
+  /// 3 address: rewrites the landmark's address to the reported value, and -
+  /// when the claim carried the report page's pin - the exact spot the tourist
+  /// pointed at. The address text is usually the OpenStreetMap wording for
+  /// that spot, which is approximate; the pin is what is exact, so it is
+  /// applied too (null keeps the landmark's own coordinates).
+  Future<void> updateLandmarkAddress(
+    int landmarkId,
+    String address, {
+    double? latitude,
+    double? longitude,
+  }) async {
     await api.updateRow(
       APIManager.tableSubmittedLandmark,
-      <String, Object?>{'address': address},
+      <String, Object?>{
+        'address': address,
+        if (latitude != null && longitude != null) ...<String, Object?>{
+          'latitude': latitude,
+          'longitude': longitude,
+        },
+      },
       eq: <String, Object?>{'landmark_id': landmarkId},
     );
   }

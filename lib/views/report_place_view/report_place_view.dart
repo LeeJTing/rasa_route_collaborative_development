@@ -6,9 +6,12 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
 import '../../core/view_state.dart';
+import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/report_category.dart';
 import '../../domain_model/report_claim.dart';
+import '../../domain_model/tourist_location.dart';
 import '../../view_models/report_place_view_model.dart';
+import '../add_landmark_view/widgets/location_picker_field.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/operating_hours_editor.dart';
 
@@ -31,9 +34,10 @@ class _ReportPlaceViewState extends State<ReportPlaceView> {
   void initState() {
     super.initState();
     _viewModel = ReportPlaceViewModel();
-    final (ReportPlaceKind, int, String)? handoff = ReportPlaceHandoff().take();
+    final (ReportPlaceKind, int, String, TouristLocation)? handoff =
+        ReportPlaceHandoff().take();
     if (handoff != null) {
-      _viewModel.configure(handoff.$1, handoff.$2, handoff.$3);
+      _viewModel.configure(handoff.$1, handoff.$2, handoff.$3, handoff.$4);
     }
     _viewModel.onInit();
   }
@@ -225,7 +229,7 @@ class _CategoryBody extends StatelessWidget {
       case ReportCategory.address:
         return _AddressBody(viewModel: viewModel);
       case ReportCategory.closedPermanently:
-        return _ClosedPermanentlyBody(viewModel: viewModel);
+        return const _ClosedPermanentlyBody();
       case ReportCategory.closedTemporarily:
         return _ClosedTemporarilyBody(viewModel: viewModel);
     }
@@ -251,8 +255,7 @@ class _HoursBody extends StatelessWidget {
           title: 'Correct Operating Hours',
           helperText:
               'Only change the days that are wrong - days you leave untouched '
-              'are not reported. Needs ${viewModel.thresholdFor(ReportCategory.operatingHours)} '
-              'matching reports to apply.',
+              'are not reported.',
         ),
         if (viewModel.hoursError != null) ...<Widget>[
           const SizedBox(height: AppSpacing.xs),
@@ -305,14 +308,6 @@ class _ItemPriceBody extends StatelessWidget {
               prefixText: 'RM ',
             ).copyWith(errorText: viewModel.priceError),
             onChanged: viewModel.setPriceText,
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Price updates after ${viewModel.thresholdFor(ReportCategory.itemPrice)} '
-            'matching reports.',
-            style: AppTextStyles.bodySmall.copyWith(
-              color: AppColors.textSecondary,
-            ),
           ),
         ],
       ],
@@ -396,22 +391,78 @@ class _ItemListBody extends StatelessWidget {
   }
 }
 
-class _AddressBody extends StatelessWidget {
+class _AddressBody extends StatefulWidget {
   const _AddressBody({required this.viewModel});
 
   final ReportPlaceViewModel viewModel;
 
   @override
+  State<_AddressBody> createState() => _AddressBodyState();
+}
+
+/// The address report, BOUND TO A MAP exactly like the Add-New-Landmark
+/// form's address field (user request: "the address we should implement just
+/// like our landmark get the location"): an OpenStreetMap opens on the spot
+/// the app currently places the place, the tourist taps the correct spot,
+/// OpenStreetMap suggestions appear while they type (nearest first, each
+/// labelled with its distance) and picking one moves the pin there - and the
+/// pin's own composed address can fill the field with one tap. There is no
+/// 100 m pin allowance here: a wrong pin may be wrong by a lot.
+class _AddressBodyState extends State<_AddressBody> {
+  final TextEditingController _controller = TextEditingController();
+  int _syncedVersion = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.text = widget.viewModel.addressText;
+    _syncedVersion = widget.viewModel.addressVersion;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final ReportPlaceViewModel viewModel = widget.viewModel;
+    // The ViewModel fills the field from the map (a suggestion, the pin's own
+    // address) - the controller has to catch up with those writes, while
+    // never fighting the tourist's typing.
+    if (viewModel.addressVersion != _syncedVersion) {
+      _syncedVersion = viewModel.addressVersion;
+      _controller.text = viewModel.addressText;
+    }
+    final TouristLocation pin = viewModel.reportLocation;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
+        if (pin.isKnown) ...<Widget>[
+          const Text(
+            'Tap the map to set the correct spot',
+            style: AppTextStyles.titleSmall,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          LocationPickerField(
+            center: pin,
+            pin: pin,
+            onMove: viewModel.moveReportLocation,
+            errorMessage: viewModel.mapAddressStatus,
+            // No pin allowance on this page - see the class doc.
+            rangeMetres: null,
+          ),
+          const SizedBox(height: AppSpacing.lg),
+        ],
         const Text(
           'What is the correct address?',
           style: AppTextStyles.titleSmall,
         ),
         const SizedBox(height: AppSpacing.sm),
         TextField(
+          controller: _controller,
           maxLines: 2,
           maxLength: 150,
           maxLengthEnforcement: MaxLengthEnforcement.enforced,
@@ -425,29 +476,109 @@ class _AddressBody extends StatelessWidget {
           ),
           onChanged: viewModel.setAddressText,
         ),
-        const SizedBox(height: AppSpacing.xs),
-        Text(
-          'The address updates after ${viewModel.thresholdFor(ReportCategory.address)} '
-          'matching reports.',
-          style: AppTextStyles.bodySmall.copyWith(
-            color: AppColors.textSecondary,
+        if (viewModel.canApplyMapAddress) ...<Widget>[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: viewModel.applyMapAddressFromPin,
+              icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+              label: const Text("Use the map pin's address"),
+            ),
           ),
-        ),
+        ],
+        if (viewModel.addressSuggestions.isNotEmpty) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          _SuggestionList(viewModel: viewModel),
+        ],
+        if (viewModel.addressSearchStatus != null) ...<Widget>[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            viewModel.addressSearchStatus!,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
-class _ClosedPermanentlyBody extends StatelessWidget {
-  const _ClosedPermanentlyBody({required this.viewModel});
+/// The OpenStreetMap suggestions under the address field - the same box the
+/// Add-Landmark form shows (bounded height, one row per place with its
+/// distance), because a search can return several and an unbounded list would
+/// push the rest of the page off the screen.
+class _SuggestionList extends StatelessWidget {
+  const _SuggestionList({required this.viewModel});
 
   final ReportPlaceViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      'This place will be hidden from the map after '
-      '${viewModel.thresholdFor(ReportCategory.closedPermanently)} matching reports.',
+    final List<AddressSuggestion> suggestions = viewModel.addressSuggestions;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.outline),
+        borderRadius: AppRadius.cardRadius,
+      ),
+      constraints: const BoxConstraints(
+        maxHeight: AppSizes.addressSuggestionListMaxHeight,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          children: <Widget>[
+            for (int i = 0; i < suggestions.length; i++) ...<Widget>[
+              if (i > 0) const Divider(height: 1),
+              InkWell(
+                onTap: () => viewModel.selectAddressSuggestion(suggestions[i]),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.sm,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      const Icon(
+                        Icons.place_outlined,
+                        size: 18,
+                        color: AppColors.textSecondary,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          suggestions[i].address,
+                          style: AppTextStyles.bodyMedium,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        viewModel.formatDistance(suggestions[i].distanceMeters),
+                        style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ClosedPermanentlyBody extends StatelessWidget {
+  const _ClosedPermanentlyBody();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      'Once enough tourists report the same thing, the place is hidden from '
+      'the map.',
       style: AppTextStyles.bodyMedium,
     );
   }
@@ -509,8 +640,7 @@ class _ClosedTemporarilyBody extends StatelessWidget {
         const SizedBox(height: AppSpacing.xs),
         Text(
           'The place is hidden during the closure and returns automatically '
-          'after the most-reported duration. Needs '
-          '${viewModel.thresholdFor(ReportCategory.closedTemporarily)} matching reports.',
+          'after the most-reported duration.',
           style: AppTextStyles.bodySmall.copyWith(
             color: AppColors.textSecondary,
           ),

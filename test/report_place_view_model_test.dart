@@ -1,9 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rasa_route_collaborative_development/domain_model/address_suggestion.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/report_category.dart';
 import 'package:rasa_route_collaborative_development/domain_model/report_claim.dart';
 import 'package:rasa_route_collaborative_development/domain_model/report_outcome.dart';
+import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/report_logic_facade.dart';
+import 'package:rasa_route_collaborative_development/view_models/current_location_facade.dart';
 import 'package:rasa_route_collaborative_development/view_models/report_place_view_model.dart';
 
 void main() {
@@ -14,9 +17,10 @@ void main() {
     ReportPlaceKind kind = ReportPlaceKind.restaurant,
     int placeId = 1,
     String name = 'OldTown',
+    TouristLocation location = TouristLocation.unknown,
   }) {
     final ReportPlaceViewModel viewModel = _TestReportPlaceViewModel(logic);
-    viewModel.configure(kind, placeId, name);
+    viewModel.configure(kind, placeId, name, location);
     return viewModel;
   }
 
@@ -274,6 +278,182 @@ void main() {
       },
     );
   });
+
+  // The address report works like the Add-Landmark form's address field: a
+  // map pin, OpenStreetMap suggestions, and the pin's own composed address
+  // (user request, 2026-09-13). These tests drive the ViewModel directly -
+  // no widget, no network (the facade is faked).
+  group('address report map binding', () {
+    const TouristLocation place = TouristLocation(
+      latitude: 3.1,
+      longitude: 101.6,
+    );
+
+    test('the pin starts on the place the app already has', () {
+      final ReportPlaceViewModel viewModel = build(
+        _FakeReportLogicFacade(),
+        location: place,
+      );
+
+      expect(viewModel.reportLocation.latitude, 3.1);
+      expect(viewModel.reportLocation.longitude, 101.6);
+      viewModel.dispose();
+    });
+
+    test('moving the pin fills an empty address field from the map', () async {
+      final _FakeReportLogicFacade logic = _FakeReportLogicFacade();
+      final ReportPlaceViewModel viewModel = build(logic, location: place);
+      // A watched ViewModel counts as "a page is open" - the lookup only runs
+      // then, exactly like the Add-Landmark form.
+      viewModel.addListener(() {});
+
+      viewModel.moveReportLocation(3.2, 101.7);
+
+      await Future<void>.delayed(
+        ReportPlaceViewModel.mapAddressLookupDelay +
+            const Duration(milliseconds: 250),
+      );
+
+      expect(viewModel.reportLocation.latitude, 3.2);
+      expect(viewModel.addressText, '10, Jalan Foo, 50000 Kuala Lumpur');
+      expect(viewModel.addressError, isNull);
+      expect(viewModel.mapAddressStatus, isNull);
+      viewModel.dispose();
+    });
+
+    test('typed text is kept, and the map wording is offered back', () async {
+      final _FakeReportLogicFacade logic = _FakeReportLogicFacade();
+      final ReportPlaceViewModel viewModel = build(logic, location: place);
+      viewModel.addListener(() {});
+      viewModel.selectCategory(ReportCategory.address);
+      viewModel.setAddressText('12, Jalan Bukit Bintang, Kuala Lumpur');
+
+      viewModel.moveReportLocation(3.2, 101.7);
+      await Future<void>.delayed(
+        ReportPlaceViewModel.mapAddressLookupDelay +
+            const Duration(milliseconds: 250),
+      );
+
+      // Their wording survives the pin move ...
+      expect(viewModel.addressText, '12, Jalan Bukit Bintang, Kuala Lumpur');
+      // ... and the map's version is one tap away.
+      expect(viewModel.canApplyMapAddress, isTrue);
+
+      viewModel.applyMapAddressFromPin();
+      expect(viewModel.addressText, '10, Jalan Foo, 50000 Kuala Lumpur');
+      expect(viewModel.canApplyMapAddress, isFalse);
+      viewModel.dispose();
+    });
+
+    test('a suggestion fills the field and moves the pin to it', () {
+      final ReportPlaceViewModel viewModel = build(
+        _FakeReportLogicFacade(),
+        location: place,
+      );
+      viewModel.selectCategory(ReportCategory.address);
+
+      viewModel.selectAddressSuggestion(
+        const AddressSuggestion(
+          address: '20, Jalan Sultan, 50000 Kuala Lumpur',
+          latitude: 3.14,
+          longitude: 101.69,
+        ),
+      );
+
+      expect(viewModel.addressText, '20, Jalan Sultan, 50000 Kuala Lumpur');
+      expect(viewModel.reportLocation.latitude, 3.14);
+      expect(viewModel.reportLocation.longitude, 101.69);
+      expect(viewModel.addressSuggestions, isEmpty);
+      viewModel.dispose();
+    });
+
+    test('with no location from the handoff there is no map to open', () {
+      final ReportPlaceViewModel viewModel = build(_FakeReportLogicFacade());
+
+      expect(viewModel.reportLocation.isKnown, isFalse);
+      expect(viewModel.mapAddressStatus, isNull);
+      viewModel.dispose();
+    });
+
+    test('the submitted claim carries the pinned spot', () async {
+      // The address text is whatever the tourist ended up with (usually the
+      // OpenStreetMap wording); the pin is the exact part, so it rides the
+      // claim (user request, 2026-09-13).
+      final _FakeReportLogicFacade logic = _FakeReportLogicFacade();
+      final ReportPlaceViewModel viewModel = build(logic, location: place);
+      viewModel.selectCategory(ReportCategory.address);
+      viewModel.setAddressText('12, Jalan Bukit Bintang, Kuala Lumpur');
+      viewModel.moveReportLocation(3.14, 101.69);
+
+      await viewModel.submit();
+
+      final ReportClaim claim = logic.submittedClaims.single;
+      expect(claim.payload, 'address:12, Jalan Bukit Bintang, Kuala Lumpur');
+      expect(claim.latitude, 3.14);
+      expect(claim.longitude, 101.69);
+      viewModel.dispose();
+    });
+
+    test('an address claim with no map carries no coordinates', () async {
+      final _FakeReportLogicFacade logic = _FakeReportLogicFacade();
+      final ReportPlaceViewModel viewModel = build(logic);
+      viewModel.selectCategory(ReportCategory.address);
+      viewModel.setAddressText('12, Jalan Bukit Bintang, Kuala Lumpur');
+
+      await viewModel.submit();
+
+      final ReportClaim claim = logic.submittedClaims.single;
+      expect(claim.latitude, isNull);
+      expect(claim.longitude, isNull);
+      viewModel.dispose();
+    });
+
+    test('a reporter standing at the place produces a valid claim', () async {
+      // The fix the report page reads silently - at the PLACE (3.1, 101.6).
+      CurrentLocationFacade().publish(place);
+      addTearDown(
+        () => CurrentLocationFacade().publish(TouristLocation.unknown),
+      );
+      final _FakeReportLogicFacade logic = _FakeReportLogicFacade();
+      final ReportPlaceViewModel viewModel = build(logic, location: place);
+      await viewModel.onInit();
+      viewModel.selectCategory(ReportCategory.address);
+      viewModel.setAddressText('12, Jalan Bukit Bintang, Kuala Lumpur');
+      // They drop the correction pin 1 km away - where the pin is has no say
+      // in the on-site check: the place they are reporting is what counts.
+      viewModel.moveReportLocation(3.2, 101.6);
+
+      await viewModel.submit();
+
+      expect(logic.submittedClaims.single.locationValid, isTrue);
+      viewModel.dispose();
+    });
+
+    test(
+      'a reporter far from the place produces a claim that cannot count',
+      () async {
+        // Standing exactly where they put their pin - but a kilometre from the
+        // landmark they are reporting.
+        CurrentLocationFacade().publish(
+          const TouristLocation(latitude: 3.2, longitude: 101.6),
+        );
+        addTearDown(
+          () => CurrentLocationFacade().publish(TouristLocation.unknown),
+        );
+        final _FakeReportLogicFacade logic = _FakeReportLogicFacade();
+        final ReportPlaceViewModel viewModel = build(logic, location: place);
+        await viewModel.onInit();
+        viewModel.selectCategory(ReportCategory.address);
+        viewModel.setAddressText('12, Jalan Bukit Bintang, Kuala Lumpur');
+        viewModel.moveReportLocation(3.2, 101.6);
+
+        await viewModel.submit();
+
+        expect(logic.submittedClaims.single.locationValid, isFalse);
+        viewModel.dispose();
+      },
+    );
+  });
 }
 
 class _TestReportPlaceViewModel extends ReportPlaceViewModel {
@@ -289,6 +469,14 @@ class _FakeReportLogicFacade extends ReportLogicFacade {
   List<ReportableMenuItem> menuItems = const <ReportableMenuItem>[];
   ReportSubmitOutcome outcome = const ReportSubmitOutcome();
   List<ReportClaim> submittedClaims = <ReportClaim>[];
+
+  /// What the pin's reverse lookup answers (null = nothing found there).
+  String? mapAddress = '10, Jalan Foo, 50000 Kuala Lumpur';
+
+  /// What the field's search answers (null = the lookup failed).
+  List<AddressSuggestion>? suggestions = const <AddressSuggestion>[];
+  String? lastQuery;
+  TouristLocation? lastAround;
 
   @override
   int thresholdFor(ReportCategory category) => 1;
@@ -307,4 +495,18 @@ class _FakeReportLogicFacade extends ReportLogicFacade {
     submittedClaims = List<ReportClaim>.of(claims);
     return outcome;
   }
+
+  @override
+  Future<List<AddressSuggestion>?> searchAddresses({
+    required String query,
+    required TouristLocation around,
+  }) async {
+    lastQuery = query;
+    lastAround = around;
+    return suggestions;
+  }
+
+  @override
+  Future<String?> reverseGeocodeAddress(TouristLocation location) async =>
+      mapAddress;
 }
