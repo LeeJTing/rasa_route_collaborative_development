@@ -177,9 +177,33 @@ class AuthRepository {
         .toList(growable: false);
     history[key] = iso;
     await storage.writeJson(_otpSendHistoryKey, history);
+    // Every send also stamps the DEVICE, not just this address.
+    await storage.writeString(
+      _otpDeviceSendKey,
+      DateTime.now().toIso8601String(),
+    );
   }
   // ==========================================================================
   // End of OTP send history (Auth - ChinShunYon)
+  // ==========================================================================
+
+  // ==========================================================================
+  // OTP device cooldown marker (Auth - ChinShunYon) - the resend wait is per
+  // DEVICE, so switching accounts cannot buy a fresh allowance. Written by
+  // `recordOtpSend` above, read by the send gate in `AuthenticateLogic`.
+  // ==========================================================================
+
+  static const String _otpDeviceSendKey = 'otp_device_send_at';
+
+  /// When this device last sent ANY OTP, for any address, or null when it has
+  /// not sent one yet.
+  DateTime? get otpLastDeviceSendAt {
+    final String? raw = storage.readString(_otpDeviceSendKey);
+    if (raw == null || raw.isEmpty) return null;
+    return DateTime.tryParse(raw);
+  }
+  // ==========================================================================
+  // End of OTP device cooldown marker (Auth - ChinShunYon)
   // ==========================================================================
 
   /// Verifies an email OTP and returns the authenticated domain session.

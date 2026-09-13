@@ -40,6 +40,12 @@ class OtpViewModel extends BaseViewModel {
   String emailArgument = '';
 
   String _email = '';
+
+  /// The address exactly as it arrived (typed on the login screen, or the
+  /// pending one). Kept only so the screen can mention the mailbox rewrite when
+  /// there is one - every request uses [_email].
+  String _typedEmail = '';
+
   String _token = '';
   bool _verified = false;
   bool _isVerifying = false;
@@ -49,6 +55,17 @@ class OtpViewModel extends BaseViewModel {
   Timer? _resendTimer;
 
   String get email => _email;
+
+  /// The address before the mailbox rewrite.
+  String get typedEmail => _typedEmail;
+
+  /// True when the code goes to the mailbox's canonical form rather than the
+  /// salted address that was typed (e.g. `jo.hn@gmail.com` → `john@gmail.com`),
+  /// so the screen can say what it is sending to instead of appearing to mail
+  /// somewhere the tourist never typed.
+  bool get emailWasRewritten =>
+      _typedEmail.isNotEmpty && _email != _typedEmail.toLowerCase();
+
   String get token => _token;
   bool get verified => _verified;
 
@@ -86,15 +103,20 @@ class OtpViewModel extends BaseViewModel {
 
   @override
   Future<void> onInit() async {
-    _email =
+    _typedEmail =
         (emailArgument.isNotEmpty
                 ? emailArgument
                 : touristLogic.pendingAuthEmail)
             .trim();
-    if (_email.isEmpty) {
+    if (_typedEmail.isEmpty) {
       setError(StateError('Enter your email address before verifying a code.'));
       return;
     }
+    // Mailbox identity: the whole screen works on the canonical form, so every
+    // salted spelling of one mailbox shares one quota and lands on one Supabase
+    // user (one mailbox = one account). Send and verify MUST agree on this
+    // string or verification would never match the code that was mailed.
+    _email = touristLogic.canonicalEmail(_typedEmail);
     safeNotifyListeners();
     await _ensureCodeReady();
   }
