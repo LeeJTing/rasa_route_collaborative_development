@@ -310,18 +310,19 @@ void main() {
       expect(restaurant.frozenWithoutUntil, <int>[1]);
     });
 
-    test('temporary closure counts ACROSS durations and uses the most-common '
-        'one when 10 are in', () async {
+    test('temporary closure counts ACROSS durations and records the '
+        'most-voted END DATE when 10 are in', () async {
       final _FakeReportRepository report = _FakeReportRepository()
         ..issueCount = 10
-        ..issuePayloads = <String>[
-          // 7 reports say 3 days; 3 say 7 days.
+        ..issueClaims = <ClosureClaim>[
+          // 7 reported 3 days vs 3 reported 7 days, all filed today -> the
+          // end dates are today+3 and today+7; today+3 wins 7 votes to 3.
           for (int i = 0; i < 7; i++)
-            _closurePayload(
+            _closureClaim(
               const ProposedClosure(amount: 3, unit: ClosureUnit.days),
             ),
           for (int i = 0; i < 3; i++)
-            _closurePayload(
+            _closureClaim(
               const ProposedClosure(amount: 7, unit: ClosureUnit.days),
             ),
         ];
@@ -348,7 +349,7 @@ void main() {
       expect(outcome.applied.single, contains('closed temporarily'));
       expect(outcome.placeHiddenNow, isTrue);
       expect(landmark.frozenWithUntil, hasLength(1));
-      // 7 reports of 3 days beat 3 reports of 7 days -> 3 days out.
+      // The 3-day end date got 7 votes vs the 7-day date's 3 -> ~3 days out.
       final DateTime closedUntil = landmark.frozenWithUntil.single.$2!;
       expect(
         closedUntil.isBefore(DateTime.now().add(const Duration(days: 4))),
@@ -358,16 +359,16 @@ void main() {
       expect(report.deletedIssues, 1);
     });
 
-    test('temporary closure tie breaks to the LONGER duration', () async {
+    test('temporary closure tie breaks to the LATER end date', () async {
       final _FakeReportRepository report = _FakeReportRepository()
         ..issueCount = 10
-        ..issuePayloads = <String>[
+        ..issueClaims = <ClosureClaim>[
           for (int i = 0; i < 5; i++)
-            _closurePayload(
+            _closureClaim(
               const ProposedClosure(amount: 2, unit: ClosureUnit.days),
             ),
           for (int i = 0; i < 5; i++)
-            _closurePayload(
+            _closureClaim(
               const ProposedClosure(amount: 9, unit: ClosureUnit.days),
             ),
         ];
@@ -501,6 +502,14 @@ TouristLocation _pin(double northMetres) =>
 String _closurePayload(ProposedClosure closure) =>
     'closed-temporarily:${closure.amount}:${closure.unit.columnValue}';
 
+/// A stored closure claim stamped [createdAt] (default now - the tests that
+/// care about END DATES pass their own).
+ClosureClaim _closureClaim(ProposedClosure closure, {DateTime? createdAt}) =>
+    ClosureClaim(
+      payload: _closurePayload(closure),
+      createdAt: createdAt ?? DateTime.now(),
+    );
+
 String _issueKey(ReportClaim claim) =>
     '${claim.placeKind.columnValue}:${claim.placeId}:'
     '${claim.category.name}:${claim.itemKind?.columnValue ?? '-'}:'
@@ -568,7 +577,7 @@ class _TestReportModerationLogic extends ReportModerationLogic {
 class _FakeReportRepository extends ReportRepository {
   int identicalCount = 0;
   int issueCount = 0;
-  List<String> issuePayloads = const <String>[];
+  List<ClosureClaim> issueClaims = const <ClosureClaim>[];
   List<TouristLocation> issuePins = const <TouristLocation>[];
   Set<String> already = <String>{};
   final List<Map<String, Object?>> inserted = <Map<String, Object?>>[];
@@ -596,8 +605,8 @@ class _FakeReportRepository extends ReportRepository {
   Future<int> countIssue(ReportClaim claim) async => issueCount;
 
   @override
-  Future<List<String>> payloadsForIssue(ReportClaim claim) async =>
-      issuePayloads;
+  Future<List<ClosureClaim>> closureClaimsForIssue(ReportClaim claim) async =>
+      issueClaims;
 
   @override
   Future<List<TouristLocation>> locationsForIssue(ReportClaim claim) async =>
