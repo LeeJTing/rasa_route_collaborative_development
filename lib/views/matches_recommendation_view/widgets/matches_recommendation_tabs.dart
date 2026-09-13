@@ -19,7 +19,7 @@ class MatchesRecommendationTabs extends StatelessWidget {
         ButtonSegment<MatchesRecommendationTab>(
           value: MatchesRecommendationTab.restaurants,
           icon: Icon(Icons.restaurant_outlined),
-          label: Text('Restaurants'),
+          label: Text('Google-Sourced Restaurant'),
         ),
         ButtonSegment<MatchesRecommendationTab>(
           value: MatchesRecommendationTab.submittedLandmarks,

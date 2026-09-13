@@ -14,6 +14,7 @@ class LocalFoodCard extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     required this.onFavourite,
+    this.onImageTap,
   });
 
   final LocalFood food;
@@ -21,6 +22,7 @@ class LocalFoodCard extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback onFavourite;
+  final VoidCallback? onImageTap;
 
   @override
   Widget build(BuildContext context) {
@@ -47,13 +49,19 @@ class LocalFoodCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              SizedBox.square(
-                dimension: AppSizes.foodCardImage,
-                child: AppImage(
-                  source: food.imageUrls.isEmpty ? null : food.imageUrls.first,
-                  semanticLabel: food.name,
-                  borderRadius: AppRadius.cardRadius,
-                  fallback: const _FoodImageUnavailable(),
+              InkWell(
+                onTap: onImageTap,
+                borderRadius: AppRadius.cardRadius,
+                child: SizedBox.square(
+                  dimension: AppSizes.foodCardImage,
+                  child: AppImage(
+                    source: food.imageUrls.isEmpty
+                        ? null
+                        : food.imageUrls.first,
+                    semanticLabel: food.name,
+                    borderRadius: AppRadius.cardRadius,
+                    fallback: const _FoodImageUnavailable(),
+                  ),
                 ),
               ),
               const SizedBox(width: AppSpacing.md),

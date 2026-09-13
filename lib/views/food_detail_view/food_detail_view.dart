@@ -8,11 +8,11 @@ import '../../domain_model/local_food.dart';
 import '../../view_models/food_detail_view_model.dart';
 import '../common_widgets/app_image.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/food_notice_banner.dart';
 import '../common_widgets/food_section_card.dart';
 import '../food_recommendation_view/food_recommendation_view.dart';
 import 'widgets/food_hero_card.dart';
 import 'widgets/food_name_collision_card.dart';
-import 'widgets/food_notice_banner.dart';
 import 'widgets/food_overview_card.dart';
 
 class FoodDetailView extends StatefulWidget {
@@ -25,6 +25,7 @@ class FoodDetailView extends StatefulWidget {
 class _FoodDetailViewState extends State<FoodDetailView> {
   late final FoodDetailViewModel _viewModel;
   bool _initialised = false;
+  bool _isReturning = false;
 
   @override
   void initState() {
@@ -48,29 +49,41 @@ class _FoodDetailViewState extends State<FoodDetailView> {
     super.dispose();
   }
 
+  void _returnToPrevious() {
+    if (_isReturning) return;
+    setState(() => _isReturning = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).pop(<String, Object?>{
+        'id': _viewModel.food?.id,
+        'isFavourite': _viewModel.isLiked,
+      });
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<FoodDetailViewModel>.value(
       value: _viewModel,
-      child: Consumer<FoodDetailViewModel>(
-        builder: (BuildContext context, FoodDetailViewModel vm, Widget? child) {
-          return Scaffold(
-            appBar: AppTopBar(
-              title: vm.food?.name ?? 'Food Details',
-              showBackButton: true,
-              onBack: () {
-                Navigator.pop(
-                  context,
-                  {
-                    'id': vm.food?.id,
-                    'isFavourite': vm.isLiked,
-                  },
+      child: PopScope(
+        canPop: _isReturning,
+        onPopInvokedWithResult: (bool didPop, Object? result) {
+          if (didPop) return;
+          _returnToPrevious();
+        },
+        child: Consumer<FoodDetailViewModel>(
+          builder:
+              (BuildContext context, FoodDetailViewModel vm, Widget? child) {
+                return Scaffold(
+                  appBar: AppTopBar(
+                    title: vm.food?.name ?? 'Food Details',
+                    showBackButton: true,
+                    onBack: _returnToPrevious,
+                  ),
+                  body: _body(context, vm),
                 );
               },
-            ),
-            body: _body(context, vm),
-          );
-        },
+        ),
       ),
     );
   }
