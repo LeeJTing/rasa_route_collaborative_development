@@ -4,7 +4,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/routing/app_navigator.dart';
 import '../../app/routing/app_routes.dart';
-import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../domain_model/report_category.dart';
@@ -13,6 +12,7 @@ import '../../domain_model/tourist_location.dart';
 import '../../view_models/report_place_view_model.dart';
 import '../../view_models/restaurant_detail_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/enlarged_image_dialog.dart';
 import 'widgets/restaurant_detail_header.dart';
 import 'widgets/restaurant_information_section.dart';
 import 'widgets/restaurant_menu_preview.dart';
@@ -91,10 +91,7 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
                           ),
                           child: OutlinedButton.icon(
                             onPressed: () => _openReport(restaurant),
-                            icon: const Icon(
-                              Icons.flag_outlined,
-                              color: AppColors.error,
-                            ),
+                            icon: const Icon(Icons.flag_outlined),
                             label: const Text('Report Restaurant'),
                           ),
                         ),
@@ -144,7 +141,14 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
         AppSpacing.xl,
       ),
       children: <Widget>[
-        RestaurantDetailHeader(restaurant: restaurant),
+        RestaurantDetailHeader(
+          restaurant: restaurant,
+          onImageTap: () => showEnlargedImage(
+            context,
+            semanticLabel: restaurant.name,
+            source: restaurant.imageUrl,
+          ),
+        ),
         const SizedBox(height: AppSpacing.xl),
         RestaurantInformationSection(
           restaurant: restaurant,
@@ -156,7 +160,15 @@ class _RestaurantDetailViewState extends State<RestaurantDetailView> {
           onWebsiteTap: () => _openWebsite(restaurant.website),
         ),
         const SizedBox(height: AppSpacing.xl),
-        RestaurantMenuPreview(items: restaurant.items),
+        RestaurantMenuPreview(
+          items: restaurant.items,
+          onImageTap: (item) => showRestaurantItemImage(
+            context,
+            semanticLabel: item.foodName,
+            source: item.imageUrl,
+            fromLinkedFood: item.imageFromLinkedFood,
+          ),
+        ),
       ],
     );
   }

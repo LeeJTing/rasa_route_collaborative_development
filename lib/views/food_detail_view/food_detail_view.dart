@@ -8,11 +8,11 @@ import '../../domain_model/local_food.dart';
 import '../../view_models/food_detail_view_model.dart';
 import '../common_widgets/app_image.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/food_notice_banner.dart';
 import '../common_widgets/food_section_card.dart';
 import '../food_recommendation_view/food_recommendation_view.dart';
 import 'widgets/food_hero_card.dart';
 import 'widgets/food_name_collision_card.dart';
-import 'widgets/food_notice_banner.dart';
 import 'widgets/food_overview_card.dart';
 
 class FoodDetailView extends StatefulWidget {

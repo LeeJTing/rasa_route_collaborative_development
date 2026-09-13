@@ -992,6 +992,10 @@ class RestaurantRepository {
           .map((LocalFoodImageDataModel image) => image.imageName)
           .toList(growable: false),
     );
+    // The item has no photo of its own, so the image above came from the
+    // linked local food: a stand-in the UI labels "for reference only".
+    final bool imageFromLinkedFood =
+        _nonEmpty(data.foodImgUrl) == null && imageName != null;
     return RestaurantItem(
       id: data.restaurantItemId,
       restaurantId: data.restaurantId,
@@ -1005,6 +1009,7 @@ class RestaurantRepository {
         imageName,
         bucket: APIManager.storageBucketFoodImages,
       ),
+      imageFromLinkedFood: imageFromLinkedFood,
       price: data.restaurantItemPrice,
       currency: 'RM',
       foodCategory: data.foodCategory ?? '',
@@ -1016,8 +1021,10 @@ class RestaurantRepository {
   /// Resolves an item's image according to the ERD relationship.
   ///
   /// A restaurant-specific photo wins. Otherwise the first image belonging to
-  /// the `local_food_id` foreign-key target is used. Missing data remains null
-  /// so the View can render its neutral fallback.
+  /// the `local_food_id` foreign-key target is used - callers mark that case
+  /// with [RestaurantItem.imageFromLinkedFood] so the UI can say it is only a
+  /// reference picture. Missing data remains null so the View can render its
+  /// neutral default image.
   @visibleForTesting
   String? preferredRestaurantItemImageName({
     required String? restaurantImageName,

@@ -41,6 +41,7 @@ class RestaurantInformationSection extends StatelessWidget {
                 ? 'Address unavailable'
                 : restaurant.address,
             onTap: restaurant.address.isEmpty ? null : onAddressTap,
+            textColor: AppColors.textPrimary,
           ),
           const SizedBox(height: AppSpacing.md),
           InformationRow(
@@ -49,6 +50,7 @@ class RestaurantInformationSection extends StatelessWidget {
                 ? 'Phone unavailable'
                 : restaurant.phone,
             onTap: restaurant.phone.isEmpty ? null : onPhoneTap,
+            textColor: AppColors.textPrimary,
           ),
           const SizedBox(height: AppSpacing.md),
           InformationRow(
@@ -57,6 +59,7 @@ class RestaurantInformationSection extends StatelessWidget {
                 ? 'Website unavailable'
                 : restaurant.website,
             onTap: restaurant.website.isEmpty ? null : onWebsiteTap,
+            textColor: AppColors.textPrimary,
           ),
           const SizedBox(height: AppSpacing.sm),
           Material(

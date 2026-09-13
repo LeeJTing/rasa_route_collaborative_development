@@ -6,10 +6,10 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../view_models/food_recommendation_view_model.dart';
+import '../common_widgets/food_notice_banner.dart';
 import '../common_widgets/food_pairing_card.dart';
 import '../common_widgets/food_section_card.dart';
 import '../common_widgets/similar_food_card.dart';
-import '../food_detail_view/widgets/food_notice_banner.dart';
 
 class FoodRecommendationView extends StatefulWidget {
   const FoodRecommendationView({super.key, this.foodId});
