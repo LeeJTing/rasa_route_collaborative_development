@@ -67,6 +67,43 @@ class GeminiService {
     );
   }
 
+  /// Sends SEVERAL images with [prompt], in the order given.
+  ///
+  /// The prompt refers to them by position - "the FIRST image", "the SECOND
+  /// image" - which is the order they are attached in. Every other option
+  /// behaves exactly as in [describeImage]; used by the near-duplicate place
+  /// check, which asks one question about two photos at once.
+  Future<String> describeImages({
+    required List<List<int>> imageBytes,
+    required String prompt,
+    String mimeType = 'image/jpeg',
+    String? apiKey,
+    String? model,
+    double? temperature,
+    bool jsonResponse = false,
+    int? thinkingBudget,
+    String? label,
+  }) async {
+    return _generate(
+      <Map<String, Object?>>[
+        <String, Object?>{'text': prompt},
+        for (final List<int> bytes in imageBytes)
+          <String, Object?>{
+            'inline_data': <String, Object?>{
+              'mime_type': mimeType,
+              'data': base64Encode(bytes),
+            },
+          },
+      ],
+      apiKey: apiKey,
+      model: model,
+      temperature: temperature,
+      jsonResponse: jsonResponse,
+      thinkingBudget: thinkingBudget,
+      label: label,
+    );
+  }
+
   /// Sends [prompt] as plain text and returns the model's raw text reply.
   ///
   /// Times out after [Env.apiTimeout] (UC406 requires the caller to handle a

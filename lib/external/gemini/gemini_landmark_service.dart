@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import '../../app/config/env.dart';
 import '../../model/data_models/food_analysis_response.dart';
+import '../../model/data_models/place_photo_match_response.dart';
 import '../../model/data_models/signboard_analysis_response.dart';
+import '../../model/data_models/signboard_name_match_response.dart';
 import '../../model/data_models/stall_analysis_response.dart';
 import 'gemini_service.dart';
 
@@ -88,7 +90,10 @@ class GeminiLandmarkService {
   ///    are markedly more accurate when made to name the dish's origin
   ///    first, then classify;
   ///  - it reused the single `confidence` field, so an obvious dish with a
-  ///    genuinely borderline local-ness call still looked fully certain.
+  ///    genuinely borderline local-ness call still looked fully certain;
+  ///  - and it accepted ANY "Malaysian hawker/street adaptation", so a
+  ///    foreign original sold here unchanged (tau fu fah) passed as local
+  ///    food - see the MERGED-FOOD RULE below, added 2026-09-13.
   ///
   /// Kept in one constant so every call judges by exactly the same rules -
   /// previously each prompt had its own looser wording.
@@ -154,6 +159,15 @@ class GeminiLandmarkService {
   ARE Malaysian kopitiam food (class (a)); a Western breakfast cooked the
   same way - french toast, pancakes - is still a foreign dish (class (c)).
   Judge the DISH, never the venue.
+
+  MERGED-FOOD RULE: a dish that is originally foreign may be class (a) or
+  (b) ONLY once it has FULLY MERGED - Malaysia reshaped it into a form of
+  its own. yong tau foo: Chinese stuffed tofu reworked in Malaysia around
+  fish paste and sold from Malaysian stalls, so it IS local food. A dish
+  still served in its ORIGINAL foreign form, with no Malaysian evolution of
+  its own, has NOT fully merged and is NOT local food however widely it
+  sells here - tau fu fah (soft tofu pudding as made in China) stays class
+  (c). Selling at pasar malam or kopitiams is NOT a Malaysian form.
 
   CONFIDENCE CALIBRATION - use the full range, do not default to high:
     0.90-1.00  Certain. The dish is unmistakable and clearly photographed.
@@ -1075,6 +1089,181 @@ $_catalogueFoodTypeRules
     );
   }
 
+  /// The SECOND signboard question (UC500): the tourist EDITED the name
+  /// Gemini read, so the same photo is asked again - this time about the
+  /// name the form is holding.
+  ///
+  /// Returns how well that typed name matches the name painted on the
+  /// signboard. The allowances a person would make (translation, other
+  /// script, a dropped "Restoran"/"Restaurant" prefix, a shortened but still
+  /// distinctive form, spacing, capitalisation, small typos) count as the
+  /// SAME name - the question is whether both name the same shop, not
+  /// whether they spell it identically. See
+  /// `LandmarkSubmissionLogic.nameMatchesSignboard` for the cutoff.
+  /// Errors: A2 (timeout) - callers decide what an unanswered check means.
+  Future<SignboardNameMatchResponse> verifySignboardName({
+    required List<int> imageBytes,
+    required String typedName,
+  }) async {
+    if (useLiveGemini) {
+      return _verifySignboardNameLive(imageBytes, typedName);
+    }
+
+    // Stub fallback - only reached while the live call is disabled. A stub
+    // cannot read a signboard, so it must NOT invent a mismatch: the check
+    // stands aside and the form behaves exactly as it did before it existed.
+    return const SignboardNameMatchResponse(
+      matchScore: 1.0,
+      matched: true,
+      reason: 'stub: no live signboard check',
+    );
+  }
+
+  Future<SignboardNameMatchResponse> _verifySignboardNameLive(
+    List<int> imageBytes,
+    String typedName,
+  ) async {
+    final String prompt =
+        '''
+  This image is a restaurant signboard photo. A tourist typed this restaurant
+  name for it:
+
+  "$typedName"
+
+  Question: does that typed name name the SAME restaurant as the signboard in
+  this photo?
+
+  Treat as the SAME name - score them high - when they differ only by:
+  - translation or romanisation of the same name, or the same name written
+    in another script (Chinese/Tamil/Jawi vs Latin, and vice versa);
+  - a dropped or added generic word ("Restoran", "Restaurant", "Kedai",
+    "Kopitiam", "Sdn Bhd", "(M) Sdn Bhd");
+  - a shortened but still distinctive form (signboard paints "Restoran
+    Makanan Laut Tian Yi", typed name "Tian Yi");
+  - spacing, punctuation, capitalisation, or a small typo.
+  Treat as a DIFFERENT name - score them low - when the words identify a
+  different restaurant, even if the typed name is itself plausible.
+  "&" and "and" are different words, NEVER interchangeable: a signboard
+  painted "Hup Kee & Sons" and a typed "Hup Kee and Sons" (or the reverse,
+  or "&" simply dropped) is a DIFFERENT name and must score below 50 - this
+  app keeps the two spellings as two separate restaurants.
+
+  Read the signboard in ALL scripts (Malay/English, Chinese, Tamil, Jawi) -
+  never answer "cannot tell" just because the signboard is not in Latin
+  letters.
+
+  Score 0-100:
+  - 100 = the same name (including every allowance above);
+  - 95 or more = clearly the same restaurant;
+  - 40-94 = related or partly readable as the same name;
+  - 0-39 = a different name, or the typed name is not on this signboard.
+
+  Return ONLY raw JSON, no markdown fences, no extra text:
+  {
+    "matchScore": 0-100,
+    "matched": true|false,
+    "reason": "one short sentence"
+  }
+  ''';
+
+    final String raw = await _gemini.describeImage(
+      imageBytes: imageBytes,
+      prompt: prompt,
+      apiKey: Env.geminiApiKeyLandmark,
+      model: Env.geminiModelLandmark,
+      jsonResponse: true,
+      thinkingBudget: Env.geminiThinkingBudget,
+      label: 'signboard-name-check',
+    );
+    final Map<String, dynamic> json = _decodeJsonObject(raw);
+    // The wire score is 0-100; the app reasons in 0.0-1.0 (like every other
+    // confidence it reads from Gemini).
+    final double rawScore = ((json['matchScore'] as num?) ?? 0).toDouble();
+    return SignboardNameMatchResponse(
+      matchScore: (rawScore / 100).clamp(0.0, 1.0),
+      matched: (json['matched'] as bool?) ?? rawScore >= 95,
+      reason: (json['reason'] as String?) ?? '',
+    );
+  }
+
+  /// The near-duplicate question (UC500): do these two photos show the same
+  /// restaurant? [imageBytes] is the photo the tourist just captured,
+  /// [otherImageBytes] the stored photo of a NEARBY place whose name looks
+  /// like theirs (see `LandmarkSubmissionLogic.similarNearbyPlaces`).
+  ///
+  /// The spelling there is deliberately generous - "Ali & Abu" and "Ali and
+  /// Abu" ARE the same place when the photos agree, because the photos are
+  /// the evidence; the tourist still confirms before anything is merged, so
+  /// nothing is decided by the model alone.
+  /// Errors: A2 (timeout) - callers treat an unanswered check as "no match".
+  Future<PlacePhotoMatchResponse> comparePlacePhotos({
+    required List<int> imageBytes,
+    required List<int> otherImageBytes,
+  }) async {
+    if (useLiveGemini) {
+      return _comparePlacePhotosLive(imageBytes, otherImageBytes);
+    }
+
+    // Stub fallback - only reached while the live call is disabled. Nothing
+    // was read, so it must never claim a match (a stub "yes" would raise the
+    // merge question on every Confirm).
+    return const PlacePhotoMatchResponse(
+      samePlace: false,
+      reason: 'stub: no photo comparison',
+    );
+  }
+
+  Future<PlacePhotoMatchResponse> _comparePlacePhotosLive(
+    List<int> imageBytes,
+    List<int> otherImageBytes,
+  ) async {
+    const String prompt = '''
+  Two photos are attached. The FIRST was just taken by a tourist adding this
+  restaurant to the app. The SECOND is stored for a place that already
+  exists nearby, under a name that looks similar to the tourist's.
+
+  Question: do the two photos show the SAME restaurant or stall?
+
+  - Either photo may show a signboard, a shop front, a stall, or a dish -
+    judge from whatever is visible in BOTH.
+  - Read any name text in either photo. The SAME name spelled differently is
+    the same place ("Ali & Abu" vs "Ali and Abu"; "Restoran Ali" vs
+    "Ali Restaurant"; a Chinese name and its romanised form). Different
+    names on the signs mean the two photos are NOT the same place.
+  - A branch of the same chain at a different spot is NOT the same place:
+    weigh the shop's own look (colours, structure, signage, surroundings,
+    the street/stalls around it), not just the name.
+  - If the SECOND photo does not identify a place at all (a dish close-up, a
+    blurry shot, an interior with no sign), answer false.
+
+  Return ONLY raw JSON, no markdown fences, no extra text:
+  {
+    "samePlace": true|false,
+    "confidence": 0.0-1.0,
+    "reason": "one short sentence"
+  }
+  ''';
+
+    final String raw = await _gemini.describeImages(
+      imageBytes: <List<int>>[imageBytes, otherImageBytes],
+      prompt: prompt,
+      apiKey: Env.geminiApiKeyLandmark,
+      model: Env.geminiModelLandmark,
+      jsonResponse: true,
+      thinkingBudget: Env.geminiThinkingBudget,
+      label: 'place-photo-match',
+    );
+    final Map<String, dynamic> json = _decodeJsonObject(raw);
+    return PlacePhotoMatchResponse(
+      samePlace: (json['samePlace'] as bool?) ?? false,
+      confidence: ((json['confidence'] as num?) ?? 0).toDouble().clamp(
+        0.0,
+        1.0,
+      ),
+      reason: (json['reason'] as String?) ?? '',
+    );
+  }
+
   /// Analyze stall image to verify stall detection and frame completeness (UC500)
   /// Returns: stall detection status + frame status (NO auto-fill)
   /// Errors: A2 (timeout), A8 (not detected), A15 (incomplete frame)
@@ -1139,7 +1328,12 @@ $_catalogueFoodTypeRules
   /// Dishes already confirmed wrong in this catalogue (port of the Python
   /// tool's KNOWN_MISATTRIBUTIONS). Append every newly-caught misattribution
   /// here - check 3 only gets more precise over time.
-  static const List<String> knownMisattributions = <String>['Soto Ayam'];
+  static const List<String> knownMisattributions = <String>[
+    'Soto Ayam',
+    // Caught 2026-09-13: sold at every Malaysian pasar malam yet still the
+    // Chinese original - popular here is not the same as fully merged.
+    'Tau Fu Fah',
+  ];
 
   /// Check 1 - direct origin. No mention of Malaysia anywhere, so there is
   /// nothing for the model to anchor to or agree with. Asks for the historical
@@ -1159,15 +1353,20 @@ $_catalogueFoodTypeRules
         'Classify the dish "$dish" against this scheme, using culinary '
         'history, not where it is eaten today:\n'
         '(a) MALAYSIAN ORIGIN - the dish originated in Malaysia.\n'
-        '(b) ADOPTED / NATURALIZED - originated elsewhere but adopted and '
-        'naturalized as everyday Malaysian local food (e.g. roti canai, '
-        'chee cheong fun).\n'
+        '(b) ADOPTED / NATURALIZED - originated elsewhere but FULLY MERGED: '
+        'Malaysia reshaped it into a local form of its own (e.g. roti '
+        'canai, chee cheong fun, yong tau foo).\n'
         '(c) FOREIGN - popular in Malaysia but foreign with no distinct '
         'Malaysian identity (e.g. sushi, pizza, a Western fast-food '
         'burger).\n'
         '(d) SHARED REGIONAL - shared across Malaysia/Indonesia/etc. and '
         'genuinely part of Malaysian everyday food culture (e.g. rendang, '
         'laksa).\n\n'
+        'A dish still served in its ORIGINAL foreign form, with no Malaysian '
+        'evolution of its own, has NOT fully merged: it is (c), not (b) or '
+        '(d), however widely it is sold in Malaysia - tau fu fah (soft tofu '
+        'pudding as made in China) is (c), unlike yong tau foo which IS a '
+        'Malaysian form.\n\n'
         'What country/ethnic cuisine did it historically originate from, '
         'and which case fits best?\n\n'
         'Return strictly this JSON object, nothing else, no markdown fences: '
@@ -1202,11 +1401,16 @@ $_catalogueFoodTypeRules
         'there.\n\n'
         'Adjudicate which case fits best:\n'
         '(a) MALAYSIAN ORIGIN\n'
-        '(b) ADOPTED / NATURALIZED in Malaysia (everyday local food, foreign '
-        'origin)\n'
+        '(b) ADOPTED / NATURALIZED in Malaysia - FULLY MERGED into a '
+        'distinctly Malaysian form of its own (roti canai, yong tau foo)\n'
         '(c) FOREIGN with no distinct Malaysian identity\n'
         '(d) SHARED REGIONAL, genuinely part of Malaysian everyday food '
         'culture\n\n'
+        'A dish still served in its ORIGINAL foreign form, with no Malaysian '
+        'evolution of its own, has NOT fully merged: it is (c), not (b) or '
+        '(d), however widely it is sold in Malaysia - tau fu fah (soft tofu '
+        'pudding as made in China) is (c), unlike yong tau foo which IS a '
+        'Malaysian form.\n\n'
         'Return strictly this JSON object, nothing else, no markdown fences: '
         '{"case": "a|b|c|d", "actual_origin_country": "<country>", '
         '"distinguishing_notes": "<max 2 sentences>"}';

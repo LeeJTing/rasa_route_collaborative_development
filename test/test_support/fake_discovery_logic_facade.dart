@@ -100,6 +100,7 @@ const SubmittedLandmarkRecommendation testLandmarkRecommendation =
       id: 901,
       name: 'Uncle Lim Prawn Noodle Stall',
       category: 'Hawker Stall',
+      address: 'Jalan Pudu, Kuala Lumpur',
       distanceMetres: 620,
       dishes: <SubmittedLandmarkDish>[
         SubmittedLandmarkDish(name: 'Prawn Noodle', price: 12),
