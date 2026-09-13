@@ -176,6 +176,50 @@ void main() {
         expect(viewModel.hasError, isTrue);
       },
     );
+
+    test('an abandoned flow stops being retried on every app resume', () async {
+      // Regression: `googleFlowStarted` was never cleared, and the View resumes
+      // on it - so tapping Continue with Google, coming back from the browser
+      // without signing in, then switching apps at any point afterwards re-ran
+      // the whole grace-period poll and re-showed the failure, every single
+      // time, for the rest of the session.
+      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
+        touristLogic: _FakeTouristInformationLogicFacade(
+          googleCompleteResult: null,
+        ),
+        googleSessionGracePeriod: Duration.zero,
+      );
+
+      await viewModel.signInWithGoogle();
+      expect(viewModel.googleFlowStarted, isTrue);
+
+      await viewModel.completeGoogleSignIn();
+
+      // The View's guard is `googleFlowStarted && !googleSignInComplete`, so
+      // this is what stops the loop.
+      expect(viewModel.googleFlowStarted, isFalse);
+      expect(viewModel.googleSignInComplete, isFalse);
+    });
+
+    test(
+      'a successful flow still reports complete after the marker clears',
+      () async {
+        // Clearing the marker must not cost the View its navigation: it reads
+        // `googleSignInComplete` straight after this call.
+        final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
+          touristLogic: _FakeTouristInformationLogicFacade(
+            googleCompleteResult: _tourist(),
+          ),
+          googleSessionGracePeriod: Duration.zero,
+        );
+
+        await viewModel.signInWithGoogle();
+        await viewModel.completeGoogleSignIn();
+
+        expect(viewModel.googleSignInComplete, isTrue);
+        expect(viewModel.googleFlowStarted, isFalse);
+      },
+    );
   });
 }
 

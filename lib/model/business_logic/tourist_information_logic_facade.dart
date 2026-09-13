@@ -22,6 +22,21 @@ class TouristInformationLogicFacade {
   /// rule - the login screen reads it live to gate the Send-OTP button.
   String? emailError(String email) => authenticate.emailError(email);
 
+  /// Auth -----
+  /// The mailbox identity of [email] (see `AuthenticateLogic.canonicalEmail`).
+  ///
+  /// This is the address a code is actually sent to: salted spellings of one
+  /// mailbox (Gmail dots, `+tag` subaddresses) collapse onto this form, so one
+  /// mailbox resolves to one account. Used by the OTP screen to show what it is
+  /// sending to instead of what was typed.
+  String canonicalEmail(String email) => authenticate.canonicalEmail(email);
+
+  /// True when [email] is a salted spelling of its mailbox rather than the
+  /// canonical form - the OTP screen mentions the rewrite only when it is.
+  bool isSaltedEmail(String email) => authenticate.isSaltedEmail(email);
+
+  /// Auth end ----
+
   Future<AuthSession?> verifyEmailOtp({
     required String email,
     required String token,

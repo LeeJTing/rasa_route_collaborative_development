@@ -30,8 +30,7 @@ class TouristRepositoryFacade {
 
   /// Every recorded OTP send timestamp for [email] (see `AuthenticateLogic`'s
   /// 3-per-10-minute gate).
-  Future<List<DateTime>> otpSendTimes(String email) =>
-      auth.otpSendTimes(email);
+  Future<List<DateTime>> otpSendTimes(String email) => auth.otpSendTimes(email);
 
   /// Records a successful OTP send for [email].
   Future<void> recordOtpSend(String email) => auth.recordOtpSend(email);
@@ -46,6 +45,14 @@ class TouristRepositoryFacade {
   /// When the freshest code for the pending email was sent, or null when no
   /// code is pending (see `AuthRepository`'s Option B pending-OTP marker).
   DateTime? get pendingOtpSentAt => auth.pendingOtpSentAt;
+
+  /// Auth -----
+  /// When this device last sent ANY OTP, whichever address it was for, or null
+  /// when it has not sent one yet. Powers the device-wide resend cooldown, so
+  /// switching accounts on one handset gains nothing.
+  DateTime? get otpLastDeviceSendAt => auth.otpLastDeviceSendAt;
+
+  /// Auth end ----
 
   Future<bool> signInWithGoogle({required String redirectTo}) =>
       auth.signInWithGoogle(redirectTo: redirectTo);
