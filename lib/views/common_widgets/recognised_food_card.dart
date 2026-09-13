@@ -8,6 +8,8 @@ import '../../app/theme/app_dimensions.dart';
 import '../../app/theme/app_text_styles.dart';
 import '../../domain_model/local_food.dart';
 import 'app_tag_chip.dart';
+import 'dietary_conflict_warning.dart';
+import 'enlarged_image_dialog.dart';
 
 /// The "Recognised Food" card - the same card shown on `AddLandmarkView`
 /// ("Form 1") and `LandmarkDetailView` ("View Details"). Thumbnail on the
@@ -22,6 +24,12 @@ import 'app_tag_chip.dart';
 ///
 /// [footer] - optional widget rendered at the bottom inside the card (e.g.
 /// `AddLandmarkView`'s Price field). `LandmarkDetailView` passes none.
+///
+/// [onImageTap] - opens the photo full-screen (see `showEnlargedImage`). The
+/// card only has room for a square crop of it, so the screens that CAN show
+/// the whole shot pass a handler - and the thumbnail then carries a "View
+/// photo" hint telling the tourist so; without one the thumbnail stays a
+/// plain image (the form card has its own photo controls).
 ///
 /// Shared because two screens render the same card (this project's
 /// convention: promote a screen-local widget to `lib/views/common_widgets/`
@@ -38,6 +46,7 @@ class RecognisedFoodCard extends StatefulWidget {
     this.collapsible = false,
     this.footer,
     this.dietaryConflicts = const <String>[],
+    this.onImageTap,
   });
 
   final LocalFood food;
@@ -60,6 +69,11 @@ class RecognisedFoodCard extends StatefulWidget {
   /// (e.g. "No Pork"). When non-empty a warning banner is shown - adding is
   /// still allowed.
   final List<String> dietaryConflicts;
+
+  /// Opens the photo full-screen (thumbnail tap) - null leaves the thumbnail
+  /// non-interactive and hintless. Only the screens with a full-image overlay
+  /// pass one.
+  final VoidCallback? onImageTap;
 
   @override
   State<RecognisedFoodCard> createState() => _RecognisedFoodCardState();
@@ -102,17 +116,25 @@ class _RecognisedFoodCardState extends State<RecognisedFoodCard> {
             ),
             const SizedBox(height: AppSpacing.sm),
             if (widget.dietaryConflicts.isNotEmpty) ...<Widget>[
-              _DietaryConflictWarning(conflicts: widget.dietaryConflicts),
+              DietaryConflictWarning(conflicts: widget.dietaryConflicts),
               const SizedBox(height: AppSpacing.sm),
             ],
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 if (widget.image != null) ...<Widget>[
-                  _FoodThumbnail(image: widget.image!),
+                  _TappableThumbnail(
+                    key: _photoKey,
+                    onTap: widget.onImageTap,
+                    child: _FoodThumbnail(image: widget.image!),
+                  ),
                   const SizedBox(width: AppSpacing.md),
                 ] else if (widget.imageUrl != null) ...<Widget>[
-                  _StoredFoodThumbnail(url: widget.imageUrl!),
+                  _TappableThumbnail(
+                    key: _photoKey,
+                    onTap: widget.onImageTap,
+                    child: _StoredFoodThumbnail(url: widget.imageUrl!),
+                  ),
                   const SizedBox(width: AppSpacing.md),
                 ],
                 Expanded(
@@ -188,46 +210,6 @@ class _RecognisedFoodCardState extends State<RecognisedFoodCard> {
   }
 }
 
-/// Warning box: this dish conflicts with the signed-in tourist's dietary
-/// restrictions. Informative only - adding is still allowed.
-class _DietaryConflictWarning extends StatelessWidget {
-  const _DietaryConflictWarning({required this.conflicts});
-
-  final List<String> conflicts;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: AppColors.bannerCautionBackground,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-      ),
-      child: Row(
-        children: <Widget>[
-          const Icon(
-            Icons.warning_amber_rounded,
-            size: AppSizes.inlineNoticeIconSize,
-            color: AppColors.warning,
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-            child: Text(
-              'Your profile avoids: ${conflicts.join(', ')}. '
-              "This dish may not suit you.",
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: AppColors.warning,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Taste tags, shown in the expanded details - chip styling per the theme.
 class _ExpandedTasteTags extends StatelessWidget {
   const _ExpandedTasteTags({required this.tags});
@@ -272,6 +254,31 @@ class _ExpandedTextField extends StatelessWidget {
         Text(value, style: AppTextStyles.detailValue),
       ],
     );
+  }
+}
+
+/// Identifies the photo thumbnail in widget tests (and keeps it stable when
+/// the card rebuilds) - tapping it is how the whole photo is opened.
+const ValueKey<String> _photoKey = ValueKey<String>('recognised-food-photo');
+
+/// Wraps a thumbnail so tapping it opens the photo full-screen - only when
+/// the screen actually offers that ([onTap] non-null); the photo is left as
+/// a plain, non-interactive image otherwise (the form used to rely on that:
+/// it now offers the overlay too).
+///
+/// The tap target, the "View photo" hint and the ripple come from
+/// [EnlargeablePhoto], so every openable photo in the app looks the same.
+class _TappableThumbnail extends StatelessWidget {
+  const _TappableThumbnail({super.key, required this.child, this.onTap});
+
+  final Widget child;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final VoidCallback? onTap = this.onTap;
+    if (onTap == null) return child;
+    return EnlargeablePhoto(onTap: onTap, child: child);
   }
 }
 
@@ -334,7 +341,11 @@ class _StoredFoodThumbnail extends StatelessWidget {
   }
 }
 
-/// Inline label/value row - `'Dish  Nasi Lemak'` in one text span.
+/// Label/value row - the label in the same FIXED column
+/// [AppSizes.fieldLabelWidth] the chip rows use, so every value (Dish,
+/// Variant, Origin AND the category/meal pills) starts at one x position
+/// instead of wherever the label happens to end ("Dish" vs "Origin" vs
+/// "Variant" used to shift each value).
 class _FieldRow extends StatelessWidget {
   const _FieldRow({required this.label, required this.value});
 
@@ -345,16 +356,22 @@ class _FieldRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-      child: Text.rich(
-        TextSpan(
-          children: <InlineSpan>[
-            TextSpan(text: '$label  ', style: AppTextStyles.detailLabel),
-            TextSpan(
-              text: value.isEmpty ? '-' : value,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: AppSizes.fieldLabelWidth,
+            child: Text(label, style: AppTextStyles.detailLabel),
+          ),
+          // Expanded so a long value wraps inside the card's right edge
+          // rather than overflowing it.
+          Expanded(
+            child: Text(
+              value.isEmpty ? '-' : value,
               style: AppTextStyles.detailValue,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_dimensions.dart';
 import '../../../app/theme/app_text_styles.dart';
 import '../../../domain_model/local_food.dart';
+import '../../common_widgets/dietary_conflict_warning.dart';
 import 'manual_food_name_entry.dart';
 
 /// Reusable piece of `FoodRecognitionView`: the "Local Food Recognised"
@@ -15,10 +16,10 @@ import 'manual_food_name_entry.dart';
 /// link to `AddLandmarkView`) and "Add More Food" (A12, no "View Details", a
 /// different confirm label - see [addLandmarkLabel]/[promptText]).
 ///
-/// Keeps this preview brief on purpose - just Dish, Variant and a
-/// one-line-truncated description, inside a highlighted box. Everything
-/// else (Origin, Food Category, Meal Type, Taste, Cooking Style, Cultural
-/// Background) is one tap away via "View Details"
+/// Keeps this preview brief on purpose - just Dish, Variant and a labelled,
+/// wrapped description (up to a few lines), inside a highlighted box.
+/// Everything else (Origin, Food Category, Meal Type, Taste, Cooking Style,
+/// Cultural Background) is one tap away via "View Details"
 /// (`RecognisedFoodDetailsView`), not crammed into this popup.
 ///
 /// No outer `Card` here on purpose - `FoodRecognitionView` wraps every popup
@@ -271,7 +272,7 @@ class RecognitionResultCard extends StatelessWidget {
                 ],
                 if (dietaryConflicts.isNotEmpty) ...<Widget>[
                   const SizedBox(height: AppSpacing.sm),
-                  _DietaryConflictWarning(conflicts: dietaryConflicts),
+                  DietaryConflictWarning(conflicts: dietaryConflicts),
                 ],
                 if (blockMessage != null) ...<Widget>[
                   const SizedBox(height: AppSpacing.sm),
@@ -294,10 +295,24 @@ class RecognitionResultCard extends StatelessWidget {
                             _InfoRow(label: 'Variant', value: variant),
                           if (food.description.isNotEmpty) ...<Widget>[
                             const SizedBox(height: AppSpacing.xs),
+                            // Labelled like every other field on the card -
+                            // the bare paragraph read as if the word
+                            // "Description" had been dropped.
                             Text(
-                              _truncateDescription(food.description),
-                              maxLines: 1,
-                              overflow: TextOverflow.clip,
+                              'Description',
+                              style: AppTextStyles.detailLabel,
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
+                            // The FULL description, wrapped: the column next
+                            // to the 96 pt thumbnail has room for several
+                            // lines (all of them when no Variant row is
+                            // shown), so the old 40-character one-line
+                            // preview just left the space empty. Long text
+                            // ellipsizes - "View Details" opens the rest.
+                            Text(
+                              food.description.trim(),
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
                               style: AppTextStyles.recognitionInfoValue,
                             ),
                           ],
@@ -345,45 +360,6 @@ class RecognitionResultCard extends StatelessWidget {
   }
 }
 
-/// Warning box: this recognised food conflicts with the signed-in tourist's
-/// dietary restrictions. Informative only - adding is still allowed.
-class _DietaryConflictWarning extends StatelessWidget {
-  const _DietaryConflictWarning({required this.conflicts});
-
-  final List<String> conflicts;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: AppColors.bannerCautionBackground,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-      ),
-      child: Row(
-        children: <Widget>[
-          const Icon(
-            Icons.warning_amber_rounded,
-            size: AppSizes.inlineNoticeIconSize,
-            color: AppColors.warning,
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-            child: Text(
-              'Your profile avoids: ${conflicts.join(', ')}. '
-              "This dish may not suit you.",
-              style: AppTextStyles.bodySmall.copyWith(
-                color: AppColors.warning,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Warning box: this capture cannot join the landmark at all - it was taken
 /// too far from the first food, so it is not the same restaurant (blocking,
 /// unlike the dietary warning). The only way forward is capturing again on
@@ -422,18 +398,6 @@ class _BlockedCaptureWarning extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Truncates a description to a short one-line preview, always appending a
-/// literal "..." - even when it isn't hard-truncated by length, since this
-/// is a preview inviting a tap into "View Details" for the rest, not the
-/// complete text either way.
-String _truncateDescription(String description, {int maxLength = 40}) {
-  final String trimmed = description.trim();
-  final String preview = trimmed.length <= maxLength
-      ? trimmed
-      : trimmed.substring(0, maxLength).trimRight();
-  return '$preview ...';
 }
 
 class _ViewDetailsLink extends StatelessWidget {

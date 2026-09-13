@@ -369,8 +369,9 @@ void main() {
       expect(vm.recognizedFoodImageUrl, 'https://cdn.example.com/food-a.jpg');
       expect(updated, <String>['Cendol Jagung']);
 
-      // Blank contact fields took the draft's.
-      expect(vm.restaurantPhone, '+60 12-345 6789');
+      // Blank contact fields took the draft's (normalised to the stored
+      // restaurant-table format).
+      expect(vm.restaurantPhone, '012-345 6789');
       expect(vm.restaurantAddress, '12 Jalan Makan');
 
       // A day this form left empty took the draft's hours.
@@ -397,7 +398,7 @@ void main() {
 
       vm.mergeExistingDraft(saved);
 
-      expect(vm.restaurantPhone, '+60 19-000 0000');
+      expect(vm.restaurantPhone, '019-000 0000');
       final List<OpeningHour> tuesday = vm.operatingHours[Weekday.tuesday]!;
       expect(tuesday.single.opensAt, 8 * 60);
       expect(tuesday.single.closesAt, 14 * 60);

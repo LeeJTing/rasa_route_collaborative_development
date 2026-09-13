@@ -2,9 +2,109 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/report_category.dart';
 import 'package:rasa_route_collaborative_development/domain_model/report_claim.dart';
+import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/report_moderation_rules.dart';
 
+/// One degree of latitude is ~111.32 km, so these offsets are metres.
+double _northMetres(double metres) => metres / 111320;
+
 void main() {
+  group('on-site validity', () {
+    const TouristLocation spot = TouristLocation(
+      latitude: 3.14,
+      longitude: 101.69,
+    );
+
+    test('a reporter next to the spot is valid', () {
+      expect(
+        ReportModerationRules.isWithinOnsiteRange(
+          TouristLocation(latitude: 3.14 + _northMetres(40), longitude: 101.69),
+          spot,
+        ),
+        isTrue,
+      );
+    });
+
+    test('a reporter 60 m away is not', () {
+      expect(
+        ReportModerationRules.isWithinOnsiteRange(
+          TouristLocation(latitude: 3.14 + _northMetres(60), longitude: 101.69),
+          spot,
+        ),
+        isFalse,
+      );
+    });
+
+    test('no fix on either side is never valid', () {
+      expect(
+        ReportModerationRules.isWithinOnsiteRange(
+          TouristLocation.unknown,
+          spot,
+        ),
+        isFalse,
+      );
+      expect(
+        ReportModerationRules.isWithinOnsiteRange(
+          spot,
+          TouristLocation.unknown,
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('pin consensus', () {
+    TouristLocation pin(double northMetres) => TouristLocation(
+      latitude: 3.14 + _northMetres(northMetres),
+      longitude: 101.69,
+    );
+
+    test('three agreeing pins give the median of those three', () {
+      final TouristLocation? agreed = ReportModerationRules.consensusLocation(
+        <TouristLocation>[pin(0), pin(10), pin(20)],
+      );
+
+      expect(agreed, isNotNull);
+      expect(agreed!.latitude, closeTo(3.14 + _northMetres(10), 1e-9));
+      expect(agreed.longitude, closeTo(101.69, 1e-9));
+    });
+
+    test('two agreeing pins are not a consensus', () {
+      expect(
+        ReportModerationRules.consensusLocation(<TouristLocation>[
+          pin(0),
+          pin(5),
+          pin(400),
+        ]),
+        isNull,
+      );
+    });
+
+    test('dissenters are left out of the applied spot', () {
+      final TouristLocation? agreed = ReportModerationRules.consensusLocation(
+        <TouristLocation>[pin(0), pin(10), pin(20), pin(500)],
+      );
+
+      expect(agreed, isNotNull);
+      // The median of the three who agree - not of all four.
+      expect(agreed!.latitude, closeTo(3.14 + _northMetres(10), 1e-9));
+    });
+
+    test('below three pins there is nothing to agree on', () {
+      expect(
+        ReportModerationRules.consensusLocation(<TouristLocation>[
+          pin(0),
+          pin(5),
+        ]),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.consensusLocation(const <TouristLocation>[]),
+        isNull,
+      );
+    });
+  });
+
   group('thresholds', () {
     test('each category has the approved threshold', () {
       expect(
@@ -195,13 +295,22 @@ void main() {
       expect(ReportModerationRules.priceError('8.50', required: true), isNull);
       expect(ReportModerationRules.priceError('', required: true), isNotNull);
       expect(ReportModerationRules.priceError('0', required: true), isNotNull);
+      // The cap matches the Add-Landmark form (2026-09-13): 9999.99 max.
       expect(
         ReportModerationRules.priceError('1000.01', required: true),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.priceError('9999.99', required: true),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.priceError('10000', required: true),
         isNotNull,
       );
     });
 
-    test('address must contain meaningful text within the length limit', () {
+    test("address is judged by the Add-Landmark form's own rules", () {
       expect(
         ReportModerationRules.addressError(
           '12 Jalan Merdeka, Kuala Lumpur',
@@ -209,11 +318,74 @@ void main() {
         ),
         isNull,
       );
-      expect(ReportModerationRules.addressError('', required: true), isNotNull);
+      expect(
+        ReportModerationRules.addressError('', required: true),
+        'Enter the corrected address.',
+      );
       expect(
         ReportModerationRules.addressError('---', required: true),
-        isNotNull,
+        'Invalid address.',
       );
+      // No digit - the form rejects this too (a Malaysian address carries a
+      // house/unit/lot number).
+      expect(
+        ReportModerationRules.addressError('Jalan Ampang', required: true),
+        'Invalid address.',
+      );
+      // Shorter than the form's minimum.
+      expect(
+        ReportModerationRules.addressError('12 A', required: true),
+        'Invalid address.',
+      );
+      // Characters the form does not allow in an address.
+      expect(
+        ReportModerationRules.addressError(
+          "12, Jalan O'Brien, KL",
+          required: true,
+        ),
+        'Invalid address.',
+      );
+      // The 150 cap is the form's hard stop: typing is capped there, so 150
+      // itself is "too long" and 149 is the last acceptable length.
+      expect(
+        ReportModerationRules.addressError(
+          '12, Jalan A'.padRight(149, 'A'), // 149 characters
+          required: true,
+        ),
+        isNull,
+      );
+      expect(
+        ReportModerationRules.addressError(
+          '12, Jalan A'.padRight(150, 'A'), // 150 characters
+          required: true,
+        ),
+        'Address is too long.',
+      );
+      // Shape is judged BEFORE the cap, exactly like the form: a long value
+      // with no house number is "Invalid address.", not "too long".
+      expect(
+        ReportModerationRules.addressError(
+          'A'.padRight(200, 'A'),
+          required: true,
+        ),
+        'Invalid address.',
+      );
+      // Control characters are judged on the RAW text, exactly like the form
+      // (a trailing newline is not trimmed away first).
+      expect(
+        ReportModerationRules.addressError(
+          '12, Jalan Merdeka, Kuala Lumpur\n',
+          required: true,
+        ),
+        'Invalid address.',
+      );
+      // Whitespace alone is an empty answer on a required field.
+      expect(
+        ReportModerationRules.addressError('   ', required: true),
+        'Enter the corrected address.',
+      );
+      // Optional field: empty is not an error until it is submitted.
+      expect(ReportModerationRules.addressError(''), isNull);
     });
 
     test('temporary closure respects the selected unit limit', () {
@@ -363,6 +535,53 @@ void main() {
         ReportModerationRules.issueSignature(claim(day: Weekday.monday)),
         isNot(base),
       );
+    });
+  });
+
+  group('operating hours - overnight (same rules as the landmark form)', () {
+    test('an encoded overnight row is valid', () {
+      expect(
+        ReportModerationRules.operatingHoursError(<Weekday, List<OpeningHour>>{
+          Weekday.monday: const <OpeningHour>[
+            OpeningHour(
+              id: 0,
+              day: Weekday.monday,
+              status: DayStatus.open,
+              opensAt: 22 * 60,
+              closesAt: 26 * 60, // 02:00 next day
+            ),
+          ],
+        }),
+        isNull,
+      );
+    });
+
+    test('an overnight tail overlapping the next day is rejected', () {
+      final String? error = ReportModerationRules.operatingHoursError(
+        <Weekday, List<OpeningHour>>{
+          Weekday.monday: const <OpeningHour>[
+            OpeningHour(
+              id: 0,
+              day: Weekday.monday,
+              status: DayStatus.open,
+              opensAt: 22 * 60,
+              closesAt: 26 * 60, // 02:00 next day
+            ),
+          ],
+          Weekday.tuesday: const <OpeningHour>[
+            OpeningHour(
+              id: 0,
+              day: Weekday.tuesday,
+              status: DayStatus.open,
+              opensAt: 60, // 01:00 - inside Monday's tail
+              closesAt: 6 * 60,
+            ),
+          ],
+        },
+      );
+      expect(error, isNotNull);
+      expect(error, contains("Monday's overnight hours run until 02:00"));
+      expect(error, contains('Tuesday'));
     });
   });
 }

@@ -10,6 +10,7 @@ class RestaurantItem {
     required this.restaurantId,
     required this.localFoodId,
     required this.foodName,
+    this.description,
     this.ingredients,
     this.imageUrl,
     this.price,
@@ -23,6 +24,7 @@ class RestaurantItem {
   final int restaurantId;
   final int localFoodId;
   final String foodName;
+  final String? description;
   final String? ingredients;
   final String? imageUrl;
   final double? price;

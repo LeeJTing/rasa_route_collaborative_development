@@ -240,4 +240,126 @@ void main() {
       vm.dispose();
     },
   );
+
+  group('overnight hours', () {
+    test('an encoded overnight row on its own is valid', () {
+      final LandmarkSubmissionLogic logic = LandmarkSubmissionLogic();
+      final Map<Weekday, List<OpeningHour>> hours =
+          <Weekday, List<OpeningHour>>{
+            Weekday.monday: <OpeningHour>[
+              OpeningHour(
+                id: 0,
+                day: Weekday.monday,
+                status: DayStatus.open,
+                opensAt: 10 * 60, // 10:00
+                closesAt: 26 * 60, // 02:00 the NEXT day (encoded)
+              ),
+            ],
+          };
+      expect(logic.validateOperatingHours(hours), isNull);
+    });
+
+    test('an overnight row that clears the next day is valid', () {
+      final LandmarkSubmissionLogic logic = LandmarkSubmissionLogic();
+      final Map<Weekday, List<OpeningHour>> hours =
+          <Weekday, List<OpeningHour>>{
+            Weekday.monday: <OpeningHour>[
+              OpeningHour(
+                id: 0,
+                day: Weekday.monday,
+                status: DayStatus.open,
+                opensAt: 22 * 60, // 22:00
+                closesAt: 26 * 60, // 02:00
+              ),
+            ],
+            Weekday.tuesday: <OpeningHour>[
+              OpeningHour(
+                id: 0,
+                day: Weekday.tuesday,
+                status: DayStatus.open,
+                opensAt: 5 * 60, // 05:00 - after the 02:00 tail
+                closesAt: 9 * 60,
+              ),
+            ],
+          };
+      expect(logic.validateOperatingHours(hours), isNull);
+    });
+
+    test('an overnight tail overlapping the next day is rejected', () {
+      final LandmarkSubmissionLogic logic = LandmarkSubmissionLogic();
+      final Map<Weekday, List<OpeningHour>> hours =
+          <Weekday, List<OpeningHour>>{
+            Weekday.monday: <OpeningHour>[
+              OpeningHour(
+                id: 0,
+                day: Weekday.monday,
+                status: DayStatus.open,
+                opensAt: 22 * 60, // 22:00
+                closesAt: 26 * 60, // 02:00 next day
+              ),
+            ],
+            Weekday.tuesday: <OpeningHour>[
+              OpeningHour(
+                id: 0,
+                day: Weekday.tuesday,
+                status: DayStatus.open,
+                opensAt: 60, // 01:00 - INSIDE the overnight tail
+                closesAt: 6 * 60,
+              ),
+            ],
+          };
+      final String? error = logic.validateOperatingHours(hours);
+      expect(error, isNotNull);
+      expect(error, contains("Monday's overnight hours run until 02:00"));
+      expect(error, contains('Tuesday'));
+    });
+
+    test('the Sunday tail wraps onto Monday when checking overlap', () {
+      final LandmarkSubmissionLogic logic = LandmarkSubmissionLogic();
+      final Map<Weekday, List<OpeningHour>> hours =
+          <Weekday, List<OpeningHour>>{
+            Weekday.sunday: <OpeningHour>[
+              OpeningHour(
+                id: 0,
+                day: Weekday.sunday,
+                status: DayStatus.open,
+                opensAt: 20 * 60, // 20:00
+                closesAt: 26 * 60, // 02:00 on MONDAY
+              ),
+            ],
+            Weekday.monday: <OpeningHour>[
+              OpeningHour(
+                id: 0,
+                day: Weekday.monday,
+                status: DayStatus.open,
+                opensAt: 30, // 00:30 - inside Sunday's tail
+                closesAt: 6 * 60,
+              ),
+            ],
+          };
+      expect(logic.validateOperatingHours(hours), contains("Sunday's"));
+    });
+
+    test('the ViewModel encodes a close before the open (+1440)', () async {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      await vm.onInit();
+      vm.setDayStatus(Weekday.monday, DayStatus.open);
+      vm.setRangeTime(Weekday.monday, 0, true, 22 * 60); // 22:00
+      vm.setRangeTime(Weekday.monday, 0, false, 2 * 60); // 02:00 -> +1 day
+      expect(vm.operatingHours[Weekday.monday]!.single.closesAt, 26 * 60);
+      vm.dispose();
+    });
+
+    test('the overnight hint case still keeps the encoded open time', () async {
+      final AddLandmarkViewModel vm = AddLandmarkViewModel();
+      await vm.onInit();
+      vm.setDayStatus(Weekday.monday, DayStatus.open);
+      vm.setRangeTime(Weekday.monday, 0, false, 2 * 60); // close first
+      vm.setRangeTime(Weekday.monday, 0, true, 22 * 60); // open 22:00
+      final OpeningHour row = vm.operatingHours[Weekday.monday]!.single;
+      expect(row.opensAt, 22 * 60);
+      expect(row.closesAt, 26 * 60);
+      vm.dispose();
+    });
+  });
 }

@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
 
-import '../../../app/theme/app_colors.dart';
-import '../../../app/theme/app_dimensions.dart';
-import '../../../domain_model/opening_hour.dart';
+import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_dimensions.dart';
+import '../../domain_model/opening_hour.dart';
 
-/// Reusable piece of `RestaurantDetailView`. Placeholder.
+/// A place's opening hours, grouped by day and shown in a FIXED
+/// Monday-to-Sunday order with ONE day label per day - a day with several
+/// ranges (e.g. a midday closure) stacks them right-aligned under its single
+/// label, so nothing drifts and no day can appear twice.
 ///
-/// Widgets in a `widgets/` folder are driven entirely by constructor
-/// parameters and callbacks - they never read a ViewModel themselves, and they
-/// style from the theme rather than raw values. Promote one to
-/// `lib/views/common_widgets/` once a second screen needs it.
+/// Shared by the restaurant detail and the submitted-landmark detail pages
+/// (promoted out of `restaurant_detail_view` when the second page needed the
+/// same table - the codebase convention). The repository read has already
+/// merged overnight tails back into the day that owns them (see
+/// `OpeningHoursRows`), so an overnight period simply reads
+/// "10:00 AM - 2:00 AM" - no "(next day)" mark.
 class OpeningHoursTable extends StatelessWidget {
   const OpeningHoursTable({super.key, required this.openingHours});
 
@@ -74,13 +79,19 @@ class OpeningHoursTable extends StatelessWidget {
     if (hours.opensAt == null || hours.closesAt == null) {
       return 'Hours unavailable';
     }
+    if (hours.opensAt == 0 && hours.closesAt == 1440) {
+      return 'Open 24 hours';
+    }
     return '${_timeLabel(hours.opensAt!)} - ${_timeLabel(hours.closesAt!)}';
   }
 
   String _timeLabel(int minutes) {
-    if (minutes >= 1440) return '12:00 AM';
-    final int hour = minutes ~/ 60;
-    final int minute = minutes % 60;
+    // 1440 (24:00) is midnight; an overnight close is encoded past 1440
+    // (1560 = 02:00 the next day - see `OpeningHoursRows`) and reads as its
+    // own time, the way Google Maps shows "10:00 AM - 2:00 AM".
+    final int normalized = minutes % 1440;
+    final int hour = normalized ~/ 60;
+    final int minute = normalized % 60;
     final String period = hour >= 12 ? 'PM' : 'AM';
     final int displayHour = hour % 12 == 0 ? 12 : hour % 12;
     return '$displayHour:${minute.toString().padLeft(2, '0')} $period';

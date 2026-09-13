@@ -180,4 +180,59 @@ void main() {
       expect(result.existingDishNames, <String>['Nasi Lemak']);
     });
   });
+
+  group('mergeConfirmation copy', () {
+    test('added dishes say where they went', () {
+      expect(
+        LandmarkSubmissionLogic.mergeConfirmation(
+          targetName: 'Kopitiam Ali',
+          addedDishNames: <String>['Cendol'],
+          existingDishNames: const <String>[],
+        ),
+        'Added Cendol to "Kopitiam Ali".',
+      );
+    });
+
+    test('dishes the place already had are named separately', () {
+      expect(
+        LandmarkSubmissionLogic.mergeConfirmation(
+          targetName: 'Kopitiam Ali',
+          addedDishNames: <String>['Cendol'],
+          existingDishNames: <String>['Nasi Lemak'],
+        ),
+        'Added Cendol to "Kopitiam Ali". Already there: Nasi Lemak.',
+      );
+    });
+
+    test('nothing new names the place and what it already has', () {
+      expect(
+        LandmarkSubmissionLogic.mergeConfirmation(
+          targetName: 'Kopitiam Ali',
+          addedDishNames: const <String>[],
+          existingDishNames: <String>['Cendol', 'Nasi Lemak'],
+        ),
+        'Nothing new was added to "Kopitiam Ali". '
+        'Already there: Cendol, Nasi Lemak.',
+      );
+    });
+
+    test('an unknown target still reads as a sentence', () {
+      expect(
+        LandmarkSubmissionLogic.mergeConfirmation(
+          targetName: '',
+          addedDishNames: <String>['Cendol'],
+          existingDishNames: const <String>[],
+        ),
+        'Added Cendol to the existing place.',
+      );
+      expect(
+        LandmarkSubmissionLogic.mergeConfirmation(
+          targetName: '',
+          addedDishNames: const <String>[],
+          existingDishNames: const <String>[],
+        ),
+        'Nothing new was added to the existing place.',
+      );
+    });
+  });
 }
