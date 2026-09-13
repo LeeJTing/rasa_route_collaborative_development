@@ -134,6 +134,9 @@ class DiscoveryLogicFacade {
     TouristLocation origin = TouristLocation.unknown,
   }) => restaurantDiscovery.findById(restaurantId, origin: origin);
 
+  Future<bool> hasDietaryRestrictions() =>
+      restaurantDiscovery.hasActiveDietaryRestrictions();
+
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
     String? foodType,

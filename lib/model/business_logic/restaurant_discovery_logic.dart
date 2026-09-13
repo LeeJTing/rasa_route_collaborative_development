@@ -42,7 +42,34 @@ class RestaurantDiscoveryLogic {
       restaurantId,
     );
     if (restaurant == null) return null;
-    return _measure(<Restaurant>[restaurant], origin).single;
+    final Restaurant allowed = await _withoutConflictingItems(restaurant);
+    return _measure(<Restaurant>[allowed], origin).single;
+  }
+
+  Future<bool> hasActiveDietaryRestrictions() async =>
+      (await repository.getCurrentDietaryRestrictions()).isNotEmpty;
+
+  Future<Restaurant> _withoutConflictingItems(Restaurant restaurant) async {
+    if (restaurant.items.isEmpty) return restaurant;
+    final List<DietaryRestriction> restrictions = await repository
+        .getCurrentDietaryRestrictions();
+    final Set<int> activeRestrictionIds = restrictions
+        .map((DietaryRestriction restriction) => restriction.id)
+        .toSet();
+    if (activeRestrictionIds.isEmpty) return restaurant;
+    final Map<int, List<int>> restrictionIdsByFood = await repository
+        .getRestrictionIdsByFood();
+    final List<RestaurantItem> allowedItems = restaurant.items
+        .where(
+          (RestaurantItem item) => _isAllowed(
+            item,
+            activeRestrictionIds: activeRestrictionIds,
+            restrictionIdsByFood: restrictionIdsByFood,
+          ),
+        )
+        .toList(growable: false);
+    if (allowedItems.length == restaurant.items.length) return restaurant;
+    return restaurant.copyWith(items: allowedItems);
   }
 
   Future<List<Restaurant>> nearby({
@@ -525,19 +552,15 @@ class RestaurantDiscoveryLogic {
                 )
                 .toList(growable: false);
       if (typedItems.isEmpty) continue;
-      final List<RestaurantItem> safeItems = activeRestrictionIds.isEmpty
-          ? typedItems
-          : typedItems
-                .where(
-                  (RestaurantItem item) =>
-                      item.localFoodId > 0 &&
-                      !_conflictsWithRestrictions(
-                        item,
-                        activeRestrictionIds: activeRestrictionIds,
-                        restrictionIdsByFood: restrictionIdsByFood,
-                      ),
-                )
-                .toList(growable: false);
+      final List<RestaurantItem> safeItems = typedItems
+          .where(
+            (RestaurantItem item) => _isAllowed(
+              item,
+              activeRestrictionIds: activeRestrictionIds,
+              restrictionIdsByFood: restrictionIdsByFood,
+            ),
+          )
+          .toList(growable: false);
       if (safeItems.isEmpty) continue;
       eligible.add(
         _withDiscoveryValues(
@@ -548,6 +571,20 @@ class RestaurantDiscoveryLogic {
       );
     }
     return eligible;
+  }
+
+  bool _isAllowed(
+    RestaurantItem item, {
+    required Set<int> activeRestrictionIds,
+    required Map<int, List<int>> restrictionIdsByFood,
+  }) {
+    if (activeRestrictionIds.isEmpty) return true;
+    if (item.localFoodId <= 0) return false;
+    return !_conflictsWithRestrictions(
+      item,
+      activeRestrictionIds: activeRestrictionIds,
+      restrictionIdsByFood: restrictionIdsByFood,
+    );
   }
 
   bool _conflictsWithRestrictions(

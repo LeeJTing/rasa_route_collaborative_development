@@ -11,16 +11,18 @@ class RestaurantMenuPreview extends StatelessWidget {
   const RestaurantMenuPreview({
     super.key,
     required this.items,
+    required this.emptyMessage,
     required this.onImageTap,
   });
 
   final List<RestaurantItem> items;
+  final String emptyMessage;
   final ValueChanged<RestaurantItem> onImageTap;
 
   @override
   Widget build(BuildContext context) => PlaceMenuSection(
     itemCount: items.length,
-    emptyMessage: 'Menu information is not available yet.',
+    emptyMessage: emptyMessage,
     children: <Widget>[
       for (final RestaurantItem item in items)
         Padding(
