@@ -153,6 +153,8 @@ abstract final class AppColors {
   /// [Figma] Allergy warning banner on Food Detail.
   static const Color bannerWarningBackground = Color(0xB3FFA9A9);
   static const Color bannerWarningText = Color(0xFF921616);
+  static const Color cardWarningBackground = Color(0x4DFFA9A9);
+  static const Color cardWarningBorder = Color(0x80D64545);
 
   /// [Figma] Name-collision caution banner on Food Detail.
   static const Color bannerCautionBackground = Color(0xB3FDFD82);

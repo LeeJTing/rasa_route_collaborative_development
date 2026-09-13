@@ -40,6 +40,7 @@ class FoodComparison {
       isSuitable: true,
       message: 'No dietary restrictions to check.',
     ),
+    this.preferenceSuggestion,
   });
 
   final List<int> foodIds;
@@ -60,6 +61,11 @@ class FoodComparison {
   /// Dietary fit of the left / right dish.
   final DietaryAssessment leftDietaryAssessment;
   final DietaryAssessment rightDietaryAssessment;
+
+  /// One sentence naming the compared dish that best fits the tourist's SAVED
+  /// taste + culture preferences, or null when they have none saved or none of
+  /// the dishes matches any of them.
+  final String? preferenceSuggestion;
 
   /// First compared dish. Valid because a comparison is only built with at
   /// least two dishes.

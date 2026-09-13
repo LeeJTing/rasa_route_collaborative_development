@@ -85,6 +85,24 @@ class SubmittedLandmark {
   /// left alone, and an unknown category stays empty rather than inventing
   /// "restaurant" on its own.
   String get displayCategoryLabel => placeCategoryLabel(displayCategory);
+
+  SubmittedLandmark copyWith({List<LandmarkItem>? items}) => SubmittedLandmark(
+    id: id,
+    name: name,
+    latitude: latitude,
+    longitude: longitude,
+    category: category,
+    reportedCount: reportedCount,
+    status: status,
+    imageUrl: imageUrl,
+    imageId: imageId,
+    imageCategory: imageCategory,
+    phone: phone,
+    website: website,
+    address: address,
+    items: items ?? this.items,
+    openingHours: openingHours,
+  );
 }
 
 /// Moderation state of a submission - `submitted_landmark.status` is free
@@ -126,6 +144,7 @@ class LandmarkItem {
     required this.mealType,
     this.isRemoved = false,
     this.isFake = false,
+    this.dietaryWarning,
   });
 
   final int id;
@@ -207,6 +226,39 @@ class LandmarkItem {
   /// `landmark_item` table, so the repository writes the marker into the
   /// saved dish text (`[FAKE] ...`) to keep test rows identifiable.
   final bool isFake;
+
+  /// Warning printed ON this dish row when it clashes with the tourist's own
+  /// dietary restrictions, e.g. "Contains or may include: Chicken.". Filled
+  /// in by the LOGIC layer (like `Restaurant.distanceMetres`) - the
+  /// repository still hands this model up as a plain mirror of
+  /// `landmark_item`. Null = nothing to warn about.
+  final String? dietaryWarning;
+
+  LandmarkItem copyWith({String? dietaryWarning}) => LandmarkItem(
+    id: id,
+    landmarkId: landmarkId,
+    touristId: touristId,
+    localFoodId: localFoodId,
+    dish: dish,
+    variant: variant,
+    foodCategory: foodCategory,
+    description: description,
+    origin: origin,
+    culturalBackground: culturalBackground,
+    ingredients: ingredients,
+    dietaryRestrictions: dietaryRestrictions,
+    imageUrl: imageUrl,
+    imageId: imageId,
+    price: price,
+    priceMin: priceMin,
+    priceMax: priceMax,
+    seasonal: seasonal,
+    cookingStyle: cookingStyle,
+    mealType: mealType,
+    isRemoved: isRemoved,
+    isFake: isFake,
+    dietaryWarning: dietaryWarning ?? this.dietaryWarning,
+  );
 }
 
 /// One food being submitted with a landmark - a food (already recognized)

@@ -16,7 +16,10 @@ class ComparisonInsightCard extends StatelessWidget {
   String get _bestMatchText {
     final bool leftOk = comparison.leftDietaryAssessment.isSuitable;
     final bool rightOk = comparison.rightDietaryAssessment.isSuitable;
-    if (leftOk && rightOk) return "Try Both Food. Don't Miss Out!";
+    if (leftOk && rightOk) {
+      return comparison.preferenceSuggestion ??
+          "Try Both Food. Don't Miss Out!";
+    }
     if (leftOk != rightOk) {
       final String safeName = leftOk
           ? comparison.leftFood.name

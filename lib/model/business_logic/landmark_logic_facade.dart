@@ -185,6 +185,12 @@ class LandmarkLogicFacade {
   Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) =>
       submission.getSubmittedLandmarkById(landmarkId);
 
+  /// One submitted landmark for its own page, each dish annotated with the
+  /// dietary warning it must show - see
+  /// `LandmarkSubmissionLogic.getLandmarkPlaceDetail`.
+  Future<SubmittedLandmark?> getLandmarkPlaceDetail(int landmarkId) =>
+      submission.getLandmarkPlaceDetail(landmarkId);
+
   /// Every submitted landmark the tourist has contributed dishes to, newest
   /// first - flat passthrough to the submission logic.
   Future<List<SubmittedLandmark>> getSubmittedLandmarksByTourist(
