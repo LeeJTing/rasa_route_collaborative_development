@@ -82,6 +82,13 @@ class _FakeLandmarkLogicFacade extends LandmarkLogicFacade {
   @override
   Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) async =>
       landmark?.id == landmarkId ? landmark : null;
+
+  // The detail page fetches through the logic layer's dietary-aware entry
+  // point - without this override the fake would fall through to the real
+  // repository (and its network client) whenever `load()` runs.
+  @override
+  Future<SubmittedLandmark?> getLandmarkPlaceDetail(int landmarkId) =>
+      getSubmittedLandmarkById(landmarkId);
 }
 
 const SubmittedLandmark _testLandmark = SubmittedLandmark(

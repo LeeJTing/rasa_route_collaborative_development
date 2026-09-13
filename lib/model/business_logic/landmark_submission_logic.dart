@@ -1325,8 +1325,11 @@ class LandmarkSubmissionLogic {
 
   /// How many nearby places the near-duplicate check may compare photos with
   /// (nearest first, and only the ones carrying a photo): every candidate is
-  /// one Gemini call inside the blocked wait on Confirm.
-  static const int similarPlaceCandidateLimit = 5;
+  /// one Gemini call inside the blocked wait on Confirm. Raised 5 -> 10 on
+  /// the user's request (2026-09-14): with the old cap a same-place
+  /// candidate could fall outside the compared set, and the duplicate
+  /// question then never came up.
+  static const int similarPlaceCandidateLimit = 10;
 
   /// How far the near-duplicate check looks - the same 100 m the A13 merge
   /// uses for "the same place", because it asks the same question and only
@@ -1875,6 +1878,10 @@ class LandmarkSubmissionLogic {
   /// tourist to keep the dish name short: a dish name is a LABEL, not a
   /// description, and an over-long one would be written into the landmark
   /// item, the catalogue row and the database column behind them.
+  ///
+  /// Characters are restricted too: the field blocks special characters -
+  /// letters (any script), digits and spaces only (enforced in
+  /// `FoodNameTextField`, user request 2026-09-14).
   static const int maxFoodNameLength = 50;
   static const int foodNameWarnFromLength = 45;
 
