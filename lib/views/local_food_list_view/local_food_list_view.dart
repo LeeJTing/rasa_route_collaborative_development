@@ -8,6 +8,7 @@ import '../../core/view_state.dart';
 import '../../domain_model/local_food.dart';
 import '../../view_models/local_food_list_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/enlarged_image_dialog.dart';
 import 'widgets/food_filter_controls.dart';
 import 'widgets/food_search_bar.dart';
 import 'widgets/local_food_card.dart';
@@ -119,6 +120,13 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                                     isSelected: vm.selectedIds.contains(
                                       food.id,
                                     ),
+                                    onImageTap: food.imageUrls.isEmpty
+                                        ? null
+                                        : () => showEnlargedImage(
+                                            context,
+                                            semanticLabel: food.name,
+                                            source: food.imageUrls.first,
+                                          ),
                                     onTap: () async {
                                       if (vm.isSelecting) {
                                         vm.toggleSelection(food.id);
@@ -133,10 +141,13 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                                         if (!context.mounted || result is! Map)
                                           return;
 
-                                        vm.updateFavourite(
-                                          result['id'] as int,
-                                          result['isFavourite'] as bool,
-                                        );
+                                        final Object? id = result['id'];
+                                        final Object? isFavourite =
+                                            result['isFavourite'];
+                                        if (id is! int || isFavourite is! bool) {
+                                          return;
+                                        }
+                                        vm.updateFavourite(id, isFavourite);
                                       }
                                     },
                                     onFavourite: () async {

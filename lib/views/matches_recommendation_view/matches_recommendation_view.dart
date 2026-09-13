@@ -305,6 +305,7 @@ class _SortToolbar extends StatelessWidget {
                 label: _SortLabel(
                   text: switch (sort) {
                     MatchesLandmarkSort.distance => 'Distance',
+                    MatchesLandmarkSort.price => 'Price',
                     MatchesLandmarkSort.name => 'Name',
                   },
                   direction: selected ? viewModel.landmarkSortDirection : null,
