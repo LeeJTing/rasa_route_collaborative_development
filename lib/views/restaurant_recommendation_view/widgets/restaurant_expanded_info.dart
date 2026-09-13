@@ -94,15 +94,62 @@ class RestaurantExpandedInfo extends StatelessWidget {
                               ],
                             ],
                           ),
-                          if (item.ingredients?.isNotEmpty == true) ...<Widget>[
-                            const SizedBox(height: AppSpacing.xs),
-                            // The whole description, however long: no maxLines
-                            // and no ellipsis, so nothing is cut in half.
-                            Text(
-                              item.ingredients!,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
+                          // Prefer the item's ingredients text when present. If
+                          // absent, fall back to the linked local-food's
+                          // description so the tourist still sees a helpful
+                          // description in the expanded menu.
+-                          Builder(builder: (BuildContext context) {
+-                            final String? ingredients =
+-                                item.ingredients?.trim();
+-                            final String? linkedDescription =
+-                                item.description?.trim();
+-                            if (ingredients != null && ingredients.isNotEmpty) {
+-                              return Column(children: <Widget>[
+-                                const SizedBox(height: AppSpacing.xs),
+-                                Text(
+-                                  ingredients,
+-                                  style: Theme.of(context).textTheme.bodySmall,
+-                                ),
+-                              ]);
+-                            }
+-                            if (linkedDescription != null &&
+-                                linkedDescription.isNotEmpty) {
+-                              return Column(children: <Widget>[
+-                                const SizedBox(height: AppSpacing.xs),
+-                                Text(
+-                                  linkedDescription,
+-                                  style: Theme.of(context).textTheme.bodySmall,
+-                                ),
+-                              ]);
+-                            }
+-                            return const SizedBox.shrink();
+-                          }),
++                          Builder(builder: (BuildContext context) {
++                            final String? ingredients =
++                                item.ingredients?.trim();
++                            final String? linkedDescription =
++                                item.description?.trim();
++                            if (ingredients != null && ingredients.isNotEmpty) {
++                              return Column(children: <Widget>[
++                                const SizedBox(height: AppSpacing.xs),
++                                Text(
++                                  ingredients,
++                                  style: Theme.of(context).textTheme.bodySmall,
++                                ),
++                              ]);
++                            }
++                            if (linkedDescription != null &&
++                                linkedDescription.isNotEmpty) {
++                              return Column(children: <Widget>[
++                                const SizedBox(height: AppSpacing.xs),
++                                Text(
++                                  linkedDescription,
++                                  style: Theme.of(context).textTheme.bodySmall,
++                                ),
++                              ]);
++                            }
++                            return const SizedBox.shrink();
++                          }),
                         ],
                       ),
                     ),
