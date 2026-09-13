@@ -24,7 +24,7 @@ class PreferenceOptionCard extends StatelessWidget {
     required this.onTap,
     this.icon = Icons.local_dining,
     this.iconAsset,
-    this.maxLabelLines = 2,
+    this.maxLabelLines = AppLayoutRatios.profileOptionGridLabelLines,
   });
 
   final String label;
@@ -39,11 +39,13 @@ class PreferenceOptionCard extends StatelessWidget {
   /// selection colour. Null renders [icon] instead.
   final String? iconAsset;
 
-  /// How many lines the label may take before it is ellipsised. The dietary
-  /// "Chosen on top" Wrap passes 1 so a long restriction name truncates to a
-  /// single line and keeps every card the same height (a second line made one
-  /// card taller and pushed the row below down). The "All Restrictions" grid
-  /// keeps 2 so names can wrap within its fixed-height cell.
+  /// How many lines the label may take before it ellipsises.
+  ///
+  /// Defaults to the grid's allowance
+  /// ([AppLayoutRatios.profileOptionGridLabelLines]), which is what the fixed-
+  /// height grid cells are sized for. A horizontal option row passes `1`
+  /// instead: that row has a single-line height, so a second line would make one
+  /// card taller and push the row below down.
   final int maxLabelLines;
 
   @override

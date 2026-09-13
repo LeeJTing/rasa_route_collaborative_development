@@ -427,15 +427,34 @@ abstract final class AppLayoutRatios {
   // Tourist profile (ChinShunYon) - edit-screen option grid
   // ===========================================================================
 
-  /// [Figma] Fixed height (px) of one cell in the "All Restrictions" grid:
-  /// the 72px option box plus a two-line label (e.g. "No Coriander/Cilantro")
-  /// with room to spare, so long restriction names wrap instead of
-  /// overflowing the cell. A fixed extent (rather than a width-relative
-  /// aspect ratio) keeps two-line labels fitting on narrow phones too.
-  static const double profileOptionGridMainAxisExtent = 140;
+  /// [Figma] Fixed height (px) of one cell in the option grids: the 72px
+  /// option box, an 8px gap, and a three-line label (e.g.
+  /// "No Coriander/Cilantro", "No Shrimp/Prawn") with room to spare, so long
+  /// restriction names wrap instead of being cut off. A fixed extent (rather
+  /// than a width-relative aspect ratio) keeps the labels fitting on narrow
+  /// phones too.
+  ///
+  /// 72 + 8 + 3 lines of bodyMedium (3 x ~20) = 140, plus the same ~20px of
+  /// spare the two-line version carried.
+  static const double profileOptionGridMainAxisExtent = 160;
 
   /// Columns in the "Chosen on top" / "All Restrictions" option grids.
   static const int profileOptionGridCrossAxisCount = 4;
+
+  /// Label lines a grid cell allows before its text ellipsises.
+  ///
+  /// Three, not two: the longest dietary restrictions ("No Coriander/Cilantro",
+  /// "No Shrimp/Prawn") need the third line at four options per row, and
+  /// [profileOptionGridMainAxisExtent] is sized for exactly this many.
+  static const int profileOptionGridLabelLines = 3;
+
+  /// Lines a profile card's section title may take before it ellipsises.
+  ///
+  /// The title shares its row with the "N selected" pill and the expand
+  /// chevron. "Culture Preference" is the longest of them, and on a narrow
+  /// screen that row overflowed by a few pixels - the title needs to be able to
+  /// wrap rather than claim its full intrinsic width.
+  static const int profileSectionTitleMaxLines = 2;
 
   // ===========================================================================
   // End of Tourist profile (ChinShunYon)
