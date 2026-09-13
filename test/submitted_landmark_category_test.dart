@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
 import 'package:rasa_route_collaborative_development/domain_model/submitted_landmark.dart';
 
@@ -93,20 +94,49 @@ void main() {
       ],
     );
 
-    expect(landmark.displayCategoryLabel, 'Chinese restaurant');
+    expect(landmark.displayCategoryLabel, 'Chinese Restaurant');
   });
 
-  test('a category that already says restaurant is left alone', () {
+  test('a stored phrase gets the capital R, nothing else', () {
     final SubmittedLandmark landmark = _landmark(
       items: <LandmarkItem>[
         _dish(dish: 'Wan Tan Mee', foodCategory: 'Chinese restaurant'),
       ],
     );
 
-    expect(landmark.displayCategoryLabel, 'Chinese restaurant');
+    expect(landmark.displayCategoryLabel, 'Chinese Restaurant');
   });
 
   test('an unknown category stays empty rather than inventing a suffix', () {
     expect(_landmark().displayCategoryLabel, '');
+  });
+
+  group('the recommendation cards share the same wording', () {
+    SubmittedLandmarkRecommendation recommendation({String category = ''}) =>
+        SubmittedLandmarkRecommendation(
+          id: 7,
+          name: 'HOMETOWN ICE KACANG',
+          category: category,
+          distanceMetres: 350,
+          dishes: const <SubmittedLandmarkDish>[],
+        );
+
+    test('a stored category is worded like the restaurant rows', () {
+      expect(
+        recommendation(category: 'Chinese').categoryLabel,
+        'Chinese Restaurant',
+      );
+    });
+
+    test('a stored phrase gets the capital R too', () {
+      expect(
+        recommendation(category: 'Malay restaurant').categoryLabel,
+        'Malay Restaurant',
+      );
+    });
+
+    test('no category falls back to the placeholder, never a suffix', () {
+      expect(recommendation().categoryLabel, 'Submitted Landmark');
+    });
   });
 }

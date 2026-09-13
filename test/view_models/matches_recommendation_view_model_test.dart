@@ -116,6 +116,51 @@ void main() {
     viewModel.dispose();
   });
 
+  test('landmark Preference sort leads with the most dishes served', () async {
+    final MatchesRecommendationViewModel viewModel =
+        _TestMatchesRecommendationViewModel(
+          FakeDiscoveryLogicFacade(
+            matchesResult: MatchesRecommendationResult(
+              stateCode: testMatchesResult.stateCode,
+              stateName: testMatchesResult.stateName,
+              session: testMatchesResult.session,
+              groups: <MatchedFoodRecommendations>[
+                MatchedFoodRecommendations(
+                  food: testMatchedFood,
+                  restaurants: const <Restaurant>[],
+                  submittedLandmarks: <SubmittedLandmarkRecommendation>[
+                    _landmarkWithDishes(id: 1, dishes: 1, distance: 500),
+                    _landmarkWithDishes(id: 2, dishes: 3, distance: 800),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+    await viewModel.onInit();
+    viewModel.selectTab(MatchesRecommendationTab.submittedLandmarks);
+
+    // Ascending = fewest dishes first; the direction toggle flips it, the
+    // same rule the restaurant tab's Preference chip uses.
+    viewModel.selectLandmarkSort(MatchesLandmarkSort.preference);
+    expect(
+      viewModel.displayedGroups.single.submittedLandmarks.map(
+        (SubmittedLandmarkRecommendation landmark) => landmark.id,
+      ),
+      <int>[1, 2],
+    );
+
+    viewModel.selectLandmarkSort(MatchesLandmarkSort.preference);
+    expect(
+      viewModel.displayedGroups.single.submittedLandmarks.map(
+        (SubmittedLandmarkRecommendation landmark) => landmark.id,
+      ),
+      <int>[2, 1],
+    );
+
+    viewModel.dispose();
+  });
+
   test('restaurant price sort changes the displayed order', () async {
     final MatchesRecommendationViewModel viewModel =
         _TestMatchesRecommendationViewModel(FakeDiscoveryLogicFacade());
@@ -183,4 +228,21 @@ Restaurant _restaurantAtDistance(
   distanceMetres: distanceMetres,
   reviewCount: restaurant.reviewCount,
   items: restaurant.items,
+);
+
+/// A Matches landmark serving [dishes] dishes - what the Preference sort
+/// counts ([SubmittedLandmarkRecommendation.dishes] length).
+SubmittedLandmarkRecommendation _landmarkWithDishes({
+  required int id,
+  required int dishes,
+  required double distance,
+}) => SubmittedLandmarkRecommendation(
+  id: id,
+  name: 'Stall $id',
+  category: 'Hawker',
+  distanceMetres: distance,
+  dishes: List<SubmittedLandmarkDish>.generate(
+    dishes,
+    (int index) => SubmittedLandmarkDish(name: 'Dish $id-$index'),
+  ),
 );

@@ -3,6 +3,7 @@ import 'package:meta/meta.dart' show protected;
 import '../../domain_model/exploration_filter.dart';
 import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
+import '../../domain_model/local_food.dart';
 import '../../domain_model/map.dart';
 import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/region.dart';
@@ -300,6 +301,19 @@ class DiscoveryLogicFacade {
   MapSearchSelection searchSelection(ExplorationSearchResults results) =>
       MapExplorationLogic.searchSelectionFor(results);
 
+  /// The same, narrowed to the one place the tourist picked out of the list -
+  /// that restaurant id, or that landmark id, and nothing else.
+  ///
+  /// Empty for a state or a city, which is a camera position rather than a
+  /// place and has nothing on the map to mark.
+  MapSearchSelection searchSelectionForPlace(PlaceSuggestion place) =>
+      MapExplorationLogic.searchSelectionForPlace(place);
+
+  /// The same, narrowed to the one dish the tourist picked - every available
+  /// place serving it, by id.
+  MapSearchSelection searchSelectionForFood(LocalFood food) =>
+      MapExplorationLogic.searchSelectionForFood(food);
+
   /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
   static const int maximumMarkers = MapExplorationLogic.maximumMarkers;
@@ -342,9 +356,25 @@ class DiscoveryLogicFacade {
     int? localFoodId,
   }) => mapExploration.pinDetail(pin, filter: filter, localFoodId: localFoodId);
 
+  /// REQ102_41 - whether a badge stands for this place, on the same grid
+  /// Postgres grouped by.
+  bool clusterHolds(MapCluster cluster, MapPin pin, double zoom) =>
+      MapExplorationLogic.clusterHolds(cluster, pin, zoom);
+
   /// A8 - one keyword against locations and the local-food catalogue.
   Future<ExplorationSearchResults> searchExploration(String keyword) =>
       mapExploration.search(keyword);
+
+  /// REQ102_104 - the keywords this device searched for, most recent first.
+  /// Local to the device; nothing here reaches Supabase.
+  List<String> recentSearches() => mapExploration.recentSearches();
+
+  /// Records a keyword and hands back the history that results.
+  Future<List<String>> rememberSearch(String keyword) =>
+      mapExploration.rememberSearch(keyword);
+
+  /// A15-1 - forgets every remembered keyword.
+  Future<void> clearSearchHistory() => mapExploration.clearSearchHistory();
 
   /// REQ102_6 - request GPS permission (A1 / A2).
   Future<bool> ensureLocationPermission() =>

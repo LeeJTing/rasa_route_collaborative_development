@@ -1,3 +1,4 @@
+import '../../domain_model/app_tutorial.dart';
 import '../../domain_model/auth_session.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_preference.dart';
@@ -7,6 +8,7 @@ import 'auth_repository.dart';
 import 'interaction_repository.dart';
 import 'location_repository.dart';
 import 'tourist_profile_repository.dart';
+import 'tutorial_repository.dart';
 
 /// Everything about who the tourist is: session, profile, interactions and
 /// where they are standing.
@@ -21,6 +23,7 @@ class TouristRepositoryFacade {
   final TouristProfileRepository profile = TouristProfileRepository();
   final InteractionRepository interaction = InteractionRepository();
   final LocationRepository location = LocationRepository();
+  final TutorialRepository tutorial = TutorialRepository();
 
   // ==========================================================================
   // Authentication - flat API
@@ -126,4 +129,23 @@ class TouristRepositoryFacade {
   /// Removes one saved dish from [touristId]'s favourites.
   Future<void> removeFavourite(String touristId, int localFoodId) =>
       profile.removeFavourite(touristId, localFoodId);
+
+  // ==========================================================================
+  // Guided walkthrough - flat API
+  // ==========================================================================
+  //
+  // Device-scoped, not account-scoped: the tutorial explains the app, and a
+  // phone that has never run it is a first-time user whoever is signed in.
+
+  /// What this device remembers about the walkthrough, or
+  /// [TutorialProgress.never]. Synchronous, because local storage is already
+  /// loaded by the time any screen asks.
+  TutorialProgress tutorialProgress() => tutorial.read();
+
+  /// Records that the walkthrough was finished or skipped.
+  Future<void> saveTutorialProgress(TutorialProgress progress) =>
+      tutorial.write(progress);
+
+  /// Forgets that record, so the next launch shows the walkthrough again.
+  Future<void> clearTutorialProgress() => tutorial.clear();
 }

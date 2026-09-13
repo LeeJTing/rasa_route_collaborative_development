@@ -35,6 +35,9 @@ void main() {
         expect(result.groups.single.food.id, 1);
         expect(result.groups.single.restaurants.single.id, 10);
         expect(result.groups.single.restaurants.single.items, hasLength(1));
+        // The headline price is restaurant-wide: the RM2.50 item belongs to a
+        // different food, but it is still the restaurant's cheapest item.
+        expect(result.groups.single.restaurantStartingPrices[10], 2.5);
         expect(
           result.groups.single.restaurants.single.items.single.localFoodId,
           1,
@@ -45,7 +48,8 @@ void main() {
           containsAll(<String>['Liked Food', 'Not Liked Food']),
         );
         // Each dish carries its OWN price, and the landmark's headline price
-        // is their AVERAGE (8 and 12 -> 10), not one dish's price.
+        // is the STARTING price - the LOWEST of them (8 and 12 -> 8) - so
+        // the card can read "From RM 8.00" like a restaurant's.
         final SubmittedLandmarkRecommendation landmark =
             result.groups.single.submittedLandmarks.single;
         expect(
@@ -56,9 +60,12 @@ void main() {
         );
         expect(landmark.dishes.first.price, 8);
         expect(landmark.dishes.last.price, 12);
-        expect(landmark.price, 10);
+        expect(landmark.price, 8);
         expect(landmark.dishes.first.ingredients, 'Rice, sambal');
         expect(landmark.dishes.last.ingredients, isNull);
+        // The tourist-supplied address rides along for the card's address
+        // row.
+        expect(landmark.address, 'Jalan Ampang, Kuala Lumpur');
       },
     );
 
@@ -110,6 +117,7 @@ void main() {
             result.groups.single.restaurants.single.items;
         expect(items, hasLength(1));
         expect(items.single.price, 9.5);
+        expect(result.groups.single.restaurantStartingPrices[10], 2.5);
       },
     );
 
@@ -294,6 +302,17 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           itemPrice: 9.5,
         ),
         FoodOccurrence(
+          sourceId: '10',
+          source: FoodOccurrenceSource.restaurant,
+          placeName: 'Actual Restaurant',
+          localFoodId: 2,
+          foodName: 'Cheaper Unmatched Item',
+          foodType: 'Food',
+          latitude: 1,
+          longitude: 1.001,
+          itemPrice: 2.5,
+        ),
+        FoodOccurrence(
           sourceId: '20',
           source: FoodOccurrenceSource.submittedLandmark,
           placeName: 'Actual Landmark',
@@ -302,6 +321,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
           foodType: 'Food',
           latitude: 1,
           longitude: 1.002,
+          placeAddress: 'Jalan Ampang, Kuala Lumpur',
           itemPrice: 8,
           itemIngredients: 'Rice, sambal',
         ),

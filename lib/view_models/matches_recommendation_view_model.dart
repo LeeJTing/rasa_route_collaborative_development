@@ -6,14 +6,18 @@ import '../core/base_view_model.dart';
 import '../domain_model/matches_recommendation_tab.dart';
 import '../domain_model/matches_recommendation.dart';
 import '../domain_model/restaurant.dart';
-import '../domain_model/restaurant_item.dart';
 import '../domain_model/swipe_session.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
 import 'current_location_facade.dart';
 
 enum MatchesRestaurantSort { distance, price, preference, rating }
 
-enum MatchesLandmarkSort { distance, price, name }
+/// What the Submitted Landmarks tab can order its cards by. `preference`
+/// mirrors the restaurant tab's own chip: the landmark serving the MOST
+/// dishes leads (its `dishes` length - the landmark equivalent of the
+/// restaurant's matching menu items). The chip used to be missing from the
+/// landmark tab (user request, 2026-09-14).
+enum MatchesLandmarkSort { distance, price, preference, name }
 
 enum MatchesSortDirection { ascending, descending }
 
@@ -76,7 +80,10 @@ class MatchesRecommendationViewModel extends BaseViewModel {
       .map((MatchedFoodRecommendations group) {
         if (_selectedTab == MatchesRecommendationTab.restaurants) {
           final List<Restaurant> restaurants =
-              _sortedRestaurants(group.restaurants)
+              _sortedRestaurants(
+                    group.restaurants,
+                    group.restaurantStartingPrices,
+                  )
                   .where((Restaurant value) {
                     final double? distance = value.distanceMetres;
                     return distance == null ||
@@ -91,6 +98,7 @@ class MatchesRecommendationViewModel extends BaseViewModel {
             food: group.food,
             restaurants: restaurants,
             submittedLandmarks: group.submittedLandmarks,
+            restaurantStartingPrices: group.restaurantStartingPrices,
           );
         }
         final List<SubmittedLandmarkRecommendation> landmarks =
@@ -108,6 +116,7 @@ class MatchesRecommendationViewModel extends BaseViewModel {
           food: group.food,
           restaurants: group.restaurants,
           submittedLandmarks: landmarks,
+          restaurantStartingPrices: group.restaurantStartingPrices,
         );
       })
       .toList(growable: false);
@@ -329,7 +338,10 @@ class MatchesRecommendationViewModel extends BaseViewModel {
     return null;
   }
 
-  List<Restaurant> _sortedRestaurants(List<Restaurant> values) {
+  List<Restaurant> _sortedRestaurants(
+    List<Restaurant> values,
+    Map<int, double> startingPrices,
+  ) {
     final List<Restaurant> sorted = List<Restaurant>.of(values);
     sorted.sort((Restaurant first, Restaurant second) {
       final int comparison = switch (_restaurantSort) {
@@ -339,8 +351,8 @@ class MatchesRecommendationViewModel extends BaseViewModel {
           _restaurantSortDirection,
         ),
         MatchesRestaurantSort.price => _compareNullable(
-          _minimumPrice(first),
-          _minimumPrice(second),
+          startingPrices[first.id],
+          startingPrices[second.id],
           _restaurantSortDirection,
         ),
         MatchesRestaurantSort.preference => _applyDirection(
@@ -379,6 +391,10 @@ class MatchesRecommendationViewModel extends BaseViewModel {
           second.price,
           _landmarkSortDirection,
         ),
+        MatchesLandmarkSort.preference => _applyDirection(
+          first.dishes.length.compareTo(second.dishes.length),
+          _landmarkSortDirection,
+        ),
         MatchesLandmarkSort.name => first.name.toLowerCase().compareTo(
           second.name.toLowerCase(),
         ),
@@ -390,15 +406,6 @@ class MatchesRecommendationViewModel extends BaseViewModel {
       return first.id.compareTo(second.id);
     });
     return sorted;
-  }
-
-  double? _minimumPrice(Restaurant restaurant) {
-    final List<double> prices = restaurant.items
-        .map((RestaurantItem item) => item.price)
-        .whereType<double>()
-        .toList(growable: false);
-    if (prices.isEmpty) return null;
-    return prices.reduce(math.min);
   }
 
   int _compareNullable(

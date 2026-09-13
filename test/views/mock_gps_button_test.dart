@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/views/common_widgets/mock_gps_button.dart';
 
@@ -59,5 +60,94 @@ void main() {
       expect(same.lat, lat);
       expect(same.lon, lon);
     });
+  });
+
+  group('MockGpsButton.presetGroups', () {
+    Map<String, List<String>> byState() => <String, List<String>>{
+      for (final ({
+            String state,
+            List<({String label, double lat, double lon})> spots,
+          })
+          group
+          in MockGpsButton.presetGroups)
+        group.state: <String>[
+          for (final ({String label, double lat, double lon}) spot
+              in group.spots)
+            spot.label,
+        ],
+    };
+
+    test('separates the demo districts by state', () {
+      final Map<String, List<String>> states = byState();
+
+      expect(
+        states.keys,
+        containsAll(<String>['Kuala Lumpur', 'Selangor', 'Johor']),
+      );
+      expect(
+        states['Kuala Lumpur'],
+        containsAll(<String>['KL', 'Setapak', 'Cheras', 'Ampang']),
+      );
+      expect(
+        states['Selangor'],
+        containsAll(<String>['Subang Jaya', 'Shah Alam', 'Klang']),
+      );
+      expect(
+        states['Johor'],
+        containsAll(<String>['Johor Bahru', 'Skudai', 'Batu Pahat']),
+      );
+    });
+
+    test('keeps the refusal-test spots in their own group', () {
+      expect(
+        byState()['Refusal tests'],
+        containsAll(<String>['Outside MY', 'At sea']),
+      );
+    });
+
+    test('every spot is uniquely labelled', () {
+      final List<String> labels = <String>[
+        for (final List<String> stateLabels in byState().values) ...stateLabels,
+      ];
+      expect(labels.toSet(), hasLength(labels.length));
+    });
+  });
+
+  testWidgets('the picker shows one section per state and sets a district', (
+    WidgetTester tester,
+  ) async {
+    double? mockedLatitude;
+    double? mockedLongitude;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MockGpsButton(
+            isActive: false,
+            onSetMock: (double latitude, double longitude) async {
+              mockedLatitude = latitude;
+              mockedLongitude = longitude;
+              return null;
+            },
+            onStopMock: () async {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(MockGpsButton));
+    await tester.pumpAndSettle();
+
+    // One header per state, not one flat list of chips.
+    expect(find.text('Kuala Lumpur'), findsOneWidget);
+    expect(find.text('Selangor'), findsOneWidget);
+    expect(find.text('Johor'), findsOneWidget);
+    expect(find.text('Refusal tests'), findsOneWidget);
+
+    // Tapping a district teleports the mock to ITS coordinates.
+    await tester.tap(find.text('Setapak'));
+    await tester.pumpAndSettle();
+
+    expect(mockedLatitude, 3.1930);
+    expect(mockedLongitude, 101.7120);
   });
 }

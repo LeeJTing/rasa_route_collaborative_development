@@ -10,6 +10,7 @@ import '../../domain_model/matches_recommendation.dart';
 import '../../view_models/dashboard_view_model.dart' show MapSelectionHandoff;
 import '../../view_models/matches_recommendation_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
+import '../common_widgets/enlarged_image_dialog.dart';
 import 'widgets/matched_food_recommendation_group.dart';
 import 'widgets/matches_recommendation_tabs.dart';
 import 'widgets/matches_restaurant_card.dart';
@@ -74,7 +75,7 @@ class _MatchesRecommendationViewState extends State<MatchesRecommendationView> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                       AppSpacing.lg,
-                      AppSpacing.lg,
+                      AppSpacing.sm,
                       AppSpacing.lg,
                       AppSpacing.sm,
                     ),
@@ -82,18 +83,13 @@ class _MatchesRecommendationViewState extends State<MatchesRecommendationView> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
                         Text(
-                          'Places serving your matched foods',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        Text(
                           viewModel.stateName.isEmpty
                               ? 'Recommendations from your active Swipe Mode state.'
                               : '${viewModel.stateName} recommendations from foods you liked.',
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(color: AppColors.textSecondary),
                         ),
-                        const SizedBox(height: AppSpacing.lg),
+                        const SizedBox(height: AppSpacing.md),
                         MatchesRecommendationTabs(
                           selectedTab: viewModel.selectedTab,
                           onChanged: viewModel.selectTab,
@@ -191,6 +187,7 @@ class _MatchesRecommendationViewState extends State<MatchesRecommendationView> {
         (restaurant) => MatchesRestaurantCard(
           restaurant: restaurant,
           matchedFoodName: group.food.name,
+          startingPrice: group.restaurantStartingPrices[restaurant.id],
           onTap: () => _openRestaurantDetails(context, restaurant.id),
         ),
       )
@@ -222,6 +219,11 @@ class _MatchesRecommendationViewState extends State<MatchesRecommendationView> {
             SubmittedLandmarkRecommendationCard(
               landmark: landmark,
               onTap: () => _openLandmarkDetails(context, landmark),
+              onImageTap: () => showLandmarkImage(
+                context,
+                semanticLabel: landmark.name,
+                source: landmark.imageUrl,
+              ),
             ),
       )
       .toList(growable: true);
@@ -306,6 +308,7 @@ class _SortToolbar extends StatelessWidget {
                   text: switch (sort) {
                     MatchesLandmarkSort.distance => 'Distance',
                     MatchesLandmarkSort.price => 'Price',
+                    MatchesLandmarkSort.preference => 'Preference',
                     MatchesLandmarkSort.name => 'Name',
                   },
                   direction: selected ? viewModel.landmarkSortDirection : null,

@@ -92,6 +92,46 @@ void main() {
 
       expect(viewModel.selectedIds, isEmpty);
     });
+
+    test('returning from profile refreshes all favourite icons', () async {
+      final _FakeFoodLogic logic = _FakeFoodLogic(
+        loads: <Future<List<LocalFood>>>[
+          Future<List<LocalFood>>.value(<LocalFood>[
+            _food(1, 'Cendol').copyWith(isFavourite: true),
+            _food(2, 'Nasi Lemak'),
+          ]),
+        ],
+        favouriteIds: <int>{2},
+      );
+      final LocalFoodListViewModel viewModel = _TestViewModel(logic);
+      addTearDown(viewModel.dispose);
+      await viewModel.loadFoods();
+
+      expect(await viewModel.refreshFavourite(), isNull);
+
+      final Map<int, bool> favourites = <int, bool>{
+        for (final LocalFood food in viewModel.displayedFoods)
+          food.id: food.isFavourite,
+      };
+      expect(favourites, <int, bool>{1: false, 2: true});
+    });
+
+    test('failed favourite refresh preserves existing icons', () async {
+      final _FakeFoodLogic logic = _FakeFoodLogic(
+        loads: <Future<List<LocalFood>>>[
+          Future<List<LocalFood>>.value(<LocalFood>[
+            _food(1, 'Cendol').copyWith(isFavourite: true),
+          ]),
+        ],
+        favouriteError: StateError('offline'),
+      );
+      final LocalFoodListViewModel viewModel = _TestViewModel(logic);
+      addTearDown(viewModel.dispose);
+      await viewModel.loadFoods();
+
+      expect(await viewModel.refreshFavourite(), isNotNull);
+      expect(viewModel.displayedFoods.single.isFavourite, isTrue);
+    });
   });
 }
 
@@ -105,10 +145,17 @@ class _TestViewModel extends LocalFoodListViewModel {
 }
 
 class _FakeFoodLogic extends FoodLogicFacade {
-  _FakeFoodLogic({required this.loads, this.favouriteResult});
+  _FakeFoodLogic({
+    required this.loads,
+    this.favouriteResult,
+    this.favouriteIds = const <int>{},
+    this.favouriteError,
+  });
 
   final List<Future<List<LocalFood>>> loads;
   final Future<bool>? favouriteResult;
+  final Set<int> favouriteIds;
+  final Object? favouriteError;
   int loadCalls = 0;
   int favouriteCalls = 0;
 
@@ -119,6 +166,12 @@ class _FakeFoodLogic extends FoodLogicFacade {
   Future<bool> toggleFavouriteFood(int foodId) {
     favouriteCalls += 1;
     return favouriteResult ?? Future<bool>.value(true);
+  }
+
+  @override
+  Future<Set<int>> favouriteFoodIds() async {
+    if (favouriteError != null) throw favouriteError!;
+    return favouriteIds;
   }
 }
 

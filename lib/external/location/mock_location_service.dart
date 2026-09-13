@@ -36,6 +36,12 @@ class MockLocationService {
   double? _latitude;
   double? _longitude;
 
+  /// When the last mock was STOPPED, or null when none has run yet. Android's
+  /// fused provider can keep answering with the mocked spot for a while after
+  /// the test provider is removed, so callers need to know a mock just ended
+  /// (see `LocationRepository.currentLocation`).
+  DateTime? _stoppedAt;
+
   final StreamController<bool> _changes = StreamController<bool>.broadcast();
 
   /// Whether a mock is live right now.
@@ -49,6 +55,10 @@ class MockLocationService {
 
   /// Fires `true` the moment a mock starts and `false` the moment it stops.
   Stream<bool> get activeChanges => _changes.stream;
+
+  /// When the last mock was stopped, or null when none has run yet - see
+  /// [_stoppedAt].
+  DateTime? get stoppedAt => _stoppedAt;
 
   /// Teleports the OS GPS to [latitude]/[longitude]. The app's
   /// `LocationMonitor` picks up the new fix through `geolocator` and every
@@ -87,6 +97,7 @@ class MockLocationService {
     _active = false;
     _latitude = null;
     _longitude = null;
+    _stoppedAt = DateTime.now();
     _changes.add(false);
   }
 }

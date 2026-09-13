@@ -39,6 +39,10 @@ class LocalStorageManager {
   static const String keyHasSeenOnboarding = 'has_seen_onboarding';
   static const String keyActiveSwipeSession = 'active_swipe_session';
 
+  /// REQ102_104 - the last few keywords typed into the dashboard search box.
+  /// Local only: search history is never sent to Supabase.
+  static const String keyRecentSearches = 'recent_searches';
+
   /// Suffix appended to a cache key to store its write time.
   static String _stampKey(String key) => '${key}__written_at';
 
