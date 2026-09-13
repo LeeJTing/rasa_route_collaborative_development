@@ -80,8 +80,11 @@ class LandmarkPlaceDetailViewModel extends BaseViewModel
   }
 
   Future<void> load() => runGuarded(() async {
+    // The page's own fetch: the logic layer annotates each dish with the
+    // dietary warning it has to show, so a dish the tourist must avoid is
+    // marked rather than hidden.
     final SubmittedLandmark? landmark = await landmarkLogic
-        .getSubmittedLandmarkById(_landmarkId);
+        .getLandmarkPlaceDetail(_landmarkId);
     if (landmark == null) {
       // A landmark that no longer exists (e.g. reported past the threshold
       // and hidden since the pin was drawn) - say so instead of showing an

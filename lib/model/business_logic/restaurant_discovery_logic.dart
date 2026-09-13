@@ -12,6 +12,7 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/tourist_location.dart';
 import '../repositories/discovery_repository_facade.dart';
+import 'dietary_warning.dart';
 import 'opening_hours_logic.dart';
 
 /// Finding and filtering restaurants.
@@ -42,7 +43,51 @@ class RestaurantDiscoveryLogic {
       restaurantId,
     );
     if (restaurant == null) return null;
-    return _measure(<Restaurant>[restaurant], origin).single;
+    final Restaurant annotated = await _withDietaryWarnings(restaurant);
+    return _measure(<Restaurant>[annotated], origin).single;
+  }
+
+
+  Future<Restaurant> _withDietaryWarnings(Restaurant restaurant) async {
+    if (restaurant.items.isEmpty) return restaurant;
+    final List<DietaryRestriction> restrictions = await repository
+        .getCurrentDietaryRestrictions();
+    if (restrictions.isEmpty) return restaurant;
+    final Map<int, List<int>> restrictionIdsByFood = await repository
+        .getRestrictionIdsByFood();
+    final Map<int, String> labelsById = <int, String>{
+      for (final DietaryRestriction restriction in restrictions)
+        restriction.id: DietaryWarning.label(restriction.name),
+    };
+    return restaurant.copyWith(
+      items: restaurant.items
+          .map(
+            (RestaurantItem item) => item.copyWith(
+              dietaryWarning: _dietaryWarning(
+                item,
+                labelsById: labelsById,
+                restrictionIdsByFood: restrictionIdsByFood,
+              ),
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  /// The warning for one menu row, or null when nothing is known to clash.
+  String? _dietaryWarning(
+    RestaurantItem item, {
+    required Map<int, String> labelsById,
+    required Map<int, List<int>> restrictionIdsByFood,
+  }) {
+    if (item.localFoodId <= 0) return DietaryWarning.unknown;
+    final List<String> clashes = <String>[];
+    for (final int id
+        in restrictionIdsByFood[item.localFoodId] ?? const <int>[]) {
+      final String? label = labelsById[id];
+      if (label != null && !clashes.contains(label)) clashes.add(label);
+    }
+    return DietaryWarning.forLabels(clashes);
   }
 
   Future<List<Restaurant>> nearby({
@@ -525,19 +570,15 @@ class RestaurantDiscoveryLogic {
                 )
                 .toList(growable: false);
       if (typedItems.isEmpty) continue;
-      final List<RestaurantItem> safeItems = activeRestrictionIds.isEmpty
-          ? typedItems
-          : typedItems
-                .where(
-                  (RestaurantItem item) =>
-                      item.localFoodId > 0 &&
-                      !_conflictsWithRestrictions(
-                        item,
-                        activeRestrictionIds: activeRestrictionIds,
-                        restrictionIdsByFood: restrictionIdsByFood,
-                      ),
-                )
-                .toList(growable: false);
+      final List<RestaurantItem> safeItems = typedItems
+          .where(
+            (RestaurantItem item) => _isAllowed(
+              item,
+              activeRestrictionIds: activeRestrictionIds,
+              restrictionIdsByFood: restrictionIdsByFood,
+            ),
+          )
+          .toList(growable: false);
       if (safeItems.isEmpty) continue;
       eligible.add(
         _withDiscoveryValues(
@@ -548,6 +589,20 @@ class RestaurantDiscoveryLogic {
       );
     }
     return eligible;
+  }
+
+  bool _isAllowed(
+    RestaurantItem item, {
+    required Set<int> activeRestrictionIds,
+    required Map<int, List<int>> restrictionIdsByFood,
+  }) {
+    if (activeRestrictionIds.isEmpty) return true;
+    if (item.localFoodId <= 0) return false;
+    return !_conflictsWithRestrictions(
+      item,
+      activeRestrictionIds: activeRestrictionIds,
+      restrictionIdsByFood: restrictionIdsByFood,
+    );
   }
 
   bool _conflictsWithRestrictions(
