@@ -227,9 +227,6 @@ class MapExplorationLogic {
   /// queried, which at these row counts is free.
   static const double viewportBuffer = 0.25;
 
-  /// How many dish names the pin sheet lists before it stops.
-  static const int maximumServedFoods = 8;
-
   /// How many pins the detailed map may draw at [zoom].
   ///
   /// The thresholds reuse the zoom levels the rest of the module already names:
@@ -865,6 +862,10 @@ class MapExplorationLogic {
   ///
   /// Returns [pin] unchanged when the detail cannot be read, so a tap always
   /// opens a sheet with at least the name and photo already on the marker.
+  ///
+  /// [filter] and [localFoodId] say what the tourist was looking for. They
+  /// **order** the "Serves: ..." line and nothing else - the sheet lists the
+  /// whole menu either way (REQ102_47).
   Future<MapPin> pinDetail(
     MapPin pin, {
     ExplorationFilter filter = ExplorationFilter.none,
@@ -898,31 +899,48 @@ class MapExplorationLogic {
     }
     if (restaurant == null) return pin;
 
-    // "Serves: ..." lists what the tourist is looking for first. With nothing
-    // selected that is simply the menu, catalogue names preferred over the
+    // REQ102_47 - "Serves: ..." is the whole menu, always.
+    //
+    // A filter chip, a keyword and a Swipe card decide which *places* reach
+    // the map. They do not decide what a place turns out to serve once it is
+    // opened: a restaurant serving Nasi Lemak, Laksa, Satay and Roti Canai
+    // lists all four whether the tourist searched for Nasi Lemak, ticked
+    // Breakfast, or swiped past Satay. It used to list only the dishes that
+    // matched, which read as "this place serves one thing" (user report,
+    // 2026-09-13). Catalogue names are preferred over the
     // restaurant's own spelling so the sheet matches the rest of the app.
     final List<LocalFood> catalogue = await repository.getLocalFoods();
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
+    // What the tourist was looking for is still listed *first*. Ordering, not
+    // filtering - nothing is dropped - and it is what keeps the dish they
+    // asked for on the visible part of a long line. The list itself is
+    // whole; the sheet's strip ellipsises what will not fit, which is a
+    // truncation the tourist can see rather than a silent cut at eight.
     final Set<int> wanted = <int>{
       for (final LocalFood food in catalogue)
         if ((localFoodId == null || food.id == localFoodId) &&
             matchesFilter(food, filter))
           food.id,
     };
-    final bool narrowed = localFoodId != null || filter.selectionCount > 0;
 
     final List<String> served = <String>[];
+    final List<String> alsoServed = <String>[];
     final List<double> prices = <double>[];
     for (final RestaurantItem item in items) {
-      final bool matches = wanted.contains(item.localFoodId);
-      if (narrowed && !matches) continue;
       final String name = (nameById[item.localFoodId] ?? item.foodName).trim();
-      if (name.isNotEmpty && !served.contains(name)) served.add(name);
+      if (name.isNotEmpty &&
+          !served.contains(name) &&
+          !alsoServed.contains(name)) {
+        (wanted.contains(item.localFoodId) ? served : alsoServed).add(name);
+      }
       final double? price = item.price;
       if (price != null && price > 0) prices.add(price);
     }
+    // The rest of the menu, behind what was asked for. The price range covers
+    // the same dishes the line now names, so the two agree.
+    served.addAll(alsoServed);
 
     return MapPin(
       referenceId: pin.referenceId,
@@ -938,11 +956,7 @@ class MapExplorationLogic {
       thumbnailUrl: pin.thumbnailUrl,
       category: restaurant.category.isEmpty ? null : restaurant.category,
       rating: restaurant.rating ?? pin.rating,
-      servedFoods: List<String>.unmodifiable(
-        served.length > maximumServedFoods
-            ? served.sublist(0, maximumServedFoods)
-            : served,
-      ),
+      servedFoods: List<String>.unmodifiable(served),
       priceRange: _priceRangeOf(prices),
       openNow: _openNow(hours['restaurant:$id']),
       distanceMetres: pin.distanceMetres,
@@ -983,28 +997,32 @@ class MapExplorationLogic {
     }
     if (landmark == null) return pin;
 
-    // The same "Serves: ..." rule as the restaurant sheet: catalogue names
-    // preferred over the submission's own spelling, and narrowed to what the
-    // tourist is looking for when a dish or a filter is active.
+    // The same "Serves: ..." rule as the restaurant sheet: every dish the
+    // landmark has on record, catalogue names preferred over the
+    // submission's own spelling, ordered so that what the tourist was
+    // looking for comes first.
     final List<LocalFood> catalogue = await repository.getLocalFoods();
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
+    // Listed first, never listed alone - see the restaurant branch above.
     final Set<int> wanted = <int>{
       for (final LocalFood food in catalogue)
         if ((localFoodId == null || food.id == localFoodId) &&
             matchesFilter(food, filter))
           food.id,
     };
-    final bool narrowed = localFoodId != null || filter.selectionCount > 0;
 
     final List<String> served = <String>[];
+    final List<String> alsoServed = <String>[];
     final List<double> prices = <double>[];
     for (final LandmarkItem item in landmark.items) {
-      final bool matches = wanted.contains(item.localFoodId);
-      if (narrowed && !matches) continue;
       final String name = (nameById[item.localFoodId] ?? item.dish).trim();
-      if (name.isNotEmpty && !served.contains(name)) served.add(name);
+      if (name.isNotEmpty &&
+          !served.contains(name) &&
+          !alsoServed.contains(name)) {
+        (wanted.contains(item.localFoodId) ? served : alsoServed).add(name);
+      }
       final double? price = item.price;
       if (price != null && price > 0) {
         prices.add(price);
@@ -1015,6 +1033,7 @@ class MapExplorationLogic {
         prices.add(item.priceMax);
       }
     }
+    served.addAll(alsoServed);
 
     // The landmark's own category: the food category MOST of its dishes
     // carry (see `SubmittedLandmark.displayCategory`), worded the way the
@@ -1034,11 +1053,7 @@ class MapExplorationLogic {
       thumbnailUrl: pin.thumbnailUrl,
       category: category.isEmpty ? null : category,
       rating: pin.rating,
-      servedFoods: List<String>.unmodifiable(
-        served.length > maximumServedFoods
-            ? served.sublist(0, maximumServedFoods)
-            : served,
-      ),
+      servedFoods: List<String>.unmodifiable(served),
       priceRange: _priceRangeOf(prices),
       openNow: _openNow(hours['submittedLandmark:$id']),
       distanceMetres: pin.distanceMetres,
