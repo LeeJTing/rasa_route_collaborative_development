@@ -292,8 +292,13 @@ class MapPin {
 
   final double? rating;
 
-  /// "Serves: Nasi Lemak, Teh Tarik" - the matching local foods on the menu
-  /// here, already filtered to whatever the tourist is looking for.
+  /// "Serves: Nasi Lemak, Teh Tarik" - **every** local food linked to this
+  /// place, not only the ones the tourist searched, filtered or swiped for.
+  ///
+  /// Empty on a marker straight from the viewport query, which carries only
+  /// what it draws; filled by `pinDetail` when the sheet opens. What the
+  /// tourist was looking for is ordered first, so it survives the sheet's
+  /// own two-line ellipsis at a place with a long menu.
   final List<String> servedFoods;
 
   /// "RM20-40", or null when no item at this place carries a price.
