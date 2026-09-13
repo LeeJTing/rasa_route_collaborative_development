@@ -13,6 +13,11 @@ import '../repositories/food_repository_facade.dart';
 class FoodKnowledgeLogic {
   FoodKnowledgeLogic();
 
+  // Separate screens create separate logic instances. A favourites read must
+  // not overtake an in-flight write started by another screen (for example,
+  // swiping in Profile and immediately returning to the Learn catalogue).
+  static final Set<Future<void>> _pendingFavouriteWrites = <Future<void>>{};
+
   @protected
   FoodRepositoryFacade createRepository() => FoodRepositoryFacade();
 
@@ -23,7 +28,10 @@ class FoodKnowledgeLogic {
   // =========================================================================
 
   /// Fetch all local foods catalogue.
-  Future<List<LocalFood>> getLocalFoods() => repository.getFoods();
+  Future<List<LocalFood>> getLocalFoods() async {
+    await _waitForFavouriteWrites();
+    return repository.getFoods();
+  }
 
   /// Search foods by query string.
   Future<List<LocalFood>> searchLocalFoods(String query) =>
@@ -35,18 +43,41 @@ class FoodKnowledgeLogic {
 
   /// Toggle favourite status (add if missing, remove if present).
   Future<bool> toggleFavouriteFood(int localFoodId) =>
-      repository.toggleFavourite(localFoodId);
+      _trackFavouriteWrite(repository.toggleFavourite(localFoodId));
 
   /// The signed-in tourist's favourited food ids (empty when signed out),
   /// used to prioritise similar foods.
-  Future<Set<int>> favouriteFoodIds() => repository.favouriteFoodIds();
+  Future<Set<int>> favouriteFoodIds() async {
+    await _waitForFavouriteWrites();
+    return repository.favouriteFoodIds();
+  }
 
   /// Removes a saved dish without the add-on-missing behaviour of toggle.
-  Future<void> removeFavouriteFood(int localFoodId) async {
+  Future<void> removeFavouriteFood(int localFoodId) =>
+      _trackFavouriteWrite(_removeFavouriteFood(localFoodId));
+
+  Future<void> _removeFavouriteFood(int localFoodId) async {
     final Set<int> savedIds = await repository.favouriteFoodIds();
     if (savedIds.contains(localFoodId)) {
       await repository.toggleFavourite(localFoodId);
     }
+  }
+
+  Future<T> _trackFavouriteWrite<T>(Future<T> operation) {
+    // The coordination future always settles successfully so a failed write
+    // cannot prevent a later read from checking the actual database state.
+    final Future<void> settled = operation.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {},
+    );
+    _pendingFavouriteWrites.add(settled);
+    settled.whenComplete(() => _pendingFavouriteWrites.remove(settled));
+    return operation;
+  }
+
+  Future<void> _waitForFavouriteWrites() async {
+    if (_pendingFavouriteWrites.isEmpty) return;
+    await Future.wait<void>(_pendingFavouriteWrites.toList(growable: false));
   }
 
   Future<LocalFood> getFoodDetails(int foodId) async {

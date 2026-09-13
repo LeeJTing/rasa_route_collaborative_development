@@ -10,6 +10,7 @@ import '../../view_models/local_food_list_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/enlarged_image_dialog.dart';
 import 'widgets/food_filter_controls.dart';
+import 'widgets/food_filter_sheet.dart';
 import 'widgets/food_search_bar.dart';
 import 'widgets/local_food_card.dart';
 
@@ -48,14 +49,10 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
           title: 'All Local Food',
           showBackButton: Navigator.of(context).canPop(),
           onProfileTap: () async {
-            await Navigator.pushNamed(
-              context,
-              AppRoutes.profile,
-            );
+            await Navigator.pushNamed(context, AppRoutes.profile);
 
             if (!context.mounted) return;
-
-            await _viewModel.refreshFavourite();
+            await _refreshFavourites(context);
           },
         ),
         body: Consumer<LocalFoodListViewModel>(
@@ -138,16 +135,17 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
                                               arguments: food.id,
                                             );
 
-                                        if (!context.mounted || result is! Map)
-                                          return;
-
-                                        final Object? id = result['id'];
-                                        final Object? isFavourite =
-                                            result['isFavourite'];
-                                        if (id is! int || isFavourite is! bool) {
-                                          return;
+                                        if (!context.mounted) return;
+                                        if (result is Map) {
+                                          final Object? id = result['id'];
+                                          final Object? isFavourite =
+                                              result['isFavourite'];
+                                          if (id is int &&
+                                              isFavourite is bool) {
+                                            vm.updateFavourite(id, isFavourite);
+                                          }
                                         }
-                                        vm.updateFavourite(id, isFavourite);
+                                        await _refreshFavourites(context);
                                       }
                                     },
                                     onFavourite: () async {
@@ -204,6 +202,14 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
     );
   }
 
+  Future<void> _refreshFavourites(BuildContext context) async {
+    final String? message = await _viewModel.refreshFavourite();
+    if (!context.mounted || message == null) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _showSortOptions(
     BuildContext context,
     LocalFoodListViewModel vm,
@@ -249,89 +255,46 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
   );
 
   Future<void> _showFilters(
-      BuildContext context,
-      LocalFoodListViewModel vm,
-      ) async {
+    BuildContext context,
+    LocalFoodListViewModel vm,
+  ) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: AppRadius.sheetRadius,
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: AppRadius.sheetRadius),
       builder: (BuildContext context) =>
-      ChangeNotifierProvider<LocalFoodListViewModel>.value(
-        value: vm,
-        child: DraggableScrollableSheet(
-          expand: false,
-          initialChildSize:
-          AppLayoutRatios.catalogueFilterSheetInitial,
-          maxChildSize:
-          AppLayoutRatios.catalogueFilterSheetMaximum,
-          builder: (
-              BuildContext context,
-              ScrollController controller,
-              ) =>
-              Consumer<LocalFoodListViewModel>(
-                builder: (
-                    BuildContext context,
-                    LocalFoodListViewModel vm,
-                    _,
-                    ) =>
-                    ListView(
-                      controller: controller,
-                      padding: const EdgeInsets.all(AppSpacing.lg),
-                      children: <Widget>[
-                        Text(
-                          'Filter local food',
-                          style: Theme.of(
-                            context,
-                          ).textTheme.titleLarge,
-                        ),
-
-                        ...FoodFilterGroup.values.map(
-                              (FoodFilterGroup group) => _FilterGroup(
-                            title: _filterTitle(group),
-                            values: LocalFoodListViewModel
-                                .filterOptions[group]!,
-                            isSelected: (String value) =>
-                                vm.isFilterSelected(group, value),
-                            onToggle: (String value) =>
-                                vm.toggleFilter(group, value),
-                          ),
-                        ),
-
-                        const SizedBox(height: AppSpacing.xl),
-
-                        Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: vm.displayedFoods.isEmpty
-                                    ? null
-                                    : () =>
-                                    Navigator.pop(context),
-                                child: Text(
-                                  'Show ${vm.displayedFoods.length} local food',
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
+          ChangeNotifierProvider<LocalFoodListViewModel>.value(
+            value: vm,
+            child: DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: AppLayoutRatios.catalogueFilterSheetInitial,
+              maxChildSize: AppLayoutRatios.catalogueFilterSheetMaximum,
+              builder: (BuildContext context, ScrollController controller) =>
+                  Consumer<LocalFoodListViewModel>(
+                    builder:
+                        (BuildContext context, LocalFoodListViewModel vm, _) =>
+                            FoodFilterSheet(
+                              controller: controller,
+                              sections: <FoodFilterSection>[
+                                for (final FoodFilterGroup group
+                                    in FoodFilterGroup.values)
+                                  FoodFilterSection(
+                                    title: _filterTitle(group),
+                                    values: LocalFoodListViewModel
+                                        .filterOptions[group]!,
+                                    isSelected: (String value) =>
+                                        vm.isFilterSelected(group, value),
+                                    onToggle: (String value) =>
+                                        vm.toggleFilter(group, value),
+                                  ),
+                              ],
+                              resultCount: vm.displayedFoods.length,
+                              onApply: () => Navigator.pop(context),
+                              onClear: vm.clearFilters,
                             ),
-                            const SizedBox(width: AppSpacing.md),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: vm.clearFilters,
-                                child: const Text('Clear'),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: AppSpacing.lg),
-                      ],
-                    ),
-              ),
-        ),
-      ),
+                  ),
+            ),
+          ),
     );
 
     if (vm.displayedFoods.isEmpty) {
@@ -361,45 +324,6 @@ class _LocalFoodListViewState extends State<LocalFoodListView> {
     FoodFilterGroup.taste => 'Taste',
     FoodFilterGroup.foodType => 'Food Type',
   };
-}
-
-class _FilterGroup extends StatelessWidget {
-  const _FilterGroup({
-    required this.title,
-    required this.values,
-    required this.isSelected,
-    required this.onToggle,
-  });
-
-  final String title;
-  final List<String> values;
-  final bool Function(String) isSelected;
-  final ValueChanged<String> onToggle;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: AppSpacing.lg),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(title, style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: AppSpacing.sm),
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: values
-              .map(
-                (String value) => FilterChip(
-                  label: Text(value),
-                  selected: isSelected(value),
-                  onSelected: (_) => onToggle(value),
-                ),
-              )
-              .toList(growable: false),
-        ),
-      ],
-    ),
-  );
 }
 
 class _LoadingState extends StatelessWidget {
