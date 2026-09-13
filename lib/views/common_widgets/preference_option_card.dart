@@ -1,21 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 
-/// One selectable option in the profile edit screens - a square icon box with
+/// One selectable option in the profile edit screens - a square photo box with
 /// a label underneath, exactly like the mock-up's preference/restriction
-/// options. Tapping it toggles selection, which is drawn with a green border
-/// and a white box.
+/// options. Tapping it toggles selection.
+///
+/// Selection is drawn on the BOX, not the artwork: the photo is full colour and
+/// cannot be tinted the way the old SVG icons were, so a green border plus a
+/// soft green halo carry the state instead. The border is a foreground frame
+/// over the photo, and the photo is inset by a thin neutral rim so that frame
+/// stays visible at rest instead of dissolving into photo pixels.
 ///
 /// Used by `EditFoodPreferenceView`, `EditDietaryRestrictionView` and
 /// `ProfileSetUpView`, so it lives in `common_widgets/` rather than a view's
 /// private `widgets/` folder.
 ///
-/// [iconAsset] (from `PreferenceIcons`) shows the per-option icon SVG, tinted
-/// to the selection colour; when null the [icon] Material glyph is used as a
-/// generic placeholder.
+/// [iconAsset] (from `PreferenceIcons`) shows the per-option photo; when null
+/// the [icon] Material glyph is used as a generic placeholder.
 class PreferenceOptionCard extends StatelessWidget {
   const PreferenceOptionCard({
     super.key,
@@ -35,8 +38,10 @@ class PreferenceOptionCard extends StatelessWidget {
   /// food placeholder.
   final IconData icon;
 
-  /// Bundled SVG asset for this option (see `PreferenceIcons`), tinted to the
-  /// selection colour. Null renders [icon] instead.
+  /// Bundled photo for this option (see `PreferenceIcons`), drawn full colour
+  /// inside the box, inset by a thin neutral rim (see
+  /// [AppSizes.profileOptionPhotoInset]) so the frame has its own background
+  /// to read against. Null renders [icon] instead.
   final String? iconAsset;
 
   /// How many lines the label may take before it ellipsises.
@@ -63,37 +68,66 @@ class PreferenceOptionCard extends StatelessWidget {
             Container(
               width: AppSizes.profileOptionBox,
               height: AppSizes.profileOptionBox,
+              // Box-level clip: nothing inside may paint past the rounded
+              // outline (the photo gets its own concentric rounding below).
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                color: isSelected
-                    ? AppColors.surface
-                    : AppColors.tagNeutralBackground,
+                color: AppColors.tagNeutralBackground,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                // The old SVG icons turned green when picked. A photo cannot, so
+                // the halo under the box carries that cue instead.
+                boxShadow: isSelected
+                    ? const <BoxShadow>[
+                        BoxShadow(
+                          color: AppColors.profileOptionSelectedGlow,
+                          blurRadius: AppSizes.profileOptionSelectedGlowBlur,
+                          offset: Offset(
+                            0,
+                            AppSizes.profileOptionSelectedGlowOffsetY,
+                          ),
+                        ),
+                      ]
+                    : null,
+              ),
+              // The frame is painted over the photo, not under it: under it the
+              // photo hides the ring entirely and only its anti-aliased rounded
+              // edge leaks the colour back, which reads as a green line broken
+              // at every corner. Over it, the ring hugs the rounded box cleanly.
+              foregroundDecoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(AppRadius.lg),
                 border: Border.all(
-                  color: isSelected ? AppColors.success : AppColors.transparent,
-                  width: AppSizes.borderWidthStrong,
+                  color: isSelected ? AppColors.success : AppColors.outline,
+                  width: isSelected
+                      ? AppSizes.borderWidthStrong
+                      : AppSizes.borderWidth,
                 ),
               ),
-              child: iconAsset != null
-                  ? SizedBox(
-                      width: AppSizes.profileOptionIcon,
-                      height: AppSizes.profileOptionIcon,
-                      child: SvgPicture.asset(
-                        iconAsset!,
-                        colorFilter: ColorFilter.mode(
-                          isSelected
-                              ? AppColors.success
-                              : AppColors.textSecondary,
-                          BlendMode.srcIn,
+              child: Padding(
+                // The box's own fill shows as a frame margin around the photo.
+                // Without it the 1pt frame line lies straight on photo pixels -
+                // cream on photo - and simply stops being visible.
+                padding: const EdgeInsets.all(AppSizes.profileOptionPhotoInset),
+                child: ClipRRect(
+                  // Concentric with the box: subtracting the inset keeps the
+                  // photo's arcs parallel to the frame's.
+                  borderRadius: BorderRadius.circular(
+                    AppRadius.lg - AppSizes.profileOptionPhotoInset,
+                  ),
+                  child: iconAsset != null
+                      // The photo fills the inner area: inset to the old 32pt
+                      // glyph size it would read as a postage stamp at 72pt.
+                      ? Image.asset(iconAsset!, fit: BoxFit.cover)
+                      : Center(
+                          child: Icon(
+                            icon,
+                            size: AppSizes.profileOptionIcon,
+                            color: isSelected
+                                ? AppColors.success
+                                : AppColors.textSecondary,
+                          ),
                         ),
-                      ),
-                    )
-                  : Icon(
-                      icon,
-                      size: AppSizes.profileOptionIcon,
-                      color: isSelected
-                          ? AppColors.success
-                          : AppColors.textSecondary,
-                    ),
+                ),
+              ),
             ),
             const SizedBox(height: AppSpacing.sm),
             // Long names (e.g. "No Coriander/Cilantro") wrap onto two lines
