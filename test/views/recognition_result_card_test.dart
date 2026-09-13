@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/landmark_submission_logic.dart';
@@ -50,6 +51,81 @@ void main() {
       );
       expect(find.textContaining("Keep 'Murtabak'"), findsOneWidget);
       expect(find.textContaining('Roti John'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a description that cannot be shown in full ends with the ellipsis - a '
+    'short one is shown complete',
+    (tester) async {
+      tester.view.physicalSize = const Size(380, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      Future<void> pumpCard(String description) => tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RecognitionResultCard(
+              food: LocalFood(
+                id: 1,
+                name: 'Ais Kacang',
+                description: description,
+                origin: 'Malaysia',
+                culturalBackground: '',
+                ingredients: '',
+                category: 'Dessert',
+                cookingStyle: 'Chilled',
+                mealType: 'Dessert',
+                foodType: 'Dessert',
+              ),
+              onViewDetails: () {},
+              foodNameMaxLength: LandmarkSubmissionLogic.maxFoodNameLength,
+              foodNameWarning: (_) => null,
+            ),
+          ),
+        ),
+      );
+
+      Finder descriptionLine(String text) => find.byWidgetPredicate(
+        (Widget widget) =>
+            widget is RichText && widget.text.toPlainText() == text,
+      );
+
+      // Long text: the FULL description rides the widget, wraps over several
+      // lines (it used to be cut at 40 characters on one line) and ellipsizes
+      // when even those cannot show it all.
+      const String longDescription =
+          'Shaved ice topped with red beans, sweet corn, grass jelly, palm '
+          'sugar, evaporated milk, and durian pulp - a Malaysian hawker '
+          'classic served all day long in kopitiams and night markets, piled '
+          'high with toppings and finished with a drizzle of gula Melaka '
+          'syrup.';
+      await pumpCard(longDescription);
+
+      // The paragraph is labelled like every other field on the card.
+      expect(find.text('Description'), findsOneWidget);
+
+      final Text longText = tester.widget<Text>(
+        find.byWidgetPredicate(
+          (Widget widget) => widget is Text && widget.data == longDescription,
+        ),
+      );
+      expect(longText.maxLines, 4);
+      expect(longText.overflow, TextOverflow.ellipsis);
+      expect(
+        tester
+            .renderObject<RenderParagraph>(descriptionLine(longDescription))
+            .didExceedMaxLines,
+        isTrue,
+        reason: 'truncated text must render the ellipsis, not clip silently',
+      );
+
+      // Short text: everything fits - no dots.
+      const String shortDescription = 'Shaved ice dessert.';
+      await pumpCard(shortDescription);
+      final RenderParagraph shortParagraph = tester
+          .renderObject<RenderParagraph>(descriptionLine(shortDescription));
+      expect(shortParagraph.didExceedMaxLines, isFalse);
     },
   );
 

@@ -25,6 +25,7 @@ const Restaurant testRestaurant = Restaurant(
       restaurantId: 1,
       localFoodId: 1,
       foodName: 'Prawn Noodle',
+      description: 'A comforting local noodle dish in a rich prawn broth.',
       ingredients: 'Prawn, noodle and broth',
       price: 18,
       currency: 'RM',

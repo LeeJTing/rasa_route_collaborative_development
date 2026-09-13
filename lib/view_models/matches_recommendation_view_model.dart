@@ -271,12 +271,15 @@ class MatchesRecommendationViewModel extends BaseViewModel {
   }
 
   void _initialiseGroupPaging() {
-    _restaurantRadiusKm.clear();
-    _landmarkRadiusKm.clear();
-    _initialRestaurantRadiusKm.clear();
-    _initialLandmarkRadiusKm.clear();
-    _visibleRestaurantCount.clear();
-    _visibleLandmarkCount.clear();
+    final Set<int> activeFoodIds = groups
+        .map((MatchedFoodRecommendations group) => group.food.id)
+        .toSet();
+    _removeMissingFoodIds(_restaurantRadiusKm, activeFoodIds);
+    _removeMissingFoodIds(_landmarkRadiusKm, activeFoodIds);
+    _removeMissingFoodIds(_initialRestaurantRadiusKm, activeFoodIds);
+    _removeMissingFoodIds(_initialLandmarkRadiusKm, activeFoodIds);
+    _removeMissingFoodIds(_visibleRestaurantCount, activeFoodIds);
+    _removeMissingFoodIds(_visibleLandmarkCount, activeFoodIds);
     for (final MatchedFoodRecommendations group in groups) {
       final int foodId = group.food.id;
       final double restaurantRadius = _initialRadius(
@@ -289,13 +292,23 @@ class MatchesRecommendationViewModel extends BaseViewModel {
           (SubmittedLandmarkRecommendation value) => value.distanceMetres,
         ),
       );
-      _restaurantRadiusKm[foodId] = restaurantRadius;
-      _landmarkRadiusKm[foodId] = landmarkRadius;
+      _restaurantRadiusKm[foodId] = math.max(
+        _restaurantRadiusKm[foodId] ?? restaurantRadius,
+        restaurantRadius,
+      );
+      _landmarkRadiusKm[foodId] = math.max(
+        _landmarkRadiusKm[foodId] ?? landmarkRadius,
+        landmarkRadius,
+      );
       _initialRestaurantRadiusKm[foodId] = restaurantRadius;
       _initialLandmarkRadiusKm[foodId] = landmarkRadius;
-      _visibleRestaurantCount[foodId] = initialVisibleCount;
-      _visibleLandmarkCount[foodId] = initialVisibleCount;
+      _visibleRestaurantCount.putIfAbsent(foodId, () => initialVisibleCount);
+      _visibleLandmarkCount.putIfAbsent(foodId, () => initialVisibleCount);
     }
+  }
+
+  void _removeMissingFoodIds<T>(Map<int, T> values, Set<int> activeFoodIds) {
+    values.removeWhere((int foodId, T _) => !activeFoodIds.contains(foodId));
   }
 
   double _initialRadius(Iterable<double> distancesMetres) {
