@@ -919,14 +919,14 @@ class MapRepository {
               orderBy: 'landmark_id',
               columns:
                   'landmark_id, landmark_name, latitude, longitude, status, '
-                  'image_url, category',
+                  'image_url, category, address',
             ),
             api.selectEvery(
               APIManager.tableLandmarkItem,
               orderBy: 'landmark_item_id',
               columns:
                   'landmark_id, local_food_id, dish, image_url, item_price, '
-                  'food_category, ingredients',
+                  'food_category, ingredients, description, is_removed',
             ),
           ]);
       landmarks = rows[0];
@@ -950,6 +950,10 @@ class MapRepository {
 
     final List<FoodOccurrence> out = <FoodOccurrence>[];
     for (final Map<String, dynamic> item in items) {
+      // A soft-removed dish (`is_removed`, set once a report claim passes its
+      // count validation) is hidden from every screen - it must not reach the
+      // map's food layer either.
+      if (item['is_removed'] == true) continue;
       final Map<String, dynamic>? place = byId[_asInt(item['landmark_id'])];
       if (place == null) continue;
 
@@ -977,13 +981,23 @@ class MapRepository {
               _normalizeLandmarkImageUrl(place['image_url']) ??
               _normalizeLandmarkImageUrl(item['image_url']),
           placeCategory: _asStringOrNull(place['category']),
+          // The tourist-supplied address - Matches' landmark cards show it
+          // like a restaurant's own address row.
+          placeAddress: _asStringOrNull(place['address']),
           itemPrice: _asDoubleOrNull(item['item_price']),
           // The dish's OWN photo, kept apart from the place photo above: the
           // quick-mode landmark rows show it like a restaurant menu row.
           itemImageUrl: _normalizeLandmarkImageUrl(item['image_url']),
-          // The dish's ingredients text - the quick-mode row shows it exactly
-          // like a restaurant menu row shows its own.
+          // The dish's ingredients text - the quick-mode row's FALLBACK
+          // line when the dish carries no description.
           itemIngredients: _asStringOrNull(item['ingredients']),
+          // The dish's description - the text the quick-mode row shows,
+          // exactly like a restaurant menu row shows its own.
+          itemDescription: _asStringOrNull(item['description']),
+          // The dish's OWN food category: a landmark's displayed category is
+          // the one MOST of its dishes carry (`majorityCategory`), computed
+          // over every dish rather than just the filtered ones.
+          itemFoodCategory: _asStringOrNull(item['food_category']),
         ),
       );
     }

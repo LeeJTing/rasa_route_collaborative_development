@@ -46,13 +46,14 @@ void main() {
       ),
     );
 
-    // The same open-in-new marker and link styling the restaurant card gives
-    // its own address / phone / website rows.
+    // The same open-in-new marker and styling the restaurant card gives its
+    // own address / phone / website rows - black link text (user request,
+    // 2026-09-14), not the old blue.
     expect(find.byIcon(Icons.open_in_new), findsNWidgets(3));
     final Text addressLabel = tester.widget<Text>(
       find.text('12, Jalan Bukit Bintang, Kuala Lumpur'),
     );
-    expect(addressLabel.style?.color, AppColors.info);
+    expect(addressLabel.style?.color, AppColors.textPrimary);
     expect(addressLabel.style?.decoration, TextDecoration.underline);
 
     await tester.tap(find.text('12, Jalan Bukit Bintang, Kuala Lumpur'));

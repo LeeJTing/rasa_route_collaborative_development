@@ -138,6 +138,44 @@ void main() {
     expect(_priceText(tester), '1.50');
   });
 
+  testWidgets('the price box keeps its fixed RM mark, empty and unfocused '
+      'included', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1200, 5000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    addTearDown(LandmarkDraftHandoff().clear);
+
+    LandmarkDraftHandoff().pendingRecognizedFood = _food();
+
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const AddLandmarkView()),
+    );
+    await tester.pumpAndSettle();
+
+    // Untouched and unfocused: only the "0.00" hint shows, and the mark is
+    // STILL there beside it. It used to be an `InputDecoration` prefix, which
+    // Flutter hides while a field is empty and not focused - the mark came
+    // and went with focus.
+    expect(_priceText(tester), '');
+    expect(find.text('RM'), findsOneWidget);
+
+    // Focusing without typing must not change that...
+    await tester.tap(_priceField());
+    await tester.pump();
+    expect(find.text('RM'), findsOneWidget);
+
+    // ...and neither must a value (which is what used to bring it back).
+    await tester.enterText(_priceField(), '12');
+    await tester.pump();
+    expect(find.text('RM'), findsOneWidget);
+
+    // Leaving it again keeps it, with the value still two-decimal formatted.
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    expect(find.text('RM'), findsOneWidget);
+    expect(_priceText(tester), '12.00');
+  });
+
   testWidgets(
     'the phone field shows a fixed +60 and accepts digits only (no words)',
     (WidgetTester tester) async {

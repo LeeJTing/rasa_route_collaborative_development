@@ -93,14 +93,24 @@ LandmarkDraft _draft() => LandmarkDraft(
 /// A form that satisfies every submit requirement EXCEPT the operating
 /// hours, so the hours rules are the only thing a failure can come from.
 /// Includes the Confirm step, which submission is gated on.
-Future<AddLandmarkViewModel> _readyToSubmit() async {
-  final AddLandmarkViewModel vm = AddLandmarkViewModel();
+///
+/// [websiteReachability] is the website-link probe seam (see
+/// `AddLandmarkViewModel.websiteReachability`), for the tests that make the
+/// live link check fail on purpose.
+Future<AddLandmarkViewModel> _readyToSubmit({
+  Future<bool> Function(String url)? websiteReachability,
+}) async {
+  final AddLandmarkViewModel vm = AddLandmarkViewModel(
+    websiteReachability: websiteReachability,
+  );
   await vm.onInit();
   vm.setRecognizedFood(_food('Nasi Lemak'), captureLocation: _kl);
   vm.setPrimaryFoodPrice(6.5);
   vm.setRestaurantName('Kopitiam Ali');
   vm.setCapturedImage(_image(), 'signboard');
-  vm.confirmRestaurant();
+  // Awaited: Confirm now does its similar-place search, so the confirmation
+  // only lands once that returns.
+  await vm.confirmRestaurant();
   return vm;
 }
 
@@ -253,4 +263,46 @@ void main() {
       });
     },
   );
+
+  group('the live website-link probe gates Submit', () {
+    test('an unopenable link disables Submit and says why', () async {
+      final AddLandmarkViewModel vm = await _readyToSubmit(
+        websiteReachability: (String url) async =>
+            url == 'https://works.example',
+      );
+      // The form is on screen, so the debounced probe may run at all.
+      vm.addListener(() {});
+      vm.setDayStatus(Weekday.monday, DayStatus.open);
+      vm.setRangeTime(Weekday.monday, 0, true, 9 * 60);
+      vm.setRangeTime(Weekday.monday, 0, false, 17 * 60);
+      vm.setRestaurantWebsite('https://gone.example');
+
+      // The link's shape is fine, so nothing blocks while the probe is still
+      // behind its debounce.
+      expect(vm.canSubmit, isTrue);
+
+      await Future<void>.delayed(
+        AddLandmarkViewModel.websiteLinkCheckDelay +
+            const Duration(milliseconds: 100),
+      );
+      expect(vm.websiteLinkUnreachable, isTrue);
+      expect(vm.canSubmit, isFalse);
+      expect(
+        vm.canSubmitReason,
+        "We couldn't open this website. Check the address and try again.",
+      );
+
+      // Editing the field re-probes: a link that answers unblocks Submit.
+      vm.setRestaurantWebsite('https://works.example');
+      await Future<void>.delayed(
+        AddLandmarkViewModel.websiteLinkCheckDelay +
+            const Duration(milliseconds: 100),
+      );
+      expect(vm.websiteLinkUnreachable, isFalse);
+      expect(vm.canSubmitReason, isNull);
+      expect(vm.canSubmit, isTrue);
+
+      vm.dispose();
+    });
+  });
 }
