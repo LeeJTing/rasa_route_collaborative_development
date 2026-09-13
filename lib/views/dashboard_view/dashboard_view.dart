@@ -616,6 +616,57 @@ class _DashboardViewState extends State<DashboardView> {
     );
   }
 
+  /// Hands one camera to the ViewModel - its centre, its zoom, its visible
+  /// bounds, and the Swipe Mode rectangle read off the map geometry.
+  ///
+  /// Every gesture arrives here through `onPositionChanged`, and the map's
+  /// opening viewport through `onMapReady` (REQ102_84). One path for both, so
+  /// the ViewModel's debounce and its load revision see one kind of report and
+  /// the initial fetch cannot be doubled by the gesture machinery.
+  ///
+  /// Deferred by a microtask: flutter_map can report a camera change from
+  /// inside a build, and notifying listeners there would be a setState during
+  /// build. The microtask runs once the frame has unwound.
+  void _reportCamera(
+    MapCamera camera,
+    DashboardViewModel viewModel, {
+    bool initial = false,
+  }) {
+    final LatLng centre = camera.center;
+    final double zoom = camera.zoom;
+    final LatLngBounds bounds = camera.visibleBounds;
+    // Swipe Mode deliberately never moves the camera. Its fixed discovery
+    // area is the unobstructed top half of this map, above the expanded card
+    // panel. Convert that screen rectangle here, where the Flutter Map
+    // geometry belongs, and pass only plain coordinates into the ViewModel.
+    final double mapWidth = camera.nonRotatedSize.x;
+    final double topHalfHeight = camera.nonRotatedSize.y / 2;
+    final bool hasMeasuredMap = mapWidth > 0 && topHalfHeight > 0;
+    final LatLng swipeNorthWest = hasMeasuredMap
+        ? camera.pointToLatLng(const math.Point<double>(0, 0))
+        : bounds.northWest;
+    final LatLng swipeSouthEast = hasMeasuredMap
+        ? camera.pointToLatLng(math.Point<double>(mapWidth, topHalfHeight))
+        : bounds.southEast;
+    Future<void>.microtask(() {
+      if (!mounted) return;
+      viewModel.onCameraChanged(
+        latitude: centre.latitude,
+        longitude: centre.longitude,
+        zoom: zoom,
+        south: bounds.south,
+        west: bounds.west,
+        north: bounds.north,
+        east: bounds.east,
+        swipeSouth: swipeSouthEast.latitude,
+        swipeWest: swipeNorthWest.longitude,
+        swipeNorth: swipeNorthWest.latitude,
+        swipeEast: swipeSouthEast.longitude,
+        initial: initial,
+      );
+    });
+  }
+
   Widget _map(DashboardViewModel viewModel) {
     // Only ever built for the detailed view - the overview is
     // `RegionHeatmapCanvas`, which paints its own ground.
@@ -648,53 +699,23 @@ class _DashboardViewState extends State<DashboardView> {
             // The ViewModel usually asks for its first camera position before
             // the map is ready to move; one rebuild here replays it.
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) setState(() {});
+              if (!mounted) return;
+              setState(() {});
+              // REQ102_84 - the pins belong on the map from the moment it
+              // exists. `onPositionChanged` reports a camera *change*, and
+              // opening the map at `initialCenter` is not one, so without this
+              // the ViewModel holds no bounds and the map stays bare until the
+              // tourist drags it. Reported after the frame, when the map has
+              // been laid out and its camera knows its own size.
+              _reportCamera(_mapController.camera, viewModel, initial: true);
             });
           },
           onTap: (TapPosition _, LatLng point) =>
               viewModel.onMapTapped(point.latitude, point.longitude),
           // REQ102_12 / REQ102_13 - crossing the predefined zoom level here is
           // what swaps the heatmap for the detailed map, and back.
-          // Deferred by a microtask: flutter_map can report a camera change from
-          // inside a build, and notifying listeners there would be a setState
-          // during build. The microtask runs once the frame has unwound.
-          onPositionChanged: (MapCamera camera, bool _) {
-            final LatLng centre = camera.center;
-            final double zoom = camera.zoom;
-            final LatLngBounds bounds = camera.visibleBounds;
-            // Swipe Mode deliberately never moves the camera. Its fixed
-            // discovery area is the unobstructed top half of this map, above
-            // the expanded card panel. Convert that screen rectangle here,
-            // where the Flutter Map geometry belongs, and pass only plain
-            // coordinates into the ViewModel.
-            final double mapWidth = camera.nonRotatedSize.x;
-            final double topHalfHeight = camera.nonRotatedSize.y / 2;
-            final bool hasMeasuredMap = mapWidth > 0 && topHalfHeight > 0;
-            final LatLng swipeNorthWest = hasMeasuredMap
-                ? camera.pointToLatLng(const math.Point<double>(0, 0))
-                : bounds.northWest;
-            final LatLng swipeSouthEast = hasMeasuredMap
-                ? camera.pointToLatLng(
-                    math.Point<double>(mapWidth, topHalfHeight),
-                  )
-                : bounds.southEast;
-            Future<void>.microtask(() {
-              if (!mounted) return;
-              viewModel.onCameraChanged(
-                latitude: centre.latitude,
-                longitude: centre.longitude,
-                zoom: zoom,
-                south: bounds.south,
-                west: bounds.west,
-                north: bounds.north,
-                east: bounds.east,
-                swipeSouth: swipeSouthEast.latitude,
-                swipeWest: swipeNorthWest.longitude,
-                swipeNorth: swipeNorthWest.latitude,
-                swipeEast: swipeSouthEast.longitude,
-              );
-            });
-          },
+          onPositionChanged: (MapCamera camera, bool _) =>
+              _reportCamera(camera, viewModel),
         ),
         children: <Widget>[
           // UC300 BF-1 - the detailed view is the real OpenStreetMap surface.

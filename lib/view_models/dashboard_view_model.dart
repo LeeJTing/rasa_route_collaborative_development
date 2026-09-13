@@ -1027,6 +1027,10 @@ class DashboardViewModel extends BaseViewModel {
   /// This is where REQ102_12 and REQ102_13 happen: crossing
   /// `DiscoveryLogicFacade.detailedViewZoom` in either direction swaps the two
   /// map views, and each view loads the data it needs.
+  ///
+  /// [initial] marks the opening viewport of a map that has just been
+  /// built rather than moved (REQ102_84). Its pins are fetched at once,
+  /// without the settling delay a gesture needs.
   void onCameraChanged({
     required double latitude,
     required double longitude,
@@ -1039,9 +1043,15 @@ class DashboardViewModel extends BaseViewModel {
     double? swipeWest,
     double? swipeNorth,
     double? swipeEast,
+    bool initial = false,
   }) {
     final bool previousCanZoomIn = canZoomIn;
     final bool previousCanZoomOut = canZoomOut;
+    // REQ102_84 - the opening viewport of a freshly built map, which the
+    // View marks with [initial]. Null bounds say the same thing for a
+    // ViewModel that has never been told where the map is looking - this is
+    // the one place they are left behind.
+    final bool firstViewport = initial || _viewportSouth == null;
 
     _centreLatitude = latitude;
     _centreLongitude = longitude;
@@ -1091,7 +1101,37 @@ class DashboardViewModel extends BaseViewModel {
     // the visible bounds. Debounced rather than gated on distance: a pinch
     // never moves the centre, so a distance gate meant zooming never refreshed
     // at all.
-    if (_mode == DashboardMapMode.detailed) _schedulePinRefresh();
+    if (_mode != DashboardMapMode.detailed) return;
+    // REQ102_84 - opening the map is not a gesture, so the first viewport is
+    // not debounced like one.
+    if (firstViewport) {
+      _loadPinsForFirstViewport();
+      return;
+    }
+    _schedulePinRefresh();
+  }
+
+  /// REQ102_84 - the pins for the viewport the map opens on, fetched at once.
+  ///
+  /// [_schedulePinRefresh] is built for gestures: it waits out a 350 ms
+  /// settling delay and re-localises Swipe Mode *before* the pins, both of
+  /// which are right when a tourist is dragging the map and wrong for the
+  /// report that arrives with the map itself - there the tourist is looking at
+  /// an empty map with nothing to settle. Same query, same filter, same
+  /// clustering; only the waiting is dropped, and the region refresh follows
+  /// the pins instead of leading them.
+  ///
+  /// One request, not two: the pending refresh timer is cancelled first, and
+  /// `_loadPins` records the loaded centre and zoom synchronously, so a
+  /// `onPositionChanged` that lands straight after the map settles finds
+  /// `_viewportChangedSinceLastPinLoad()` false and fetches nothing.
+  Future<void> _loadPinsForFirstViewport() async {
+    _pinRefreshTimer?.cancel();
+    await _loadPins();
+    if (_mode != DashboardMapMode.detailed) return;
+    if (!_swipePanelExpanded && !hasActiveSearch) {
+      await _refreshSwipeModeRegion();
+    }
   }
 
   /// Coalesces the flood of camera events a single gesture produces into one
