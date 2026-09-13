@@ -275,6 +275,7 @@ class DiscoveryLogicFacade {
     double? fromLongitude,
     double zoom = detailedViewZoom,
     int? limit,
+    MapSearchSelection search = MapSearchSelection.none,
   }) => mapExploration.pins(
     filter: filter,
     localFoodId: localFoodId,
@@ -286,44 +287,22 @@ class DiscoveryLogicFacade {
     fromLongitude: fromLongitude,
     zoom: zoom,
     limit: limit,
+    search: search,
   );
 
-  /// The temporary markers a keyword adds on top of the filtered map.
+  /// What a keyword is asking the map about, ready to hand to [mapPins].
   ///
-  /// Separate from [mapPins] because it answers a different question and must
-  /// not inherit the filter chips: the chips drive the map, a keyword is the
-  /// other way in. It still obeys the base rule - `available` only - and the
-  /// viewport it is given.
-  /// Pins **and clusters**, because the search layer groups by the same grid
-  /// the filtered map does. Only the colour tells the two apart.
-  Future<MapPinPage> searchMarkers({
-    required ExplorationSearchResults results,
-    double? south,
-    double? west,
-    double? north,
-    double? east,
-    double? fromLatitude,
-    double? fromLongitude,
-    double zoom = detailedViewZoom,
-    int? limit,
-  }) => mapExploration.searchLayerMarkers(
-    results: results,
-    south: south,
-    west: west,
-    north: north,
-    east: east,
-    fromLatitude: fromLatitude,
-    fromLongitude: fromLongitude,
-    zoom: zoom,
-    limit: limit,
-  );
+  /// There is **no second marker query**. The search used to have its own call
+  /// and therefore its own grid, which is how two badges came to sit on top of
+  /// each other. One query now answers for the filtered map and the keyword
+  /// together; this turns a search result list into the half of that question
+  /// the keyword owns.
+  MapSearchSelection searchSelection(ExplorationSearchResults results) =>
+      MapExplorationLogic.searchSelectionFor(results);
 
   /// Ceiling on marker rows from one viewport query. Re-exposed because a
   /// ViewModel may not name a logic class to read a constant off it.
   static const int maximumMarkers = MapExplorationLogic.maximumMarkers;
-
-  /// The same, for the search layer.
-  static const int maximumSearchPins = MapExplorationLogic.maximumSearchPins;
 
   // `swipeFoodMarkerLimit`, `swipeFoodFocusZoom` and `nearestFoodLocation`
   // stood here and named three members `MapExplorationLogic` does not have, so
@@ -334,20 +313,23 @@ class DiscoveryLogicFacade {
 
   /// REQ102_41 - what a tap on [cluster] should do: the zoom that visibly
   /// breaks it up, or its members when no zoom ever separates them.
-  /// [foodIds] is for a cluster on the search layer: it must be opened against
-  /// the dishes the keyword matched, not the filter chips.
+  /// [search] must be whatever was passed to [mapPins] for the load this badge
+  /// came from. The probe has to see the same set the badge was drawn from, or
+  /// it answers with a zoom that does not split this badge.
   Future<ClusterExpansion> expandMapCluster(
     MapCluster cluster, {
     required double zoom,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
     List<int>? foodIds,
+    MapSearchSelection search = MapSearchSelection.none,
   }) => mapExploration.expandCluster(
     cluster,
     zoom: zoom,
     filter: filter,
     localFoodId: localFoodId,
     foodIds: foodIds,
+    search: search,
   );
 
   /// REQ102_47 - the full detail behind one tapped marker, fetched by id.

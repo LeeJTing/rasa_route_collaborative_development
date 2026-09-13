@@ -182,34 +182,33 @@ class _RestaurantRecommendationViewState
       builder: (BuildContext dialogContext) => Dialog(
         insetPadding: EdgeInsets.zero,
         backgroundColor: AppColors.transparent,
-        child: Stack(
-          fit: StackFit.expand,
-          children: <Widget>[
-            InteractiveViewer(
-              minScale: 1,
-              maxScale: 4,
-              child: Center(
+        child: Center(
+          child: Stack(
+            children: <Widget>[
+              InteractiveViewer(
+                minScale: 1,
+                maxScale: 4,
                 child: AppImage(
                   source: source,
                   fit: BoxFit.contain,
                   semanticLabel: semanticLabel,
                 ),
               ),
-            ),
-            Positioned(
-              top: AppSpacing.lg,
-              right: AppSpacing.lg,
-              child: Material(
-                color: AppColors.surface,
-                shape: const CircleBorder(),
-                child: IconButton(
-                  tooltip: 'Close image',
-                  onPressed: () => Navigator.pop(dialogContext),
-                  icon: const Icon(Icons.close),
+              Positioned(
+                top: AppSpacing.sm,
+                right: AppSpacing.sm,
+                child: Material(
+                  color: AppColors.surface,
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    tooltip: 'Close image',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -294,69 +294,39 @@ class DashboardViewModel extends BaseViewModel {
   ///
   /// What it does **not** relax: `available` only, and the current viewport.
   /// Those are not filters, they are what the map is.
-  List<MapPin> _searchPins = const <MapPin>[];
-  Set<String> _searchPinKeys = const <String>{};
-  int _searchPinRevision = 0;
-
-  /// The answer the layer is drawn from, kept separately from [_searchResults]
+  /// What the keyword last matched, kept separately from [_searchResults]
   /// because the two are cleared at different moments: picking one result
   /// closes the result list, and must not take the markers with it.
   ExplorationSearchResults _searchLayerFor = ExplorationSearchResults.empty;
 
-  /// The markers the current keyword put on the map, if any.
-  List<MapPin> get searchPins => _searchPins;
+  /// The same answer, in the shape the marker query wants it.
+  ///
+  /// **There is no second query and no second marker list.** Search results and
+  /// the filtered map are one set, grouped by one grid, in one request; this is
+  /// the half of that request the keyword owns. Empty when no keyword is
+  /// active, and the query is then exactly what it always was.
+  MapSearchSelection _searchSelection = MapSearchSelection.none;
 
   /// Whether a keyword is currently adding anything to the map.
-  bool get hasSearchPins => _searchPins.isNotEmpty;
-
-  /// The clusters the search layer drew, grouped by the same grid the filtered
-  /// map uses. A separate list, because they are a separate layer with their
-  /// own colour and their own tap.
-  List<MapCluster> _searchClusters = const <MapCluster>[];
-  List<MapCluster> _visibleSearchClusters = const <MapCluster>[];
-  List<MapCluster> get searchClusters => _visibleSearchClusters;
+  bool get hasSearchPins => _searchSelection.isNotEmpty;
 
   /// Is this marker a search result rather than part of the filtered map?
   ///
-  /// The View asks per marker, so this is a set lookup rather than a scan.
-  /// Reads the **drawn** set, not [_searchPinKeys]: opening a search cluster
-  /// puts its members on the map as ordinary expanded pins, and they are still
-  /// search results.
-  bool isSearchPin(MapPin pin) => _drawnSearchKeys.contains(_pinKey(pin));
-
-  Set<String> _drawnSearchKeys = const <String>{};
-
-  /// Identity of a place across the two sources. `referenceId` alone is not
-  /// enough - the restaurant and landmark id spaces overlap (C21).
-  static String _pinKey(MapPin pin) => '${pin.kind.name}:${pin.referenceId}';
+  /// Read off the marker, because Postgres is what decided it: one grid over
+  /// both sets, and `search_count` on the row says which set the place came
+  /// from. This used to be a set of keys maintained here, which was the client
+  /// re-deriving something the server already knew.
+  bool isSearchPin(MapPin pin) => pin.isSearchResult;
 
   void _rebuildVisibleMarkers() {
     final MapCluster? expanded = _expandedCluster;
 
-    // Members of an opened **search** cluster are search results too - they
-    // came out of it - so they carry the styling with them rather than
-    // arriving as ordinary pins the moment the badge is tapped.
-    _drawnSearchKeys = _expandedIsSearch && _expandedPins.isNotEmpty
-        ? <String>{
-            ..._searchPinKeys,
-            for (final MapPin pin in _expandedPins) _pinKey(pin),
-          }
-        : _searchPinKeys;
-    final List<MapPin> base = _expandedPins.isEmpty
+    // One list. The members of an opened cluster join the pins that were
+    // already drawn, and each one carries its own type, so nothing here has to
+    // know which of them a keyword is responsible for.
+    final List<MapPin> drawn = _expandedPins.isEmpty
         ? _pins
         : <MapPin>[..._pins, ..._expandedPins];
-
-    // basePins + searchPins, with the search layer winning a tie. A place the
-    // keyword matched that is *also* on the filtered map is one marker, drawn
-    // as a search result: two markers on one coordinate is not a richer answer,
-    // it is a tap target fighting itself.
-    final List<MapPin> drawn = _searchPins.isEmpty
-        ? base
-        : <MapPin>[
-            for (final MapPin pin in base)
-              if (!_searchPinKeys.contains(_pinKey(pin))) pin,
-            ..._searchPins,
-          ];
 
     // **The open place always has a marker.** The pins come from the viewport
     // query, which answers the current filter and zoom cap - so a restaurant
@@ -376,17 +346,11 @@ class DashboardViewModel extends BaseViewModel {
     _visiblePins = List<MapPin>.unmodifiable(
       alreadyDrawn ? drawn : <MapPin>[...drawn, selected],
     );
-    // An opened cluster loses its badge while its members are drawn - on
-    // whichever of the two layers it came from.
-    _visibleClusters = expanded == null || _expandedIsSearch
+    // An opened cluster loses its badge while its members are drawn.
+    _visibleClusters = expanded == null
         ? _clusters
         : List<MapCluster>.unmodifiable(
             _clusters.where((MapCluster c) => c.key != expanded.key),
-          );
-    _visibleSearchClusters = expanded == null || !_expandedIsSearch
-        ? _searchClusters
-        : List<MapCluster>.unmodifiable(
-            _searchClusters.where((MapCluster c) => c.key != expanded.key),
           );
   }
 
@@ -394,13 +358,7 @@ class DashboardViewModel extends BaseViewModel {
     if (_expandedCluster == null && _expandedPins.isEmpty) return;
     _expandedCluster = null;
     _expandedPins = const <MapPin>[];
-    _expandedIsSearch = false;
   }
-
-  /// Which layer the opened cluster belongs to. It decides three things: which
-  /// badge disappears, whether the members are drawn as search results, and
-  /// which set of dishes the next expansion is asked about.
-  bool _expandedIsSearch = false;
 
   // ---------------------------------------------------------------------------
   // How much of the answer is on screen
@@ -1066,12 +1024,6 @@ class DashboardViewModel extends BaseViewModel {
       safeNotifyListeners();
       if (_mode == DashboardMapMode.detailed) {
         _loadPins();
-        // Coming back down into the pins: whatever the keyword matched is
-        // still remembered, so it is re-drawn rather than re-asked for.
-        if (_searchLayerFor.places.isNotEmpty ||
-            _searchLayerFor.foods.isNotEmpty) {
-          _loadSearchPins();
-        }
         _prepareSwipeModeForActiveState();
       } else {
         _loadHeatmap();
@@ -1106,11 +1058,9 @@ class DashboardViewModel extends BaseViewModel {
       if (!_swipePanelExpanded) await _refreshSwipeModeRegion();
       if (_swipePanelExpanded) _offerSwipeQueueUpdateIfViewportChanged();
       if (_mode != DashboardMapMode.detailed) return;
+      // One load, whether or not a keyword is active: the search half rides
+      // along inside the same query.
       if (_viewportChangedSinceLastPinLoad()) await _loadPins();
-      // The search layer is viewport-scoped too. Only its food half actually
-      // costs a request - the name half is already in hand - so this is skipped
-      // entirely when the keyword matched no dish.
-      if (_searchLayerFor.foods.isNotEmpty) await _loadSearchPins();
     });
   }
 
@@ -1199,10 +1149,7 @@ class DashboardViewModel extends BaseViewModel {
   /// the keyword matched rather than the filter chips, or the probe answers
   /// about a different set of places and hands back a split zoom that does not
   /// split this badge.
-  Future<void> zoomIntoCluster(
-    MapCluster cluster, {
-    bool searchLayer = false,
-  }) async {
+  Future<void> zoomIntoCluster(MapCluster cluster) async {
     if (_clusterOpening) return;
     _clusterOpening = true;
     try {
@@ -1211,7 +1158,10 @@ class DashboardViewModel extends BaseViewModel {
         zoom: _zoom,
         filter: _filter,
         localFoodId: _activePinFoodId,
-        foodIds: searchLayer ? _searchLayerFoodIds() : null,
+        // The same search half the badge was drawn with. Without it the probe
+        // asks about a smaller set and answers with a zoom that does not split
+        // this badge - tap, zoom, badge still there.
+        search: _searchSelection,
       );
 
       if (expansion.splits) {
@@ -1230,7 +1180,6 @@ class DashboardViewModel extends BaseViewModel {
       if (expansion.members.isNotEmpty) {
         _expandedCluster = cluster;
         _expandedPins = expansion.members;
-        _expandedIsSearch = searchLayer;
         _rebuildVisibleMarkers();
         _paintedSignature = _markerSignature();
         safeNotifyListeners();
@@ -1249,13 +1198,31 @@ class DashboardViewModel extends BaseViewModel {
   /// would race the camera.
   bool _clusterOpening = false;
 
-  /// The dishes the search layer was drawn from, for reopening one of its
-  /// clusters. Null when the keyword matched no dish, which is also when the
-  /// layer has no clusters to tap.
-  List<int>? _searchLayerFoodIds() {
-    final List<LocalFood> foods = _searchLayerFor.foods;
-    if (foods.isEmpty) return null;
-    return <int>[for (final LocalFood food in foods) food.id];
+  /// Records what the keyword is asking the map about, and reloads if that
+  /// changed. One request, the same one the filter uses.
+  ///
+  /// The comparison matters: `_runSearch` fires on every debounced keystroke,
+  /// and a keyword whose *matches* have not changed - another character typed
+  /// into a word that already resolved - must not refetch the map.
+  void _applySearchSelection(ExplorationSearchResults results) {
+    _searchLayerFor = results;
+    final MapSearchSelection next = discoveryLogic.searchSelection(results);
+    if (next.cacheKey == _searchSelection.cacheKey) return;
+    _searchSelection = next;
+    // An open cluster belonged to the old answer; it is stale now.
+    _collapseExpandedCluster();
+    if (isDetailedView) _loadPins();
+  }
+
+  /// Forgets the keyword's half of the marker query, and puts the map back to
+  /// what the filters alone say. Nothing is "restored": the filtered markers
+  /// were never replaced, they were only joined.
+  void _clearSearchSelection() {
+    _searchLayerFor = ExplorationSearchResults.empty;
+    if (_searchSelection.isEmpty) return;
+    _searchSelection = MapSearchSelection.none;
+    _collapseExpandedCluster();
+    if (isDetailedView) _loadPins();
   }
 
   /// A11.1 - tap the map outside the overlay, or swipe it down.
@@ -1482,10 +1449,10 @@ class DashboardViewModel extends BaseViewModel {
       _searchRevision++;
       _searchResults = ExplorationSearchResults.empty;
       _searching = false;
-      // Emptying the field is clearing the search, so the markers go with it
-      // and the filtered map is what is left - which is what it was all along,
-      // since the layer never touched it.
-      _dropSearchPins(forget: true);
+      // Emptying the field is clearing the search: the keyword stops being part
+      // of the marker query and what is left is the filtered map - which is
+      // what it was all along, since the keyword only ever joined it.
+      _clearSearchSelection();
       safeNotifyListeners();
       return;
     }
@@ -1519,8 +1486,7 @@ class DashboardViewModel extends BaseViewModel {
 
       // The same answer fills two things: the result list, and the markers the
       // keyword adds to the map. They are filled together and cleared apart.
-      _searchLayerFor = results;
-      unawaited(_loadSearchPins());
+      _applySearchSelection(results);
     } catch (error, stackTrace) {
       if (revision != _searchRevision) return;
       setError(error, stackTrace);
@@ -1595,14 +1561,15 @@ class DashboardViewModel extends BaseViewModel {
     // detailed map - it no longer replaces the pins the filter chips are
     // drawing. Picking "Nasi Lemak" out of the results should show where nasi
     // lemak is, on top of the map the tourist already had, not instead of it.
-    _searchLayerFor = ExplorationSearchResults(
-      keyword: food.name,
-      places: const <PlaceSuggestion>[],
-      foods: <LocalFood>[food],
+    _applySearchSelection(
+      ExplorationSearchResults(
+        keyword: food.name,
+        places: const <PlaceSuggestion>[],
+        foods: <LocalFood>[food],
+      ),
     );
     safeNotifyListeners();
     _reloadActiveView();
-    unawaited(_loadSearchPins());
   }
 
   // ===========================================================================
@@ -1649,10 +1616,9 @@ class DashboardViewModel extends BaseViewModel {
     _searchPanelOpen = false;
     _targetFrameOwnsSelection = false;
     _selectedFood = null;
-    // `searchPins = []`, and the filtered base pins are what remains. They were
-    // never replaced, so there is nothing to restore - which is the point of
-    // keeping the two sets apart.
-    _dropSearchPins(forget: true);
+    // The keyword leaves the marker query and the filtered markers remain.
+    // Nothing is "restored": they were never replaced, only joined.
+    _clearSearchSelection();
     safeNotifyListeners();
     if (hadFood) _reloadActiveView();
   }
@@ -1970,10 +1936,9 @@ class DashboardViewModel extends BaseViewModel {
 
   Future<void> _loadHeatmap() => runGuarded(() async {
     _pinLoadRevision++;
-    // Leaving the detailed view invalidates its pins - the search layer
-    // included, since it is drawn in pin coordinates. What the keyword matched
-    // is remembered, so coming back down re-draws it without asking again.
-    _dropSearchPins();
+    // Leaving the detailed view invalidates its pins. The keyword's half of
+    // the query is *not* forgotten - it is remembered on `_searchSelection`, so
+    // coming back down asks the one question again with the search still in it.
     if (_pins.isNotEmpty || _clusters.isNotEmpty) {
       _pins = const <MapPin>[];
       _clusters = const <MapCluster>[];
@@ -2055,6 +2020,9 @@ class DashboardViewModel extends BaseViewModel {
       fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
       fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
       zoom: _zoom,
+      // The keyword's half of the same question. Empty while no search is
+      // active, and the query is then exactly the one it has always been.
+      search: _searchSelection,
     );
     // REQ103 - the race guard. Swiping Nasi Lemak -> Laksa -> Satay fires
     // three loads; the first two must not land on top of the third. The
@@ -2099,7 +2067,7 @@ class DashboardViewModel extends BaseViewModel {
         // place already on the filtered map that the keyword then matches is
         // the same id in the same place and would otherwise compare equal, so
         // the ring would never be painted.
-        ..write(_searchPinKeys.contains(_pinKey(pin)) ? '*' : '')
+        ..write(pin.isSearchResult ? '*' : '')
         ..write(',');
     }
     buffer.write('|');
@@ -2108,17 +2076,11 @@ class DashboardViewModel extends BaseViewModel {
         ..write(cluster.key)
         ..write('x')
         ..write(cluster.count)
-        ..write(',');
-    }
-    // The search layer's badges are their own marker layer and their own
-    // repaint. Left out, a keyword that changes only the clusters - panning
-    // across a dense city, say - would assign new badges and never draw them.
-    buffer.write('|');
-    for (final MapCluster cluster in _visibleSearchClusters) {
-      buffer
-        ..write(cluster.key)
-        ..write('x')
-        ..write(cluster.count)
+        // The proportion of search results decides the badge's colour, so two
+        // cells with the same count but different make-up are not the same
+        // picture. Left out, a keyword would recolour nothing.
+        ..write('s')
+        ..write(cluster.searchCount)
         ..write(',');
     }
     return buffer.toString();
@@ -2190,74 +2152,15 @@ class DashboardViewModel extends BaseViewModel {
       : null;
 
   // ---------------------------------------------------------------------------
-  // The search layer
+  // Search and the markers
   // ---------------------------------------------------------------------------
-
-  /// Fills the search layer from whatever the keyword last matched.
-  ///
-  /// Its own revision, because the layer and the base pins move on different
-  /// clocks: a pan reloads both, a keystroke reloads only this one, and a late
-  /// answer for a keyword the tourist has already changed must not land.
-  Future<void> _loadSearchPins() => runGuarded(() async {
-    final int revision = ++_searchPinRevision;
-    final ExplorationSearchResults source = _searchLayerFor;
-
-    // Nothing to draw, or nowhere to draw it: the heatmap has no pin layer.
-    if (!isDetailedView || (source.places.isEmpty && source.foods.isEmpty)) {
-      _applySearchMarkers(MapPinPage.empty, revision);
-      return;
-    }
-
-    final MapPinPage page = await discoveryLogic.searchMarkers(
-      results: source,
-      south: _viewportSouth,
-      west: _viewportWest,
-      north: _viewportNorth,
-      east: _viewportEast,
-      fromLatitude: _sharedLocation.isKnown ? _sharedLocation.latitude : null,
-      fromLongitude: _sharedLocation.isKnown ? _sharedLocation.longitude : null,
-      // The screen's zoom, so this layer groups exactly as the one under it.
-      zoom: _zoom,
-    );
-    _applySearchMarkers(page, revision);
-  }, silent: true);
-
-  void _applySearchMarkers(MapPinPage page, int revision) {
-    if (revision != _searchPinRevision) return;
-    _searchPins = page.pins;
-    _searchClusters = page.clusters;
-    _searchPinKeys = <String>{
-      for (final MapPin pin in page.pins) _pinKey(pin),
-    };
-    // An opened cluster belongs to the answer it came out of. A new answer
-    // makes it stale, so it closes rather than hanging over fresh markers.
-    if (_expandedIsSearch) _collapseExpandedCluster();
-    _rebuildVisibleMarkers();
-
-    // Same bargain as `_loadPins`: redraw only when the screen would differ,
-    // because the whole dashboard is one `Consumer`.
-    final String signature = _markerSignature();
-    if (signature == _paintedSignature) return;
-    _paintedSignature = signature;
-    safeNotifyListeners();
-  }
-
-  /// Takes the layer off the map. [forget] also discards what the keyword
-  /// matched, so it will not come back by itself - that is clearing the search;
-  /// leaving it false is for moving somewhere the layer cannot be drawn.
-  ///
-  /// Silent: every caller is already about to notify.
-  void _dropSearchPins({bool forget = false}) {
-    _searchPinRevision++;
-    if (forget) _searchLayerFor = ExplorationSearchResults.empty;
-    if (_searchPins.isEmpty && _searchClusters.isEmpty) return;
-    _searchPins = const <MapPin>[];
-    _searchClusters = const <MapCluster>[];
-    _searchPinKeys = const <String>{};
-    if (_expandedIsSearch) _collapseExpandedCluster();
-    _rebuildVisibleMarkers();
-    _paintedSignature = _markerSignature();
-  }
+  //
+  // There is nothing here to load. A keyword changes one input to the marker
+  // query - `_searchSelection` - and `_loadPins` asks the one question that
+  // answers for the filtered map and the search together. What used to be a
+  // second fetch, a second pin list, a second cluster list, a second revision
+  // counter and a second repaint is `_applySearchSelection` and
+  // `_clearSearchSelection`, above.
 
   /// Has the viewport moved or scaled enough that the pins on screen could
   /// differ from the ones already fetched?

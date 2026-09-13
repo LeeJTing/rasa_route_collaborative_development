@@ -583,6 +583,12 @@ class _DashboardViewState extends State<DashboardView> {
           // REQ102_41 - aggregated counts while the map is zoomed out. One
           // badge per grid cell, counted in Postgres: at a Malaysia-wide view
           // this is seven markers instead of twelve thousand.
+          //
+          // **One layer, for both.** Search results and the filtered map are
+          // grouped by one grid in one query, so a cell is one badge whatever
+          // it holds - the count is every place in it. There were briefly two
+          // layers and two grids, which is how a 100 and a 5 came to sit on top
+          // of each other for places in the same street.
           if (viewModel.clusters.isNotEmpty)
             MarkerLayer(
               markers: viewModel.clusters
@@ -594,33 +600,10 @@ class _DashboardViewState extends State<DashboardView> {
                       height: _clusterDiameter(cluster.count),
                       child: _ClusterMarker(
                         count: cluster.count,
+                        // How much of this badge the keyword is responsible
+                        // for, which is what colours it.
+                        searchCount: cluster.searchCount,
                         onTap: () => viewModel.zoomIntoCluster(cluster),
-                      ),
-                    ),
-                  )
-                  .toList(growable: false),
-            ),
-
-          // The same badges for the search layer, in its own colour and its own
-          // layer - drawn after the filtered ones so a search count is never
-          // hidden underneath a count the chips produced. Tapping behaves
-          // identically; only the dishes it is opened against differ.
-          if (viewModel.searchClusters.isNotEmpty)
-            MarkerLayer(
-              markers: viewModel.searchClusters
-                  .map(
-                    (MapCluster cluster) => Marker(
-                      key: ValueKey<String>('search:${cluster.key}'),
-                      point: LatLng(cluster.latitude, cluster.longitude),
-                      width: _clusterDiameter(cluster.count),
-                      height: _clusterDiameter(cluster.count),
-                      child: _ClusterMarker(
-                        count: cluster.count,
-                        searchResult: true,
-                        onTap: () => viewModel.zoomIntoCluster(
-                          cluster,
-                          searchLayer: true,
-                        ),
                       ),
                     ),
                   )
@@ -688,15 +671,27 @@ class _ClusterMarker extends StatelessWidget {
   const _ClusterMarker({
     required this.count,
     required this.onTap,
-    this.searchResult = false,
+    this.searchCount = 0,
   });
 
+  /// Every place in this cell, the keyword's and the filter's alike.
   final int count;
 
-  /// Whether this badge belongs to the search layer. Same shape, same size,
-  /// same tap - a different fill, so a count the keyword produced is not read
-  /// as one the filter chips did.
-  final bool searchResult;
+  /// How many of [count] the keyword is responsible for.
+  ///
+  /// Three looks, not two, because a cell is not one thing or the other:
+  ///
+  ///  * **none** - the filtered map's own badge, in the primary colour;
+  ///  * **all** - everything here answers the keyword, so the badge is filled
+  ///    in the search colour;
+  ///  * **some** - filled as the map's, ringed in the search colour. A mixed
+  ///    cell is exactly the case a second layer used to draw as two badges
+  ///    fighting for the same pixel, and pretending it is wholly one or the
+  ///    other would be the same lie in one marker instead of two.
+  final int searchCount;
+
+  bool get _hasSearch => searchCount > 0;
+  bool get _allSearch => searchCount >= count;
 
   final VoidCallback onTap;
 
@@ -706,11 +701,16 @@ class _ClusterMarker extends StatelessWidget {
     child: DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: searchResult
-            ? AppColors.clusterSearchFill
-            : AppColors.primary,
-        border: const Border.fromBorderSide(
-          BorderSide(color: AppColors.surface, width: 2),
+        color: _allSearch ? AppColors.clusterSearchFill : AppColors.primary,
+        border: Border.fromBorderSide(
+          BorderSide(
+            // A mixed cell keeps the map's fill and takes the search colour as
+            // its edge, so it reads as "some of these" at a glance.
+            color: _hasSearch && !_allSearch
+                ? AppColors.clusterSearchFill
+                : AppColors.surface,
+            width: _hasSearch && !_allSearch ? 3 : 2,
+          ),
         ),
         boxShadow: const <BoxShadow>[
           BoxShadow(

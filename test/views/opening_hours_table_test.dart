@@ -36,4 +36,62 @@ void main() {
     expect(find.text('10:30 AM - 3:00 PM'), findsOneWidget);
     expect(find.text('5:00 PM - 10:00 PM'), findsOneWidget);
   });
+
+  testWidgets('shows normalized overnight ranges on their respective days', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: OpeningHoursTable(
+            openingHours: <OpeningHour>[
+              OpeningHour(
+                id: 1,
+                day: Weekday.monday,
+                status: DayStatus.open,
+                opensAt: 1320,
+                closesAt: 1440,
+              ),
+              OpeningHour(
+                id: 2,
+                day: Weekday.tuesday,
+                status: DayStatus.open,
+                opensAt: 0,
+                closesAt: 120,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Monday'), findsOneWidget);
+    expect(find.text('10:00 PM - 12:00 AM'), findsOneWidget);
+    expect(find.text('Tuesday'), findsOneWidget);
+    expect(find.text('12:00 AM - 2:00 AM'), findsOneWidget);
+  });
+
+  testWidgets('labels a full-day range as open 24 hours', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: OpeningHoursTable(
+            openingHours: <OpeningHour>[
+              OpeningHour(
+                id: 1,
+                day: Weekday.monday,
+                status: DayStatus.open,
+                opensAt: 0,
+                closesAt: 1440,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Open 24 hours'), findsOneWidget);
+  });
 }

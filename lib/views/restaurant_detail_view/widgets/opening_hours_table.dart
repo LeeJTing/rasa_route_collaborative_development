@@ -74,6 +74,9 @@ class OpeningHoursTable extends StatelessWidget {
     if (hours.opensAt == null || hours.closesAt == null) {
       return 'Hours unavailable';
     }
+    if (hours.opensAt == 0 && hours.closesAt == 1440) {
+      return 'Open 24 hours';
+    }
     return '${_timeLabel(hours.opensAt!)} - ${_timeLabel(hours.closesAt!)}';
   }
 

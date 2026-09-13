@@ -54,7 +54,7 @@ class MapRepository {
   /// moving between filters and back does not cost a round trip. Cleared by
   /// [clearMapCache] along with everything else.
   static final Map<String, List<RegionTallyDataModel>> _tallyCache =
-  <String, List<RegionTallyDataModel>>{};
+      <String, List<RegionTallyDataModel>>{};
 
   /// REQ102_15 - the counts behind the heatmap, worked out by Postgres against
   /// the real administrative boundaries in `region_boundary`.
@@ -70,13 +70,13 @@ class MapRepository {
       return areas
           .map(
             (Region region) => RegionTally(
-          region: region,
-          placeCount: 0,
-          foodCount: 0,
-          restaurantCount: 0,
-          landmarkCount: 0,
-        ),
-      )
+              region: region,
+              placeCount: 0,
+              foodCount: 0,
+              restaurantCount: 0,
+              landmarkCount: 0,
+            ),
+          )
           .toList(growable: false);
     }
 
@@ -97,9 +97,9 @@ class MapRepository {
     }
 
     final Map<String, RegionTallyDataModel> byCode =
-    <String, RegionTallyDataModel>{
-      for (final RegionTallyDataModel row in rows) row.code: row,
-    };
+        <String, RegionTallyDataModel>{
+          for (final RegionTallyDataModel row in rows) row.code: row,
+        };
 
     // Driven by the outlines rather than by the rows: an area with nothing in
     // it is still drawn, in grey (REQ102_16), and a row for an area the app has
@@ -173,7 +173,7 @@ class MapRepository {
 
   /// Answers to [searchPlaceNames], keyed by keyword and cap.
   static final Map<String, List<MapPlaceHit>> _placeSearchCache =
-  <String, List<MapPlaceHit>>{};
+      <String, List<MapPlaceHit>>{};
 
   /// A keyword's worth of history is plenty: the tourist types forward, and
   /// backspacing over what they just typed is the case worth having cached.
@@ -192,9 +192,9 @@ class MapRepository {
   /// Repeats are served from memory, so holding a key down or backspacing does
   /// not re-ask.
   Future<List<MapPlaceHit>> searchPlaceNames(
-      String needle, {
-        int limit = 12,
-      }) async {
+    String needle, {
+    int limit = 12,
+  }) async {
     final String trimmed = needle.trim().toLowerCase();
     if (trimmed.isEmpty) return const <MapPlaceHit>[];
 
@@ -210,14 +210,14 @@ class MapRepository {
     final List<MapPlaceHit> hits = rows
         .map(
           (Map<String, dynamic> row) => MapPlaceHit(
-        referenceId: _asString(row['reference_id']),
-        isRestaurant: _asString(row['source']) == 'restaurant',
-        name: _asString(row['name']),
-        latitude: _asDoubleOrNull(row['latitude']) ?? 0,
-        longitude: _asDoubleOrNull(row['longitude']) ?? 0,
-        score: _asInt(row['score']),
-      ),
-    )
+            referenceId: _asString(row['reference_id']),
+            isRestaurant: _asString(row['source']) == 'restaurant',
+            name: _asString(row['name']),
+            latitude: _asDoubleOrNull(row['latitude']) ?? 0,
+            longitude: _asDoubleOrNull(row['longitude']) ?? 0,
+            score: _asInt(row['score']),
+          ),
+        )
         .toList(growable: false);
 
     if (_placeSearchCache.length >= placeSearchCacheEntries) {
@@ -359,7 +359,7 @@ class MapRepository {
   static const int markerCacheEntries = 48;
 
   static final Map<String, _CachedMarkers> _markerCache =
-  <String, _CachedMarkers>{};
+      <String, _CachedMarkers>{};
 
   static bool _isFresh(DateTime? at) =>
       at != null && DateTime.now().difference(at) < cacheTtl;
@@ -416,8 +416,15 @@ class MapRepository {
     required double zoom,
     List<int>? foodIds,
     int limit = 400,
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
-    if (foodIds != null && foodIds.isEmpty) return MapMarkerSet.empty;
+    // An empty id list means "a filter is on and nothing survived it", which is
+    // a real answer - every cell empty - rather than a reason to query. It only
+    // holds while nothing else is asking, though: a keyword is a second way in,
+    // and its results do not have to survive the chips.
+    if (foodIds != null && foodIds.isEmpty && search.isEmpty) {
+      return MapMarkerSet.empty;
+    }
 
     final String key = _markerKey(
       south: southLatitude,
@@ -427,6 +434,7 @@ class MapRepository {
       zoom: zoom,
       foodIds: foodIds,
       limit: limit,
+      search: search,
     );
     final _CachedMarkers? cached = _markerCache[key];
     if (cached != null &&
@@ -446,12 +454,22 @@ class MapRepository {
           'p_zoom': zoom,
           'p_food_ids': foodIds,
           'p_limit': limit,
+          // Null rather than an empty array when nothing is searched: the
+          // function tests `is not null` to decide whether a search is running
+          // at all, and an empty array is not null.
+          'p_search_food_ids': search.foodIds.isEmpty ? null : search.foodIds,
+          'p_search_restaurant_ids': search.restaurantIds.isEmpty
+              ? null
+              : search.restaurantIds,
+          'p_search_landmark_ids': search.landmarkIds.isEmpty
+              ? null
+              : search.landmarkIds,
         },
       );
     } catch (_) {
       throw Exception(
         'Unable to load the map for this area. '
-            'Check your connection and try again.',
+        'Check your connection and try again.',
       );
     }
 
@@ -465,6 +483,7 @@ class MapRepository {
             latitude: data.latitude,
             longitude: data.longitude,
             count: data.pointCount,
+            searchCount: data.searchCount,
           ),
         );
         continue;
@@ -474,6 +493,37 @@ class MapRepository {
       // tapped - carrying it on every marker is what made the old read enormous.
       final MapPin? pin = _toPin(row);
       if (pin != null) pins.add(pin);
+    }
+
+    // The RPC operates on raw imported menu rows. Guard individual filtered
+    // pins with the canonical occurrence feed so duplicate rows carrying an
+    // incorrect local_food_id cannot open an empty matching-food preview.
+    // Cluster membership still has to be corrected in the database function.
+    if (foodIds != null && search.isEmpty) {
+      final Set<int> wantedFoodIds = foodIds.toSet();
+      final List<FoodOccurrence> occurrences = await foodOccurrences();
+      final Set<String> eligibleRestaurants = occurrences
+          .where(
+            (FoodOccurrence occurrence) =>
+                occurrence.source == FoodOccurrenceSource.restaurant &&
+                wantedFoodIds.contains(occurrence.localFoodId),
+          )
+          .map((FoodOccurrence occurrence) => occurrence.sourceId)
+          .toSet();
+      final Set<String> eligibleLandmarks = occurrences
+          .where(
+            (FoodOccurrence occurrence) =>
+                occurrence.source == FoodOccurrenceSource.submittedLandmark &&
+                wantedFoodIds.contains(occurrence.localFoodId),
+          )
+          .map((FoodOccurrence occurrence) => occurrence.sourceId)
+          .toSet();
+      pins.removeWhere(
+        (MapPin pin) => pin.kind == MapPinKind.restaurant
+            ? !eligibleRestaurants.contains(pin.referenceId)
+            : pin.kind == MapPinKind.landmark &&
+                  !eligibleLandmarks.contains(pin.referenceId),
+      );
     }
 
     final MapMarkerSet markers = MapMarkerSet(
@@ -500,8 +550,9 @@ class MapRepository {
     required double zoom,
     required double maximumZoom,
     List<int>? foodIds,
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
-    if (foodIds != null && foodIds.isEmpty) {
+    if (foodIds != null && foodIds.isEmpty && search.isEmpty) {
       return (splitZoom: null, memberCount: 0);
     }
     final List<Map<String, dynamic>> rows;
@@ -514,6 +565,15 @@ class MapRepository {
           'p_zoom': zoom,
           'p_food_ids': foodIds,
           'p_max_zoom': maximumZoom,
+          // The probe has to see the same set the badge was drawn from, or it
+          // answers with a zoom that does not split this badge.
+          'p_search_food_ids': search.foodIds.isEmpty ? null : search.foodIds,
+          'p_search_restaurant_ids': search.restaurantIds.isEmpty
+              ? null
+              : search.restaurantIds,
+          'p_search_landmark_ids': search.landmarkIds.isEmpty
+              ? null
+              : search.landmarkIds,
         },
       );
     } catch (_) {
@@ -524,8 +584,8 @@ class MapRepository {
     if (rows.isEmpty) return (splitZoom: null, memberCount: 0);
     final Map<String, dynamic> row = rows.first;
     return (
-    splitZoom: _asDoubleOrNull(row['split_zoom']),
-    memberCount: _asInt(row['member_count']),
+      splitZoom: _asDoubleOrNull(row['split_zoom']),
+      memberCount: _asInt(row['member_count']),
     );
   }
 
@@ -539,8 +599,11 @@ class MapRepository {
     required double zoom,
     List<int>? foodIds,
     int limit = 200,
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
-    if (foodIds != null && foodIds.isEmpty) return const <MapPin>[];
+    if (foodIds != null && foodIds.isEmpty && search.isEmpty) {
+      return const <MapPin>[];
+    }
     final List<Map<String, dynamic>> rows;
     try {
       rows = await api.callFunction(
@@ -551,6 +614,13 @@ class MapRepository {
           'p_zoom': zoom,
           'p_food_ids': foodIds,
           'p_limit': limit,
+          'p_search_food_ids': search.foodIds.isEmpty ? null : search.foodIds,
+          'p_search_restaurant_ids': search.restaurantIds.isEmpty
+              ? null
+              : search.restaurantIds,
+          'p_search_landmark_ids': search.landmarkIds.isEmpty
+              ? null
+              : search.landmarkIds,
         },
       );
     } catch (_) {
@@ -580,6 +650,9 @@ class MapRepository {
       // ~306px and Google is serving 426x240 to every marker that gets tapped.
       thumbnailUrl: APIManager.thumbnailUrl(full, width: pinThumbnailWidth),
       rating: data.rating,
+      // Postgres decided this, not the client: one grid over both sets, and
+      // `search_count` on a single marker says which set it came from.
+      isSearchResult: data.isSearchResult,
     );
   }
 
@@ -600,6 +673,7 @@ class MapRepository {
     required double zoom,
     required List<int>? foodIds,
     required int limit,
+    required MapSearchSelection search,
   }) {
     final String box =
         '${south.toStringAsFixed(3)},${west.toStringAsFixed(3)},'
@@ -607,7 +681,10 @@ class MapRepository {
     final String foods = foodIds == null
         ? 'all'
         : (List<int>.of(foodIds)..sort()).join('.');
-    return '$box|${zoom.toStringAsFixed(1)}|$foods|$limit';
+    // The search half is part of the question, so it is part of the key.
+    // Without it, typing a keyword would be answered from the cached markers
+    // of the same viewport with nothing flagged.
+    return '$box|${zoom.toStringAsFixed(1)}|$foods|$limit|${search.cacheKey}';
   }
 
   /// How much map data exists right now - polled by `RestaurantMonitor` to
@@ -651,10 +728,10 @@ class MapRepository {
     }
     return _placesRequest ??= _fetchPlaces()
         .then((List<MapPlace> value) {
-      _cachedPlaces = value;
-      _cachedPlacesAt = DateTime.now();
-      return value;
-    })
+          _cachedPlaces = value;
+          _cachedPlacesAt = DateTime.now();
+          return value;
+        })
         .whenComplete(() => _placesRequest = null);
   }
 
@@ -664,7 +741,7 @@ class MapRepository {
         APIManager.tablePlace,
         orderBy: 'place_id',
         columns:
-        'place_id, name, kind, state_name, latitude, longitude, '
+            'place_id, name, kind, state_name, latitude, longitude, '
             'zoom, aliases',
       );
       return rows
@@ -695,10 +772,10 @@ class MapRepository {
     }
     return _occurrencesRequest ??= _fetchOccurrences()
         .then((List<FoodOccurrence> value) {
-      _cachedOccurrences = value;
-      _cachedOccurrencesAt = DateTime.now();
-      return value;
-    })
+          _cachedOccurrences = value;
+          _cachedOccurrencesAt = DateTime.now();
+          return value;
+        })
         .whenComplete(() => _occurrencesRequest = null);
   }
 
@@ -730,8 +807,8 @@ class MapRepository {
   }
 
   Future<List<FoodOccurrence>> _restaurantOccurrences(
-      Map<int, String> foodTypeById,
-      ) async {
+    Map<int, String> foodTypeById,
+  ) async {
     final List<Map<String, dynamic>> restaurants;
     final List<Map<String, dynamic>> items;
     try {
@@ -753,7 +830,7 @@ class MapRepository {
             orderBy: 'restaurant_item_id',
             columns:
                 'restaurant_id, local_food_id, restaurant_item_name, '
-                'restaurant_item_price',
+                'restaurant_item_price, is_removed',
           ),
         ],
       );
@@ -762,7 +839,7 @@ class MapRepository {
     } catch (_) {
       throw Exception(
         'Unable to load the local food distribution. '
-            'Check your connection and try again.',
+        'Check your connection and try again.',
       );
     }
 
@@ -775,9 +852,24 @@ class MapRepository {
     };
 
     final List<FoodOccurrence> out = <FoodOccurrence>[];
+    final Set<String> seenMenuEntries = <String>{};
     for (final Map<String, dynamic> item in items) {
+      if (item['is_removed'] == true) continue;
       final Map<String, dynamic>? place = byId[_asInt(item['restaurant_id'])];
       if (place == null) continue;
+
+      // Imported datasets can repeat the same visible menu row with a
+      // different local_food_id. Restaurant Details keeps one row by
+      // restaurant, visible name and price, so the distribution feeding
+      // Matches must use the same canonical rule. Rows arrive by id and the
+      // earliest source association wins until the database is repaired.
+      final String menuKey = <String>[
+        '${_asInt(item['restaurant_id'])}',
+        _normaliseMenuEntryName(_asString(item['restaurant_item_name'])),
+        _asDoubleOrNull(item['restaurant_item_price'])?.toStringAsFixed(2) ??
+            'no-price',
+      ].join('|');
+      if (!seenMenuEntries.add(menuKey)) continue;
 
       final double? latitude = _asDoubleOrNull(place['latitude']);
       final double? longitude = _asDoubleOrNull(place['longitude']);
@@ -804,8 +896,8 @@ class MapRepository {
   }
 
   Future<List<FoodOccurrence>> _landmarkOccurrences(
-      Map<int, String> foodTypeById,
-      ) async {
+    Map<int, String> foodTypeById,
+  ) async {
     final List<Map<String, dynamic>> landmarks;
     final List<Map<String, dynamic>> items;
     try {
@@ -831,7 +923,7 @@ class MapRepository {
     } catch (_) {
       throw Exception(
         'Unable to load submitted landmarks. '
-            'Check your connection and try again.',
+        'Check your connection and try again.',
       );
     }
 
@@ -871,7 +963,7 @@ class MapRepository {
           // photo when it is missing. URLs are normalized so legacy rows that
           // doubled the bucket segment still display.
           placeImageUrl:
-          _normalizeLandmarkImageUrl(place['image_url']) ??
+              _normalizeLandmarkImageUrl(place['image_url']) ??
               _normalizeLandmarkImageUrl(item['image_url']),
           placeCategory: _asStringOrNull(place['category']),
           itemPrice: _asDoubleOrNull(item['item_price']),
@@ -931,10 +1023,10 @@ class MapRepository {
     }
     return _hoursRequest ??= _fetchOpeningHours()
         .then((Map<String, List<OpeningHour>> value) {
-      _cachedHours = value;
-      _cachedHoursAt = DateTime.now();
-      return value;
-    })
+          _cachedHours = value;
+          _cachedHoursAt = DateTime.now();
+          return value;
+        })
         .whenComplete(() => _hoursRequest = null);
   }
 
@@ -954,10 +1046,10 @@ class MapRepository {
     try {
       rows = placeKeys == null
           ? await api.selectEvery(
-        APIManager.tableOpeningHours,
-        orderBy: 'opening_hours_id',
-        columns: _openingHoursColumns,
-      )
+              APIManager.tableOpeningHours,
+              orderBy: 'opening_hours_id',
+              columns: _openingHoursColumns,
+            )
           : await _openingHoursFor(placeKeys);
     } catch (_) {
       // Hours are a nice-to-have on a map pin; losing them must not take the
@@ -966,7 +1058,7 @@ class MapRepository {
     }
 
     final Map<String, List<OpeningHour>> byPlace =
-    <String, List<OpeningHour>>{};
+        <String, List<OpeningHour>>{};
     for (final Map<String, dynamic> row in rows) {
       final OpeningHoursDataModel data = OpeningHoursDataModel.fromJson(row);
       final int? restaurantId = data.restaurantId;
@@ -979,15 +1071,16 @@ class MapRepository {
       if (key.isEmpty) continue;
 
       final Weekday? day = _weekday(data.day);
-      final DayStatus? status = _dayStatus(data.status);
-      if (day == null || status == null) continue;
+      final DayStatus? storedStatus = _dayStatus(data.status);
+      if (day == null || storedStatus == null) continue;
 
       int? opensAt = _minutesOfDay(data.openingTime);
       int? closesAt = _minutesOfDay(data.closingTime);
-      if (status == DayStatus.open && opensAt == null && closesAt == null) {
-        opensAt = 0;
-        closesAt = 1440;
-      } else if (status == DayStatus.open &&
+      final DayStatus status =
+          storedStatus == DayStatus.open && opensAt == null && closesAt == null
+          ? DayStatus.unknown
+          : storedStatus;
+      if (status == DayStatus.open &&
           opensAt == 0 &&
           data.closingTime?.startsWith('23:59') == true) {
         closesAt = 1440;
@@ -996,14 +1089,14 @@ class MapRepository {
       byPlace
           .putIfAbsent(key, () => <OpeningHour>[])
           .add(
-        OpeningHour(
-          id: data.openingHoursId,
-          day: day,
-          status: status,
-          opensAt: status == DayStatus.open ? opensAt : null,
-          closesAt: status == DayStatus.open ? closesAt : null,
-        ),
-      );
+            OpeningHour(
+              id: data.openingHoursId,
+              day: day,
+              status: status,
+              opensAt: status == DayStatus.open ? opensAt : null,
+              closesAt: status == DayStatus.open ? closesAt : null,
+            ),
+          );
     }
     return byPlace;
   }
@@ -1019,8 +1112,8 @@ class MapRepository {
   /// Opening hours for a bounded set of place keys, one request per column per
   /// chunk of ids, all in flight together.
   Future<List<Map<String, dynamic>>> _openingHoursFor(
-      Set<String> placeKeys,
-      ) async {
+    Set<String> placeKeys,
+  ) async {
     final List<Object?> restaurantIds = <Object?>[];
     final List<Object?> landmarkIds = <Object?>[];
     for (final String key in placeKeys) {
@@ -1036,10 +1129,10 @@ class MapRepository {
     }
 
     final List<Future<List<Map<String, dynamic>>>> requests =
-    <Future<List<Map<String, dynamic>>>>[
-      ..._chunkedRequests('restaurant_id', restaurantIds),
-      ..._chunkedRequests('landmark_id', landmarkIds),
-    ];
+        <Future<List<Map<String, dynamic>>>>[
+          ..._chunkedRequests('restaurant_id', restaurantIds),
+          ..._chunkedRequests('landmark_id', landmarkIds),
+        ];
     if (requests.isEmpty) return const <Map<String, dynamic>>[];
 
     final List<List<Map<String, dynamic>>> pages = await Future.wait(requests);
@@ -1049,11 +1142,11 @@ class MapRepository {
   }
 
   List<Future<List<Map<String, dynamic>>>> _chunkedRequests(
-      String column,
-      List<Object?> ids,
-      ) {
+    String column,
+    List<Object?> ids,
+  ) {
     final List<Future<List<Map<String, dynamic>>>> out =
-    <Future<List<Map<String, dynamic>>>>[];
+        <Future<List<Map<String, dynamic>>>>[];
     for (int start = 0; start < ids.length; start += _idsPerRequest) {
       final int end = start + _idsPerRequest > ids.length
           ? ids.length
@@ -1147,6 +1240,9 @@ class MapRepository {
     final String text = '$value';
     return text.isEmpty ? null : text;
   }
+
+  static String _normaliseMenuEntryName(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
 
   /// Legacy landmark image URLs (written before the bucket-prefix guard in
   /// `SubmittedLandmarkRepository.uploadImage` existed) double the bucket

@@ -105,4 +105,22 @@ void main() {
     expect(rows.single.opensAt, 0);
     expect(rows.single.closesAt, 1440);
   });
+
+  test('does not infer 24-hour opening from missing times', () {
+    final List<OpeningHour> rows = repository.openingHoursFromRows(
+      <Map<String, dynamic>>[
+        <String, dynamic>{
+          'opening_hours_id': 9,
+          'day': 'Sunday',
+          'status': 'open',
+          'opening_time': null,
+          'closing_time': null,
+        },
+      ],
+    );
+
+    expect(rows.single.status, DayStatus.unknown);
+    expect(rows.single.opensAt, isNull);
+    expect(rows.single.closesAt, isNull);
+  });
 }

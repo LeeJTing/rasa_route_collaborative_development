@@ -509,6 +509,9 @@ class MapExplorationLogic {
     double? fromLongitude,
     double zoom = detailedViewZoom,
     int? limit,
+    /// What a keyword is asking about, grouped into the same grid as the
+    /// filter's answer rather than queried separately.
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
     // Without a box there is nothing to ask about. The detailed map always has
     // one; this is the guard for anyone calling before the first camera event.
@@ -540,6 +543,7 @@ class MapExplorationLogic {
       zoom: zoom,
       foodIds: resolvedFoodIds,
       limit: cap,
+      search: search,
     );
 
     // Distance to the tourist is the one thing Postgres was not asked for: it
@@ -571,119 +575,52 @@ class MapExplorationLogic {
     );
   }
 
-  /// Ceiling on the temporary search layer.
+  /// The search half of a marker query, built from what a keyword matched.
   ///
-  /// Smaller than [maximumMarkers], because this is drawn *on top of* a map
-  /// that already has its own markers and is meant to answer "where is what I
-  /// asked for", not to repaint the country.
-  static const int maximumSearchPins = 60;
-
-  /// The markers a keyword adds to the map, on top of whatever the filters are
-  /// already drawing.
+  /// **There is no second query any more.** The search layer used to be its own
+  /// call to `map_food_markers`, which meant two grids over overlapping sets of
+  /// places and two badges landing on top of each other - 100 here, 5 there,
+  /// for places standing in the same street. Postgres now groups the filtered
+  /// map and the search results together, once, and this is what tells it which
+  /// places the keyword is asking about.
   ///
-  /// **Search is the other way in.** The filter chips drive the map; a keyword
-  /// is an independent question, so this deliberately takes no
-  /// [ExplorationFilter] - a place the tourist has named by hand appears
-  /// whether or not it serves something the chips are asking for. What it does
-  /// *not* relax is the base rule or the geography: everything here is
-  /// `available` (`map_place_search` and `map_food_markers` both apply
-  /// `is_place_visible`) and everything here is inside the viewport it was
-  /// asked for.
+  /// Two ways in, because a keyword can name two different things:
   ///
-  /// Two halves, because a keyword can name two different things:
+  ///  * a **place**, by name - `map_place_search` has already answered, so the
+  ///    ids cost nothing to collect;
+  ///  * a **dish**, by name - Restaurant/Landmark -> Local Food, the same
+  ///    relationship the filters use, which is why "nasi lemak" reaches the
+  ///    stalls that sell it.
   ///
-  /// * a **place**, answered by the names `map_place_search` already returned -
-  ///   coordinates included, so this half costs nothing at all;
-  /// * a **dish**, answered by asking for the places serving it. That is
-  ///   Restaurant/Landmark -> Local Food, the same relationship the filters
-  ///   use, and it is why "nasi lemak" pins the stalls that sell it rather than
-  ///   pinning nothing.
-  ///
-  /// Deduplicated by place, so a restaurant matched by both its name and its
-  /// menu is one marker. The name half wins, because it is the more direct
-  /// answer to what was typed.
-  Future<MapPinPage> searchLayerMarkers({
-    required ExplorationSearchResults results,
-    double? south,
-    double? west,
-    double? north,
-    double? east,
-    double? fromLatitude,
-    double? fromLongitude,
-    double zoom = detailedViewZoom,
-    int? limit,
-  }) async {
-    final Map<String, MapPin> byPlace = <String, MapPin>{};
-
-    for (final PlaceSuggestion place in results.places) {
-      if (!place.isPlaceOnTheMap) continue;
-      final MapPinKind kind = place.isRestaurant
-          ? MapPinKind.restaurant
-          : MapPinKind.landmark;
-      byPlace['${kind.name}:${place.referenceId}'] = MapPin(
-        referenceId: place.referenceId!,
-        kind: kind,
-        latitude: place.latitude,
-        longitude: place.longitude,
-        label: place.name,
-        weight: 1,
-      );
-    }
-
+  /// Empty when the keyword matched nothing, and then the marker query behaves
+  /// exactly as it did before search existed.
+  static MapSearchSelection searchSelectionFor(
+    ExplorationSearchResults results,
+  ) {
     final List<int> foodIds = <int>[
       for (final LocalFood food in results.foods) food.id,
     ];
-    List<MapCluster> clusters = const <MapCluster>[];
+    final List<int> restaurantIds = <int>[];
+    final List<int> landmarkIds = <int>[];
 
-    if (foodIds.isNotEmpty &&
-        south != null &&
-        west != null &&
-        north != null &&
-        east != null) {
-      // **Asked at the screen's own zoom, exactly like the filtered map.**
-      //
-      // This was [maximumZoom] at first, on the reasoning that a search result
-      // folded into a cluster badge is not an answer to "where is the thing I
-      // searched for". At a few metres per cell almost nothing groups, which is
-      // true - and it also means a keyword matching a common dish drops two
-      // hundred individual pins onto a city-wide view while the filtered map
-      // beside it is showing seven badges. Two layers of the same places
-      // obeying two different rules is worse than a badge.
-      //
-      // So the cell grid, the split zoom and the separation behaviour are now
-      // the base layer's, to the letter: same RPC, same zoom, same answer
-      // shape. Only the colour differs, and that is the View's business.
-      final MapPinPage page = await pins(
-        foodIds: foodIds,
-        south: south,
-        west: west,
-        north: north,
-        east: east,
-        fromLatitude: fromLatitude,
-        fromLongitude: fromLongitude,
-        zoom: zoom,
-        limit: limit ?? maximumSearchPins,
-      );
-      clusters = page.clusters;
-      for (final MapPin pin in page.pins) {
-        byPlace.putIfAbsent(
-          '${pin.kind.name}:${pin.referenceId}',
-          () => pin,
-        );
+    for (final PlaceSuggestion place in results.places) {
+      if (!place.isPlaceOnTheMap) continue;
+      final int? id = int.tryParse(place.referenceId!);
+      if (id == null) continue;
+      if (place.isRestaurant) {
+        restaurantIds.add(id);
+      } else {
+        landmarkIds.add(id);
       }
     }
 
-    // The name half is never clustered, and that is deliberate: those are the
-    // twelve places the tourist named, `map_place_search` returned them one by
-    // one with their coordinates, and folding them into a count would answer a
-    // question nobody asked. A named place that *also* serves a matched dish
-    // can therefore be drawn as its own pin while a cluster nearby still counts
-    // it - the pin sits over the badge, which is the right way round.
-    return MapPinPage(
-      pins: List<MapPin>.unmodifiable(byPlace.values),
-      clusters: clusters,
-      totalInView: byPlace.length + clusters.length,
-      limit: limit ?? maximumSearchPins,
+    if (foodIds.isEmpty && restaurantIds.isEmpty && landmarkIds.isEmpty) {
+      return MapSearchSelection.none;
+    }
+    return MapSearchSelection(
+      foodIds: List<int>.unmodifiable(foodIds),
+      restaurantIds: List<int>.unmodifiable(restaurantIds),
+      landmarkIds: List<int>.unmodifiable(landmarkIds),
     );
   }
 
@@ -709,6 +646,7 @@ class MapExplorationLogic {
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
     List<int>? foodIds,
+    MapSearchSelection search = MapSearchSelection.none,
   }) async {
     final List<int>? resolvedFoodIds =
         foodIds ??
@@ -721,6 +659,7 @@ class MapExplorationLogic {
           zoom: zoom,
           maximumZoom: maximumZoom,
           foodIds: resolvedFoodIds,
+          search: search,
         );
 
     if (probe.splitZoom != null) {
@@ -735,6 +674,7 @@ class MapExplorationLogic {
       longitude: cluster.longitude,
       zoom: zoom,
       foodIds: resolvedFoodIds,
+      search: search,
     );
     return ClusterExpansion(
       splitZoom: null,
@@ -954,6 +894,9 @@ class MapExplorationLogic {
     priceRange: pin.priceRange,
     openNow: pin.openNow,
     distanceMetres: distanceMetres,
+    // Carried, or every search result would lose its colour the moment the
+    // tourist's position is known and distances are filled in.
+    isSearchResult: pin.isSearchResult,
   );
 
   /// "RM20-40", or "RM20" when everything costs the same. Null when no dish
