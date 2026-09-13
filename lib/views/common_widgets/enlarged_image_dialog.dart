@@ -103,8 +103,8 @@ const String restaurantProvidedImageNotice =
     "Provided by the restaurant — this is the restaurant's own dish photo.";
 
 const String landmarkCaptureNotice =
-    'User capture — this photo was submitted with a landmark by a tourist, '
-    'not by the place itself.';
+    'User submitted photo — this photo was submitted with a landmark by a '
+    'tourist, not by the place itself.';
 
 Future<void> showLandmarkImage(
   BuildContext context, {

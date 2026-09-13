@@ -35,4 +35,25 @@ class LinkCheckRepository {
       return false;
     }
   }
+
+  /// Downloads a PUBLIC photo - a nearby place's stored signboard/stall photo,
+  /// so it can be sent to Gemini next to the tourist's own capture (the
+  /// near-duplicate check, see `LandmarkSubmissionLogic`). Null on any failure
+  /// (bad URL, timeout, no connection, non-2xx): a candidate whose photo
+  /// cannot be read is simply skipped, never an error the tourist sees.
+  Future<List<int>?> fetchImageBytes(String url) async {
+    try {
+      final Uri uri = Uri.parse(url.trim());
+      if (!uri.hasScheme ||
+          !uri.hasAuthority ||
+          (uri.scheme != 'http' && uri.scheme != 'https')) {
+        return null;
+      }
+      final http.Response response = await http.get(uri).timeout(_timeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      return response.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
 }

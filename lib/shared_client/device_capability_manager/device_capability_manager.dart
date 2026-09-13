@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart' hide ServiceStatus;
@@ -80,19 +82,39 @@ class DeviceCapabilityManager {
   /// Never throws. `getCurrentPosition` raises if location is disabled
   /// mid-call, and a thrown exception here would surface as a red error banner
   /// over the map when the honest answer is simply "no fix".
-  Future<LocationDataModel> currentLocation() async {
+  ///
+  /// [preferPlatformProvider] asks the PLATFORM location manager
+  /// (`forceLocationManager`, Android) instead of the fused provider - used
+  /// right after a dev GPS mock stops. The mock only ever wrote to the
+  /// platform's TEST provider, so the platform's own fix is real, while the
+  /// fused provider may still hand back the mocked spot from its cache. When
+  /// that attempt yields nothing the answer is "no fix", deliberately NOT the
+  /// cached mock.
+  Future<LocationDataModel> currentLocation({
+    bool preferPlatformProvider = false,
+  }) async {
     if (!await hasLocationPermission()) return LocationDataModel.unknown;
     if (!await isLocationServiceEnabled()) return LocationDataModel.unknown;
+    final bool platformOnly =
+        preferPlatformProvider &&
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android;
     try {
       final Position position =
           await Geolocator.getCurrentPosition(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.high,
-              // Geolocator's own ceiling: without it the call blocks until a
-              // satellite fix arrives, which indoors or just after GPS is
-              // switched on may be never.
-              timeLimit: locationTimeout,
-            ),
+            locationSettings: platformOnly
+                ? AndroidSettings(
+                    accuracy: LocationAccuracy.high,
+                    timeLimit: locationTimeout,
+                    forceLocationManager: true,
+                  )
+                : const LocationSettings(
+                    accuracy: LocationAccuracy.high,
+                    // Geolocator's own ceiling: without it the call blocks
+                    // until a satellite fix arrives, which indoors or just
+                    // after GPS is switched on may be never.
+                    timeLimit: locationTimeout,
+                  ),
           ).timeout(
             // A second ceiling in case the platform side ignores the first.
             locationTimeout + const Duration(seconds: 3),

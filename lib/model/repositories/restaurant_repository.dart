@@ -700,6 +700,37 @@ class RestaurantRepository {
     invalidate();
   }
 
+  /// A13 merge, "overwrite the stored details" chosen by the tourist: writes
+  /// the phone/website this re-submission carries onto the catalogue
+  /// restaurant. Only NON-EMPTY submitted values are written - a field the
+  /// form left blank cannot blank what the restaurant stores (the same rule
+  /// `SubmittedLandmarkRepository.changedContactFields` applies to a
+  /// submitted landmark). Address and coordinates go through
+  /// [updateRestaurantAddress], opening hours through
+  /// [replaceRestaurantOpeningHourDay].
+  Future<void> updateRestaurantContactFields(
+    int restaurantId, {
+    String? phone,
+    String? website,
+  }) async {
+    final Map<String, Object?> values = <String, Object?>{};
+    final String? trimmedPhone = phone?.trim();
+    if (trimmedPhone != null && trimmedPhone.isNotEmpty) {
+      values['phone'] = trimmedPhone;
+    }
+    final String? trimmedWebsite = website?.trim();
+    if (trimmedWebsite != null && trimmedWebsite.isNotEmpty) {
+      values['website'] = trimmedWebsite;
+    }
+    if (values.isEmpty) return;
+    await api.updateRow(
+      APIManager.tableRestaurant,
+      values,
+      eq: <String, Object?>{'restaurant_id': restaurantId},
+    );
+    invalidate();
+  }
+
   /// 4a closed permanently / 4b closed temporarily: freezes the restaurant.
   /// For a TEMPORARY closure the caller sets [closedUntil] so the place can
   /// auto-reactivate once that time passes (see [reactivateFromClosure]).

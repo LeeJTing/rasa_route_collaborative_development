@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -11,6 +13,8 @@ import '../../app/theme/app_text_styles.dart';
 import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/place_overwrite_report.dart';
+import '../../domain_model/similar_place_candidate.dart';
 import '../../view_models/add_landmark_view_model.dart';
 import '../../view_models/food_recognition_view_model.dart'
     show LandmarkDraftHandoff;
@@ -248,23 +252,19 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
       if (!mounted) return;
       if (!saved) {
         // Keep the tourist on the form - leaving now would lose the entry.
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
+        await _showNotice(
+          icon: Icons.error_outline,
+          title: 'Save failed',
+          message:
               'Could not save the incomplete submission. Check your '
               'connection and try again.',
-            ),
-          ),
         );
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Incomplete submission saved. It will be kept for 24 hours.',
-          ),
-        ),
-      );
+      // No "saved" snackbar: the leave dialog already said exactly that
+      // ("it stays on the Incomplete Submissions screen, kept for 24 hours
+      // after its last save"), and the tourist has just read it - a second
+      // announcement of the same thing only adds noise (user request).
     } else {
       await _viewModel.discardDraft();
       if (!mounted) return;
@@ -272,27 +272,77 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     AppNavigator.pop();
   }
 
+  /// Submits the form with the blocking "submitting" page (see
+  /// [_SubmittingPage]) over it for as long as the write is in flight, so
+  /// nothing on the form can be edited (or left) mid-write.
+  ///
+  /// The page goes up only once `submitLandmark` has actually STARTED: its
+  /// own checks run synchronously before its first await, so a form it
+  /// rejects shows that message with no spinner flashing over it. A FAILED
+  /// submit takes the page down and leaves the tourist on the very same,
+  /// editable form with the reason under the Submit bar - ready to fix - and
+  /// a successful one hands them back to the dashboard.
   Future<void> _submit(AddLandmarkViewModel viewModel) async {
-    await viewModel.submitLandmark();
+    // Ask about replacing the same-place record's stored details BEFORE the
+    // write starts - this is the last moment the tourist can keep them.
+    await _askDetailsOverwriteIfNeeded(viewModel);
     if (!mounted) return;
-    if (viewModel.submitError == null) {
-      // A13 - when the place already exists on the map (same name within
-      // ~100m) the dishes were added to that place instead of creating a new
-      // landmark - `submitConfirmation` says so (and lists any that already
-      // existed); otherwise show the default success message.
-      final String message =
-          viewModel.submitConfirmation ??
-          'Your landmark has been submitted successfully.'; // M8
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          // Clamped so a long merged-outcome message can never overflow the
-          // snackbar - the ViewModel already caps the dish list; this caps
-          // total lines as a final guard.
-          content: Text(message, maxLines: 4, overflow: TextOverflow.ellipsis),
+    final Future<void> submission = viewModel.submitLandmark();
+    final bool started = viewModel.isSubmitting;
+    if (started) {
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext dialogContext) => const _BlockingPage(
+            title: 'Submitting your landmark…',
+            message:
+                'This can take a moment - your photos are being uploaded. '
+                "Please keep this screen open; we'll take you back to the "
+                'dashboard once it is done.',
+          ),
         ),
       );
-      AppNavigator.resetTo(AppRoutes.mainShell);
     }
+
+    await submission;
+    if (!mounted) return;
+    // The page comes down exactly once, on every outcome.
+    if (started) Navigator.of(context, rootNavigator: true).pop();
+    if (viewModel.submitError != null) return; // Fix it on this form.
+
+    // A13 - when the place already exists on the map (same name within
+    // ~100m) the dishes were added to that place instead of creating a new
+    // landmark - `submitConfirmation` says so (and lists any that already
+    // existed); otherwise show the default success message.
+    final String message =
+        viewModel.submitConfirmation ??
+        'Your landmark has been submitted successfully.'; // M8
+    // An ACKNOWLEDGEMENT, not a snackbar: the same modal frame every other
+    // notice in this flow uses (`AppDialog`), so the outcome is read and
+    // dismissed deliberately instead of sliding away while the screen
+    // changes under it (user request - consistent with the form's dialogs).
+    // The dashboard navigation happens AFTER it, so the tourist sees the
+    // outcome on the form they submitted.
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AppDialog(
+        icon: Icons.check_circle_outline,
+        title: 'Landmark submitted',
+        message: message,
+        actions: <Widget>[
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    // Done with the form: the tourist lands on the dashboard (the shell's
+    // first tab), not back on a form that would only be re-submitted.
+    AppNavigator.resetTo(AppRoutes.mainShell);
   }
 
   /// "Add More Food" (A12) - opens the camera and, when it comes back with a
@@ -308,24 +358,277 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     await viewModel.openAddMoreFood();
     if (!mounted) return;
     if (!viewModel.takeDuplicateFoodNotice()) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(viewModel.duplicateFoodNotice)));
+    await _showNotice(
+      icon: Icons.restaurant_menu,
+      title: 'Already on this form',
+      message: viewModel.duplicateFoodNotice,
+    );
   }
 
   /// "Confirm" under the Restaurant Name. It checks the mandatory photo and
   /// the name (`AddLandmarkViewModel.confirmRestaurant` - its problem, if
-  /// any, is shown right away), then offers to combine this form with
-  /// another unfinished submission for the same restaurant.
+  /// any, is shown right away), re-checks a name the tourist EDITED against
+  /// the signboard photo (see [_showNameMismatchNotice]), asks about a nearby
+  /// place whose stored photo looks like this one (see [_askSimilarPlace]),
+  /// then offers to combine this form with another unfinished submission for
+  /// the same restaurant.
+  ///
+  /// The checks are Gemini calls, so the click can take a moment: the form is
+  /// BLOCKED behind [_BlockingPage] while they run (nothing may change the
+  /// name or the photos mid-question), and the Confirm row reports progress.
   Future<void> _confirmRestaurant(AddLandmarkViewModel viewModel) async {
-    final String? problem = viewModel.confirmRestaurant();
+    // A photo + a name means the checks will actually run - show the wait
+    // only then, so a form that is rejected outright never flashes it.
+    final bool wait =
+        viewModel.hasImageCaptured &&
+        viewModel.restaurantName.trim().isNotEmpty;
+    final Future<String?> confirming = viewModel.confirmRestaurant();
+    if (wait) {
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext dialogContext) => const _BlockingPage(
+            title: 'Checking nearby restaurants…',
+            message:
+                'We are comparing your photo with the places already saved '
+                'around here. Please keep this screen open - the form cannot '
+                'be edited until this finishes.',
+          ),
+        ),
+      );
+    }
+    final String? problem = await confirming;
+    if (!mounted) return;
+    if (wait) Navigator.of(context, rootNavigator: true).pop();
     if (problem != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(problem)));
+      await _showNotice(
+        icon: Icons.info_outline,
+        title: 'Cannot confirm yet',
+        message: problem,
+      );
       return;
     }
+    if (viewModel.takeSignboardNameMismatch()) {
+      await _showNameMismatchNotice(viewModel);
+      return;
+    }
+    if (viewModel.similarPlacePrompt != null) {
+      await _askSimilarPlace(viewModel);
+      return;
+    }
+    await _askDetailsOverwriteIfNeeded(viewModel);
+    if (!mounted) return;
     await _offerDraftCombine(viewModel);
+  }
+
+  /// Asks whether this submission REPLACES details the same-place record
+  /// already stores (phone, website, address, the pin, a day's hours) - the
+  /// merge would otherwise overwrite them silently. Does nothing when there
+  /// is nothing to ask, and the answer is remembered for the submit that
+  /// follows.
+  Future<void> _askDetailsOverwriteIfNeeded(
+    AddLandmarkViewModel viewModel,
+  ) async {
+    if (!await viewModel.checkDetailsOverwrite()) return;
+    if (!mounted) return;
+    final PlaceOverwriteReport? report = viewModel.overwritePrompt;
+    if (report == null) return;
+    final bool? overwrite = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AppDialog(
+        icon: Icons.edit_note_outlined,
+        title: 'Replace the existing details?',
+        message:
+            '"${report.name}" already has ${report.fieldsText}. Replace it '
+            'with the details you entered?',
+        actions: <Widget>[
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Replace them'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep the existing details'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    // A dismissed dialog keeps the stored record - the safe direction.
+    viewModel.resolveOverwrite(overwrite == true);
+  }
+
+  /// "Is this the same restaurant?" - a nearby place, saved under a name that
+  /// only LOOKS like this form's, whose stored photo Gemini judged to be the
+  /// same restaurant. The question shows that place's OWN photo (the user's
+  /// request: the similar result's signboard is the evidence), its name and
+  /// how far away it is.
+  ///
+  /// "Yes" adopts that place's name and reports which of this form's dishes
+  /// it already lists (see [_acknowledgeExistingDishes]); "No" keeps this
+  /// form as its own new landmark.
+  Future<void> _askSimilarPlace(AddLandmarkViewModel viewModel) async {
+    final SimilarPlaceCandidate? candidate = viewModel.similarPlacePrompt;
+    if (candidate == null) return;
+    final String? photoUrl = candidate.imageUrl;
+    final bool? samePlace = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AppDialog(
+        icon: Icons.storefront_outlined,
+        title: 'Is this the same restaurant?',
+        message:
+            'A place saved nearby looks like your photo: "${candidate.name}" '
+            '(${_shortDistance(candidate.distanceMetres)} away).',
+        extra: photoUrl == null
+            ? null
+            : ClipRRect(
+                borderRadius: AppRadius.cardRadius,
+                child: Image.network(
+                  photoUrl,
+                  height: AppSizes.capturedPhotoPreviewHeight,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox(
+                    height: AppSizes.capturedPhotoPreviewHeight,
+                    child: ColoredBox(color: AppColors.surfaceVariant),
+                  ),
+                ),
+              ),
+        actions: <Widget>[
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Yes, this is the place'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('No, a different place'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (samePlace != true) {
+      viewModel.rejectSimilarPlace();
+      if (!mounted) return;
+      await _askDetailsOverwriteIfNeeded(viewModel);
+      if (!mounted) return;
+      await _offerDraftCombine(viewModel);
+      return;
+    }
+
+    await viewModel.acceptSimilarPlace();
+    if (!mounted) return;
+    await _acknowledgeExistingDishes(viewModel, candidate.name);
+  }
+
+  /// The acknowledgement after "yes, that is the place": which of this form's
+  /// dishes it ALREADY lists. One [OK], no way back (the user's choice) - the
+  /// tourist sees what it means before anything changes.
+  ///
+  /// Every dish already there -> nothing would be written: the form is left
+  /// for the dashboard (the incomplete submission goes with it).
+  /// Only some -> those dishes are dropped from THIS submission (the place
+  /// keeps its own rows) and the form carries on.
+  Future<void> _acknowledgeExistingDishes(
+    AddLandmarkViewModel viewModel,
+    String placeName,
+  ) async {
+    final List<String> existing = viewModel.existingDishNames;
+    final bool allExist = viewModel.allDishesExist;
+    if (existing.isEmpty) {
+      await _offerDraftCombine(viewModel);
+      return;
+    }
+
+    final String message = allExist
+        ? 'Every dish on this form is already listed at "$placeName", so '
+              'there is nothing to add. Nothing was submitted.'
+        : 'Already listed at "$placeName" and not added again: '
+              '${existing.join(', ')}.';
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AppDialog(
+        icon: Icons.check_circle_outline,
+        title: allExist ? 'Nothing to add' : 'Already on the menu',
+        message: message,
+        actions: <Widget>[
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+
+    if (allExist) {
+      await viewModel.finishAsAlreadyThere();
+      if (!mounted) return;
+      // No second notice here: the dialog above already said nothing would be
+      // added, and this path leaves the form straight away.
+      AppNavigator.resetTo(AppRoutes.mainShell);
+      return;
+    }
+
+    final List<String> removed = viewModel.dropExistingDishes();
+    if (!mounted) return;
+    if (removed.isNotEmpty) {
+      await _showNotice(
+        icon: Icons.check_circle_outline,
+        title: 'Already listed there',
+        message:
+            '${removed.join(', ')} - already listed there, so not added '
+            'again.',
+      );
+      if (!mounted) return;
+    }
+    await _offerDraftCombine(viewModel);
+  }
+
+  /// "45 m" / "1.2 km" for the similar-place question - the same wording the
+  /// place detail screens use.
+  static String _shortDistance(double metres) => metres < 1000
+      ? '${metres.round()} m'
+      : '${(metres / 1000).toStringAsFixed(1)} km';
+
+  /// The acknowledgement behind a refused Confirm: the name in the field is
+  /// not the name on the captured signboard photo (see
+  /// `AddLandmarkViewModel.confirmRestaurant`). The message stays plain - no
+  /// score, no model talk - and the dialog asks for a decision, not just
+  /// attention: put Gemini's own reading back (which confirms the form), or
+  /// keep the typed name and fix it by hand.
+  Future<void> _showNameMismatchNotice(AddLandmarkViewModel viewModel) async {
+    final String? signboardName = viewModel.signboardDetectedName;
+    final bool? useSignboardName = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AppDialog(
+        icon: Icons.storefront_outlined,
+        title: 'Name does not match the signboard',
+        message: AddLandmarkViewModel.signboardNameMismatchMessage,
+        actions: <Widget>[
+          if (signboardName != null)
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Use the signboard name'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep my name'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || useSignboardName != true || signboardName == null) return;
+    viewModel.useSignboardName();
+    if (!mounted) return;
+    // The field now IS Gemini's reading, so this click needs no re-check and
+    // carries on where the refused one left off (the merge offer included).
+    await _confirmRestaurant(viewModel);
   }
 
   /// Looks for ANOTHER saved submission for the same restaurant (same name,
@@ -345,9 +648,41 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
     if (!mounted || !combine) return;
     final List<String> updated = viewModel.mergeExistingDraft(saved);
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(_mergeNotice(updated))));
+    await _showNotice(
+      icon: Icons.library_add_check_outlined,
+      title: 'Submissions combined',
+      message: _mergeNotice(updated),
+    );
+  }
+
+  /// The form's ONE acknowledgement frame: centred badge, title, message and a
+  /// single OK, all inside [AppDialog] - the same modal every other notice in
+  /// this flow uses, so padding, width and alignment can never drift between
+  /// them (user request: no snackbars, one consistent pop-up).
+  ///
+  /// Messages come from the ViewModel, so the wording lives with the rule it
+  /// explains; this method only presents it.
+  Future<void> _showNotice({
+    required IconData icon,
+    required String title,
+    required String message,
+  }) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AppDialog(
+        icon: icon,
+        title: title,
+        message: message,
+        actions: <Widget>[
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// The merge outcome shown after combining: dishes that were already on
@@ -365,21 +700,6 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
 
   @override
   Widget build(BuildContext context) {
-    // A background auto-save (the app moved to the background) reports
-    // itself here, once the tourist is looking at the app again.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!_viewModel.takeAutoDraftSavedNotice()) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Incomplete submission saved automatically. It will be kept for '
-            '24 hours.',
-          ),
-        ),
-      );
-    });
-
     return ChangeNotifierProvider<AddLandmarkViewModel>.value(
       value: _viewModel,
       // The system back button cannot leave the form silently: the tourist
@@ -506,6 +826,7 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                               const SizedBox(height: AppSpacing.sm),
                               _ConfirmRestaurantRow(
                                 confirmed: viewModel.restaurantConfirmed,
+                                isChecking: viewModel.isConfirming,
                                 onConfirm: () => _confirmRestaurant(viewModel),
                               ),
                               const SizedBox(height: AppSpacing.lg),
@@ -590,15 +911,6 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                                 onCopyMondayToAll:
                                     viewModel.copyMondayToAllWeekdays,
                               ),
-                              if (viewModel.submitError != null) ...<Widget>[
-                                const SizedBox(height: AppSpacing.md),
-                                Text(
-                                  viewModel.submitError!,
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                    color: AppColors.error,
-                                  ),
-                                ),
-                              ],
                               const SizedBox(height: AppSpacing.xxl),
                             ],
                           ),
@@ -607,9 +919,15 @@ class _AddLandmarkViewState extends State<AddLandmarkView>
                           canSubmit:
                               viewModel.canSubmit && !viewModel.isSubmitting,
                           isSubmitting: viewModel.isSubmitting,
-                          reason: viewModel.canSubmit
-                              ? null
-                              : viewModel.canSubmitReason,
+                          // A failed submit's own message wins: it is the one
+                          // thing the tourist must see to fix the form, and
+                          // this pinned bar is the only part of the screen
+                          // that is always on view.
+                          reason:
+                              viewModel.submitError ??
+                              (viewModel.canSubmit
+                                  ? null
+                                  : viewModel.canSubmitReason),
                           onSubmit: () => _submit(viewModel),
                         ),
                       ],
@@ -815,6 +1133,10 @@ typedef _PriceRules = ({
 /// Shows a precise inline error under the field when the value is unparsable
 /// or outside the allowed range.
 ///
+/// The box IS the field: one bordered `TextField` with a fixed "RM" prefix
+/// inside it - no money icon and no wrapper container (the label sits
+/// directly on top of the box, like the other fields' labels do).
+///
 /// [suggestedRange] (Gemini's suggested range as a display line) is shown
 /// whenever it is known - INCLUDING while the value is invalid, so the
 /// tourist can see the expected range while fixing the number. The stronger
@@ -919,14 +1241,21 @@ class _PriceFieldState extends State<_PriceField> {
 
   @override
   Widget build(BuildContext context) {
+    // ONE box, drawn by this widget (the money icon is gone, so the "Price
+    // (MYR)" label sits straight on top of it, like the other fields on the
+    // form), with the currency mark as plain fixed text inside it.
+    //
+    // The mark CANNOT be an `InputDecoration.prefixText`: Flutter only paints
+    // a prefix while the field is focused or non-empty, so "RM" vanished the
+    // moment an empty field lost focus and the hint was all that was left.
+    // As a `Row` child it is permanently there, like the phone field's "+60".
+    final Color borderColor = _error != null
+        ? AppColors.error
+        : (widget.warning != null ? AppColors.warning : AppColors.outline);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        // The form's standard frame for a field: label above, an
-        // icon-bordered box, the inline note underneath in the same styles
-        // the name/phone/website/address fields use. This one used to be a
-        // bare Material `TextField` (floating label, Material error text) -
-        // the only input on the form that did not match the others.
         Text(widget.label, style: AppTextStyles.titleSmall),
         const SizedBox(height: AppSpacing.sm),
         Container(
@@ -935,24 +1264,13 @@ class _PriceFieldState extends State<_PriceField> {
             vertical: AppSpacing.sm,
           ),
           decoration: BoxDecoration(
-            border: Border.all(
-              color: _error != null
-                  ? AppColors.error
-                  : (widget.warning != null
-                        ? AppColors.warning
-                        : AppColors.outline),
-            ),
+            border: Border.all(color: borderColor),
             borderRadius: AppRadius.cardRadius,
           ),
           child: Row(
             children: <Widget>[
-              const Icon(
-                Icons.payments_outlined,
-                color: AppColors.textSecondary,
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              // The currency mark sits inside the box like the phone field's
-              // fixed "+60" - never part of the editable value.
+              // Fixed, never part of the editable value - it can neither be
+              // deleted nor typed over.
               Text(
                 'RM',
                 style: AppTextStyles.bodyLarge.copyWith(
@@ -977,6 +1295,9 @@ class _PriceFieldState extends State<_PriceField> {
                     ),
                   ],
                   onChanged: _onChanged,
+                  // The box around the input IS the frame above; the field
+                  // itself stays borderless, and the same colour in every
+                  // state (this form's boxes do not change on focus).
                   decoration: const InputDecoration(
                     border: InputBorder.none,
                     isDense: true,
@@ -1303,13 +1624,21 @@ class _FormTextField extends StatelessWidget {
 /// another unfinished submission for the same restaurant is looked up so the
 /// two can be combined. Once confirmed the row reports the state instead of
 /// offering the button again.
+///
+/// A name that was edited away from Gemini's signboard reading is re-checked
+/// against the photo first, so [isChecking] shows that wait on the button
+/// itself (disabled, so the question cannot be asked twice).
 class _ConfirmRestaurantRow extends StatelessWidget {
   const _ConfirmRestaurantRow({
     required this.confirmed,
     required this.onConfirm,
+    this.isChecking = false,
   });
 
   final bool confirmed;
+
+  /// True while the edited-name check is in flight - see the class doc.
+  final bool isChecking;
   final VoidCallback onConfirm;
 
   @override
@@ -1336,9 +1665,15 @@ class _ConfirmRestaurantRow extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
-        onPressed: onConfirm,
-        icon: const Icon(Icons.check_circle_outline, size: 18),
-        label: const Text('Confirm'),
+        onPressed: isChecking ? null : onConfirm,
+        icon: isChecking
+            ? const SizedBox(
+                width: AppSizes.inlineNoticeIconSize,
+                height: AppSizes.inlineNoticeIconSize,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.check_circle_outline, size: 18),
+        label: Text(isChecking ? 'Checking the signboard…' : 'Confirm'),
       ),
     );
   }
@@ -1898,6 +2233,70 @@ class _AdditionalFoodsSection extends StatelessWidget {
   }
 }
 
+/// The blocking "we are working on it" page, shown as a modal route while a
+/// network check owns the form - the submission write ([_submit]) or the
+/// near-duplicate check ([_confirmRestaurant]).
+///
+/// A full-screen barrier covers the whole form - app bar included - so
+/// nothing behind it can be tapped, scrolled or typed into, and the
+/// [PopScope] keeps the system back button from dropping the page mid-write
+/// (a half-written landmark, or a question answered about a name/photo that
+/// changed underneath it, is exactly what this page exists to prevent).
+///
+/// The copy says the wait is EXPECTED. It also matches [AppDialog]'s frame -
+/// the app's one modal frame - with a progress ring where the icon badge
+/// would sit.
+class _BlockingPage extends StatelessWidget {
+  const _BlockingPage({required this.title, required this.message});
+
+  /// Centred heading, e.g. "Submitting your landmark…".
+  final String title;
+
+  /// Centred body line under the heading - say what is happening and that it
+  /// is expected to take a moment.
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: Dialog(
+        backgroundColor: AppColors.surface,
+        insetPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.xl,
+          vertical: AppSpacing.xxl,
+        ),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(AppRadius.xl)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const CircularProgressIndicator(),
+              const SizedBox(height: AppSpacing.lg),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.titleSmall,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Bottom Submit bar, pinned below the scrolling form.
 class _BottomActions extends StatelessWidget {
   const _BottomActions({
@@ -1911,7 +2310,9 @@ class _BottomActions extends StatelessWidget {
   final bool isSubmitting;
   final VoidCallback onSubmit;
 
-  /// Why the button is disabled, shown above it (null = ready to submit).
+  /// The line above the button: why it is disabled, or - once a submit has
+  /// actually been attempted - why that attempt failed (see [_submit]).
+  /// Null when the form is ready and no failure is outstanding.
   final String? reason;
 
   @override

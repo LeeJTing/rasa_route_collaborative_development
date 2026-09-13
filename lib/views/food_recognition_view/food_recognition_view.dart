@@ -4,6 +4,9 @@ import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+// `show` keeps this to the orientation API: `services.dart` also re-exports
+// `dart:typed_data`, which this file already imports directly.
+import 'package:flutter/services.dart' show DeviceOrientation, SystemChrome;
 import 'package:provider/provider.dart';
 
 import '../../app/config/env.dart';
@@ -29,6 +32,11 @@ import 'widgets/recognition_result_card.dart';
 /// Per REQ106_1, capture happens on an in-app camera view with a frame
 /// overlay - not a hand-off to the platform's own camera app - so this owns
 /// a `CameraController` directly and renders `CameraPreview`.
+///
+/// The screen is portrait-only (user request: the camera is always used
+/// vertically), locked when the screen opens and released when it closes -
+/// which also keeps the preview, the frame guide and the crop maths in
+/// agreement, since those are written for a portrait display.
 ///
 /// Per BF-8, the recognition result is shown as a popup OVER the captured
 /// photo (dimmed), not a full navigation and not the live camera feed still
@@ -137,6 +145,15 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Portrait-only capture, locked BEFORE the camera opens so the session
+    // binds in portrait: both `_CameraViewfinder`'s sizing and `_cropToFrame`
+    // assume a portrait preview, and a user who rotates the phone mid-shot
+    // would otherwise get a preview that no longer matches the frame guide
+    // they were aiming with. `dispose` gives rotation back to the OS.
+    SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
+      DeviceOrientation.portraitUp,
+    ]);
 
     _viewModel = FoodRecognitionViewModel();
 
@@ -330,6 +347,10 @@ class _FoodRecognitionViewState extends State<FoodRecognitionView>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Release the portrait lock. The empty list is the documented "defer to
+    // the operating system default" - the rest of the app has always been
+    // free to rotate, and only this capture screen constrains it.
+    SystemChrome.setPreferredOrientations(const <DeviceOrientation>[]);
     _cameraController?.dispose();
     _viewModel.dispose();
     super.dispose();
@@ -1000,7 +1021,9 @@ class _CameraViewfinder extends StatelessWidget {
           // `camera.value.aspectRatio` is reported in landscape/sensor
           // terms, not portrait-display terms, so `previewSize` is swapped
           // (height/width, not width/height) below to get the correct
-          // natural shape for a portrait preview. `FittedBox(fit: cover)`
+          // natural shape for a portrait preview - and the screen is locked
+          // to portrait while it is open (see `_FoodRecognitionViewState`),
+          // so this portrait assumption always holds. `FittedBox(fit: cover)`
           // then scales that up to fill this area, cropping any overflow -
           // the standard, framework-provided way to do this.
           Builder(

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:meta/meta.dart' show protected;
 
+import '../../core/place_category.dart';
 import '../../domain_model/dietary_restriction.dart';
 import '../../domain_model/food_distribution.dart';
 import '../../domain_model/matches_recommendation.dart';
@@ -250,6 +251,22 @@ class RestaurantDiscoveryLogic {
     final bool hasFoodTypeFilter =
         normalizedFoodType != null && normalizedFoodType.isNotEmpty;
 
+    // Every dish a landmark carries is counted for its category - not just
+    // the ones passing today's food-type / dietary filters, so the category
+    // the card shows (the one MOST dishes carry - `majorityCategory`) is the
+    // same one the pin sheet, Landmark History and the landmark page show
+    // and cannot change with a filter.
+    final Map<String, List<String>> dishCategoriesByLandmark =
+        <String, List<String>>{};
+    for (final FoodOccurrence occurrence in occurrences) {
+      if (occurrence.source != FoodOccurrenceSource.submittedLandmark) {
+        continue;
+      }
+      (dishCategoriesByLandmark[occurrence.sourceId] ??= <String>[]).add(
+        occurrence.itemFoodCategory ?? '',
+      );
+    }
+
     final Map<String, List<FoodOccurrence>> byLandmark =
     <String, List<FoodOccurrence>>{};
     for (final FoodOccurrence occurrence in occurrences) {
@@ -294,9 +311,12 @@ class RestaurantDiscoveryLogic {
         SubmittedLandmarkRecommendation(
           id: int.tryParse(entry.key) ?? 0,
           name: place.placeName,
-          category: place.placeCategory?.trim().isNotEmpty == true
-              ? place.placeCategory!.trim()
-              : 'Submitted Landmark',
+          // The category MOST of the landmark's dishes carry - the cards
+          // word it `categoryLabel`, exactly like a restaurant row.
+          category: majorityCategory(
+            dishCategoriesByLandmark[entry.key] ?? const <String>[],
+            fallback: place.placeCategory?.trim() ?? '',
+          ),
           distanceMetres: _distanceMetres(
             location.latitude,
             location.longitude,
@@ -305,10 +325,13 @@ class RestaurantDiscoveryLogic {
           ),
           dishes: dishes,
           imageUrl: place.placeImageUrl,
-          // The headline price is the AVERAGE of the landmark's known dish
-          // prices (one dish's price would misread a stall with a menu);
-          // null while none is known.
-          price: _averageDishPrice(dishes),
+          // The tourist-supplied address rides along on the shared model;
+          // quick mode's own card does not show it, Matches' cards do.
+          address: place.placeAddress ?? '',
+          // The starting price is the LOWEST known dish price - the same
+          // "From RM x" rule the restaurant cards use; null while none is
+          // known.
+          price: _startingDishPrice(dishes),
         ),
       );
     }
@@ -355,21 +378,24 @@ class RestaurantDiscoveryLogic {
           price: item.itemPrice,
           imageUrl: item.itemImageUrl,
           ingredients: item.itemIngredients,
+          description: item.itemDescription,
         ),
       );
     }
     return dishes;
   }
 
-  /// The AVERAGE of the dishes' known prices - null while none is known.
-  double? _averageDishPrice(List<SubmittedLandmarkDish> dishes) {
-    final List<double> prices = dishes
-        .map((SubmittedLandmarkDish dish) => dish.price)
-        .whereType<double>()
-        .toList(growable: false);
-    if (prices.isEmpty) return null;
-    return prices.fold<double>(0, (double sum, double price) => sum + price) /
-        prices.length;
+  /// The LOWEST of the dishes' known prices - the "From RM x" starting
+  /// price, the same figure a restaurant card shows. Null while no dish has
+  /// a price.
+  double? _startingDishPrice(List<SubmittedLandmarkDish> dishes) {
+    double? lowest;
+    for (final SubmittedLandmarkDish dish in dishes) {
+      final double? price = dish.price;
+      if (price == null || price <= 0) continue;
+      if (lowest == null || price < lowest) lowest = price;
+    }
+    return lowest;
   }
 
   Future<List<Restaurant>> _hydrateSelected(List<Restaurant> selected) async {

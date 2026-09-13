@@ -5,6 +5,7 @@ import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/matches_recommendation.dart';
 import '../../common_widgets/app_image.dart';
 import '../../common_widgets/food_image_fallback.dart';
+import 'place_metric.dart';
 
 class SubmittedLandmarkCard extends StatelessWidget {
   const SubmittedLandmarkCard({
@@ -41,86 +42,76 @@ class SubmittedLandmarkCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: <Widget>[
-          Padding(
-            padding: AppSpacing.cardPadding,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                InkWell(
-                  onTap: landmark.imageUrl?.trim().isNotEmpty == true
-                      ? () => onImageTap(
-                    landmark.imageUrl,
-                    landmark.name,
-                  )
-                      : null,
-                  borderRadius: AppRadius.cardRadius,
-                  child: SizedBox.square(
-                    dimension: AppSizes.restaurantCardImage,
-                    child: AppImage(
-                      source: landmark.imageUrl,
-                      borderRadius: AppRadius.cardRadius,
-                      semanticLabel: landmark.name,
+          // Same header shape as `RestaurantCard` - photo, name, one metric
+          // row, category - so the two Quick Mode lists read as one design.
+          // The ONLY difference is the rating: a submitted landmark has none,
+          // so NO empty slot is kept for one - the distance takes the metric
+          // row on its own, right under the name (user request, 2026-09-14:
+          // the reserved half read as a gap above the category).
+          InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: AppSpacing.cardPadding,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  // The photo keeps its OWN tap (the tourist's capture opens
+                  // enlarged right here - a restaurant card's photo has no
+                  // such action); the card-wide tap covers everything else.
+                  InkWell(
+                    onTap: landmark.imageUrl?.trim().isNotEmpty == true
+                        ? () => onImageTap(landmark.imageUrl, landmark.name)
+                        : null,
+                    borderRadius: AppRadius.cardRadius,
+                    child: SizedBox.square(
+                      dimension: AppSizes.restaurantCardImage,
+                      child: AppImage(
+                        source: landmark.imageUrl,
+                        borderRadius: AppRadius.cardRadius,
+                        semanticLabel: landmark.name,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: InkWell(
-                    onTap: onTap,
-                    borderRadius: AppRadius.cardRadius,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: AppSpacing.sm,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          landmark.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        // No rating for a submitted landmark, so no empty
+                        // half-line is reserved for one (user request,
+                        // 2026-09-14) - the distance takes the metric row
+                        // on its own, right under the name.
+                        PlaceMetric(
+                          icon: Icons.location_on_outlined,
+                          label: _distanceLabel(landmark.distanceMetres),
+                        ),
+                        if (landmark.categoryLabel.isNotEmpty) ...<Widget>[
+                          const SizedBox(height: AppSpacing.sm),
                           Text(
-                            landmark.name,
+                            landmark.categoryLabel,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleMedium,
+                            style: Theme.of(context).textTheme.bodySmall,
                           ),
-                          const SizedBox(height: AppSpacing.xs),
-                          Row(
-                            children: <Widget>[
-                              const Icon(
-                                Icons.location_on_outlined,
-                                size: AppSizes.iconCompact,
-                              ),
-                              const SizedBox(width: AppSpacing.xs),
-                              Expanded(
-                                child: Text(
-                                  _distanceLabel(landmark.distanceMetres),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (landmark.category.isNotEmpty) ...<Widget>[
-                            const SizedBox(height: AppSpacing.sm),
-                            Text(
-                              landmark.category,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
                         ],
-                      ),
+                      ],
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           if (expanded)
             Container(
               width: double.infinity,
-              margin: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm,
-              ),
+              margin: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
               padding: AppSpacing.cardPadding,
               decoration: BoxDecoration(
                 color: AppColors.insetSurface,
@@ -136,22 +127,17 @@ class SubmittedLandmarkCard extends StatelessWidget {
                     )
                   else
                     ...preview.map(
-                          (SubmittedLandmarkDish dish) => _LandmarkDishRow(
-                        dish: dish,
-                        onImageTap: onImageTap,
-                      ),
+                      (SubmittedLandmarkDish dish) =>
+                          _LandmarkDishRow(dish: dish, onImageTap: onImageTap),
                     ),
                   if (landmark.dishes.length > _previewLimit)
                     Center(
                       child: Text(
                         'Showing $_previewLimit of '
-                            '${landmark.dishes.length} local foods · '
-                            'Tap the landmark for all',
+                        '${landmark.dishes.length} local foods · '
+                        'Tap the landmark for all',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary,
                         ),
                       ),
@@ -164,9 +150,7 @@ class SubmittedLandmarkCard extends StatelessWidget {
               tooltip: expanded ? 'Hide local food' : 'Show local food',
               onPressed: onExpand,
               icon: Icon(
-                expanded
-                    ? Icons.keyboard_arrow_up
-                    : Icons.keyboard_arrow_down,
+                expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
               ),
             ),
           ),
@@ -185,13 +169,21 @@ class SubmittedLandmarkCard extends StatelessWidget {
 }
 
 class _LandmarkDishRow extends StatelessWidget {
-  const _LandmarkDishRow({
-    required this.dish,
-    required this.onImageTap,
-  });
+  const _LandmarkDishRow({required this.dish, required this.onImageTap});
 
   final SubmittedLandmarkDish dish;
   final void Function(String? source, String semanticLabel) onImageTap;
+
+  /// The row's grey line: the dish's DESCRIPTION, exactly like a restaurant
+  /// menu row shows its own - the recorded ingredients are only the fallback
+  /// when the dish carries no description (user request, 2026-09-14: the
+  /// ingredients list was showing where the restaurant shows a description).
+  String? get _displayText {
+    final String description = dish.description?.trim() ?? '';
+    if (description.isNotEmpty) return description;
+    final String ingredients = dish.ingredients?.trim() ?? '';
+    return ingredients.isEmpty ? null : ingredients;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -202,10 +194,7 @@ class _LandmarkDishRow extends StatelessWidget {
         children: <Widget>[
           InkWell(
             onTap: dish.imageUrl?.trim().isNotEmpty == true
-                ? () => onImageTap(
-              dish.imageUrl,
-              dish.name,
-            )
+                ? () => onImageTap(dish.imageUrl, dish.name)
                 : null,
             borderRadius: AppRadius.cardRadius,
             child: SizedBox.square(
@@ -234,29 +223,30 @@ class _LandmarkDishRow extends StatelessWidget {
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                     ),
-                    if (dish.price != null)
+                    if (dish.price != null) ...<Widget>[
+                      // Same gap and wrapping as a restaurant menu row, so
+                      // the two expanded lists look like one design.
+                      const SizedBox(width: AppSpacing.sm),
                       Flexible(
                         child: Text(
                           'RM ${dish.price!.toStringAsFixed(2)}',
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.end,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(
-                            color: AppColors.accentRust,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(color: AppColors.accentRust),
                         ),
                       ),
+                    ],
                   ],
                 ),
-                if (dish.ingredients?.trim().isNotEmpty == true) ...<Widget>[
+                if (_displayText != null) ...<Widget>[
                   const SizedBox(height: AppSpacing.xs),
+                  // The whole text, however long, exactly like a restaurant
+                  // menu row: no maxLines and no ellipsis, so nothing is cut
+                  // in half.
                   Text(
-                    dish.ingredients!,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
+                    _displayText!,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],

@@ -52,16 +52,76 @@ class MockGpsButton extends StatelessWidget {
   /// North then South lands exactly back where the demo started.
   static const double nudgeMetres = 60;
 
-  /// Preset Malaysian spots - plus two the app must refuse to treat as
-  /// restaurant locations ("Outside MY", "At sea").
-  static const List<({String label, double lat, double lon})> presets =
-      <({String label, double lat, double lon})>[
-        (label: 'KL', lat: 3.1390, lon: 101.6869),
-        (label: 'Penang', lat: 5.4141, lon: 100.3288),
-        (label: 'Kota Kinabalu', lat: 5.9804, lon: 116.0735),
-        (label: 'Kuching', lat: 1.5535, lon: 110.3593),
-        (label: 'Outside MY', lat: 1.3521, lon: 103.8198),
-        (label: 'At sea', lat: 3.0, lon: 100.2),
+  /// Preset Malaysian spots, GROUPED BY STATE so the picker shows one
+  /// section per state and demoing "same dish, different state" is two taps
+  /// (user request, 2026-09-13). The LAST group holds the spots the app must
+  /// refuse to treat as restaurant locations - kept apart so they can never
+  /// be mistaken for a normal demo spot.
+  static const List<
+    ({String state, List<({String label, double lat, double lon})> spots})
+  >
+  presetGroups =
+      <({String state, List<({String label, double lat, double lon})> spots})>[
+        (
+          state: 'Kuala Lumpur',
+          spots: <({String label, double lat, double lon})>[
+            (label: 'KL', lat: 3.1390, lon: 101.6869),
+            (label: 'Setapak', lat: 3.1930, lon: 101.7120),
+            (label: 'Cheras', lat: 3.0833, lon: 101.7500),
+            (label: 'Ampang', lat: 3.1500, lon: 101.7600),
+            (label: 'Wangsa Maju', lat: 3.2005, lon: 101.7310),
+            (label: 'Kepong', lat: 3.2150, lon: 101.6400),
+            (label: 'Mont Kiara', lat: 3.1660, lon: 101.6530),
+            (label: 'Bangsar', lat: 3.1290, lon: 101.6700),
+            (label: 'Bukit Bintang', lat: 3.1466, lon: 101.7110),
+            (label: 'Chow Kit', lat: 3.1700, lon: 101.6980),
+            (label: 'Sri Petaling', lat: 3.0700, lon: 101.6900),
+            (label: 'Sentul', lat: 3.1800, lon: 101.6900),
+          ],
+        ),
+        (
+          state: 'Selangor',
+          spots: <({String label, double lat, double lon})>[
+            (label: 'Subang Jaya', lat: 3.0567, lon: 101.5853),
+            (label: 'Petaling Jaya', lat: 3.1073, lon: 101.6067),
+            (label: 'Shah Alam', lat: 3.0733, lon: 101.5185),
+            (label: 'Klang', lat: 3.0449, lon: 101.4455),
+            (label: 'Puchong', lat: 3.0324, lon: 101.6176),
+            (label: 'Kajang', lat: 2.9930, lon: 101.7872),
+            (label: 'Seri Kembangan', lat: 3.0220, lon: 101.7060),
+            (label: 'Cyberjaya', lat: 2.9213, lon: 101.6559),
+            (label: 'Bangi', lat: 2.9500, lon: 101.7550),
+            (label: 'Rawang', lat: 3.3213, lon: 101.5767),
+          ],
+        ),
+        (
+          state: 'Johor',
+          spots: <({String label, double lat, double lon})>[
+            (label: 'Johor Bahru', lat: 1.4927, lon: 103.7414),
+            (label: 'Iskandar Puteri', lat: 1.4276, lon: 103.6295),
+            (label: 'Skudai', lat: 1.5350, lon: 103.6550),
+            (label: 'Kulai', lat: 1.6562, lon: 103.6034),
+            (label: 'Batu Pahat', lat: 1.8548, lon: 102.9327),
+            (label: 'Muar', lat: 2.0450, lon: 102.5686),
+            (label: 'Kluang', lat: 2.0303, lon: 103.3162),
+            (label: 'Segamat', lat: 2.5097, lon: 102.8148),
+          ],
+        ),
+        (
+          state: 'Other states',
+          spots: <({String label, double lat, double lon})>[
+            (label: 'Penang', lat: 5.4141, lon: 100.3288),
+            (label: 'Kota Kinabalu', lat: 5.9804, lon: 116.0735),
+            (label: 'Kuching', lat: 1.5535, lon: 110.3593),
+          ],
+        ),
+        (
+          state: 'Refusal tests',
+          spots: <({String label, double lat, double lon})>[
+            (label: 'Outside MY', lat: 1.3521, lon: 103.8198),
+            (label: 'At sea', lat: 3.0, lon: 100.2),
+          ],
+        ),
       ];
 
   /// [latitude]/[longitude] moved by [northMetres]/[eastMetres] (negative =
@@ -130,82 +190,133 @@ class MockGpsButton extends StatelessWidget {
               const SizedBox(height: AppSpacing.xs),
               Text(_currentFixCaption(from), style: AppTextStyles.bodySmall),
               const SizedBox(height: AppSpacing.md),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: <Widget>[
-                  for (final ({String label, double lat, double lon}) p
-                      in presets)
-                    ActionChip(
-                      label: Text(p.label),
-                      onPressed: () => Navigator.pop(
-                        sheetContext,
-                        _MockGpsChoice.preset(p.lat, p.lon),
-                      ),
-                    ),
-                  ActionChip(
-                    avatar: const Icon(
-                      Icons.edit_location_alt_outlined,
-                      size: 18,
-                    ),
-                    label: const Text('Set lat/lon…'),
-                    onPressed: () => Navigator.pop(
-                      sheetContext,
-                      const _MockGpsChoice.custom(),
-                    ),
-                  ),
-                  if (canNudge) ...<Widget>[
-                    SizedBox(
-                      width: double.infinity,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: AppSpacing.sm),
-                        child: Text(
-                          'Walk ${nudgeMetres.round()} m from here '
-                          '(demos the 50 m rule)',
-                          style: AppTextStyles.titleSmall,
+              // One section per state, then the tools (set lat/lon, walk,
+              // stop). Scrolls, because the district list is now taller than
+              // a phone sheet.
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      for (final ({
+                            String state,
+                            List<({String label, double lat, double lon})>
+                            spots,
+                          })
+                          group
+                          in presetGroups) ...<Widget>[
+                        Padding(
+                          padding: const EdgeInsets.only(top: AppSpacing.md),
+                          child: Text(
+                            group.state,
+                            style: AppTextStyles.titleSmall,
+                          ),
                         ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Wrap(
+                          spacing: AppSpacing.sm,
+                          runSpacing: AppSpacing.sm,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: <Widget>[
+                            for (final ({String label, double lat, double lon})
+                                p
+                                in group.spots)
+                              ActionChip(
+                                label: Text(p.label),
+                                onPressed: () => Navigator.pop(
+                                  sheetContext,
+                                  _MockGpsChoice.preset(p.lat, p.lon),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                      Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.md),
+                        child: Text('Tools', style: AppTextStyles.titleSmall),
                       ),
-                    ),
-                    ActionChip(
-                      label: const Text('North'),
-                      onPressed: () => Navigator.pop(
-                        sheetContext,
-                        const _MockGpsChoice.nudge(northMetres: nudgeMetres),
+                      const SizedBox(height: AppSpacing.xs),
+                      Wrap(
+                        spacing: AppSpacing.sm,
+                        runSpacing: AppSpacing.sm,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[
+                          ActionChip(
+                            avatar: const Icon(
+                              Icons.edit_location_alt_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Set lat/lon…'),
+                            onPressed: () => Navigator.pop(
+                              sheetContext,
+                              const _MockGpsChoice.custom(),
+                            ),
+                          ),
+                          if (canNudge) ...<Widget>[
+                            SizedBox(
+                              width: double.infinity,
+                              child: Padding(
+                                padding: const EdgeInsets.only(
+                                  top: AppSpacing.sm,
+                                ),
+                                child: Text(
+                                  'Walk ${nudgeMetres.round()} m from here '
+                                  '(demos the 50 m rule)',
+                                  style: AppTextStyles.titleSmall,
+                                ),
+                              ),
+                            ),
+                            ActionChip(
+                              label: const Text('North'),
+                              onPressed: () => Navigator.pop(
+                                sheetContext,
+                                const _MockGpsChoice.nudge(
+                                  northMetres: nudgeMetres,
+                                ),
+                              ),
+                            ),
+                            ActionChip(
+                              label: const Text('South'),
+                              onPressed: () => Navigator.pop(
+                                sheetContext,
+                                const _MockGpsChoice.nudge(
+                                  northMetres: -nudgeMetres,
+                                ),
+                              ),
+                            ),
+                            ActionChip(
+                              label: const Text('East'),
+                              onPressed: () => Navigator.pop(
+                                sheetContext,
+                                const _MockGpsChoice.nudge(
+                                  eastMetres: nudgeMetres,
+                                ),
+                              ),
+                            ),
+                            ActionChip(
+                              label: const Text('West'),
+                              onPressed: () => Navigator.pop(
+                                sheetContext,
+                                const _MockGpsChoice.nudge(
+                                  eastMetres: -nudgeMetres,
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (isActive)
+                            ActionChip(
+                              avatar: const Icon(Icons.location_off, size: 18),
+                              label: const Text('Stop mock'),
+                              onPressed: () => Navigator.pop(
+                                sheetContext,
+                                const _MockGpsChoice.stop(),
+                              ),
+                            ),
+                        ],
                       ),
-                    ),
-                    ActionChip(
-                      label: const Text('South'),
-                      onPressed: () => Navigator.pop(
-                        sheetContext,
-                        const _MockGpsChoice.nudge(northMetres: -nudgeMetres),
-                      ),
-                    ),
-                    ActionChip(
-                      label: const Text('East'),
-                      onPressed: () => Navigator.pop(
-                        sheetContext,
-                        const _MockGpsChoice.nudge(eastMetres: nudgeMetres),
-                      ),
-                    ),
-                    ActionChip(
-                      label: const Text('West'),
-                      onPressed: () => Navigator.pop(
-                        sheetContext,
-                        const _MockGpsChoice.nudge(eastMetres: -nudgeMetres),
-                      ),
-                    ),
-                  ],
-                  if (isActive)
-                    ActionChip(
-                      avatar: const Icon(Icons.location_off, size: 18),
-                      label: const Text('Stop mock'),
-                      onPressed: () => Navigator.pop(
-                        sheetContext,
-                        const _MockGpsChoice.stop(),
-                      ),
-                    ),
-                ],
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
