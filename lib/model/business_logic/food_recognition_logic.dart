@@ -891,8 +891,8 @@ class FoodRecognitionLogic {
           .verifyDishOrigin(food.name);
       if (verification.verdict != OriginVerdict.accept) {
         throw LandmarkVerificationRejectedException(
-          '"${food.name}" does not appear to be Malaysian local food, so it '
-          'cannot be added as a new landmark.',
+          '"${food.name}" has not fully merged into Malaysian local food, '
+          'so it cannot be added as a new landmark.',
         );
       }
     }

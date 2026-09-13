@@ -23,9 +23,12 @@ class FoodOccurrence {
     this.placeImageUrl,
     this.placeCategory,
     this.placeRating,
+    this.placeAddress,
     this.itemPrice,
     this.itemImageUrl,
     this.itemIngredients,
+    this.itemDescription,
+    this.itemFoodCategory,
   });
 
   /// `restaurant_id` or `landmark_id`, as text - the two id spaces overlap, so
@@ -61,6 +64,12 @@ class FoodOccurrence {
   final String? placeCategory;
   final double? placeRating;
 
+  /// `submitted_landmark.address`, when the tourist recorded one - the
+  /// Matches landmark cards show it exactly like a restaurant card's own
+  /// address line. Null for restaurants: their address comes from the
+  /// restaurant fetch that the occurrence does not need to duplicate.
+  final String? placeAddress;
+
   /// Price of this one dish here, used to build the pin's price range.
   final double? itemPrice;
 
@@ -70,10 +79,23 @@ class FoodOccurrence {
   final String? itemImageUrl;
 
   /// Ingredients of THIS one dish (`landmark_item.ingredients`), when the
-  /// record has them - the quick-mode landmark rows show the text like a
-  /// restaurant menu row does. Null for restaurants; their menu fetch carries
-  /// its own ingredients.
+  /// record has them - the FALLBACK grey line for the quick-mode landmark
+  /// rows when the dish carries no description. Null for restaurants; their
+  /// menu fetch carries its own text.
   final String? itemIngredients;
+
+  /// Description of THIS one dish (`landmark_item.description`), when the
+  /// record has one - the text the quick-mode landmark rows show, exactly
+  /// like a restaurant menu row shows its own description. Null for
+  /// restaurants; their menu fetch carries its own text.
+  final String? itemDescription;
+
+  /// Food category of THIS one dish (`landmark_item.food_category`), when the
+  /// record has it - a landmark's displayed category is the one MOST of its
+  /// dishes carry (see `majorityCategory` in `core/place_category.dart`).
+  /// Null for restaurants: their category comes from the `restaurant` row
+  /// itself, never from menu items.
+  final String? itemFoodCategory;
 }
 
 /// Which data source an occurrence came from (C21 keeps the two apart).

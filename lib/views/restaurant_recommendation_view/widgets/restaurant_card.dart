@@ -5,6 +5,7 @@ import '../../../app/theme/app_dimensions.dart';
 import '../../../domain_model/restaurant.dart';
 import '../../../domain_model/restaurant_item.dart';
 import '../../common_widgets/app_image.dart';
+import 'place_metric.dart';
 import 'restaurant_expanded_info.dart';
 
 class RestaurantCard extends StatelessWidget {
@@ -66,7 +67,7 @@ class RestaurantCard extends StatelessWidget {
                         Row(
                           children: <Widget>[
                             Expanded(
-                              child: _RestaurantMetric(
+                              child: PlaceMetric(
                                 icon: Icons.star,
                                 iconColor: AppColors.secondary,
                                 label: restaurant.reviewCount == null
@@ -77,7 +78,7 @@ class RestaurantCard extends StatelessWidget {
                             ),
                             const SizedBox(width: AppSpacing.md),
                             Expanded(
-                              child: _RestaurantMetric(
+                              child: PlaceMetric(
                                 icon: Icons.location_on_outlined,
                                 label: distanceLabel,
                                 alignment: MainAxisAlignment.end,
@@ -117,38 +118,6 @@ class RestaurantCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _RestaurantMetric extends StatelessWidget {
-  const _RestaurantMetric({
-    required this.icon,
-    required this.label,
-    this.iconColor,
-    this.alignment = MainAxisAlignment.start,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color? iconColor;
-
-  /// Where the icon + label sit inside the width they are given.
-  final MainAxisAlignment alignment;
-  @override
-  Widget build(BuildContext context) {
-    final Widget labelText = Text(
-      label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-    );
-    return Row(
-      mainAxisAlignment: alignment,
-      children: <Widget>[
-        Icon(icon, size: AppSizes.iconCompact, color: iconColor),
-        const SizedBox(width: AppSpacing.xs),
-        Flexible(child: labelText),
-      ],
     );
   }
 }

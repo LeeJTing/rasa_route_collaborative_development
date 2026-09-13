@@ -5,6 +5,8 @@ import '../../domain_model/food_recognition_result.dart';
 import '../../domain_model/landmark_draft.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/place_overwrite_report.dart';
+import '../../domain_model/similar_place_candidate.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import 'food_recognition_logic.dart';
@@ -104,6 +106,74 @@ class LandmarkLogicFacade {
 
   Future<String> analyzeSignboard(List<int> imageBytes) =>
       submission.analyzeSignboard(imageBytes);
+
+  /// Whether an EDITED restaurant name still matches the captured signboard
+  /// photo - Gemini's second question about the same image (UC500). See
+  /// `LandmarkSubmissionLogic.nameMatchesSignboard`.
+  Future<bool> nameMatchesSignboard({
+    required List<int> imageBytes,
+    required String typedName,
+  }) => submission.nameMatchesSignboard(
+    imageBytes: imageBytes,
+    typedName: typedName,
+  );
+
+  /// Nearby places whose name LOOKS like [name] and that carry a photo - the
+  /// candidates the near-duplicate check compares the tourist's capture with
+  /// (UC500). See `LandmarkSubmissionLogic.similarNearbyPlaces`.
+  Future<List<SimilarPlaceCandidate>> similarNearbyPlaces({
+    required String name,
+    required double? latitude,
+    required double? longitude,
+    double maxMetres = LandmarkSubmissionLogic.similarPlaceRangeMetres,
+    int limit = LandmarkSubmissionLogic.similarPlaceCandidateLimit,
+  }) => submission.similarNearbyPlaces(
+    name: name,
+    latitude: latitude,
+    longitude: longitude,
+    maxMetres: maxMetres,
+    limit: limit,
+  );
+
+  /// Whether the tourist's photo and [candidate]'s stored photo show the same
+  /// restaurant (UC500). See `LandmarkSubmissionLogic.photosShowSamePlace`.
+  Future<bool> photosShowSamePlace({
+    required List<int> imageBytes,
+    required SimilarPlaceCandidate candidate,
+  }) => submission.photosShowSamePlace(
+    imageBytes: imageBytes,
+    candidate: candidate,
+  );
+
+  /// Which stored details a same-place merge would replace (UC500 A13), or
+  /// null when there is nothing to ask about. See
+  /// `LandmarkSubmissionLogic.mergeOverwriteReport`.
+  Future<PlaceOverwriteReport?> mergeOverwriteReport({
+    required String restaurantName,
+    required double? latitude,
+    required double? longitude,
+    String? phone,
+    String? website,
+    String? address,
+    Map<Weekday, List<OpeningHour>> operatingHours =
+        const <Weekday, List<OpeningHour>>{},
+  }) => submission.mergeOverwriteReport(
+    restaurantName: restaurantName,
+    latitude: latitude,
+    longitude: longitude,
+    phone: phone,
+    website: website,
+    address: address,
+    operatingHours: operatingHours,
+  );
+
+  /// Which of the form's dishes [candidate]'s place already lists - asked
+  /// after the tourist agreed the place is the same (UC500). See
+  /// `LandmarkSubmissionLogic.dishesAlreadyAtPlace`.
+  Future<List<String>> dishesAlreadyAtPlace({
+    required SimilarPlaceCandidate candidate,
+    required List<({String name, String variant, int localFoodId})> dishes,
+  }) => submission.dishesAlreadyAtPlace(candidate: candidate, dishes: dishes);
 
   Future<void> analyzeStall(List<int> imageBytes) =>
       submission.analyzeStall(imageBytes);
@@ -278,10 +348,10 @@ class LandmarkLogicFacade {
       submission.websiteContainsMultipleUrls(website);
 
   /// The user-readable verdict when [error] is the pre-submit origin
-  /// verifier's rejection thrown by [submitLandmark] ("...is not recognised
-  /// as a Malaysian local food"), else null. Lets the form re-surface that
-  /// deliberate message without importing logic classes or dumping raw
-  /// error text.
+  /// verifier's rejection thrown by [submitLandmark] ("...has not fully
+  /// merged into Malaysian local food..."), else null. Lets the form
+  /// re-surface that deliberate message without importing logic classes or
+  /// dumping raw error text.
   String? landmarkVerificationRejectionMessage(Object error) =>
       error is LandmarkVerificationRejectedException ? error.message : null;
 
@@ -480,6 +550,7 @@ class LandmarkLogicFacade {
     String? address,
     required List<FoodSubmission> foods,
     required Map<Weekday, List<OpeningHour>> operatingHours,
+    bool overwriteExistingDetails = false,
   }) async {
     // Pre-submit gate: a dish that is NOT already a catalogue link must pass
     // the 3-step origin verification BEFORE the landmark is saved. A rejection
@@ -501,6 +572,7 @@ class LandmarkLogicFacade {
       address: address,
       foods: foods,
       operatingHours: operatingHours,
+      overwriteExistingDetails: overwriteExistingDetails,
     );
     // Option C - best-effort catalogue growth. The landmark write (or the
     // merge) is the thing the tourist confirmed; a catalogue insert that

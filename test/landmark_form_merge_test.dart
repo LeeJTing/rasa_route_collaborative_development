@@ -5,8 +5,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:rasa_route_collaborative_development/domain_model/landmark_draft.dart';
 import 'package:rasa_route_collaborative_development/domain_model/local_food.dart';
 import 'package:rasa_route_collaborative_development/domain_model/opening_hour.dart';
+import 'package:rasa_route_collaborative_development/domain_model/place_overwrite_report.dart';
+import 'package:rasa_route_collaborative_development/domain_model/similar_place_candidate.dart';
 import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/landmark_logic_facade.dart';
+import 'package:rasa_route_collaborative_development/model/business_logic/landmark_submission_logic.dart';
 import 'package:rasa_route_collaborative_development/view_models/add_landmark_view_model.dart';
 
 LocalFood _food(String name) => LocalFood(
@@ -38,6 +41,96 @@ const TouristLocation _kl = TouristLocation(
 /// restaurant match) stays the real logic.
 class _FakeLandmarkLogicFacade extends LandmarkLogicFacade {
   List<LandmarkDraft> drafts = const <LandmarkDraft>[];
+
+  /// Every (signboard photo, typed name) pair the edited-name check was asked
+  /// about - empty when the form never had to ask (see
+  /// [signboardNameScore]).
+  final List<({List<int> bytes, String typedName})> nameChecks =
+      <({List<int> bytes, String typedName})>[];
+
+  /// How the check answers: the similarity score Gemini would return, or
+  /// null to make the check itself fail (offline/timeout).
+  double? signboardNameScore = 1.0;
+
+  /// The nearby places the near-duplicate check is offered - empty (the
+  /// default) means "nothing similar around", so the Confirm click behaves
+  /// exactly as it did before that feature.
+  List<SimilarPlaceCandidate> similarPlaces = const <SimilarPlaceCandidate>[];
+
+  /// Which photos the photo comparison says are the same place: candidate ids
+  /// (see [photoMatches]).
+  Set<int> samePlacePhotoIds = <int>{};
+
+  /// The dish names [dishesAlreadyAtPlace] reports - the "already listed at
+  /// that place" answer.
+  List<String> existingDishNames = const <String>[];
+
+  /// Every candidate id [photosShowSamePlace] was asked about.
+  final List<int> photoMatches = <int>[];
+
+  /// Every (typed name, nearby search) call, so a test can prove the search
+  /// really ran with the form's own name.
+  final List<String> similarPlaceSearches = <String>[];
+
+  @override
+  Future<List<SimilarPlaceCandidate>> similarNearbyPlaces({
+    required String name,
+    required double? latitude,
+    required double? longitude,
+    double maxMetres = LandmarkSubmissionLogic.similarPlaceRangeMetres,
+    int limit = LandmarkSubmissionLogic.similarPlaceCandidateLimit,
+  }) async {
+    similarPlaceSearches.add(name);
+    return similarPlaces;
+  }
+
+  @override
+  Future<bool> photosShowSamePlace({
+    required List<int> imageBytes,
+    required SimilarPlaceCandidate candidate,
+  }) async {
+    photoMatches.add(candidate.id);
+    return samePlacePhotoIds.contains(candidate.id);
+  }
+
+  @override
+  Future<List<String>> dishesAlreadyAtPlace({
+    required SimilarPlaceCandidate candidate,
+    required List<({String name, String variant, int localFoodId})> dishes,
+  }) async => existingDishNames;
+
+  /// What the same-place merge reports as details it would replace - null
+  /// (the default) means "nothing to ask about".
+  PlaceOverwriteReport? overwriteReport;
+
+  /// Every (name, submitted details) the question was asked with.
+  final List<String> overwriteChecks = <String>[];
+
+  @override
+  Future<PlaceOverwriteReport?> mergeOverwriteReport({
+    required String restaurantName,
+    required double? latitude,
+    required double? longitude,
+    String? phone,
+    String? website,
+    String? address,
+    Map<Weekday, List<OpeningHour>> operatingHours =
+        const <Weekday, List<OpeningHour>>{},
+  }) async {
+    overwriteChecks.add(restaurantName);
+    return overwriteReport;
+  }
+
+  @override
+  Future<bool> nameMatchesSignboard({
+    required List<int> imageBytes,
+    required String typedName,
+  }) async {
+    nameChecks.add((bytes: imageBytes, typedName: typedName));
+    final double? score = signboardNameScore;
+    if (score == null) throw Exception('signboard check unavailable');
+    return score >= LandmarkSubmissionLogic.signboardNameMatchThreshold;
+  }
 
   /// The rows removed after a save (see
   /// `AddLandmarkViewModel.mergeExistingDraft`).
@@ -170,16 +263,16 @@ void main() {
       vm.setPrimaryFoodPrice(3.0);
 
       // No photo yet.
-      expect(vm.confirmRestaurant(), contains('signboard or stall'));
+      expect(await vm.confirmRestaurant(), contains('signboard or stall'));
       expect(vm.restaurantConfirmed, isFalse);
 
       // Photo in place, name still blank.
       vm.setCapturedImage(_image(), 'signboard');
-      expect(vm.confirmRestaurant(), contains('restaurant name'));
+      expect(await vm.confirmRestaurant(), contains('restaurant name'));
       expect(vm.restaurantConfirmed, isFalse);
 
       vm.setRestaurantName('Tian Yi');
-      expect(vm.confirmRestaurant(), isNull);
+      expect(await vm.confirmRestaurant(), isNull);
       expect(vm.restaurantConfirmed, isTrue);
       vm.dispose();
     });
@@ -190,7 +283,7 @@ void main() {
       expect(vm.canSubmit, isFalse);
       expect(vm.canSubmitReason, contains('Confirm'));
 
-      vm.confirmRestaurant();
+      await vm.confirmRestaurant();
 
       expect(vm.canSubmitReason, isNull);
       expect(vm.canSubmit, isTrue);
@@ -199,7 +292,7 @@ void main() {
 
     test('editing the restaurant name takes the confirmation back', () async {
       final _TestAddLandmarkViewModel vm = await _form();
-      vm.confirmRestaurant();
+      await vm.confirmRestaurant();
       expect(vm.canSubmit, isTrue);
 
       vm.setRestaurantName('Tian Yi Seafood');
@@ -210,7 +303,7 @@ void main() {
       expect(vm.canSubmitReason, contains('Confirm'));
 
       // Confirming the NEW name passes again.
-      expect(vm.confirmRestaurant(), isNull);
+      expect(await vm.confirmRestaurant(), isNull);
       expect(vm.canSubmit, isTrue);
       vm.dispose();
     });
@@ -219,7 +312,7 @@ void main() {
       'the SAME name - only spacing differs - keeps the confirmation',
       () async {
         final _TestAddLandmarkViewModel vm = await _form();
-        vm.confirmRestaurant();
+        await vm.confirmRestaurant();
 
         // Re-typing the same name (it trims to the same value) is not a change.
         vm.setRestaurantName('  Tian Yi  ');
@@ -236,12 +329,37 @@ void main() {
       },
     );
 
+    test('a REPLACED signboard photo takes the confirmation back', () async {
+      final _TestAddLandmarkViewModel vm = await _form();
+      await vm.confirmRestaurant();
+      expect(vm.canSubmit, isTrue);
+
+      // "Retake" - a different photo, even of the SAME restaurant. The name
+      // is not what makes this stale, the PHOTO is: the click is what
+      // checked the photo the form was holding.
+      vm.setExtractedRestaurantName('Tian Yi');
+      vm.setCapturedImage(_image(), 'signboard');
+      expect(vm.restaurantConfirmed, isFalse);
+      expect(vm.canSubmit, isFalse);
+      expect(vm.canSubmitReason, contains('Confirm'));
+
+      // Confirming the new photo passes again...
+      expect(await vm.confirmRestaurant(), isNull);
+      expect(vm.canSubmit, isTrue);
+
+      // ...and cancelling the photo ("x") takes it back too - there is no
+      // photo left for the click to have checked.
+      vm.clearCapturedImage();
+      expect(vm.restaurantConfirmed, isFalse);
+      vm.dispose();
+    });
+
     test('finds the saved submission for the same restaurant', () async {
       final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
         ..drafts = <LandmarkDraft>[_savedDraft()];
       final _TestAddLandmarkViewModel vm = await _form(facade: facade);
 
-      vm.confirmRestaurant();
+      await vm.confirmRestaurant();
       final LandmarkDraft? found = await vm.draftForRestaurantMerge();
 
       expect(found?.id, 42);
@@ -264,7 +382,7 @@ void main() {
         ];
       final _TestAddLandmarkViewModel vm = await _form(facade: facade);
 
-      vm.confirmRestaurant();
+      await vm.confirmRestaurant();
 
       expect(await vm.draftForRestaurantMerge(), isNull);
       vm.dispose();
@@ -302,7 +420,7 @@ void main() {
         // The restored confirmation checked the saved name - the edit wants
         // its OWN check (and draft lookup) via Confirm.
         expect(vm.restaurantConfirmed, isFalse);
-        expect(vm.confirmRestaurant(), isNull);
+        expect(await vm.confirmRestaurant(), isNull);
         expect(vm.restaurantConfirmed, isTrue);
         vm.dispose();
       },
@@ -345,7 +463,7 @@ void main() {
       final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
         ..drafts = <LandmarkDraft>[_savedDraft()];
       final _TestAddLandmarkViewModel vm = await _form(facade: facade);
-      vm.confirmRestaurant();
+      await vm.confirmRestaurant();
       final LandmarkDraft saved = (await vm.draftForRestaurantMerge())!;
 
       final List<String> updated = vm.mergeExistingDraft(saved);
@@ -393,7 +511,7 @@ void main() {
       vm.setDayStatus(Weekday.tuesday, DayStatus.open);
       vm.setRangeTime(Weekday.tuesday, 0, true, 8 * 60);
       vm.setRangeTime(Weekday.tuesday, 0, false, 14 * 60);
-      vm.confirmRestaurant();
+      await vm.confirmRestaurant();
       final LandmarkDraft saved = (await vm.draftForRestaurantMerge())!;
 
       vm.mergeExistingDraft(saved);
@@ -411,7 +529,7 @@ void main() {
       final _TestAddLandmarkViewModel vm = await _form(facade: facade);
       // This form already carries the draft's Teh Tarik, without a price.
       vm.addAdditionalFood(_food('Teh Tarik'));
-      vm.confirmRestaurant();
+      await vm.confirmRestaurant();
       final LandmarkDraft saved = (await vm.draftForRestaurantMerge())!;
 
       final List<String> updated = vm.mergeExistingDraft(saved);
@@ -424,6 +542,283 @@ void main() {
       ]);
       expect(vm.additionalFoods.first.price, 2.5);
       expect(updated, <String>['Cendol Jagung', 'Teh Tarik']);
+      vm.dispose();
+    });
+  });
+
+  group('the edited-name check (Confirm against the signboard)', () {
+    /// A form whose signboard capture read "Tian Yi" and whose field now
+    /// holds "Tian Yi Seafood" - the tourist edited Gemini's reading.
+    /// [score] is what Gemini answers about that edit (null = it cannot be
+    /// asked at all).
+    Future<_TestAddLandmarkViewModel> editedNameForm({
+      double? score = 0.96,
+    }) async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+        ..signboardNameScore = score;
+      final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+      vm.setExtractedRestaurantName('Tian Yi');
+      vm.setRestaurantName('Tian Yi Seafood');
+      return vm;
+    }
+
+    test('an UNEDITED signboard reading is never sent to the check', () async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade();
+      final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+      vm.setExtractedRestaurantName('Tian Yi');
+
+      expect(await vm.confirmRestaurant(), isNull);
+
+      // Gemini's own reading needs no second opinion - no call, no wait.
+      expect(vm.restaurantConfirmed, isTrue);
+      expect(facade.nameChecks, isEmpty);
+      vm.dispose();
+    });
+
+    test('an edited name that still matches the signboard confirms', () async {
+      final _TestAddLandmarkViewModel vm = await editedNameForm(score: 0.96);
+
+      expect(await vm.confirmRestaurant(), isNull);
+
+      expect(vm.restaurantConfirmed, isTrue);
+      expect(vm.takeSignboardNameMismatch(), isFalse);
+      // The check saw the signboard photo AND the name the tourist typed.
+      expect(vm.facade.nameChecks, hasLength(1));
+      expect(vm.facade.nameChecks.single.typedName, 'Tian Yi Seafood');
+      expect(vm.facade.nameChecks.single.bytes, isNotEmpty);
+      vm.dispose();
+    });
+
+    test('an edited name that does not match is refused, once', () async {
+      final _TestAddLandmarkViewModel vm = await editedNameForm(score: 0.4);
+
+      expect(await vm.confirmRestaurant(), isNull);
+
+      // Not confirmed, and the View is handed the mismatch to acknowledge.
+      expect(vm.restaurantConfirmed, isFalse);
+      expect(vm.takeSignboardNameMismatch(), isTrue);
+      expect(vm.takeSignboardNameMismatch(), isFalse); // one-shot
+      expect(vm.canSubmit, isFalse);
+      expect(vm.canSubmitReason, contains('Confirm'));
+
+      // "Use the signboard name" puts Gemini's reading back, so the next
+      // click passes without asking the same question again.
+      vm.useSignboardName();
+      expect(vm.restaurantName, 'Tian Yi');
+      expect(vm.hasEditedSignboardName, isFalse);
+      expect(await vm.confirmRestaurant(), isNull);
+      expect(vm.restaurantConfirmed, isTrue);
+      expect(vm.facade.nameChecks, hasLength(1));
+      vm.dispose();
+    });
+
+    test('an unanswerable check fails OPEN - offline never blocks', () async {
+      final _TestAddLandmarkViewModel vm = await editedNameForm(score: null);
+
+      expect(await vm.confirmRestaurant(), isNull);
+
+      expect(vm.restaurantConfirmed, isTrue);
+      expect(vm.takeSignboardNameMismatch(), isFalse);
+      vm.dispose();
+    });
+
+    test(
+      'a STALL photo has no reading to check a typed name against',
+      () async {
+        final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+          ..signboardNameScore = 0.1;
+        final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+        // A stall capture replaces the signboard: no reading belongs to this
+        // form any more, so there is nothing the name could disagree with.
+        vm.setCapturedImage(_image(), 'stall');
+        vm.setRestaurantName('Tian Yi Seafood');
+
+        expect(await vm.confirmRestaurant(), isNull);
+
+        expect(vm.restaurantConfirmed, isTrue);
+        expect(facade.nameChecks, isEmpty);
+        vm.dispose();
+      },
+    );
+  });
+
+  group('the near-duplicate place check (Confirm)', () {
+    SimilarPlaceCandidate candidate({
+      int id = 7,
+      String name = 'Ali and Abu',
+    }) => SimilarPlaceCandidate(
+      id: id,
+      name: name,
+      isRestaurant: false,
+      distanceMetres: 30,
+      imageUrl: 'https://cdn.example.com/stall.jpg',
+    );
+
+    /// A form whose Confirm finds ONE similar nearby place, whose photo
+    /// comparison [matches], and where the place's dishes are [existing].
+    Future<_TestAddLandmarkViewModel> formWithCandidate({
+      bool matches = true,
+      List<String> existing = const <String>[],
+    }) async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+        ..similarPlaces = <SimilarPlaceCandidate>[candidate()]
+        ..samePlacePhotoIds = matches ? <int>{7} : <int>{}
+        ..existingDishNames = existing;
+      final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+      // The search only runs while the form is watched (see
+      // `AddLandmarkViewModel._findSimilarPlace`).
+      vm.addListener(() {});
+      return vm;
+    }
+
+    test('nothing similar nearby confirms exactly as before', () async {
+      final _TestAddLandmarkViewModel vm = await _form();
+      vm.addListener(() {});
+
+      expect(await vm.confirmRestaurant(), isNull);
+
+      expect(vm.restaurantConfirmed, isTrue);
+      expect(vm.similarPlacePrompt, isNull);
+      // The search ran with the form's own name.
+      expect(vm.facade.similarPlaceSearches, <String>['Tian Yi']);
+      vm.dispose();
+    });
+
+    test('a matching photo asks the question INSTEAD of confirming', () async {
+      final _TestAddLandmarkViewModel vm = await formWithCandidate();
+
+      expect(await vm.confirmRestaurant(), isNull);
+
+      // Not confirmed: the tourist answers first.
+      expect(vm.restaurantConfirmed, isFalse);
+      expect(vm.similarPlacePrompt?.name, 'Ali and Abu');
+      expect(vm.facade.photoMatches, <int>[7]);
+      vm.dispose();
+    });
+
+    test('a candidate whose photo does NOT match never asks', () async {
+      final _TestAddLandmarkViewModel vm = await formWithCandidate(
+        matches: false,
+      );
+
+      expect(await vm.confirmRestaurant(), isNull);
+
+      expect(vm.similarPlacePrompt, isNull);
+      expect(vm.restaurantConfirmed, isTrue);
+      vm.dispose();
+    });
+
+    test('"no" keeps this form as its own new landmark', () async {
+      final _TestAddLandmarkViewModel vm = await formWithCandidate();
+      await vm.confirmRestaurant();
+
+      vm.rejectSimilarPlace();
+
+      expect(vm.restaurantConfirmed, isTrue);
+      expect(vm.similarPlacePrompt, isNull);
+      expect(vm.restaurantName, 'Tian Yi');
+      vm.dispose();
+    });
+
+    test('"yes" adopts the place name, and SOME dishes there go', () async {
+      final _TestAddLandmarkViewModel vm = await formWithCandidate(
+        existing: <String>['Teh Tarik'],
+      );
+      vm.addAdditionalFood(_food('Teh Tarik'));
+      await vm.confirmRestaurant();
+
+      await vm.acceptSimilarPlace();
+
+      // The stored name wins - the submit path resolves the place by name.
+      expect(vm.restaurantName, 'Ali and Abu');
+      expect(vm.restaurantConfirmed, isTrue);
+      expect(vm.existingDishNames, <String>['Teh Tarik']);
+      expect(vm.allDishesExist, isFalse);
+
+      // Only the duplicate goes; the form keeps its own primary dish.
+      expect(vm.dropExistingDishes(), <String>['Teh Tarik']);
+      expect(vm.additionalFoods, isEmpty);
+      expect(vm.recognizedFood?.name, 'Cendol');
+      vm.dispose();
+    });
+
+    test('"yes" with EVERY dish there ends as nothing-to-add', () async {
+      final _TestAddLandmarkViewModel vm = await formWithCandidate(
+        existing: <String>['Cendol'],
+      );
+      await vm.confirmRestaurant();
+      await vm.acceptSimilarPlace();
+
+      expect(vm.allDishesExist, isTrue);
+
+      await vm.finishAsAlreadyThere();
+
+      // Nothing is left to submit, and no confirmation is outstanding.
+      expect(vm.restaurantConfirmed, isFalse);
+      expect(vm.existingDishNames, isEmpty);
+      vm.dispose();
+    });
+  });
+
+  group('the existing-details question (same-place merge)', () {
+    PlaceOverwriteReport report() => const PlaceOverwriteReport(
+      id: 42,
+      name: 'Tian Yi',
+      isRestaurant: false,
+      fields: <String>['phone', 'Monday hours'],
+    );
+
+    test('a same-place record with details asks before replacing', () async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+        ..overwriteReport = report();
+      final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+      vm.setRestaurantPhone('012-345 6789');
+
+      expect(await vm.checkDetailsOverwrite(), isTrue);
+      expect(vm.overwritePrompt?.name, 'Tian Yi');
+      expect(vm.overwritePrompt?.fieldsText, 'phone and Monday hours');
+
+      // "Keep the existing details" - remembered, so the submit writes none
+      // of it.
+      vm.resolveOverwrite(false);
+      expect(vm.overwritePrompt, isNull);
+      expect(vm.overwriteExistingDetails, isFalse);
+      vm.dispose();
+    });
+
+    test('nothing entered, and nothing to replace, never asks', () async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade();
+      final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+
+      // No contact details and no asserted hours: nothing a merge could
+      // overwrite, so no read and no question.
+      expect(await vm.checkDetailsOverwrite(), isFalse);
+      expect(facade.overwriteChecks, isEmpty);
+
+      // Something entered, but the place stores nothing to replace.
+      vm.setRestaurantPhone('012-345 6789');
+      expect(await vm.checkDetailsOverwrite(), isFalse);
+      expect(facade.overwriteChecks, <String>['Tian Yi']);
+      expect(vm.overwritePrompt, isNull);
+      vm.dispose();
+    });
+
+    test('answering once is enough - editing a detail asks again', () async {
+      final _FakeLandmarkLogicFacade facade = _FakeLandmarkLogicFacade()
+        ..overwriteReport = report();
+      final _TestAddLandmarkViewModel vm = await _form(facade: facade);
+      vm.setRestaurantPhone('012-345 6789');
+
+      await vm.checkDetailsOverwrite();
+      vm.resolveOverwrite(true);
+      expect(vm.overwriteExistingDetails, isTrue);
+
+      // Same values: the answer stands, no second question.
+      expect(await vm.checkDetailsOverwrite(), isFalse);
+
+      // A DIFFERENT detail is a different decision.
+      vm.setRestaurantPhone('019-000 0000');
+      expect(await vm.checkDetailsOverwrite(), isTrue);
       vm.dispose();
     });
   });
