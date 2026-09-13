@@ -153,6 +153,19 @@ class LoginRegisterViewModel extends BaseViewModel {
       _googleSignInComplete = true;
       _needsProfileSetup = await touristLogic.needsProfileSetup();
     });
+    // The attempt is over, whatever came of it: clear the in-flight marker so the
+    // View stops re-running this on EVERY resume.
+    //
+    // Left set, an abandoned flow - the tourist taps "Continue with Google",
+    // lands in the browser, then comes back without signing in - re-polls for
+    // [googleSessionGracePeriod] on every app switch and re-shows the failure
+    // each time, for the rest of the session. Starting a new flow is the
+    // button's job, not the lifecycle's.
+    //
+    // Nothing is lost by clearing it: a session that genuinely did arrive is
+    // still picked up by `onInit`'s session check on the next cold start.
+    _googleFlowStarted = false;
+    safeNotifyListeners();
   }
 
   /// Resolves the tourist created by the Google sign-in, waiting (bounded) for
