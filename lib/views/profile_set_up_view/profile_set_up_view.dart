@@ -276,40 +276,50 @@ class _AccountBar extends StatelessWidget {
         borderRadius: AppRadius.cardRadius,
         border: Border.all(color: AppColors.cardBorderWarm),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const Icon(
-            Icons.account_circle_outlined,
-            color: AppColors.accentBrown,
-            size: AppSizes.iconMedium,
+          Row(
+            children: <Widget>[
+              const Icon(
+                Icons.account_circle_outlined,
+                color: AppColors.accentBrown,
+                size: AppSizes.iconMedium,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Signed in as',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textDisabled,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      email.isEmpty ? 'Signed in' : email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.accentBrown,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Signed in as',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.textDisabled,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  email.isEmpty ? 'Signed in' : email,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.accentBrown,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+          // The switch link gets its own line: sharing the row cropped the
+          // email to make space for it, and half the address ellipsised away.
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: onSwitchAccount,
+              child: const Text('Not you? Switch account'),
             ),
-          ),
-          TextButton(
-            onPressed: onSwitchAccount,
-            child: const Text('Not you? Switch account'),
           ),
         ],
       ),

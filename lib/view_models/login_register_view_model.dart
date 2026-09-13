@@ -163,8 +163,39 @@ class LoginRegisterViewModel extends BaseViewModel {
     // button's job, not the lifecycle's.
     //
     // Nothing is lost by clearing it: a session that genuinely did arrive is
-    // still picked up by `onInit`'s session check on the next cold start.
+    // still picked up by `onInit`'s session check on the next cold start, and by
+    // [refreshSession] on the next resume.
     _googleFlowStarted = false;
+    safeNotifyListeners();
+  }
+
+  /// Re-reads the session for a resume that did NOT come from our own Google
+  /// flow, so the screen can finish a sign-in nobody was watching.
+  ///
+  /// [completeGoogleSignIn] only runs on resume while a flow is in flight. That
+  /// leaves one gap: when the OAuth deep link lands late (after the grace
+  /// period expired, or because the tourist switched back to the app before the
+  /// browser finished), the session appears with no listener, and they sit on
+  /// the sign-in form while already signed in.
+  ///
+  /// A plain session read - no polling, no browser launch - so it is cheap
+  /// enough for every resume, and it safely does nothing when there is no
+  /// session to find.
+  Future<void> refreshSession() async {
+    if (_signedIn || _googleFlowStarted) return;
+
+    AuthSession? session;
+    try {
+      session = await touristLogic.getCurrentSession();
+    } catch (_) {
+      // Unreachable / misconfigured backend is treated as "signed out", exactly
+      // as the entry check does - never trap the tourist on a blank screen.
+      return;
+    }
+    if (session == null) return;
+
+    _signedIn = true;
+    _needsProfileSetup = await touristLogic.needsProfileSetup();
     safeNotifyListeners();
   }
 

@@ -78,13 +78,17 @@ class _LoginRegisterViewState extends State<LoginRegisterView>
   /// until the OAuth deep link (`com.rasaroute.app://login-callback`) brings
   /// it back. On resume, finish the flow - Supabase already completed the
   /// exchange, so this resolves the session and provisions the tourist row.
+  ///
+  /// With no flow in flight, a plain session read is enough: that is what picks
+  /// up a deep link which landed late, without ever re-opening the browser.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        _viewModel.googleFlowStarted &&
-        !_viewModel.googleSignInComplete) {
+    if (state != AppLifecycleState.resumed) return;
+    if (_viewModel.googleFlowStarted && !_viewModel.googleSignInComplete) {
       _completeGoogleSignIn();
+      return;
     }
+    _viewModel.refreshSession();
   }
 
   /// Option B: the login "Send OTP" button no longer sends a code itself -
