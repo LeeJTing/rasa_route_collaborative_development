@@ -458,14 +458,16 @@ void _showLaunchFailure(BuildContext context, String message) {
 }
 
 /// One dish attached to the landmark - the SAME row the catalogue restaurant
-/// detail's menu shows (square photo, dish name, a two-line description when
-/// one was recorded, the food category, price in rust), and, like those rows,
-/// the PHOTO opens full-screen when tapped - with the "User submitted photo"
-/// note, because a landmark's dish photo is the tourist's own capture (the
-/// same treatment the quick-mode landmark rows give it). The NAME
-/// shown is the VARIANT the tourist actually photographed / typed ("Cendol
-/// Jagung") when one was recorded - the landmark lists what was captured -
-/// falling back to the dictionary dish (the `local_food` row it links to).
+/// detail's menu shows (square photo, dish name, the whole description when
+/// one was recorded, the food category, price in rust). Both rows grew when
+/// the description stopped being truncated, so the same sizes and the same
+/// top-aligned layout are used on both. Like those rows, the PHOTO opens
+/// full-screen when tapped - with the "User submitted photo" note, because a
+/// landmark's dish photo is the tourist's own capture (the same treatment the
+/// quick-mode landmark rows give it). The NAME shown is the VARIANT the
+/// tourist actually photographed / typed ("Cendol Jagung") when one was
+/// recorded - the landmark lists what was captured - falling back to the
+/// dictionary dish (the `local_food` row it links to).
 /// Origin, cooking style, cultural background and meal type are not shown
 /// here.
 class _DishCard extends StatelessWidget {
@@ -488,6 +490,7 @@ class _DishCard extends StatelessWidget {
         borderRadius: AppRadius.cardRadius,
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           InkWell(
             onTap: item.imageUrl?.trim().isNotEmpty == true
@@ -499,7 +502,7 @@ class _DishCard extends StatelessWidget {
                 : null,
             borderRadius: AppRadius.cardRadius,
             child: SizedBox.square(
-              dimension: AppSizes.pairingImage,
+              dimension: AppSizes.menuItemImage,
               child: AppImage(
                 source: item.imageUrl,
                 borderRadius: AppRadius.cardRadius,
@@ -518,8 +521,6 @@ class _DishCard extends StatelessWidget {
                   const SizedBox(height: AppSpacing.xs),
                   Text(
                     description,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppColors.textSecondary,
                     ),
