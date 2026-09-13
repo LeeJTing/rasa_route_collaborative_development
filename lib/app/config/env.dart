@@ -64,6 +64,7 @@ abstract final class Env {
   static const String _keyGeminiThinkingBudget = 'GEMINI_THINKING_BUDGET';
   static const String _keyOsmBaseUrl = 'OSM_BASE_URL';
   static const String _keyOsmTileUrl = 'OSM_TILE_URL';
+  static const String _keyOsmNominatimUrl = 'OSM_NOMINATIM_URL';
   static const String _keyApiTimeoutSeconds = 'API_TIMEOUT_SECONDS';
   static const String _keyAppEnv = 'APP_ENV';
   static const String _keyVerboseLogging = 'ENABLE_VERBOSE_LOGGING';
@@ -90,6 +91,7 @@ abstract final class Env {
       ),
       _keyOsmBaseUrl: String.fromEnvironment('OSM_BASE_URL'),
       _keyOsmTileUrl: String.fromEnvironment('OSM_TILE_URL'),
+      _keyOsmNominatimUrl: String.fromEnvironment('OSM_NOMINATIM_URL'),
       _keyApiTimeoutSeconds: String.fromEnvironment('API_TIMEOUT_SECONDS'),
       _keyAppEnv: String.fromEnvironment('APP_ENV'),
       _keyVerboseLogging: String.fromEnvironment('ENABLE_VERBOSE_LOGGING'),
@@ -165,6 +167,14 @@ abstract final class Env {
   static String get osmTileUrl => _read(
     _keyOsmTileUrl,
     fallback: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  );
+
+  /// The OpenStreetMap geocoding service (Nominatim) behind the Add-Landmark
+  /// address field's suggestions and the map pin's composed address. Public
+  /// service - the repository throttles to its one-request-per-second policy.
+  static String get osmNominatimUrl => _read(
+    _keyOsmNominatimUrl,
+    fallback: 'https://nominatim.openstreetmap.org',
   );
 
   static Duration get apiTimeout =>

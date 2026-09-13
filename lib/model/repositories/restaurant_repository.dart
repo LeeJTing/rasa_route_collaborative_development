@@ -675,11 +675,26 @@ class RestaurantRepository {
     invalidate();
   }
 
-  /// 3 address: rewrites the restaurant's address to the reported value.
-  Future<void> updateRestaurantAddress(int restaurantId, String address) async {
+  /// 3 address: rewrites the restaurant's address to the reported value, and -
+  /// when the claim carried the report page's pin - the exact spot the tourist
+  /// pointed at. The address text is usually the OpenStreetMap wording for
+  /// that spot, which is approximate; the pin is what is exact, so it is
+  /// applied too (null keeps the restaurant's own coordinates).
+  Future<void> updateRestaurantAddress(
+    int restaurantId,
+    String address, {
+    double? latitude,
+    double? longitude,
+  }) async {
     await api.updateRow(
       APIManager.tableRestaurant,
-      <String, Object?>{'address': address},
+      <String, Object?>{
+        'address': address,
+        if (latitude != null && longitude != null) ...<String, Object?>{
+          'latitude': latitude,
+          'longitude': longitude,
+        },
+      },
       eq: <String, Object?>{'restaurant_id': restaurantId},
     );
     invalidate();

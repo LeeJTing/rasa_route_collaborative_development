@@ -1,7 +1,10 @@
+import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/report_category.dart';
 import '../../domain_model/report_claim.dart';
 import '../../domain_model/report_outcome.dart';
 import '../../domain_model/opening_hour.dart';
+import '../../domain_model/tourist_location.dart';
+import 'landmark_submission_logic.dart';
 import 'report_moderation_logic.dart';
 import 'report_moderation_rules.dart';
 import 'opening_hours_logic.dart';
@@ -55,6 +58,47 @@ class ReportLogicFacade {
 
   String? addressError(String value, {bool required = false}) =>
       ReportModerationRules.addressError(value, required: required);
+
+  /// The amber "close to the cap" nudge for the report page's address field
+  /// (141-149), in the Add-Landmark form's own words (see
+  /// `ReportModerationRules.addressLengthWarning`).
+  String? addressLengthWarning(String value) =>
+      ReportModerationRules.addressLengthWarning(value);
+
+  /// The address cap - the Add-Landmark form's 150 - so the report page's
+  /// field stops accepting typing exactly where the form's field does.
+  int get maxAddressLength => ReportModerationRules.maximumAddressLength;
+
+  /// Live address suggestions for the report page's address field - the same
+  /// OpenStreetMap lookup the Add-Landmark form uses, measured from [around]
+  /// and sorted nearest first. `null` = the lookup failed; `[]` = nothing
+  /// matched.
+  Future<List<AddressSuggestion>?> searchAddresses({
+    required String query,
+    required TouristLocation around,
+  }) => moderation.searchAddresses(query: query, around: around);
+
+  /// The composed address of a point ([location]) - what fills the address
+  /// field when the report page's pin moves. Null when OpenStreetMap has
+  /// nothing usable there. Never throws.
+  Future<String?> reverseGeocodeAddress(TouristLocation location) =>
+      moderation.reverseGeocodeAddress(location);
+
+  /// How a suggestion's distance is labelled ("350 m", "1.2 km") - the same
+  /// wording the Add-Landmark form uses.
+  String formatDistance(double metres) => moderation.formatDistance(metres);
+
+  /// Whether the reporter's own fix is close enough to the spot they are
+  /// reporting about for the claim to count (see
+  /// `ReportModerationRules.isWithinOnsiteRange`). The ViewModel feeds it the
+  /// raw GPS fix; the rule - and the radius - stay in the logic layer.
+  bool isWithinOnsiteRange(TouristLocation reporter, TouristLocation target) =>
+      ReportModerationRules.isWithinOnsiteRange(reporter, target);
+
+  /// The shortest typed query that triggers address suggestions - the same
+  /// two characters the Add-Landmark form requires.
+  int get minAddressSearchLength =>
+      LandmarkSubmissionLogic.minAddressSearchLength;
 
   String? closureError(
     String value,

@@ -62,7 +62,11 @@ class LocationPickerField extends StatelessWidget {
   /// The pin's correction allowance (A9.1), in metres - the radius drawn
   /// around the fix. Comes from the ViewModel so the circle and the enforced
   /// rule can never disagree; the default matches the rule's own default.
-  final double rangeMetres;
+  ///
+  /// Null when the caller has NO allowance to draw (the report page's
+  /// correction pin: the app's own spot may be wrong by more than any sane
+  /// range), which simply leaves the circle off the map.
+  final double? rangeMetres;
 
   @override
   Widget build(BuildContext context) {
@@ -96,19 +100,21 @@ class LocationPickerField extends StatelessWidget {
                         urlTemplate: Env.osmTileUrl,
                         userAgentPackageName: 'com.rasaroute.app',
                       ),
-                      // The pin allowance, drawn around the captured spot.
-                      CircleLayer(
-                        circles: <CircleMarker>[
-                          CircleMarker(
-                            point: LatLng(center.latitude, center.longitude),
-                            radius: rangeMetres,
-                            useRadiusInMeter: true,
-                            color: AppColors.primary.withValues(alpha: 0.15),
-                            borderColor: AppColors.primary,
-                            borderStrokeWidth: 1,
-                          ),
-                        ],
-                      ),
+                      // The pin allowance, drawn around the captured spot -
+                      // absent on the pages that have no such rule.
+                      if (rangeMetres != null)
+                        CircleLayer(
+                          circles: <CircleMarker>[
+                            CircleMarker(
+                              point: LatLng(center.latitude, center.longitude),
+                              radius: rangeMetres!,
+                              useRadiusInMeter: true,
+                              color: AppColors.primary.withValues(alpha: 0.15),
+                              borderColor: AppColors.primary,
+                              borderStrokeWidth: 1,
+                            ),
+                          ],
+                        ),
                       // The captured spot itself, so "recover" has a visible
                       // destination once the pin has been moved away.
                       if (moved)
