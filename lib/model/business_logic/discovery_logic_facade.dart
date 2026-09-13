@@ -356,9 +356,25 @@ class DiscoveryLogicFacade {
     int? localFoodId,
   }) => mapExploration.pinDetail(pin, filter: filter, localFoodId: localFoodId);
 
+  /// REQ102_41 - whether a badge stands for this place, on the same grid
+  /// Postgres grouped by.
+  bool clusterHolds(MapCluster cluster, MapPin pin, double zoom) =>
+      MapExplorationLogic.clusterHolds(cluster, pin, zoom);
+
   /// A8 - one keyword against locations and the local-food catalogue.
   Future<ExplorationSearchResults> searchExploration(String keyword) =>
       mapExploration.search(keyword);
+
+  /// REQ102_104 - the keywords this device searched for, most recent first.
+  /// Local to the device; nothing here reaches Supabase.
+  List<String> recentSearches() => mapExploration.recentSearches();
+
+  /// Records a keyword and hands back the history that results.
+  Future<List<String>> rememberSearch(String keyword) =>
+      mapExploration.rememberSearch(keyword);
+
+  /// A15-1 - forgets every remembered keyword.
+  Future<void> clearSearchHistory() => mapExploration.clearSearchHistory();
 
   /// REQ102_6 - request GPS permission (A1 / A2).
   Future<bool> ensureLocationPermission() =>

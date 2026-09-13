@@ -18,6 +18,7 @@ import 'map_repository.dart';
 import 'recognition_repository.dart';
 import 'report_repository.dart';
 import 'restaurant_repository.dart';
+import 'search_history_repository.dart';
 import 'submitted_landmark_repository.dart';
 import 'swipe_repository.dart';
 import 'tourist_profile_repository.dart';
@@ -61,6 +62,10 @@ class DiscoveryRepositoryFacade {
   /// REQ106_1 - the camera permission that gates photo capture on
   /// `FoodRecognitionView`.
   final CameraRepository camera = CameraRepository();
+
+  /// REQ102_104 - the recent keywords, on this device only. The one
+  /// repository here that never reaches `APIManager`.
+  final SearchHistoryRepository searchHistory = SearchHistoryRepository();
 
   /// 3-step origin verification for a dish name (Option C gate) - three
   /// separately-framed Gemini questions, fail-closed.
