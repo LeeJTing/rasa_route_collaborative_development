@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,6 +13,7 @@ import '../domain_model/local_food.dart';
 import '../domain_model/opening_hour.dart';
 import '../domain_model/place_overwrite_report.dart';
 import '../domain_model/similar_place_candidate.dart';
+import '../domain_model/stored_place_details.dart';
 import '../domain_model/submitted_landmark.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
@@ -295,11 +297,39 @@ class AddLandmarkViewModel extends BaseViewModel
   bool get addressFromMap => _addressFromMap;
 
   /// Bumped by every PROGRAMMATIC address change (map fill, suggestion pick,
-  /// "use the map pin's address"). `AddLandmarkView` watches this to force
-  /// its text field to show the new text - the same pattern as the
-  /// signboard name's extraction version.
+  /// "use the map pin's address", the Confirm prefill). `AddLandmarkView`
+  /// watches this to force its text field to show the new text - the same
+  /// pattern as the signboard name's extraction version.
   int _addressVersion = 0;
   int get addressVersion => _addressVersion;
+
+  /// Bumped when the APP ITSELF fills the phone/website field - today only the
+  /// Confirm prefill ([fillRestaurantPhone] / [fillRestaurantWebsite]). Typing
+  /// does not bump them, so `AddLandmarkView` can force the visible TextField
+  /// to show the value: the controllers are built ONCE in the View's
+  /// initState, and a stored phone/website written only to this form's state
+  /// left the field looking empty (user report, 2026-09-14: "the existing
+  /// details in the db is still not written in the input field").
+  int _phoneVersion = 0;
+  int get phoneVersion => _phoneVersion;
+  int _websiteVersion = 0;
+  int get websiteVersion => _websiteVersion;
+
+  /// Fills the phone from the place already on record - [setRestaurantPhone]
+  /// plus the version bump that makes the FIELD show it (see [phoneVersion]).
+  void fillRestaurantPhone(String value) {
+    setRestaurantPhone(value);
+    _phoneVersion++;
+    safeNotifyListeners();
+  }
+
+  /// Same as [fillRestaurantPhone], for the website field (see
+  /// [websiteVersion]).
+  void fillRestaurantWebsite(String value) {
+    setRestaurantWebsite(value);
+    _websiteVersion++;
+    safeNotifyListeners();
+  }
 
   /// The last composed address the pinned spot produced - offered by
   /// [canApplyMapAddress] and applied by [applyMapAddressFromPin].
@@ -749,6 +779,10 @@ class AddLandmarkViewModel extends BaseViewModel
   /// unanswered - and a merge then keeps the stored record (the safe way).
   bool? _overwriteExistingDetails;
 
+  /// The acknowledgement of the last answer (see [resolveOverwrite] /
+  /// [takeOverwriteAck]).
+  String? _overwriteAck;
+
   /// See [_overwriteExistingDetails].
   bool? get overwriteExistingDetails => _overwriteExistingDetails;
 
@@ -812,12 +846,34 @@ class AddLandmarkViewModel extends BaseViewModel
   }
 
   /// The tourist's answer to [overwritePrompt].
+  ///
+  /// The answer is never silent: the actual replacement happens at SUBMIT
+  /// (see [submitLandmark] / `LandmarkSubmissionLogic.submitLandmark`), so
+  /// [resolveOverwrite] leaves [takeOverwriteAck] for the View to say what the
+  /// choice means (user report, 2026-09-14: "after i click replace, nothing
+  /// changed").
   void resolveOverwrite(bool overwrite) {
     if (_overwritePrompt == null) return;
+    final PlaceOverwriteReport report = _overwritePrompt!;
     _overwritePrompt = null;
     _overwriteExistingDetails = overwrite;
     _overwriteAnsweredFor = _detailsSignature;
+    _overwriteAck = overwrite
+        ? 'When you submit, what you entered will replace the '
+              '${report.fieldsText} stored for "${report.name}". If you do '
+              'not submit, the record stays as it is.'
+        : '"${report.name}" keeps its stored ${report.fieldsText} - what you '
+              'entered is not written over it.';
     safeNotifyListeners();
+  }
+
+  /// The last [resolveOverwrite] answer as one sentence, consumed by the first
+  /// caller (one-shot, like the form's other notices - a rebuild cannot show
+  /// it twice). Null when no answer is outstanding.
+  String? takeOverwriteAck() {
+    final String? ack = _overwriteAck;
+    _overwriteAck = null;
+    return ack;
   }
 
   /// The values the details question is about, as one comparable string - an
@@ -1390,12 +1446,19 @@ class AddLandmarkViewModel extends BaseViewModel
   /// while the field is still focused (the focus-guarded sync alone would
   /// skip it, leaving the tourist's typed name on screen).
   ///
+  /// A SHOUTING reading ("RESTORAN ALI & ABU") is stored in readable casing
+  /// ("Restoran Ali & Abu") - Gemini transcribes a sign as lettered, so the
+  /// same shop otherwise came back as "Restoran X" or "RESTORAN X" depending
+  /// on its signboard, which made one place look like two (user report
+  /// 2026-09-14). Identity is unaffected (name lookups ignore case); see
+  /// [LandmarkLogicFacade.normaliseNameCasing] for the exact rule.
+  ///
   /// The reading is kept as [_signboardDetectedName]: an EDIT of it is what
   /// [confirmRestaurant] re-checks against the photo.
   void setExtractedRestaurantName(String? name) {
     if (name != null && name.trim().isNotEmpty) {
       final String next = _clampTo(
-        name.trim(),
+        landmarkLogic.normaliseNameCasing(name.trim()),
         landmarkLogic.maxRestaurantNameLength,
       );
       // A NEW signboard name takes the restaurant confirmation back - that
@@ -1495,6 +1558,11 @@ class AddLandmarkViewModel extends BaseViewModel
     }
     _restaurantConfirmed = true;
     safeNotifyListeners();
+    // The name may already be on record: pull that place's own details into
+    // the form so the tourist reviews and corrects what is stored instead of
+    // retyping it - and the submit-time merge then has nothing to ask about
+    // (see [_prefillFromExistingPlace]).
+    await _prefillFromExistingPlace();
     return null;
   }
 
@@ -1565,7 +1633,7 @@ class AddLandmarkViewModel extends BaseViewModel
     }
   }
 
-  /// The tourist answered \"yes, that is the same place\". The form adopts
+  /// The tourist answered "yes, that is the same place". The form adopts
   /// that place's NAME - the whole submit path resolves the place by name
   /// (A13's same-name + 100 m lookup, the per-field hours/contact merge), so
   /// adopting it is what makes this submission join that place instead of
@@ -1595,15 +1663,109 @@ class AddLandmarkViewModel extends BaseViewModel
         dishes.isNotEmpty && _existingDishNames.length == dishes.length;
     _restaurantConfirmed = true;
     safeNotifyListeners();
+    // The adopted name is the place already on record - fill the form with
+    // what it stores (see [_prefillFromExistingPlace]).
+    await _prefillFromExistingPlace();
   }
 
-  /// The tourist answered \"no, it is a different place\": nothing is adopted
+  /// The tourist answered "no, it is a different place": nothing is adopted
   /// and the form carries on as before - the confirmation is taken, so the
-  /// click simply continues (the draft-combine offer included).
-  void rejectSimilarPlace() {
+  /// click simply continues (the draft-combine offer included). The form's own
+  /// name can still match a place on record, so the same details fill runs
+  /// (see [_prefillFromExistingPlace]) - the state change above stays
+  /// synchronous, only the fill follows.
+  Future<void> rejectSimilarPlace() async {
     if (_similarPlacePrompt == null) return;
     _similarPlacePrompt = null;
     _restaurantConfirmed = true;
+    safeNotifyListeners();
+    await _prefillFromExistingPlace();
+  }
+
+  /// Fills this form with what the place on record stores for its name - the
+  /// same fill Confirm runs (see [_prefillFromExistingPlace]), exposed for a
+  /// form resumed ALREADY CONFIRMED: its Confirm button is gone (the row
+  /// reports the confirmed state instead), so this is the only way the stored
+  /// phone, website, address and hours can reach it (user request,
+  /// 2026-09-14: "phone and websites shall also be auto filled").
+  ///
+  /// Safe to call on any form: it fills only the fields still EMPTY, and a
+  /// name that matches nothing on record leaves everything as it is.
+  Future<void> fillDetailsFromPlaceOnRecord() => _prefillFromExistingPlace();
+
+  /// Fills the form with the details the place ALREADY on record stores for
+  /// the confirmed name - run right after a successful confirmation (user
+  /// request 2026-09-14), and by [fillDetailsFromPlaceOnRecord] on a resumed
+  /// confirmed form, so a re-submission reviews and corrects the phone,
+  /// website, address and week that are on file instead of retyping them.
+  ///
+  /// Only EMPTY fields are filled: anything the tourist typed themselves
+  /// stays theirs. The adopted NAME is the record's own spelling (the lookup
+  /// matches ignoring case and punctuation, so this is a spelling alignment,
+  /// never a rename - a shouted ALL-CAPS row reads back in readable casing
+  /// through [setExtractedRestaurantName]) - and it does NOT take the
+  /// confirmation back, because our own fill is not the tourist editing over
+  /// the signboard reading.
+  ///
+  /// Best-effort, like the other form lookups: no location fix, no matching
+  /// place, or an unreadable read leaves the form exactly as it was - and,
+  /// like the address search and the near-duplicate check, it only asks the
+  /// network while the form is actually watched.
+  Future<void> _prefillFromExistingPlace() async {
+    final String name = _restaurantName.trim();
+    if (name.isEmpty || !hasListeners) return;
+    final TouristLocation location = _adjustedLocation.isKnown
+        ? _adjustedLocation
+        : baseLocation;
+    if (!location.isKnown) return;
+    StoredPlaceDetails? stored;
+    try {
+      stored = await landmarkLogic.storedPlaceDetails(
+        restaurantName: name,
+        latitude: location.latitude,
+        longitude: location.longitude,
+      );
+    } catch (_) {
+      stored = null;
+    }
+    if (stored == null) return;
+    final bool wasConfirmed = _restaurantConfirmed;
+    if (stored.name.trim().isNotEmpty &&
+        stored.name.trim() != _restaurantName) {
+      setExtractedRestaurantName(stored.name);
+    }
+    if (_phone.trim().isEmpty && stored.phone.isNotEmpty) {
+      // Through the fill* setters, so the FIELD shows it - not just this
+      // form's state (the View's text controllers are built once, long
+      // before this fill runs).
+      fillRestaurantPhone(stored.phone);
+    }
+    if (_website.trim().isEmpty && stored.website.isNotEmpty) {
+      fillRestaurantWebsite(stored.website);
+    }
+    if (_address.trim().isEmpty && stored.address.isNotEmpty) {
+      setRestaurantAddress(stored.address);
+      // The same force-sync the map fills use: the field must SHOW it.
+      _addressVersion++;
+    }
+    // A fresh form's week is seven placeholder "Unknown" rows, so "empty"
+    // means the tourist has not given a day any status yet - their own
+    // schedule, once touched, is never overwritten.
+    final bool hasOwnHours = _operatingHours.values.any(
+      (List<OpeningHour> rows) =>
+          rows.any((OpeningHour hour) => hour.status != DayStatus.unknown),
+    );
+    if (!hasOwnHours && stored.openingHours.isNotEmpty) {
+      final Map<Weekday, List<OpeningHour>> byDay =
+          <Weekday, List<OpeningHour>>{};
+      for (final OpeningHour hour in stored.openingHours) {
+        (byDay[hour.day] ??= <OpeningHour>[]).add(hour);
+      }
+      _operatingHours = byDay;
+    }
+    // Prefilling is not an edit: a name change above must not take the
+    // confirmation that was just given for this very place.
+    if (wasConfirmed) _restaurantConfirmed = true;
     safeNotifyListeners();
   }
 
@@ -1617,11 +1779,19 @@ class AddLandmarkViewModel extends BaseViewModel
   List<String> dropExistingDishes() {
     final List<String> existing = _existingDishNames;
     if (existing.isEmpty) return const <String>[];
+    // Compared case-insensitively (and trimmed): the entry carries the
+    // tourist's own spelling while the name the place lists may come from the
+    // signboard, and the SAME dish must never be kept just because the two
+    // spell it in a different case (user request 2026-09-14 - every such check
+    // folds case first).
+    final Set<String> keys = <String>{
+      for (final String name in existing) name.trim().toLowerCase(),
+    };
     final List<String> removed = <String>[];
     for (final LandmarkFoodEntry entry in List<LandmarkFoodEntry>.of(
       _additionalFoods,
     )) {
-      if (!existing.contains(entry.food.name)) continue;
+      if (!keys.contains(entry.food.name.trim().toLowerCase())) continue;
       removed.add(entry.food.name);
       removeAdditionalFood(entry.entryId);
     }
@@ -2956,6 +3126,10 @@ class AddLandmarkViewModel extends BaseViewModel
     _submitError = null;
     safeNotifyListeners();
 
+    // Names the step a failure happened in - the tourist only ever sees
+    // user-safe copy (see [_submitFailureMessage]), so the console log in the
+    // catch below carries the real cause.
+    String stage = 'checking the website';
     try {
       // The optional website field gets a STRICT reachability check (HTTP
       // 200-399 within 5s) before anything is uploaded/saved. Best-effort
@@ -2974,6 +3148,7 @@ class AddLandmarkViewModel extends BaseViewModel
       // The signed-in tourist - null when nobody is signed in (the entry
       // gate routes to sign-in first, so a signed-in tourist is expected
       // here).
+      stage = 'reading the signed-in tourist';
       final String? touristId = await landmarkLogic.currentTouristId();
       if (touristId == null || touristId.isEmpty) {
         throw StateError(_signInRequiredMessage);
@@ -2983,6 +3158,7 @@ class AddLandmarkViewModel extends BaseViewModel
       // on the `submitted_landmark` row (`image_url` / `image_id` /
       // `image_category`), same bucket as the food photos. A photo carried
       // over from a resumed draft is reused, not re-uploaded.
+      stage = 'uploading the place photo';
       final ({String id, String url})? landmarkPhoto = await _photoFor(
         _capturedImage,
         _capturedImageRef,
@@ -2992,6 +3168,7 @@ class AddLandmarkViewModel extends BaseViewModel
       // object name + public URL are what `landmark_item.image_id` /
       // `landmark_item.image_url` store. A food without a photo stays null
       // in those columns.
+      stage = 'uploading the dish photos';
       final ({String id, String url})? primaryPhoto = await _photoFor(
         _recognizedFoodImage,
         _recognizedFoodImageRef,
@@ -3007,6 +3184,7 @@ class AddLandmarkViewModel extends BaseViewModel
       // their defaults, like reportedCount: 0 and status: available) is
       // LandmarkSubmissionLogic's job now, not this ViewModel's - see that
       // method's doc for why.
+      stage = 'saving the landmark';
       final result = await landmarkLogic.submitLandmark(
         restaurantName: _restaurantName,
         latitude: location.isKnown ? location.latitude : null,
@@ -3057,11 +3235,21 @@ class AddLandmarkViewModel extends BaseViewModel
       // The landmark is saved - the incomplete submission it may have come
       // from is done. Only the draft ROW is removed; its photos stay because
       // the landmark now stores those same objects.
+      stage = 'clearing the draft';
       await clearSubmittedDraft();
 
       _isSubmitting = false;
       safeNotifyListeners();
-    } catch (error) {
+    } catch (error, stackTrace) {
+      // The tourist only ever sees user-safe copy (see [_submitFailureMessage])
+      // - log the REAL failure and the step it happened in, so a blocked
+      // submission can be diagnosed from the console instead of guessed at.
+      developer.log(
+        'Landmark submit failed while $stage.',
+        name: 'AddLandmarkViewModel',
+        error: error,
+        stackTrace: stackTrace,
+      );
       _submitError = _submitFailureMessage(error);
       _isSubmitting = false;
       safeNotifyListeners();

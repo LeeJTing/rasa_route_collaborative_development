@@ -221,6 +221,62 @@ void main() {
       },
     );
   });
+
+  group('LoginRegisterViewModel.refreshSession', () {
+    test('picks up a session that arrived with nobody watching', () async {
+      // The late-deep-link case: the Google completion already gave up and
+      // cleared its marker, then the session appears. A resume now re-reads it
+      // instead of re-running the whole OAuth hand-off.
+      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
+        touristLogic: _FakeTouristInformationLogicFacade(
+          session: const AuthSession(
+            accessToken: 'access',
+            refreshToken: 'refresh',
+            userId: 'auth-user-1',
+            email: 'tourist@example.com',
+          ),
+        ),
+      );
+
+      await viewModel.refreshSession();
+
+      expect(viewModel.signedIn, isTrue);
+    });
+
+    test(
+      'does nothing, and reports nothing, when there is no session',
+      () async {
+        final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
+          touristLogic: _FakeTouristInformationLogicFacade(session: null),
+        );
+
+        await viewModel.refreshSession();
+
+        expect(viewModel.signedIn, isFalse);
+        expect(viewModel.hasError, isFalse);
+      },
+    );
+
+    test('stays out of the way while a Google flow is in flight', () async {
+      // That window belongs to completeGoogleSignIn, which polls. Letting this
+      // single-shot read run alongside it would race the PKCE exchange.
+      final LoginRegisterViewModel viewModel = LoginRegisterViewModel(
+        touristLogic: _FakeTouristInformationLogicFacade(
+          session: const AuthSession(
+            accessToken: 'access',
+            refreshToken: 'refresh',
+            userId: 'auth-user-1',
+            email: 'tourist@example.com',
+          ),
+        ),
+      );
+
+      await viewModel.signInWithGoogle();
+      await viewModel.refreshSession();
+
+      expect(viewModel.signedIn, isFalse);
+    });
+  });
 }
 
 Tourist _tourist() => Tourist(

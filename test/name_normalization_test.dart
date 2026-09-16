@@ -47,6 +47,35 @@ void main() {
     });
   });
 
+  group('detailValueKey', () {
+    test('folds case and inner spacing, but never content', () {
+      expect(
+        detailValueKey('  Jalan  AMPANG '),
+        detailValueKey('jalan ampang'),
+      );
+      expect(
+        detailValueKey('https://TianYiKopitiam.my'),
+        detailValueKey('https://tianyikopitiam.my'),
+      );
+      expect(
+        detailValueKey('12, Jalan Alor'),
+        isNot(detailValueKey('12, Jalan Alor 50450')),
+      );
+      // Punctuation is content: the same number written with different
+      // separators stays a change, exactly as the merge rule has always
+      // treated it.
+      expect(
+        detailValueKey('0123456789'),
+        isNot(detailValueKey('012-345 6789')),
+      );
+    });
+
+    test('null and blank values share the empty key', () {
+      expect(detailValueKey(null), '');
+      expect(detailValueKey('   '), '');
+    });
+  });
+
   group('chineseScriptStyleOf', () {
     test('tells the two styles apart', () {
       expect(chineseScriptStyleOf('海天樓'), 'traditional');

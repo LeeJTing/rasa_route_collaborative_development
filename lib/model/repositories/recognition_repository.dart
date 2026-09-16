@@ -5,6 +5,7 @@ import '../data_models/food_analysis_response.dart';
 import '../data_models/place_photo_match_response.dart';
 import '../data_models/signboard_analysis_response.dart';
 import '../data_models/signboard_name_match_response.dart';
+import '../data_models/signboard_script_check_response.dart';
 import '../data_models/stall_analysis_response.dart';
 
 /// A recognised food plus Gemini's suggested MYR price range for it. The
@@ -342,6 +343,17 @@ class RecognitionRepository {
     imageBytes: imageBytes,
     typedName: typedName,
   );
+
+  /// The SIGNBOARD photo asked a SEPARATELY-FRAMED second question (UC500):
+  /// which Chinese character style is PAINTED on the sign - Traditional or
+  /// Simplified? Asked because the first reading can be self-consistently
+  /// wrong (a Traditional sign transcribed in Simplified characters and
+  /// labelled "simplified" contradicts nothing), and answered with the
+  /// glyphs the model read so the app can restore the transcription to the
+  /// painted style. See `LandmarkSubmissionLogic.applyPaintedScript`.
+  Future<SignboardScriptCheckResponse> verifySignboardScript({
+    required List<int> imageBytes,
+  }) => api.geminiLandmark.verifySignboardScript(imageBytes: imageBytes);
 
   /// Two photos, one question (UC500): the tourist's own capture against the
   /// stored photo of a NEARBY place whose name looks like theirs - do they

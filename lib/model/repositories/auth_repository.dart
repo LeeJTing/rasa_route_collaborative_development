@@ -20,9 +20,10 @@ class AuthRepository {
 
   /// The email address for the in-progress passwordless sign-in.
   ///
-  /// This is intentionally transient: the OTP view only needs it while the
-  /// app remains open, and a session must never be created until verification
-  /// succeeds.
+  /// A session must never be created until verification succeeds, so this is
+  /// only a hint for the OTP screen - but it is persisted now (see the
+  /// pending-OTP marker below), so a code sent just before the app is killed
+  /// is still recognised as pending on the next launch.
   static String _pendingEmail = '';
 
   // ==========================================================================
@@ -34,24 +35,45 @@ class AuthRepository {
   // time the freshest code was sent plus a "consumed" flag, which is why this
   // marker lives apart from the rate-limit history in `otp_send_history`
   // (that list must survive verification so the 3-per-10 gate keeps counting).
+  //
+  // The marker is PERSISTED, with the statics below as a process cache. It
+  // used to be memory-only, while the device-wide cooldown it overlaps with
+  // (`otp_device_send_at`) did survive a kill - so a relaunch inside that
+  // window could no longer tell "a code was already sent": it fired a send,
+  // got refused by the device gate, and restarted a fresh 60s countdown that
+  // disagreed with the gate's own clock on every re-entry.
   // ==========================================================================
+  static const String _pendingEmailKey = 'otp_pending_email';
+  static const String _pendingOtpSentAtKey = 'otp_pending_sent_at';
+
   static DateTime? _pendingOtpSentAt;
 
   /// When the freshest code for the pending email was sent, or null when no
   /// code is currently pending. Cleared once that code is verified.
-  DateTime? get pendingOtpSentAt => _pendingOtpSentAt;
+  ///
+  /// Reads through to the persisted copy (and caches it) so the marker also
+  /// survives an app restart.
+  DateTime? get pendingOtpSentAt {
+    if (_pendingOtpSentAt != null) return _pendingOtpSentAt;
+    final String? raw = storage.readString(_pendingOtpSentAtKey);
+    _pendingOtpSentAt = raw == null ? null : DateTime.tryParse(raw);
+    return _pendingOtpSentAt;
+  }
 
   /// Marks the pending email's freshest code as sent at [sentAt]. Called by
   /// [sendEmailOtp] after the server accepts the send.
-  void recordPendingOtpSentAt(DateTime sentAt) {
+  Future<void> recordPendingOtpSentAt(DateTime sentAt) async {
     _pendingOtpSentAt = sentAt;
+    await storage.writeString(_pendingOtpSentAtKey, sentAt.toIso8601String());
   }
 
   /// Forgets the pending email and its code - called once a code is verified
   /// so a later sign-in with the same email must request a fresh code.
-  void clearPendingOtp() {
+  Future<void> clearPendingOtp() async {
     _pendingEmail = '';
     _pendingOtpSentAt = null;
+    await storage.remove(_pendingEmailKey);
+    await storage.remove(_pendingOtpSentAtKey);
   }
   // ==========================================================================
   // End of pending OTP tracking (Auth - ChinShunYon)
@@ -131,11 +153,16 @@ class AuthRepository {
     final String normalizedEmail = email.trim();
     await api.sendEmailOtp(email: normalizedEmail);
     _pendingEmail = normalizedEmail;
-    recordPendingOtpSentAt(DateTime.now());
+    await storage.writeString(_pendingEmailKey, normalizedEmail);
+    await recordPendingOtpSentAt(DateTime.now());
   }
 
   /// The email address currently awaiting OTP verification.
-  String get pendingEmail => _pendingEmail;
+  String get pendingEmail {
+    if (_pendingEmail.isNotEmpty) return _pendingEmail;
+    _pendingEmail = storage.readString(_pendingEmailKey) ?? '';
+    return _pendingEmail;
+  }
 
   // ==========================================================================
   // OTP send history (Auth - ChinShunYon) - powers the 3-per-10-min gate.
@@ -228,7 +255,7 @@ class AuthRepository {
 
     // The pending code has been consumed - a later sign-in for the same
     // address must request a brand-new code rather than reusing this one.
-    clearPendingOtp();
+    await clearPendingOtp();
 
     return session;
   }

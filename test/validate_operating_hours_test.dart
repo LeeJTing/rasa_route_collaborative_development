@@ -362,4 +362,39 @@ void main() {
       vm.dispose();
     });
   });
+
+  group('assertedOpeningHours (placeholder rows are not details)', () {
+    test('a week of placeholder Unknown rows reads as no hours', () {
+      // The untouched form writes seven "Unknown" rows - retrieving them as
+      // "hours" made a place with no real hours look filled with nothing, and
+      // made the overwrite report list every day as changed (user report,
+      // 2026-09-14).
+      final List<OpeningHour> week = <OpeningHour>[
+        for (final Weekday day in Weekday.values)
+          OpeningHour(id: 0, day: day, status: DayStatus.unknown),
+      ];
+
+      expect(LandmarkSubmissionLogic.assertedOpeningHours(week), isEmpty);
+    });
+
+    test('only Open and Closed rows survive', () {
+      final List<OpeningHour> rows = <OpeningHour>[
+        OpeningHour(id: 0, day: Weekday.monday, status: DayStatus.unknown),
+        OpeningHour(
+          id: 1,
+          day: Weekday.monday,
+          status: DayStatus.open,
+          opensAt: 540,
+          closesAt: 1080,
+        ),
+        OpeningHour(id: 2, day: Weekday.tuesday, status: DayStatus.closed),
+        OpeningHour(id: 3, day: Weekday.wednesday, status: DayStatus.unknown),
+      ];
+
+      final List<OpeningHour> asserted =
+          LandmarkSubmissionLogic.assertedOpeningHours(rows);
+
+      expect(asserted.map((OpeningHour hour) => hour.id), <int>[1, 2]);
+    });
+  });
 }

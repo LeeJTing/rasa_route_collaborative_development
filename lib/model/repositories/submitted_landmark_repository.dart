@@ -142,7 +142,12 @@ class SubmittedLandmarkRepository {
       // Not supplied (null/blank) -> never touch the stored value.
       if (trimmed == null || trimmed.isEmpty) return;
       // Unchanged -> skip; only an actual change on this field is written.
-      if (trimmed == (stored ?? '').trim()) return;
+      // Compared on `detailValueKey` (trimmed, inner whitespace collapsed,
+      // lowercased), so a case- or spacing-only difference ("Jalan AMPANG"
+      // over "Jalan Ampang") is not a change and the row is left alone - the
+      // SAME rule the merge's overwrite question uses (user request
+      // 2026-09-14).
+      if (detailValueKey(trimmed) == detailValueKey(stored)) return;
       values[column] = trimmed;
     }
 
@@ -1007,6 +1012,10 @@ class SubmittedLandmarkRepository {
     List<OpeningHour> hours,
   ) async {
     for (final OpeningHour hour in hours) {
+      // A placeholder "Unknown" row carries nothing - the untouched week must
+      // NOT become seven junk rows that later reads then mistake for stored
+      // hours (see `LandmarkSubmissionLogic.assertedOpeningHours`).
+      if (hour.status == DayStatus.unknown) continue;
       // An overnight row is split into its end-of-day row plus the next-day
       // tail - see `OpeningHoursRows` for the convention. No id is passed: the
       // primary key is left to the identity column (see the note above).
