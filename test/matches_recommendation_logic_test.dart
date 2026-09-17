@@ -15,7 +15,7 @@ import 'package:rasa_route_collaborative_development/model/repositories/discover
 void main() {
   group('MatchesRecommendationLogic', () {
     late _MatchesRepository repository;
-    late MatchesRecommendationLogic logic;
+    late _TestMatchesRecommendationLogic logic;
 
     setUp(() {
       repository = _MatchesRepository();
@@ -25,7 +25,7 @@ void main() {
     test(
       'groups real restaurants and landmarks under liked foods only',
       () async {
-        final MatchesRecommendationResult result = await logic.recommendations(
+        final MatchesRecommendationResult result = await logic.recommendForTest(
           const MatchesRecommendationRequest(
             stateCode: 'TST',
             origin: TouristLocation(latitude: 1, longitude: 1),
@@ -81,13 +81,13 @@ void main() {
     });
 
     test('keeps a real occurrence when the catalogue page omits it', () async {
-      final MatchesRecommendationLogic fallbackLogic =
+      final _TestMatchesRecommendationLogic fallbackLogic =
           _TestMatchesRecommendationLogic(
             _MissingCatalogueRestaurantRepository(),
           );
 
       final MatchesRecommendationResult result = await fallbackLogic
-          .recommendations(
+          .recommendForTest(
             const MatchesRecommendationRequest(
               stateCode: 'TST',
               origin: TouristLocation(latitude: 1, longitude: 1),
@@ -103,11 +103,11 @@ void main() {
       () async {
         final _MatchesRepository summaryRepository = _MatchesRepository()
           ..catalogueIncludesItems = false;
-        final MatchesRecommendationLogic summaryLogic =
+        final _TestMatchesRecommendationLogic summaryLogic =
             _TestMatchesRecommendationLogic(summaryRepository);
 
         final MatchesRecommendationResult result = await summaryLogic
-            .recommendations(
+            .recommendForTest(
               const MatchesRecommendationRequest(
                 stateCode: 'TST',
                 origin: TouristLocation(latitude: 1, longitude: 1),
@@ -129,7 +129,7 @@ void main() {
         ],
       };
 
-      final MatchesRecommendationResult result = await logic.recommendations(
+      final MatchesRecommendationResult result = await logic.recommendForTest(
         const MatchesRecommendationRequest(
           stateCode: 'TST',
           origin: TouristLocation(latitude: 1, longitude: 1),
@@ -143,7 +143,7 @@ void main() {
     test(
       'does not substitute the explored state centre for missing GPS',
       () async {
-        final MatchesRecommendationResult result = await logic.recommendations(
+        final MatchesRecommendationResult result = await logic.recommendForTest(
           const MatchesRecommendationRequest(
             stateCode: 'TST',
             origin: TouristLocation.unknown,
@@ -166,7 +166,7 @@ void main() {
         2: <int>[7],
       };
 
-      final MatchesRecommendationResult result = await logic.recommendations(
+      final MatchesRecommendationResult result = await logic.recommendForTest(
         const MatchesRecommendationRequest(
           stateCode: 'TST',
           origin: TouristLocation(latitude: 1, longitude: 1),
@@ -194,7 +194,7 @@ void main() {
         1: <int>[7], // The LIKED food itself conflicts.
       };
 
-      final MatchesRecommendationResult result = await logic.recommendations(
+      final MatchesRecommendationResult result = await logic.recommendForTest(
         const MatchesRecommendationRequest(
           stateCode: 'TST',
           origin: TouristLocation(latitude: 1, longitude: 1),
@@ -212,13 +212,27 @@ void main() {
 class _TestMatchesRecommendationLogic extends MatchesRecommendationLogic {
   _TestMatchesRecommendationLogic(this.repository);
 
-  final DiscoveryRepositoryFacade repository;
+  final _MatchesRepository repository;
 
   @override
   DiscoveryRepositoryFacade createRepository() => repository;
 
   @override
   DateTime currentTime() => DateTime(2026, 9, 7, 12);
+
+  Future<MatchesRecommendationResult> recommendForTest(
+    MatchesRecommendationRequest request,
+  ) => recommendations(
+    request,
+    touristIdFuture: Future<String?>.value('tourist'),
+    foodsFuture: Future<List<LocalFood>>.value(repository.catalogue),
+    restrictionsFuture: Future<List<DietaryRestriction>>.value(
+      repository.restrictions,
+    ),
+    restrictionIdsByFoodFuture: Future<Map<int, List<int>>>.value(
+      repository.restrictionIdsByFood,
+    ),
+  );
 }
 
 class _MissingCatalogueRestaurantRepository extends _MatchesRepository {
@@ -242,41 +256,7 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
       const <String, List<OpeningHour>>{};
   bool catalogueIncludesItems = true;
 
-  /// The user's dietary restrictions and the catalogue's food -> restriction
-  /// links behind them - empty by default, so unrelated tests see no
-  /// filtering (and no restrictions = everything is safe).
-  List<DietaryRestriction> restrictions = const <DietaryRestriction>[];
-  Map<int, List<int>> restrictionIdsByFood = const <int, List<int>>{};
-
-  @override
-  Future<String?> currentTouristId() async => 'tourist';
-
-  @override
-  Future<List<Region>> malaysiaRegions() async => const <Region>[
-    Region(
-      code: 'TST',
-      name: 'Test State',
-      centreLatitude: 1,
-      centreLongitude: 1,
-      defaultZoom: 10,
-      boundary: <GeoPoint>[
-        GeoPoint(0, 0),
-        GeoPoint(0, 2),
-        GeoPoint(2, 2),
-        GeoPoint(2, 0),
-      ],
-      places: <RegionPlace>[],
-    ),
-  ];
-
-  @override
-  Future<SwipeSession?> getSwipeSession({
-    required String touristId,
-    required String stateCode,
-  }) async => session;
-
-  @override
-  Future<List<LocalFood>> getLocalFoods() async => const <LocalFood>[
+  List<LocalFood> get catalogue => const <LocalFood>[
     LocalFood(
       id: 1,
       name: 'Liked Food',
@@ -302,6 +282,36 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
       foodType: 'Food',
     ),
   ];
+
+  /// The user's dietary restrictions and the catalogue's food -> restriction
+  /// links behind them - empty by default, so unrelated tests see no
+  /// filtering (and no restrictions = everything is safe).
+  List<DietaryRestriction> restrictions = const <DietaryRestriction>[];
+  Map<int, List<int>> restrictionIdsByFood = const <int, List<int>>{};
+
+  @override
+  Future<List<Region>> malaysiaRegions() async => const <Region>[
+    Region(
+      code: 'TST',
+      name: 'Test State',
+      centreLatitude: 1,
+      centreLongitude: 1,
+      defaultZoom: 10,
+      boundary: <GeoPoint>[
+        GeoPoint(0, 0),
+        GeoPoint(0, 2),
+        GeoPoint(2, 2),
+        GeoPoint(2, 0),
+      ],
+      places: <RegionPlace>[],
+    ),
+  ];
+
+  @override
+  Future<SwipeSession?> getSwipeSession({
+    required String touristId,
+    required String stateCode,
+  }) async => session;
 
   @override
   Future<List<Restaurant>> getRestaurants() async => <Restaurant>[
@@ -397,12 +407,4 @@ class _MatchesRepository extends DiscoveryRepositoryFacade {
   Future<void> saveSwipeSession(SwipeSession value) async {
     savedSession = value;
   }
-
-  @override
-  Future<List<DietaryRestriction>> getCurrentDietaryRestrictions() async =>
-      restrictions;
-
-  @override
-  Future<Map<int, List<int>>> getRestrictionIdsByFood() async =>
-      restrictionIdsByFood;
 }

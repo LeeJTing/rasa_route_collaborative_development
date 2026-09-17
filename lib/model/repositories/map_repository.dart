@@ -9,6 +9,7 @@ import '../../shared_client/local_storage_manager/local_storage_manager.dart';
 import '../../domain_model/map.dart';
 import '../../domain_model/map_data_stamp.dart';
 import '../../domain_model/map_place.dart';
+import 'package:meta/meta.dart' show visibleForTesting;
 import '../data_models/malaysia_outline_data_model.dart';
 import '../data_models/malaysia_region_data_model.dart';
 import '../data_models/map_data_model.dart';
@@ -48,7 +49,7 @@ class MapRepository {
   /// The 13 states + 3 federal territories the map covers (REQ102_1).
   Future<List<Region>> malaysiaRegions() async {
     return _regions ??= MalaysiaRegionDataModel.catalogue
-        .map((MalaysiaRegionDataModel data) => data.toDomain())
+        .map(regionFromDataModel)
         .toList(growable: false);
   }
 
@@ -238,7 +239,7 @@ class MapRepository {
   /// everything that is not Malaysia out of the detailed map view.
   Future<List<CountryOutline>> malaysiaOutlines() async {
     return _outlines ??= MalaysiaOutlineDataModel.catalogue
-        .map((MalaysiaOutlineDataModel data) => data.toDomain())
+        .map(outlineFromDataModel)
         .toList(growable: false);
   }
 
@@ -277,7 +278,7 @@ class MapRepository {
 
     final List<CountryOutline> islands = MalaysiaOutlineDataModel
         .outlyingIslands
-        .map((MalaysiaOutlineDataModel data) => data.toDomain())
+        .map(outlineFromDataModel)
         .toList(growable: false);
 
     List<CountryOutline> rings;
@@ -297,7 +298,7 @@ class MapRepository {
 
     if (rings.isEmpty) {
       rings = MalaysiaOutlineDataModel.maskCatalogue
-          .map((MalaysiaOutlineDataModel data) => data.toDomain())
+          .map(outlineFromDataModel)
           .toList(growable: false);
     }
 
@@ -768,7 +769,7 @@ class MapRepository {
       );
       return rows
           .map(PlaceDataModel.fromJson)
-          .map((PlaceDataModel data) => data.toDomain())
+          .map(placeFromDataModel)
           .toList(growable: false);
     } catch (_) {
       // Reference data - losing it degrades search, it does not break it.
@@ -1284,6 +1285,73 @@ class MapRepository {
     LocalStorageManager.keyLastMapViewport,
     viewport.toJson(),
   );
+
+  // ---------------------------------------------------------------------------
+  // Data-model -> domain-model conversion.
+  // ---------------------------------------------------------------------------
+
+  @visibleForTesting
+  static CountryOutline outlineFromDataModel(MalaysiaOutlineDataModel data) =>
+      CountryOutline(
+        name: data.name,
+        ring: data.ring
+            .map((List<double> point) => GeoPoint(point[0], point[1]))
+            .toList(growable: false),
+      );
+
+  @visibleForTesting
+  static Region regionFromDataModel(MalaysiaRegionDataModel data) => Region(
+    code: data.code,
+    name: data.name,
+    centreLatitude: data.centreLatitude,
+    centreLongitude: data.centreLongitude,
+    defaultZoom: data.defaultZoom,
+    boundary: data.boundary
+        .map((List<double> point) => GeoPoint(point[0], point[1]))
+        .toList(growable: false),
+    places: data.places
+        .map(
+          (MalaysiaPlaceDataModel place) => RegionPlace(
+            name: place.name,
+            regionName: data.name,
+            latitude: place.latitude,
+            longitude: place.longitude,
+          ),
+        )
+        .toList(growable: false),
+  );
+
+  @visibleForTesting
+  static MapPlace placeFromDataModel(PlaceDataModel data) {
+    final MapPlaceKind kind = _placeKind(data.kind);
+    return MapPlace(
+      name: data.name,
+      kind: kind,
+      stateName: data.stateName,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      zoom: data.zoom ?? _defaultPlaceZoom(kind),
+      aliases: (data.aliases ?? '')
+          .split(',')
+          .map((String value) => value.trim())
+          .where((String value) => value.isNotEmpty)
+          .toList(growable: false),
+    );
+  }
+
+  static MapPlaceKind _placeKind(String value) => switch (value.toLowerCase()) {
+    'landmark' => MapPlaceKind.landmark,
+    'area' => MapPlaceKind.area,
+    'town' => MapPlaceKind.town,
+    _ => MapPlaceKind.city,
+  };
+
+  static double _defaultPlaceZoom(MapPlaceKind kind) => switch (kind) {
+    MapPlaceKind.landmark => 16,
+    MapPlaceKind.area => 15,
+    MapPlaceKind.town => 13,
+    MapPlaceKind.city => 13,
+  };
 
   // ---------------------------------------------------------------------------
   // Row readers. Supabase returns numerics as String on some drivers, so every

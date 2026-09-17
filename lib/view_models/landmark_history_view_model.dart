@@ -1,9 +1,9 @@
 import '../app/routing/app_navigator.dart';
+import '../app/routing/map_selection_handoff.dart';
 import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
 import '../domain_model/submitted_landmark.dart';
 import '../model/business_logic/landmark_logic_facade.dart';
-import 'dashboard_view_model.dart' show MapSelectionHandoff;
 
 /// ViewModel for `LandmarkHistoryView`.
 ///
@@ -41,9 +41,7 @@ class LandmarkHistoryViewModel extends BaseViewModel {
       _landmarks = const <SubmittedLandmark>[];
       return;
     }
-    _landmarks = await landmarkLogic.getSubmittedLandmarksByTourist(
-      touristId,
-    );
+    _landmarks = await landmarkLogic.getSubmittedLandmarksByTourist(touristId);
   });
 
   /// Open one of the tourist's landmarks in the full place-detail screen

@@ -210,7 +210,7 @@ class FoodRecognitionLogic {
   /// Routed through the repository so no View ever touches
   /// `permission_handler` directly.
   Future<bool> requestCameraPermission() =>
-      discoveryRepository.camera.requestCameraPermission();
+      discoveryRepository.requestCameraPermission();
 
   late final DiscoveryRepositoryFacade discoveryRepository =
       createDiscoveryRepository();
@@ -493,9 +493,7 @@ class FoodRecognitionLogic {
   /// path. A3 (not local food) is NO LONGER an error - see
   /// [FoodRecognitionResult] for how it's surfaced instead.
   Future<FoodRecognitionResult> recognizeFood(List<int> imageBytes) async {
-    final quick = await discoveryRepository.recognition.identifyFoodName(
-      imageBytes,
-    );
+    final quick = await discoveryRepository.identifyFoodName(imageBytes);
 
     if (quick.foodStatus == 'not_detected') {
       throw Exception('No food detected in image. Please try again.');
@@ -524,7 +522,7 @@ class FoodRecognitionLogic {
       final LocalFood? quickRow = (await _matchCatalogueDetailed(
         quick.dish,
       ))?.food;
-      final analysis = await discoveryRepository.recognition.analyzeFoodFull(
+      final analysis = await discoveryRepository.analyzeFoodFull(
         imageBytes,
         storedDish: quickRow,
       );
@@ -661,7 +659,7 @@ class FoodRecognitionLogic {
         // The row the quick name matched (when there is one) is sent as the
         // STORED RECORD: the analysis either confirms its text or adapts it
         // to the variant actually shown (see [_adaptToVariant]).
-        final analysis = await discoveryRepository.recognition.analyzeFoodFull(
+        final analysis = await discoveryRepository.analyzeFoodFull(
           imageBytes,
           storedDish: existing,
         );
@@ -776,7 +774,7 @@ class FoodRecognitionLogic {
     // RECORD, so the answer can ADAPT it to the variant instead of describing
     // the plain dish (see [_adaptToVariant]).
     final LocalFood? typedRow = (await _matchCatalogueDetailed(trimmed))?.food;
-    final analysis = await discoveryRepository.recognition.analyzeFoodByName(
+    final analysis = await discoveryRepository.analyzeFoodByName(
       imageBytes,
       trimmed,
       storedDish: typedRow,
@@ -906,7 +904,7 @@ class FoodRecognitionLogic {
     if (observed.toLowerCase() == typedName.toLowerCase()) return null;
     try {
       final ({bool isTypo, String correctedName}) check =
-          await discoveryRepository.recognition.checkTypedNameSpelling(
+          await discoveryRepository.checkTypedNameSpelling(
             typedName: typedName,
             observedFood: observed,
           );
@@ -980,7 +978,7 @@ class FoodRecognitionLogic {
         ),
       );
     }
-    final analysis = await discoveryRepository.recognition.analyzeFoodByName(
+    final analysis = await discoveryRepository.analyzeFoodByName(
       imageBytes,
       trimmed,
       // A picked VARIANT's row rides the call as the STORED RECORD, so the

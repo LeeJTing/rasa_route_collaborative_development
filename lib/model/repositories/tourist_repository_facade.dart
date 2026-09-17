@@ -5,8 +5,6 @@ import '../../domain_model/food_preference.dart';
 import '../../domain_model/tourist.dart';
 
 import 'auth_repository.dart';
-import 'interaction_repository.dart';
-import 'location_repository.dart';
 import 'tourist_profile_repository.dart';
 import 'tutorial_repository.dart';
 
@@ -19,64 +17,63 @@ import 'tutorial_repository.dart';
 class TouristRepositoryFacade {
   TouristRepositoryFacade();
 
-  final AuthRepository auth = AuthRepository();
-  final TouristProfileRepository profile = TouristProfileRepository();
-  final InteractionRepository interaction = InteractionRepository();
-  final LocationRepository location = LocationRepository();
-  final TutorialRepository tutorial = TutorialRepository();
+  final AuthRepository _auth = AuthRepository();
+  final TouristProfileRepository _profile = TouristProfileRepository();
+  final TutorialRepository _tutorial = TutorialRepository();
 
   // ==========================================================================
   // Authentication - flat API
   // ==========================================================================
 
-  Future<void> sendEmailOtp(String email) => auth.sendEmailOtp(email);
+  Future<void> sendEmailOtp(String email) => _auth.sendEmailOtp(email);
 
   /// Every recorded OTP send timestamp for [email] (see `AuthenticateLogic`'s
   /// 3-per-10-minute gate).
-  Future<List<DateTime>> otpSendTimes(String email) => auth.otpSendTimes(email);
+  Future<List<DateTime>> otpSendTimes(String email) =>
+      _auth.otpSendTimes(email);
 
   /// Records a successful OTP send for [email].
-  Future<void> recordOtpSend(String email) => auth.recordOtpSend(email);
+  Future<void> recordOtpSend(String email) => _auth.recordOtpSend(email);
 
   Future<AuthSession?> verifyEmailOtp({
     required String email,
     required String token,
-  }) => auth.verifyEmailOtp(email: email, token: token);
+  }) => _auth.verifyEmailOtp(email: email, token: token);
 
-  String get pendingAuthEmail => auth.pendingEmail;
+  String get pendingAuthEmail => _auth.pendingEmail;
 
   /// When the freshest code for the pending email was sent, or null when no
   /// code is pending (see `AuthRepository`'s Option B pending-OTP marker).
-  DateTime? get pendingOtpSentAt => auth.pendingOtpSentAt;
+  DateTime? get pendingOtpSentAt => _auth.pendingOtpSentAt;
 
   /// Auth -----
   /// When this device last sent ANY OTP, whichever address it was for, or null
   /// when it has not sent one yet. Powers the device-wide resend cooldown, so
   /// switching accounts on one handset gains nothing.
-  DateTime? get otpLastDeviceSendAt => auth.otpLastDeviceSendAt;
+  DateTime? get otpLastDeviceSendAt => _auth.otpLastDeviceSendAt;
 
   /// Auth end ----
 
   Future<bool> signInWithGoogle({required String redirectTo}) =>
-      auth.signInWithGoogle(redirectTo: redirectTo);
+      _auth.signInWithGoogle(redirectTo: redirectTo);
 
-  Future<AuthSession?> getCurrentSession() => auth.getCurrentSession();
+  Future<AuthSession?> getCurrentSession() => _auth.getCurrentSession();
 
-  Future<void> signOut() => auth.signOut();
+  Future<void> signOut() => _auth.signOut();
 
-  String get currentUserId => auth.currentUserId;
+  String get currentUserId => _auth.currentUserId;
 
-  Future<String?> currentTouristId() => auth.currentTouristId();
+  Future<String?> currentTouristId() => _auth.currentTouristId();
 
   /// True when the sign-in that just completed CREATED the account's `tourist`
   /// row - its first ever authentication, and the only moment the first-run
   /// set-up screen is shown (see `UserProfileLogic.needsProfileSetup`).
-  bool get accountJustCreated => auth.accountJustCreated;
+  bool get accountJustCreated => _auth.accountJustCreated;
 
   /// Returns the [Tourist] row for [session]'s auth user, auto-creating it on
   /// first sign-in - the "register" half of the login/register UX.
   Future<Tourist?> getOrCreateTourist(AuthSession session) =>
-      auth.getOrCreateTourist(session);
+      _auth.getOrCreateTourist(session);
 
   // ==========================================================================
   // Profile - flat API
@@ -88,7 +85,7 @@ class TouristRepositoryFacade {
     String authUserId = '',
     String email = '',
     String displayName = '',
-  }) => profile.getTourist(
+  }) => _profile.getTourist(
     touristId: touristId,
     authUserId: authUserId,
     email: email,
@@ -97,38 +94,38 @@ class TouristRepositoryFacade {
 
   /// Every food preference [touristId] has picked (junction rows).
   Future<List<FoodPreference>> getFoodPreferences(String touristId) =>
-      profile.getFoodPreferences(touristId);
+      _profile.getFoodPreferences(touristId);
 
   /// Every selectable food preference from `food_preference` (tastes and
   /// categories mixed - group by [FoodPreference.kind]).
   Future<List<FoodPreference>> foodPreferenceOptions() =>
-      profile.foodPreferenceOptions();
+      _profile.foodPreferenceOptions();
 
   /// Replaces [touristId]'s preference selection (junction rows).
   Future<void> saveFoodPreferences(String touristId, List<int> preferenceIds) =>
-      profile.saveFoodPreferences(touristId, preferenceIds);
+      _profile.saveFoodPreferences(touristId, preferenceIds);
 
   /// Every restriction [touristId] holds.
   Future<List<DietaryRestriction>> getDietaryRestrictions(String touristId) =>
-      profile.getDietaryRestrictions(touristId);
+      _profile.getDietaryRestrictions(touristId);
 
   /// Every restriction a tourist can pick.
   Future<List<DietaryRestriction>> dietaryRestrictionOptions() =>
-      profile.dietaryRestrictionOptions();
+      _profile.dietaryRestrictionOptions();
 
   /// Replaces [touristId]'s restriction selection (junction rows).
   Future<void> saveDietaryRestrictions(
     String touristId,
     List<int> restrictionIds,
-  ) => profile.saveDietaryRestrictions(touristId, restrictionIds);
+  ) => _profile.saveDietaryRestrictions(touristId, restrictionIds);
 
   /// The local-food ids [touristId] has saved.
   Future<Set<int>> favouriteFoodIds(String touristId) =>
-      profile.favouriteFoodIds(touristId);
+      _profile.favouriteFoodIds(touristId);
 
   /// Removes one saved dish from [touristId]'s favourites.
   Future<void> removeFavourite(String touristId, int localFoodId) =>
-      profile.removeFavourite(touristId, localFoodId);
+      _profile.removeFavourite(touristId, localFoodId);
 
   // ==========================================================================
   // Guided walkthrough - flat API
@@ -140,12 +137,12 @@ class TouristRepositoryFacade {
   /// What this device remembers about the walkthrough, or
   /// [TutorialProgress.never]. Synchronous, because local storage is already
   /// loaded by the time any screen asks.
-  TutorialProgress tutorialProgress() => tutorial.read();
+  TutorialProgress tutorialProgress() => _tutorial.read();
 
   /// Records that the walkthrough was finished or skipped.
   Future<void> saveTutorialProgress(TutorialProgress progress) =>
-      tutorial.write(progress);
+      _tutorial.write(progress);
 
   /// Forgets that record, so the next launch shows the walkthrough again.
-  Future<void> clearTutorialProgress() => tutorial.clear();
+  Future<void> clearTutorialProgress() => _tutorial.clear();
 }

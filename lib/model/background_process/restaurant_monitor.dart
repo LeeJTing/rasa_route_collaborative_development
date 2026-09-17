@@ -2,16 +2,14 @@ import 'dart:async';
 
 import '../../app/config/env.dart';
 import '../../domain_model/map_data_stamp.dart';
-import '../../view_models/current_location_facade.dart';
 import '../../view_models/update_restaurant_facade.dart';
 import '../repositories/discovery_repository_facade.dart';
 
 /// Keeps the nearby-restaurant list fresh in the background.
 ///
 /// Reads down through a **repository facade** and writes up through a
-/// **ViewModel facade**. It also listens on [CurrentLocationFacade], so it is
-/// both a consumer and a producer of inbound facades. See `LocationMonitor` for
-/// the rules background processes follow.
+/// **ViewModel facade**. See `LocationMonitor` for the rules background
+/// processes follow.
 class RestaurantMonitor {
   RestaurantMonitor();
 
@@ -20,9 +18,6 @@ class RestaurantMonitor {
 
   /// Up: how the refreshed list reaches the ViewModels.
   final UpdateRestaurantFacade viewModelFacade = UpdateRestaurantFacade();
-
-  /// Also inbound: tells this monitor the tourist has moved.
-  final CurrentLocationFacade locationFacade = CurrentLocationFacade();
 
   // ---------------------------------------------------------------------------
   // Watching for map data other tourists added (UC300, C21)
@@ -50,7 +45,7 @@ class RestaurantMonitor {
   /// so nothing is stale yet.
   Future<void> start() async {
     stop();
-    _lastSeen = await repository.map.mapDataStamp();
+    _lastSeen = await repository.mapDataStamp();
     _poll = Timer.periodic(pollInterval, (_) => _check());
   }
 
@@ -64,7 +59,7 @@ class RestaurantMonitor {
     if (_checking) return;
     _checking = true;
     try {
-      final MapDataStamp current = await repository.map.mapDataStamp();
+      final MapDataStamp current = await repository.mapDataStamp();
 
       // A failed poll reads as empty. Treat that as "no news", never as
       // "everything was deleted".

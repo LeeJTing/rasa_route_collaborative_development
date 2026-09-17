@@ -20,7 +20,7 @@ import 'widgets/otp_code_field.dart';
 ///
 /// Build the layout from the Figma frame for this screen, using
 /// `Theme.of(context)` and the tokens in `lib/app/theme/`. Reusable pieces go
-/// in `opt_view/widgets/`.
+/// in `otp_view/widgets/`.
 class OtpView extends StatefulWidget {
   const OtpView({super.key});
 

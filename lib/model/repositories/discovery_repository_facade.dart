@@ -1,7 +1,9 @@
-import '../../domain_model/dietary_restriction.dart';
+import '../../domain_model/exploration_search.dart';
 import '../../domain_model/food_distribution.dart';
-import '../../domain_model/food_preference.dart';
 import '../../domain_model/local_food.dart';
+import '../../domain_model/map.dart';
+import '../../domain_model/map_data_stamp.dart';
+import '../../domain_model/map_place.dart';
 import '../../domain_model/origin_verification.dart';
 import '../../domain_model/opening_hour.dart';
 import '../../domain_model/region.dart';
@@ -9,19 +11,16 @@ import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/swipe_session.dart';
-import 'auth_repository.dart';
+import '../../domain_model/tourist_location.dart';
+import '../data_models/food_analysis_response.dart';
 import 'camera_repository.dart';
-import 'dietary_restriction_repository.dart';
-import 'food_knowledge_repository.dart';
+import 'landmark_discovery_repository.dart';
 import 'location_repository.dart';
 import 'map_repository.dart';
 import 'recognition_repository.dart';
-import 'report_repository.dart';
 import 'restaurant_repository.dart';
 import 'search_history_repository.dart';
-import 'submitted_landmark_repository.dart';
 import 'swipe_repository.dart';
-import 'tourist_profile_repository.dart';
 
 /// Everything about finding food out in the world: restaurants, menus, photo
 /// recognition, and the map the tourist finds them on.
@@ -40,99 +39,97 @@ import 'tourist_profile_repository.dart';
 class DiscoveryRepositoryFacade {
   DiscoveryRepositoryFacade();
 
-  final RestaurantRepository restaurant = RestaurantRepository();
-  final SubmittedLandmarkRepository landmark = SubmittedLandmarkRepository();
-  final DietaryRestrictionRepository dietaryRestriction =
-      DietaryRestrictionRepository();
-  final RecognitionRepository recognition = RecognitionRepository();
-  final AuthRepository auth = AuthRepository();
-  final FoodKnowledgeRepository food = FoodKnowledgeRepository();
-  final SwipeRepository swipe = SwipeRepository();
-  final TouristProfileRepository touristProfile = TouristProfileRepository();
-
-  /// Shared tourist report table (kind + place_id + reason).
-  final ReportRepository report = ReportRepository();
+  final RestaurantRepository _restaurant = RestaurantRepository();
+  final LandmarkDiscoveryRepository _landmark = LandmarkDiscoveryRepository();
+  final RecognitionRepository _recognition = RecognitionRepository();
+  final SwipeRepository _swipe = SwipeRepository();
 
   /// REQ102 - the Malaysian regions and the food occurrences plotted on them.
-  final MapRepository map = MapRepository();
+  final MapRepository _map = MapRepository();
 
   /// REQ102_6 / REQ102_7 - GPS permission and fixes.
-  final LocationRepository location = LocationRepository();
+  final LocationRepository _location = LocationRepository();
 
   /// REQ106_1 - the camera permission that gates photo capture on
   /// `FoodRecognitionView`.
-  final CameraRepository camera = CameraRepository();
+  final CameraRepository _camera = CameraRepository();
 
   /// REQ102_104 - the recent keywords, on this device only. The one
   /// repository here that never reaches `APIManager`.
-  final SearchHistoryRepository searchHistory = SearchHistoryRepository();
+  final SearchHistoryRepository _searchHistory = SearchHistoryRepository();
 
   /// 3-step origin verification for a dish name (Option C gate) - three
   /// separately-framed Gemini questions, fail-closed.
   Future<OriginVerification> verifyDishOrigin(String dishName) =>
-      recognition.verifyDishOrigin(dishName);
+      _recognition.verifyDishOrigin(dishName);
 
-  Future<List<Restaurant>> getRestaurants() => restaurant.getRestaurants();
+  Future<bool> requestCameraPermission() => _camera.requestCameraPermission();
+
+  Future<FoodAnalysisResponse> identifyFoodName(List<int> imageBytes) =>
+      _recognition.identifyFoodName(imageBytes);
+
+  Future<FoodAnalysis> analyzeFoodFull(
+    List<int> imageBytes, {
+    LocalFood? storedDish,
+  }) => _recognition.analyzeFoodFull(imageBytes, storedDish: storedDish);
+
+  Future<FoodAnalysis> analyzeFoodByName(
+    List<int> imageBytes,
+    String name, {
+    LocalFood? storedDish,
+  }) =>
+      _recognition.analyzeFoodByName(imageBytes, name, storedDish: storedDish);
+
+  Future<({bool isTypo, String correctedName})> checkTypedNameSpelling({
+    required String typedName,
+    required String observedFood,
+  }) => _recognition.checkTypedNameSpelling(
+    typedName: typedName,
+    observedFood: observedFood,
+  );
+
+  Future<List<Restaurant>> getRestaurants() => _restaurant.getRestaurants();
 
   Future<List<Restaurant>> getRestaurantsNear({
     required double latitude,
     required double longitude,
     required double maximumDistanceKm,
-  }) => restaurant.getRestaurantsNear(
+  }) => _restaurant.getRestaurantsNear(
     latitude: latitude,
     longitude: longitude,
     maximumDistanceKm: maximumDistanceKm,
   );
 
   Future<List<Restaurant>> getRestaurantsByIds(List<int> restaurantIds) =>
-      restaurant.getRestaurantsByIds(restaurantIds);
+      _restaurant.getRestaurantsByIds(restaurantIds);
 
   Future<List<RestaurantItem>> getRestaurantItemsByRestaurantIds(
     List<int> restaurantIds,
-  ) => restaurant.getRestaurantItemsByRestaurantIds(restaurantIds);
-
-  Future<List<DietaryRestriction>> getCurrentDietaryRestrictions() =>
-      dietaryRestriction.restrictionsForCurrentTourist();
-
-  Future<Map<int, List<int>>> getRestrictionIdsByFood() =>
-      dietaryRestriction.restrictionIdsByFood();
+  ) => _restaurant.getRestaurantItemsByRestaurantIds(restaurantIds);
 
   Future<Restaurant?> getRestaurantById(int restaurantId) =>
-      restaurant.getRestaurantById(restaurantId);
+      _restaurant.getRestaurantById(restaurantId);
 
   Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) =>
-      landmark.getSubmittedLandmarkById(landmarkId);
+      _landmark.getSubmittedLandmarkById(landmarkId);
 
   Future<void> reactivateRestaurantFromClosure(int restaurantId) =>
-      restaurant.reactivateRestaurantFromClosure(restaurantId);
+      _restaurant.reactivateRestaurantFromClosure(restaurantId);
 
-  Future<List<LocalFood>> getLocalFoods() => food.getFoods();
+  Future<List<Region>> malaysiaRegions() => _map.malaysiaRegions();
 
-  Future<List<LocalFood>> searchLocalFoods(String query) =>
-      food.searchFoods(query);
+  Future<List<RegionTally>> regionDistribution({List<int>? foodIds}) =>
+      _map.regionDistribution(foodIds: foodIds);
 
-  Future<Set<int>> favouriteFoodIdsForTourist(String touristId) =>
-      food.favouriteFoodIdsForTourist(touristId);
+  Future<Region?> regionAt(double latitude, double longitude) =>
+      _map.regionAt(latitude, longitude);
 
-  Future<List<FoodPreference>> foodPreferencesForTourist(String touristId) =>
-      touristProfile.getFoodPreferences(touristId);
+  Future<List<CountryOutline>> malaysiaOutlines() => _map.malaysiaOutlines();
 
-  Future<List<DietaryRestriction>> dietaryRestrictionsForTourist(
-    String touristId,
-  ) => dietaryRestriction.restrictionsForTourist(touristId);
+  Future<List<CountryOutline>> malaysiaMaskOutlines() =>
+      _map.malaysiaMaskOutlines();
 
-  Future<Map<int, Set<int>>> dietaryRestrictionIdsByFood() async {
-    final Map<int, List<int>> ids = await dietaryRestriction
-        .restrictionIdsByFood();
-    return ids.map(
-      (int foodId, List<int> restrictionIds) =>
-          MapEntry<int, Set<int>>(foodId, restrictionIds.toSet()),
-    );
-  }
-
-  Future<List<Region>> malaysiaRegions() => map.malaysiaRegions();
-
-  Future<List<FoodOccurrence>> foodOccurrences() => map.foodOccurrences();
+  Future<List<FoodOccurrence>> foodOccurrences() => _map.foodOccurrences();
 
   /// Opening hours keyed by place (`"restaurant:12"`).
   ///
@@ -141,22 +138,102 @@ class DiscoveryRepositoryFacade {
   /// the most expensive read on the map.
   Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
     Set<String>? placeKeys,
-  }) => map.openingHours(placeKeys: placeKeys);
+  }) => _map.openingHours(placeKeys: placeKeys);
 
-  void clearMapCache() => map.clearCache();
+  void clearMapCache() => _map.clearCache();
 
-  Future<String?> currentTouristId() => auth.currentTouristId();
+  Future<MapMarkerSet> mapMarkers({
+    required double southLatitude,
+    required double westLongitude,
+    required double northLatitude,
+    required double eastLongitude,
+    required double zoom,
+    required double maximumZoom,
+    List<int>? foodIds,
+    int limit = 400,
+    MapSearchSelection search = MapSearchSelection.none,
+  }) => _map.mapMarkers(
+    southLatitude: southLatitude,
+    westLongitude: westLongitude,
+    northLatitude: northLatitude,
+    eastLongitude: eastLongitude,
+    zoom: zoom,
+    maximumZoom: maximumZoom,
+    foodIds: foodIds,
+    limit: limit,
+    search: search,
+  );
+
+  Future<({double? splitZoom, int memberCount})> clusterSplitZoom({
+    required double latitude,
+    required double longitude,
+    required double zoom,
+    required double maximumZoom,
+    List<int>? foodIds,
+    MapSearchSelection search = MapSearchSelection.none,
+  }) => _map.clusterSplitZoom(
+    latitude: latitude,
+    longitude: longitude,
+    zoom: zoom,
+    maximumZoom: maximumZoom,
+    foodIds: foodIds,
+    search: search,
+  );
+
+  Future<List<MapPin>> clusterMembers({
+    required double latitude,
+    required double longitude,
+    required double zoom,
+    List<int>? foodIds,
+    int limit = 200,
+    MapSearchSelection search = MapSearchSelection.none,
+  }) => _map.clusterMembers(
+    latitude: latitude,
+    longitude: longitude,
+    zoom: zoom,
+    foodIds: foodIds,
+    limit: limit,
+    search: search,
+  );
+
+  Future<List<MapPlace>> places() => _map.places();
+
+  Future<List<MapPlaceHit>> searchPlaceNames(String needle, {int limit = 12}) =>
+      _map.searchPlaceNames(needle, limit: limit);
+
+  Future<MapDataStamp> mapDataStamp() => _map.mapDataStamp();
+
+  bool get mockGpsSupported => _location.mockSupported;
+
+  bool get mockGpsActive => _location.mockActive;
+
+  Future<String?> setMockLocation(double latitude, double longitude) =>
+      _location.setMockLocation(latitude, longitude);
+
+  Future<void> stopMockLocation() => _location.stopMockLocation();
+
+  Future<bool> ensureLocationPermission() =>
+      _location.ensureLocationPermission();
+
+  Future<TouristLocation> currentLocation() => _location.currentLocation();
+
+  List<String> recentSearches() => _searchHistory.read();
+
+  Future<void> saveRecentSearches(List<String> terms) =>
+      _searchHistory.write(terms);
+
+  Future<void> clearRecentSearches() => _searchHistory.clear();
 
   Future<SwipeSession?> getSwipeSession({
     required String touristId,
     required String stateCode,
-  }) => swipe.getSession(touristId: touristId, stateCode: stateCode);
+  }) => _swipe.getSession(touristId: touristId, stateCode: stateCode);
 
   Future<void> saveSwipeSession(SwipeSession session) =>
-      swipe.saveSession(session);
+      _swipe.saveSession(session);
 
   Future<void> deleteSwipeSession({
     required String touristId,
     required String stateCode,
-  }) => swipe.deleteSession(touristId: touristId, stateCode: stateCode);
+  }) => _swipe.deleteSession(touristId: touristId, stateCode: stateCode);
 }

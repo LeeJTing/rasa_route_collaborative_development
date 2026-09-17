@@ -28,7 +28,7 @@ class LandmarkDraftLogic {
     final String touristId = await _currentTouristId();
     if (touristId.isEmpty) return 0;
     final DateTime now = DateTime.now();
-    return repository.drafts.save(
+    return repository.saveDraft(
       touristId: touristId,
       draft: LandmarkDraft(
         id: draft.id,
@@ -55,7 +55,7 @@ class LandmarkDraftLogic {
   Future<List<LandmarkDraft>> pendingDrafts() async {
     final String touristId = await _currentTouristId();
     if (touristId.isEmpty) return const <LandmarkDraft>[];
-    final List<LandmarkDraft> drafts = await repository.drafts.draftsByTourist(
+    final List<LandmarkDraft> drafts = await repository.draftsByTourist(
       touristId,
     );
     final List<LandmarkDraft> resumable = <LandmarkDraft>[];
@@ -65,7 +65,7 @@ class LandmarkDraftLogic {
         continue;
       }
       try {
-        await repository.drafts.deleteDraft(draft);
+        await repository.deleteDraft(draft);
       } catch (_) {
         // Purge is best-effort - a draft that fails to delete simply gets
         // another chance next time; it is not returned as resumable.
@@ -77,21 +77,21 @@ class LandmarkDraftLogic {
   /// Discards one draft (the tourist chose not to continue it) - the row and
   /// its uploaded photos are deleted.
   Future<void> deleteDraft(LandmarkDraft draft) =>
-      repository.drafts.deleteDraft(draft);
+      repository.deleteDraft(draft);
 
   /// Removes a draft ROW after a successful submission - its photos are NOT
   /// deleted, because the submitted landmark now stores those same objects.
   Future<void> clearSubmittedDraft(int draftId) =>
-      repository.drafts.deleteDraftRow(draftId);
+      repository.deleteDraftRow(draftId);
 
   /// Deletes one uploaded photo by its storage object name - used when a
   /// draft's photo is replaced by a fresh capture, so the old object does
   /// not linger (best-effort).
   Future<void> deletePhoto(String objectId) =>
-      repository.drafts.deletePhoto(objectId);
+      repository.deleteDraftPhoto(objectId);
 
   Future<String> _currentTouristId() async {
-    final String? touristId = await repository.auth.currentTouristId();
+    final String? touristId = await repository.currentTouristId();
     return touristId ?? '';
   }
 }

@@ -1,4 +1,4 @@
-import 'package:http/http.dart' as http;
+import '../../external/link_validation/link_validation_client.dart';
 
 /// Checks whether a tourist-supplied website URL is reachable - used by the
 /// Add Landmark form's optional website field.
@@ -8,10 +8,10 @@ import 'package:http/http.dart' as http;
 /// loop) is NOT reachable. `package:http` follows redirects for GET by
 /// default.
 ///
-/// The only repository that touches `package:http` directly (kept behind the
-/// repository facade so logic/ViewModel never import a client). Best-effort
-/// and deliberately strict about status codes - callers treat `false` as
-/// "not reachable".
+/// HTTP execution stays behind [LinkValidationClient], while this repository
+/// keeps the feature rules for valid URLs and accepted status codes.
+/// Best-effort and deliberately strict - callers treat `false` as "not
+/// reachable".
 ///
 /// NOTE (SSRF): this runs from the client for form validation only. For
 /// production, the equivalent check belongs on a backend so private/internal
@@ -19,7 +19,7 @@ import 'package:http/http.dart' as http;
 class LinkCheckRepository {
   LinkCheckRepository();
 
-  static const Duration _timeout = Duration(seconds: 5);
+  final LinkValidationClient _client = LinkValidationClient();
 
   Future<bool> isWebsiteReachable(String url) async {
     try {
@@ -29,8 +29,10 @@ class LinkCheckRepository {
           (uri.scheme != 'http' && uri.scheme != 'https')) {
         return false;
       }
-      final http.Response response = await http.get(uri).timeout(_timeout);
-      return response.statusCode >= 200 && response.statusCode < 400;
+      final LinkValidationResponse? response = await _client.get(uri);
+      return response != null &&
+          response.statusCode >= 200 &&
+          response.statusCode < 400;
     } catch (_) {
       return false;
     }
@@ -49,8 +51,12 @@ class LinkCheckRepository {
           (uri.scheme != 'http' && uri.scheme != 'https')) {
         return null;
       }
-      final http.Response response = await http.get(uri).timeout(_timeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      final LinkValidationResponse? response = await _client.get(uri);
+      if (response == null ||
+          response.statusCode < 200 ||
+          response.statusCode >= 300) {
+        return null;
+      }
       return response.bodyBytes;
     } catch (_) {
       return null;

@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:rasa_route_collaborative_development/views/restaurant_recommendation_view/widgets/submmitted_landmark_card.dart';
+import 'package:rasa_route_collaborative_development/views/restaurant_recommendation_view/widgets/submitted_landmark_card.dart';
 
 import '../../app/routing/app_routes.dart';
+import '../../app/routing/map_selection_handoff.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../domain_model/matches_recommendation.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/restaurant_item.dart';
-import '../../view_models/dashboard_view_model.dart';
 import '../../view_models/restaurant_recommendation_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/async_message.dart';

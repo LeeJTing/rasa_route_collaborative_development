@@ -213,44 +213,39 @@ class _LandmarkDishRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 LayoutBuilder(
-                  builder:
-                      (BuildContext context, BoxConstraints constraints) =>
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Expanded(
-                                child: Text(
-                                  dish.name,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleSmall,
-                                ),
-                              ),
-                              if (dish.price != null) ...<Widget>[
-                                const SizedBox(width: AppSpacing.sm),
-                                ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxWidth:
-                                        constraints.maxWidth *
-                                        AppLayoutRatios
-                                            .restaurantMenuPriceMaxWidthFraction,
-                                  ),
-                                  child: Text(
-                                    'RM ${dish.price!.toStringAsFixed(2)}',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.end,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(color: AppColors.accentRust),
-                                  ),
-                                ),
-                              ],
-                            ],
+                  builder: (BuildContext context, BoxConstraints constraints) =>
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              dish.name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
                           ),
+                          if (dish.price != null) ...<Widget>[
+                            const SizedBox(width: AppSpacing.sm),
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth:
+                                    constraints.maxWidth *
+                                    AppLayoutRatios
+                                        .restaurantMenuPriceMaxWidthFraction,
+                              ),
+                              child: Text(
+                                'RM ${dish.price!.toStringAsFixed(2)}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.end,
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(color: AppColors.accentRust),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                 ),
                 if (_displayText != null) ...<Widget>[
                   const SizedBox(height: AppSpacing.xs),

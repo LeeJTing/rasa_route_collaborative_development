@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
-import 'package:rasa_route_collaborative_development/views/restaurant_recommendation_view/widgets/submmitted_landmark_card.dart';
+import 'package:rasa_route_collaborative_development/views/restaurant_recommendation_view/widgets/submitted_landmark_card.dart';
 
 /// The Quick Mode landmark card must read like the restaurant card - same
 /// header shape, one metric row, category worded like the restaurant rows -

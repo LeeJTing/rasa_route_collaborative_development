@@ -45,12 +45,12 @@ class LocationMonitor {
 
     // No permission, no fixes - and say so, rather than leaving whatever was
     // on screen before.
-    if (!await repository.location.ensureLocationPermission()) {
+    if (!await repository.ensureLocationPermission()) {
       viewModelFacade.publish(TouristLocation.unknown);
       return;
     }
 
-    _service = repository.location.locationServiceStream().listen(
+    _service = repository.locationServiceStream().listen(
       _onServiceChanged,
       onError: (Object _) => viewModelFacade.publish(TouristLocation.unknown),
       cancelOnError: false,
@@ -58,15 +58,15 @@ class LocationMonitor {
 
     // A live dev GPS mock wins over the real GPS: hold it and do not trust
     // whatever the real stream reports until the mock is stopped.
-    _mock = repository.location.mockActiveChanges().listen(
+    _mock = repository.mockLocationActiveChanges().listen(
       _onMockChanged,
       onError: (Object _) {},
     );
-    if (repository.location.mockActive) {
+    if (repository.mockLocationActive) {
       _publishMock();
     } else {
       await _subscribeToFixes();
-      viewModelFacade.publish(await repository.location.currentLocation());
+      viewModelFacade.publish(await repository.currentLocation());
     }
   }
 
@@ -80,14 +80,14 @@ class LocationMonitor {
       _publishMock();
     } else {
       await _subscribeToFixes();
-      viewModelFacade.publish(await repository.location.currentLocation());
+      viewModelFacade.publish(await repository.currentLocation());
     }
   }
 
   /// Publishes the mocked spot, or `unknown` if the mock has no coordinates.
   void _publishMock() {
     viewModelFacade.publish(
-      repository.location.mockLocation ?? TouristLocation.unknown,
+      repository.activeMockLocation ?? TouristLocation.unknown,
     );
   }
 
@@ -106,17 +106,17 @@ class LocationMonitor {
     // waiting for the tourist to move far enough to trigger the stream.
     // While a mock is live there is nothing to subscribe to - the mock is
     // the fix.
-    if (repository.location.mockActive) {
+    if (repository.mockLocationActive) {
       _publishMock();
       return;
     }
     await _subscribeToFixes();
-    viewModelFacade.publish(await repository.location.currentLocation());
+    viewModelFacade.publish(await repository.currentLocation());
   }
 
   Future<void> _subscribeToFixes() async {
     await _fixes?.cancel();
-    _fixes = repository.location.locationStream().listen(
+    _fixes = repository.locationStream().listen(
       // Published unfiltered, including an unknown fix - that *is* the
       // signal that the position is gone.
       viewModelFacade.publish,

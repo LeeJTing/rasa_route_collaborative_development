@@ -468,6 +468,14 @@ class _TestRestaurantDiscoveryLogic extends RestaurantDiscoveryLogic {
   DiscoveryRepositoryFacade createRepository() => fakeRepository;
 
   @override
+  Future<List<DietaryRestriction>> testDietaryRestrictions() async =>
+      (fakeRepository as _FakeDiscoveryRepositoryFacade).restrictions;
+
+  @override
+  Future<Map<int, List<int>>> testRestrictionIdsByFood() async =>
+      (fakeRepository as _FakeDiscoveryRepositoryFacade).restrictionIdsByFood;
+
+  @override
   DateTime currentTime() => now();
 }
 
@@ -590,14 +598,6 @@ class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   Future<List<RestaurantItem>> getRestaurantItemsByRestaurantIds(
     List<int> restaurantIds,
   ) async => restaurantIds.expand(_itemsFor).toList(growable: false);
-
-  @override
-  Future<List<DietaryRestriction>> getCurrentDietaryRestrictions() async =>
-      restrictions;
-
-  @override
-  Future<Map<int, List<int>>> getRestrictionIdsByFood() async =>
-      restrictionIdsByFood;
 
   @override
   Future<List<FoodOccurrence>> foodOccurrences() async => occurrences;

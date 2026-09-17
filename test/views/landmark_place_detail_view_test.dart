@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/app/theme/app_theme.dart';
-import 'package:rasa_route_collaborative_development/view_models/dashboard_view_model.dart'
-    show MapSelectionHandoff;
+import 'package:rasa_route_collaborative_development/app/routing/map_selection_handoff.dart';
 import 'package:rasa_route_collaborative_development/views/landmark_place_detail_view/landmark_place_detail_view.dart';
 
 void main() {

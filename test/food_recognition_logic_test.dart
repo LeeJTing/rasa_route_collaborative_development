@@ -149,7 +149,38 @@ class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   final RecognitionRepository fakeRecognition;
 
   @override
-  RecognitionRepository get recognition => fakeRecognition;
+  Future<OriginVerification> verifyDishOrigin(String dishName) =>
+      fakeRecognition.verifyDishOrigin(dishName);
+
+  @override
+  Future<FoodAnalysisResponse> identifyFoodName(List<int> imageBytes) =>
+      fakeRecognition.identifyFoodName(imageBytes);
+
+  @override
+  Future<FoodAnalysis> analyzeFoodFull(
+    List<int> imageBytes, {
+    LocalFood? storedDish,
+  }) => fakeRecognition.analyzeFoodFull(imageBytes, storedDish: storedDish);
+
+  @override
+  Future<FoodAnalysis> analyzeFoodByName(
+    List<int> imageBytes,
+    String name, {
+    LocalFood? storedDish,
+  }) => fakeRecognition.analyzeFoodByName(
+    imageBytes,
+    name,
+    storedDish: storedDish,
+  );
+
+  @override
+  Future<({bool isTypo, String correctedName})> checkTypedNameSpelling({
+    required String typedName,
+    required String observedFood,
+  }) => fakeRecognition.checkTypedNameSpelling(
+    typedName: typedName,
+    observedFood: observedFood,
+  );
 }
 
 class _FakeFoodRepositoryFacade extends FoodRepositoryFacade {

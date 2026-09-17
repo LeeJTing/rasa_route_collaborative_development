@@ -51,14 +51,6 @@ class Restaurant {
 
   final List<RestaurantItem> items;
 
-  String get distanceLabel {
-    final double? metres = distanceMetres;
-    if (metres == null) return '';
-    if (metres < 1000) return '${metres.round()} m';
-    final double kilometres = metres / 1000;
-    return '${kilometres.toStringAsFixed(kilometres >= 10 ? 0 : 1)} km';
-  }
-
   Restaurant copyWith({
     int? id,
     String? name,

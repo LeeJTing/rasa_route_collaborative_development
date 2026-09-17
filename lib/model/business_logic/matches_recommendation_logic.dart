@@ -26,11 +26,14 @@ class MatchesRecommendationLogic {
   DateTime currentTime() => DateTime.now();
 
   late final DiscoveryRepositoryFacade _repository = createRepository();
-
   Future<MatchesRecommendationResult> recommendations(
-    MatchesRecommendationRequest request,
-  ) async {
-    final String touristId = await _repository.currentTouristId() ?? '';
+    MatchesRecommendationRequest request, {
+    required Future<String?> touristIdFuture,
+    required Future<List<LocalFood>> foodsFuture,
+    required Future<List<DietaryRestriction>> restrictionsFuture,
+    required Future<Map<int, List<int>>> restrictionIdsByFoodFuture,
+  }) async {
+    final String touristId = await touristIdFuture ?? '';
     if (touristId.isEmpty) throw Exception('Sign in to view Matches.');
 
     final List<Region> regions = await _repository.malaysiaRegions();
@@ -52,7 +55,7 @@ class MatchesRecommendationLogic {
       );
     }
 
-    final List<LocalFood> foods = await _repository.getLocalFoods();
+    final List<LocalFood> foods = await foodsFuture;
     final Map<int, LocalFood> foodsById = <int, LocalFood>{
       for (final LocalFood food in foods) food.id: food,
     };
@@ -60,8 +63,8 @@ class MatchesRecommendationLogic {
       _repository.foodOccurrences(),
       _repository.openingHoursByPlace(),
       _repository.getRestaurants(),
-      _repository.getCurrentDietaryRestrictions(),
-      _repository.getRestrictionIdsByFood(),
+      restrictionsFuture,
+      restrictionIdsByFoodFuture,
     ]);
     final Map<String, List<OpeningHour>> hoursByPlace =
         placeData[1] as Map<String, List<OpeningHour>>;

@@ -17,6 +17,11 @@ class _TestMapExplorationLogic extends MapExplorationLogic {
 
   @override
   DiscoveryRepositoryFacade createRepository() => fake;
+
+  Future<MapPin> pinDetailForTest(MapPin pin) => pinDetail(
+    pin,
+    loadFoods: () => Future<List<LocalFood>>.value(const <LocalFood>[]),
+  );
 }
 
 class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
@@ -36,9 +41,6 @@ class _FakeDiscoveryRepositoryFacade extends DiscoveryRepositoryFacade {
   Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
     Set<String>? placeKeys,
   }) async => hoursByPlace;
-
-  @override
-  Future<List<LocalFood>> getLocalFoods() async => const <LocalFood>[];
 }
 
 MapPin _landmarkPin() => const MapPin(
@@ -107,7 +109,7 @@ void main() {
   test(
     'a landmark comes back with its category, dishes and price range',
     () async {
-      final MapExplorationLogic logic = _TestMapExplorationLogic(
+      final _TestMapExplorationLogic logic = _TestMapExplorationLogic(
         _FakeDiscoveryRepositoryFacade(
           landmarkToReturn: _landmark(
             items: <LandmarkItem>[
@@ -121,7 +123,7 @@ void main() {
         ),
       );
 
-      final MapPin pin = await logic.pinDetail(_landmarkPin());
+      final MapPin pin = await logic.pinDetailForTest(_landmarkPin());
 
       expect(pin.category, 'Dessert Restaurant');
       expect(pin.priceRange, 'RM5-8');
@@ -132,7 +134,7 @@ void main() {
   );
 
   test('one price for every dish reads as that single price', () async {
-    final MapExplorationLogic logic = _TestMapExplorationLogic(
+    final _TestMapExplorationLogic logic = _TestMapExplorationLogic(
       _FakeDiscoveryRepositoryFacade(
         landmarkToReturn: _landmark(
           items: <LandmarkItem>[
@@ -143,13 +145,13 @@ void main() {
       ),
     );
 
-    expect((await logic.pinDetail(_landmarkPin())).priceRange, 'RM5');
+    expect((await logic.pinDetailForTest(_landmarkPin())).priceRange, 'RM5');
   });
 
   test(
     'a dish with no price falls back to the band it was shown with',
     () async {
-      final MapExplorationLogic logic = _TestMapExplorationLogic(
+      final _TestMapExplorationLogic logic = _TestMapExplorationLogic(
         _FakeDiscoveryRepositoryFacade(
           landmarkToReturn: _landmark(
             items: <LandmarkItem>[
@@ -159,12 +161,15 @@ void main() {
         ),
       );
 
-      expect((await logic.pinDetail(_landmarkPin())).priceRange, 'RM4-6');
+      expect(
+        (await logic.pinDetailForTest(_landmarkPin())).priceRange,
+        'RM4-6',
+      );
     },
   );
 
   test('the dish category most dishes carry is the one shown', () async {
-    final MapExplorationLogic logic = _TestMapExplorationLogic(
+    final _TestMapExplorationLogic logic = _TestMapExplorationLogic(
       _FakeDiscoveryRepositoryFacade(
         landmarkToReturn: _landmark(
           category: 'Malay',
@@ -188,13 +193,13 @@ void main() {
     );
 
     expect(
-      (await logic.pinDetail(_landmarkPin())).category,
+      (await logic.pinDetailForTest(_landmarkPin())).category,
       'Chinese Restaurant',
     );
   });
 
   test('with no dish category at all the submitted one is used', () async {
-    final MapExplorationLogic logic = _TestMapExplorationLogic(
+    final _TestMapExplorationLogic logic = _TestMapExplorationLogic(
       _FakeDiscoveryRepositoryFacade(
         landmarkToReturn: _landmark(
           category: 'Malay',
@@ -206,17 +211,17 @@ void main() {
     );
 
     expect(
-      (await logic.pinDetail(_landmarkPin())).category,
+      (await logic.pinDetailForTest(_landmarkPin())).category,
       'Malay Restaurant',
     );
   });
 
   test('a landmark with nothing on record leaves the pin alone', () async {
-    final MapExplorationLogic logic = _TestMapExplorationLogic(
+    final _TestMapExplorationLogic logic = _TestMapExplorationLogic(
       _FakeDiscoveryRepositoryFacade(landmarkToReturn: null),
     );
 
-    final MapPin pin = await logic.pinDetail(_landmarkPin());
+    final MapPin pin = await logic.pinDetailForTest(_landmarkPin());
 
     expect(pin.category, isNull);
     expect(pin.priceRange, isNull);
