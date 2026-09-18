@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation.dart';
-import 'package:rasa_route_collaborative_development/domain_model/matches_recommendation_tab.dart';
+import 'package:rasa_route_collaborative_development/view_models/presentation_models/matches_recommendation_state.dart';
 import 'package:rasa_route_collaborative_development/domain_model/restaurant.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/discovery_logic_facade.dart';
 import 'package:rasa_route_collaborative_development/view_models/matches_recommendation_view_model.dart';

@@ -50,20 +50,20 @@ class MapExplorationLogic {
 
   /// Whether this build can mock the OS GPS (Android, non-web). Views hide
   /// the dev control when false.
-  bool get mockGpsSupported => repository.location.mockSupported;
+  bool get mockGpsSupported => repository.mockGpsSupported;
 
   /// Whether a mock is live right now.
-  bool get mockGpsActive => repository.location.mockActive;
+  bool get mockGpsActive => repository.mockGpsActive;
 
   /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error
   /// message, or null on success.
   Future<String?> setMockGps({
     required double latitude,
     required double longitude,
-  }) => repository.location.setMockLocation(latitude, longitude);
+  }) => repository.setMockLocation(latitude, longitude);
 
   /// Stops mocking and resumes real GPS fixes.
-  Future<void> stopMockGps() => repository.location.stopMockLocation();
+  Future<void> stopMockGps() => repository.stopMockLocation();
 
   // ===========================================================================
   // Map geometry constants
@@ -365,21 +365,21 @@ class MapExplorationLogic {
   // Regions
   // ===========================================================================
 
-  Future<List<Region>> regions() => repository.map.malaysiaRegions();
+  Future<List<Region>> regions() => repository.malaysiaRegions();
 
   /// Throws away the cached map data so the next read goes to Supabase.
   ///
   /// Called when the tourist accepts the "map has been updated" prompt, and
   /// worth calling after this app submits a landmark of its own - otherwise the
   /// tourist's own contribution takes up to `MapRepository.cacheTtl` to appear.
-  void clearMapCache() => repository.map.clearCache();
+  void clearMapCache() => repository.clearMapCache();
 
   /// REQ102_1 - the tight coastline, which the painted overview clips to.
-  Future<List<CountryOutline>> outlines() => repository.map.malaysiaOutlines();
+  Future<List<CountryOutline>> outlines() => repository.malaysiaOutlines();
 
   /// REQ102_1 - the generous rings the detailed map masks with.
   Future<List<CountryOutline>> maskOutlines() =>
-      repository.map.malaysiaMaskOutlines();
+      repository.malaysiaMaskOutlines();
 
   /// The state containing [latitude] / [longitude], or null when the point is
   /// outside every Malaysian state (A3).
@@ -399,7 +399,7 @@ class MapExplorationLogic {
   /// answer at all.
   Future<Region?> regionAt(double latitude, double longitude) async {
     try {
-      return await repository.map.regionAt(latitude, longitude);
+      return await repository.regionAt(latitude, longitude);
     } catch (_) {
       return _regionOf(await regions(), latitude, longitude);
     }
@@ -449,6 +449,7 @@ class MapExplorationLogic {
   ///        Target Frame, or null to score every food. Reaches here from
   ///        `DashboardViewModel.showFoodInTargetFrame`.
   Future<FoodDistribution> distribution({
+    required Future<List<LocalFood>> Function() loadFoods,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
   }) async {
@@ -465,13 +466,14 @@ class MapExplorationLogic {
     //
     // The same tally now arrives as sixteen rows.
     final List<int>? foodIds = await _foodIdsFor(
+      loadFoods: loadFoods,
       filter: filter,
       localFoodId: localFoodId,
     );
 
     final List<Object> gathered = await Future.wait(<Future<Object>>[
-      repository.map.regionDistribution(foodIds: foodIds),
-      repository.getLocalFoods(),
+      repository.regionDistribution(foodIds: foodIds),
+      loadFoods(),
     ]);
     final List<RegionTally> tallies = gathered[0] as List<RegionTally>;
     final List<LocalFood> catalogue = gathered[1] as List<LocalFood>;
@@ -544,6 +546,7 @@ class MapExplorationLogic {
   /// @param localFoodId (swipe mode) - `LocalFood.id` of the dish in the
   ///        Target Frame, or null for every matching food.
   Future<MapPinPage> pins({
+    required Future<List<LocalFood>> Function() loadFoods,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
 
@@ -579,7 +582,12 @@ class MapExplorationLogic {
     // empty list, which is "a filter is on and nothing matches it" - the first
     // skips the menu lookup, the second is an empty map.
     final List<int>? resolvedFoodIds =
-        foodIds ?? await _foodIdsFor(filter: filter, localFoodId: localFoodId);
+        foodIds ??
+        await _foodIdsFor(
+          loadFoods: loadFoods,
+          filter: filter,
+          localFoodId: localFoodId,
+        );
 
     // REQ102_41 - a little wider than the screen, so panning a short way finds
     // its markers already loaded instead of flashing an empty edge.
@@ -588,7 +596,7 @@ class MapExplorationLogic {
     final double latitudePad = latitudeSpan * viewportBuffer;
     final double longitudePad = longitudeSpan * viewportBuffer;
 
-    final MapMarkerSet markers = await repository.map.mapMarkers(
+    final MapMarkerSet markers = await repository.mapMarkers(
       southLatitude: south - latitudePad,
       westLongitude: west - longitudePad,
       northLatitude: north + latitudePad,
@@ -750,6 +758,7 @@ class MapExplorationLogic {
   /// back a split zoom that does not split *this* badge.
   Future<ClusterExpansion> expandCluster(
     MapCluster cluster, {
+    required Future<List<LocalFood>> Function() loadFoods,
     required double zoom,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
@@ -757,9 +766,14 @@ class MapExplorationLogic {
     MapSearchSelection search = MapSearchSelection.none,
   }) async {
     final List<int>? resolvedFoodIds =
-        foodIds ?? await _foodIdsFor(filter: filter, localFoodId: localFoodId);
+        foodIds ??
+        await _foodIdsFor(
+          loadFoods: loadFoods,
+          filter: filter,
+          localFoodId: localFoodId,
+        );
 
-    final ({double? splitZoom, int memberCount}) probe = await repository.map
+    final ({double? splitZoom, int memberCount}) probe = await repository
         .clusterSplitZoom(
           latitude: cluster.latitude,
           longitude: cluster.longitude,
@@ -776,7 +790,7 @@ class MapExplorationLogic {
       );
     }
 
-    final List<MapPin> members = await repository.map.clusterMembers(
+    final List<MapPin> members = await repository.clusterMembers(
       latitude: cluster.latitude,
       longitude: cluster.longitude,
       zoom: zoom,
@@ -862,6 +876,7 @@ class MapExplorationLogic {
   /// resolved here rather than in SQL, so the filter rules stay in one place
   /// and the 368-row catalogue is read from cache.
   Future<List<int>?> _foodIdsFor({
+    required Future<List<LocalFood>> Function() loadFoods,
     required ExplorationFilter filter,
     required int? localFoodId,
   }) async {
@@ -885,7 +900,7 @@ class MapExplorationLogic {
     final List<int>? cached = _foodIdCache[key];
     if (cached != null) return cached;
 
-    final List<LocalFood> catalogue = await repository.getLocalFoods();
+    final List<LocalFood> catalogue = await loadFoods();
     final List<int> ids = catalogue
         .where((LocalFood food) => matchesFilter(food, filter))
         .map((LocalFood food) => food.id)
@@ -913,6 +928,7 @@ class MapExplorationLogic {
   /// whole menu either way (REQ102_47).
   Future<MapPin> pinDetail(
     MapPin pin, {
+    required Future<List<LocalFood>> Function() loadFoods,
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
   }) async {
@@ -922,6 +938,7 @@ class MapExplorationLogic {
       return _landmarkPinDetail(
         pin,
         id,
+        loadFoods: loadFoods,
         filter: filter,
         localFoodId: localFoodId,
       );
@@ -954,7 +971,7 @@ class MapExplorationLogic {
     // matched, which read as "this place serves one thing" (user report,
     // 2026-09-13). Catalogue names are preferred over the
     // restaurant's own spelling so the sheet matches the rest of the app.
-    final List<LocalFood> catalogue = await repository.getLocalFoods();
+    final List<LocalFood> catalogue = await loadFoods();
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
@@ -1023,6 +1040,7 @@ class MapExplorationLogic {
   Future<MapPin> _landmarkPinDetail(
     MapPin pin,
     int id, {
+    required Future<List<LocalFood>> Function() loadFoods,
     required ExplorationFilter filter,
     required int? localFoodId,
   }) async {
@@ -1046,7 +1064,7 @@ class MapExplorationLogic {
     // landmark has on record, catalogue names preferred over the
     // submission's own spelling, ordered so that what the tourist was
     // looking for comes first.
-    final List<LocalFood> catalogue = await repository.getLocalFoods();
+    final List<LocalFood> catalogue = await loadFoods();
     final Map<int, String> nameById = <int, String>{
       for (final LocalFood food in catalogue) food.id: food.name,
     };
@@ -1265,7 +1283,7 @@ class MapExplorationLogic {
   static const int recentSearchLimit = 5;
 
   /// What this device searched for, most recent first.
-  List<String> recentSearches() => repository.searchHistory.read();
+  List<String> recentSearches() => repository.recentSearches();
 
   /// Records [keyword] as the newest entry and returns the list that results.
   ///
@@ -1283,18 +1301,18 @@ class MapExplorationLogic {
 
     final String key = _historyKey(term);
     final List<String> next = <String>[term];
-    for (final String existing in repository.searchHistory.read()) {
+    for (final String existing in repository.recentSearches()) {
       if (_historyKey(existing) == key) continue;
       if (next.length >= recentSearchLimit) break;
       next.add(existing);
     }
 
-    await repository.searchHistory.write(next);
+    await repository.saveRecentSearches(next);
     return List<String>.unmodifiable(next);
   }
 
   /// A15-1 - forgets every remembered keyword.
-  Future<void> clearSearchHistory() => repository.searchHistory.clear();
+  Future<void> clearSearchHistory() => repository.clearRecentSearches();
 
   /// Collapses a term to what makes two searches "the same" for the history:
   /// case and runs of whitespace are not a difference a tourist means.
@@ -1314,7 +1332,10 @@ class MapExplorationLogic {
   /// heatmap and the pin list; a keyword is the other way in, and a tourist who
   /// types a restaurant's name expects to find it whether or not it serves
   /// something the filter chips happen to be asking for.
-  Future<ExplorationSearchResults> search(String keyword) async {
+  Future<ExplorationSearchResults> search(
+    String keyword, {
+    required Future<List<LocalFood>> Function() loadFoods,
+  }) async {
     // Normalised, not merely lowercased: "nasi-lemak", "char_kway_teow" and
     // "cHarKwayteOW" are all somebody asking for a dish, and the punctuation
     // they reached for is not part of the question.
@@ -1339,9 +1360,9 @@ class MapExplorationLogic {
     // and answers with the twelve rows the list can show.
     final List<Object> gathered = await Future.wait(<Future<Object>>[
       regions(),
-      repository.map.places(),
-      repository.getLocalFoods(),
-      repository.map.searchPlaceNames(placeNeedle, limit: maximumPlaceResults),
+      repository.places(),
+      loadFoods(),
+      repository.searchPlaceNames(placeNeedle, limit: maximumPlaceResults),
     ]);
     final List<Region> allRegions = gathered[0] as List<Region>;
     final List<MapPlace> catalogue = gathered[1] as List<MapPlace>;
@@ -1851,11 +1872,10 @@ class MapExplorationLogic {
   /// REQ102_6 - asks the OS for location permission, returning whether it was
   /// granted (A1 / A2).
   Future<bool> ensureLocationPermission() =>
-      repository.location.ensureLocationPermission();
+      repository.ensureLocationPermission();
 
   /// REQ102_7 - one GPS fix. `TouristLocation.unknown` when there isn't one.
-  Future<TouristLocation> currentLocation() =>
-      repository.location.currentLocation();
+  Future<TouristLocation> currentLocation() => repository.currentLocation();
 
   // ===========================================================================
   // Internals

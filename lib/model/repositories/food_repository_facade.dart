@@ -4,14 +4,10 @@ import '../../domain_model/food_preference.dart';
 import '../../domain_model/food_similarity.dart';
 import '../../domain_model/local_food.dart';
 import '../../domain_model/pronunciation_playback_result.dart';
-import 'auth_repository.dart';
 import 'dietary_restriction_repository.dart';
 import 'food_knowledge_repository.dart';
 import 'food_preference_repository.dart';
 import 'recommendation_repository.dart';
-import 'restaurant_repository.dart';
-import 'swipe_repository.dart';
-import 'tourist_profile_repository.dart';
 
 /// Everything about dishes: the catalogue, favourites, recommendation
 /// candidates, the swipe deck, and the food-domain reference data
@@ -23,40 +19,34 @@ import 'tourist_profile_repository.dart';
 class FoodRepositoryFacade {
   FoodRepositoryFacade();
 
-  final FoodKnowledgeRepository knowledge = FoodKnowledgeRepository();
-  final RecommendationRepository recommendation = RecommendationRepository();
-  final SwipeRepository swipe = SwipeRepository();
+  final FoodKnowledgeRepository _knowledge = FoodKnowledgeRepository();
+  final RecommendationRepository _recommendation = RecommendationRepository();
 
   /// Canonical taste/category options (`food_preference`) and reference
   /// dietary restrictions (`dietary_restriction`) - food-domain reference
   /// data read by recognition/recommendation features.
-  final FoodPreferenceRepository foodPreference = FoodPreferenceRepository();
-  final DietaryRestrictionRepository dietaryRestriction =
+  final FoodPreferenceRepository _foodPreference = FoodPreferenceRepository();
+  final DietaryRestrictionRepository _dietaryRestriction =
       DietaryRestrictionRepository();
-  final AuthRepository auth = AuthRepository();
-  final TouristProfileRepository touristProfile = TouristProfileRepository();
-
-  /// Restaurant menu rows - used to compute a dish's listed price range.
-  final RestaurantRepository restaurant = RestaurantRepository();
 
   // =========================================================================
   // Flat API - a logic class calls these, never `facade.knowledge.xxx`.
   // =========================================================================
 
-  Future<List<LocalFood>> getFoods() => knowledge.getFoods();
+  Future<List<LocalFood>> getFoods() => _knowledge.getFoods();
 
   Future<List<LocalFood>> searchFoods(String query) =>
-      knowledge.searchFoods(query);
+      _knowledge.searchFoods(query);
 
-  Future<LocalFood?> getFoodById(int foodId) => knowledge.getFoodById(foodId);
+  Future<LocalFood?> getFoodById(int foodId) => _knowledge.getFoodById(foodId);
 
   Future<PronunciationPlaybackResult> playPronunciation(LocalFood food) =>
-      knowledge.playPronunciation(food);
+      _knowledge.playPronunciation(food);
 
   /// Adds a genuinely-new, tourist-confirmed Malaysian local food to the
   /// catalogue (Option C - catalogue growth from submissions). Returns the
   /// saved row (with its assigned id) or null when a duplicate exists.
-  Future<LocalFood?> insertFood(LocalFood food) => knowledge.insertFood(food);
+  Future<LocalFood?> insertFood(LocalFood food) => _knowledge.insertFood(food);
 
   /// Attaches a photo to a catalogue dish (`local_food_image`) - used when a
   /// new dish is added from a landmark submission, so the dish carries the
@@ -65,12 +55,12 @@ class FoodRepositoryFacade {
   Future<void> addFoodImage({
     required int localFoodId,
     required String imageName,
-  }) => knowledge.addFoodImage(localFoodId: localFoodId, imageName: imageName);
+  }) => _knowledge.addFoodImage(localFoodId: localFoodId, imageName: imageName);
 
   /// Taste/category name -> id lookups (lowercased) for normalising a
   /// recognized food's tags against `food_preference` before writing links.
   Future<({Map<String, int> tastes, Map<String, int> categories})>
-  preferenceIdLookup() => foodPreference.preferenceIdLookup();
+  preferenceIdLookup() => _foodPreference.preferenceIdLookup();
 
   /// Writes the `local_food_preference` links for a freshly-inserted dish
   /// (tastes with the main taste marked, plus its category).
@@ -79,7 +69,7 @@ class FoodRepositoryFacade {
     required List<int> tasteIds,
     int mainTasteId = 0,
     int? categoryId,
-  }) => knowledge.linkFoodPreferences(
+  }) => _knowledge.linkFoodPreferences(
     localFoodId,
     tasteIds: tasteIds,
     mainTasteId: mainTasteId,
@@ -90,44 +80,39 @@ class FoodRepositoryFacade {
   Future<void> linkFoodDietaryRestrictions(
     int localFoodId,
     List<int> restrictionIds,
-  ) => knowledge.linkFoodDietaryRestrictions(localFoodId, restrictionIds);
+  ) => _knowledge.linkFoodDietaryRestrictions(localFoodId, restrictionIds);
 
   Future<bool> toggleFavourite(int localFoodId) =>
-      knowledge.toggleFavourite(localFoodId);
+      _knowledge.toggleFavourite(localFoodId);
 
   /// The signed-in tourist's favourited food ids (`favourite_food`), or an
   /// empty set when nobody is signed in. Used to prioritise similar foods.
-  Future<Set<int>> favouriteFoodIds() => knowledge.favouriteFoodIds();
+  Future<Set<int>> favouriteFoodIds() => _knowledge.favouriteFoodIds();
 
   /// Canonical taste values from `food_preference`, used to normalise a
   /// food's taste tags against the reference set.
-  Future<List<String>> tasteOptions() => foodPreference.tasteOptions();
+  Future<List<String>> tasteOptions() => _foodPreference.tasteOptions();
 
   /// Reference dietary restrictions (`dietary_restriction`).
   Future<List<DietaryRestriction>> dietaryRestrictions() =>
-      dietaryRestriction.restrictions();
+      _dietaryRestriction.restrictions();
 
   /// The signed-in tourist's dietary restrictions (`user_dietary_restriction`),
   /// resolving the auth user id to the domain `tourist_id` first.
   Future<List<DietaryRestriction>> touristDietaryRestrictions() =>
-      dietaryRestriction.restrictionsForCurrentTourist();
+      _dietaryRestriction.restrictionsForCurrentTourist();
 
-  Future<List<FoodPreference>> touristFoodPreferences() async {
-    final String? touristId = await auth.currentTouristId();
-    if (touristId == null || touristId.isEmpty) {
-      return const <FoodPreference>[];
-    }
-    return touristProfile.getFoodPreferences(touristId);
-  }
+  Future<List<FoodPreference>> touristFoodPreferences() =>
+      _foodPreference.currentTouristPreferences();
 
   /// The restrictions attached to one dish (`food_dietary_restriction`).
   Future<List<DietaryRestriction>> foodDietaryRestrictions(int foodId) =>
-      dietaryRestriction.restrictionsForFood(foodId);
+      _dietaryRestriction.restrictionsForFood(foodId);
 
   /// Every dish's dietary-restriction ids (`local_food_id -> [restriction ids]`)
   /// in one query, used by pairing to exclude confirmed conflicts before Gemini.
   Future<Map<int, List<int>>> foodDietaryRestrictionIds() =>
-      dietaryRestriction.restrictionIdsByFood();
+      _dietaryRestriction.restrictionIdsByFood();
 
   Future<List<FoodPairing>> getPairings(
     LocalFood food,
@@ -137,7 +122,7 @@ class FoodRepositoryFacade {
     List<FoodPreference> touristPreferences = const <FoodPreference>[],
     int maximumResults = 5,
     void Function(String model)? onFallbackModel,
-  }) => recommendation.getPairings(
+  }) => _recommendation.getPairings(
     food,
     catalogue,
     touristDietaryRestrictionIds: touristDietaryRestrictionIds,
@@ -151,15 +136,15 @@ class FoodRepositoryFacade {
   /// `restaurant_item` menu row selling those dishes.
   Future<Map<int, ({double min, double max})>> foodPriceRanges(
     Set<int> foodIds,
-  ) => restaurant.restaurantPriceRangeByFood(foodIds);
+  ) => _knowledge.foodPriceRanges(foodIds);
 
   Future<Map<int, List<({String name, double price})>>> foodMenuItems(
     Set<int> foodIds,
-  ) => restaurant.restaurantMenuItemsByFood(foodIds);
+  ) => _knowledge.foodMenuItems(foodIds);
 
   /// "If you liked X, try Y" - computed from shared attributes, no AI call.
   Future<List<FoodSimilarity>> getSimilar(
     LocalFood food,
     List<LocalFood> catalogue,
-  ) => recommendation.getSimilar(food, catalogue);
+  ) => _recommendation.getSimilar(food, catalogue);
 }

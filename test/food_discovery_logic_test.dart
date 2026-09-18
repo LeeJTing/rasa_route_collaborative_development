@@ -7,13 +7,14 @@ import 'package:rasa_route_collaborative_development/domain_model/opening_hour.d
 import 'package:rasa_route_collaborative_development/domain_model/region.dart';
 import 'package:rasa_route_collaborative_development/domain_model/swipe_mode.dart';
 import 'package:rasa_route_collaborative_development/domain_model/swipe_session.dart';
+import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/food_discovery_logic.dart';
 import 'package:rasa_route_collaborative_development/model/repositories/discovery_repository_facade.dart';
 
 void main() {
   group('FoodDiscoveryLogic', () {
     late _FakeDiscoveryRepository repository;
-    late FoodDiscoveryLogic logic;
+    late _TestFoodDiscoveryLogic logic;
 
     setUp(() {
       repository = _FakeDiscoveryRepository();
@@ -21,7 +22,7 @@ void main() {
     });
 
     test('localises, personalises, and places restricted food last', () async {
-      final SwipeModePreparation result = await logic.prepareSwipeMode(
+      final SwipeModePreparation result = await logic.prepareForTest(
         latitude: 1,
         longitude: 1,
       );
@@ -37,7 +38,7 @@ void main() {
       repository.preferences = const <FoodPreference>[];
       repository.favouriteFoodIds = <int>{3};
 
-      final SwipeModePreparation result = await logic.prepareSwipeMode(
+      final SwipeModePreparation result = await logic.prepareForTest(
         latitude: 1,
         longitude: 1,
       );
@@ -53,7 +54,7 @@ void main() {
         ];
         repository.favouriteFoodIds = <int>{1};
 
-        final SwipeModePreparation result = await logic.prepareSwipeMode(
+        final SwipeModePreparation result = await logic.prepareForTest(
           latitude: 1,
           longitude: 1,
         );
@@ -63,7 +64,7 @@ void main() {
     );
 
     test('starts, moves, and saves a like locally', () async {
-      final SwipeModePreparation preparation = await logic.prepareSwipeMode(
+      final SwipeModePreparation preparation = await logic.prepareForTest(
         latitude: 1,
         longitude: 1,
       );
@@ -112,7 +113,7 @@ void main() {
     });
 
     test('reloads changes saved by the Matches screen', () async {
-      final SwipeModePreparation preparation = await logic.prepareSwipeMode(
+      final SwipeModePreparation preparation = await logic.prepareForTest(
         latitude: 1,
         longitude: 1,
       );
@@ -146,8 +147,10 @@ void main() {
           3: <int>{7},
         };
 
-        final SwipeModePreparation refreshed = await logic
-            .refreshAfterProfileChange(latitude: 1, longitude: 1);
+        final SwipeModePreparation refreshed = await logic.refreshForTest(
+          latitude: 1,
+          longitude: 1,
+        );
 
         expect(refreshed.queue.map((LocalFood food) => food.id), <int>[
           1,
@@ -179,8 +182,10 @@ void main() {
           3: <int>{7},
         };
 
-        final SwipeModePreparation refreshed = await logic
-            .refreshAfterProfileChange(latitude: 1, longitude: 1);
+        final SwipeModePreparation refreshed = await logic.refreshForTest(
+          latitude: 1,
+          longitude: 1,
+        );
 
         expect(refreshed.savedSession!.candidateFoodIds, <int>[1, 3, 2]);
         expect(refreshed.savedSession!.currentIndex, 1);
@@ -202,12 +207,11 @@ void main() {
           currentIndex: 2,
         );
 
-        final SwipeModePreparation refreshed = await logic
-            .refreshAfterProfileChange(
-              latitude: 1,
-              longitude: 1,
-              rebuildWholeQueue: true,
-            );
+        final SwipeModePreparation refreshed = await logic.refreshForTest(
+          latitude: 1,
+          longitude: 1,
+          rebuildWholeQueue: true,
+        );
 
         expect(refreshed.savedSession!.candidateFoodIds, <int>[1, 3, 2]);
         expect(refreshed.savedSession!.currentIndex, 0);
@@ -223,7 +227,7 @@ void main() {
         ],
       };
 
-      final SwipeModePreparation result = await logic.prepareSwipeMode(
+      final SwipeModePreparation result = await logic.prepareForTest(
         latitude: 1,
         longitude: 1,
       );
@@ -232,7 +236,7 @@ void main() {
     });
 
     test('limits the queue to restaurant foods inside the viewport', () async {
-      final SwipeModePreparation result = await logic.prepareSwipeMode(
+      final SwipeModePreparation result = await logic.prepareForTest(
         latitude: 1,
         longitude: 1,
         south: 0.99,
@@ -249,13 +253,85 @@ void main() {
 class _TestFoodDiscoveryLogic extends FoodDiscoveryLogic {
   _TestFoodDiscoveryLogic(this.repository);
 
-  final DiscoveryRepositoryFacade repository;
+  final _FakeDiscoveryRepository repository;
 
   @override
   DiscoveryRepositoryFacade createRepository() => repository;
 
   @override
   DateTime currentTime() => DateTime(2026, 9, 7, 12);
+
+  Future<SwipeModePreparation> prepareForTest({
+    required double latitude,
+    required double longitude,
+    TouristLocation distanceOrigin = TouristLocation.unknown,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
+  }) => prepareSwipeMode(
+    touristIdFuture: Future<String?>.value('tourist-1'),
+    foodsFuture: Future<List<LocalFood>>.value(repository.foods),
+    preferencesFuture: Future<List<FoodPreference>>.value(
+      repository.preferences,
+    ),
+    restrictionsFuture: Future<List<DietaryRestriction>>.value(
+      const <DietaryRestriction>[
+        DietaryRestriction(id: 7, name: 'Test restriction'),
+      ],
+    ),
+    favouriteFoodIdsFuture: Future<Set<int>>.value(repository.favouriteFoodIds),
+    restrictionIdsByFoodFuture: Future<Map<int, List<int>>>.value(
+      repository.restrictionIdsByFood.map(
+        (int id, Set<int> values) =>
+            MapEntry<int, List<int>>(id, values.toList()),
+      ),
+    ),
+    latitude: latitude,
+    longitude: longitude,
+    distanceOrigin: distanceOrigin,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
+  );
+
+  Future<SwipeModePreparation> refreshForTest({
+    required double latitude,
+    required double longitude,
+    TouristLocation distanceOrigin = TouristLocation.unknown,
+    bool rebuildWholeQueue = false,
+    double? south,
+    double? west,
+    double? north,
+    double? east,
+  }) => refreshAfterProfileChange(
+    touristIdFuture: Future<String?>.value('tourist-1'),
+    foodsFuture: Future<List<LocalFood>>.value(repository.foods),
+    preferencesFuture: Future<List<FoodPreference>>.value(
+      repository.preferences,
+    ),
+    restrictionsFuture: Future<List<DietaryRestriction>>.value(
+      const <DietaryRestriction>[
+        DietaryRestriction(id: 7, name: 'Test restriction'),
+      ],
+    ),
+    favouriteFoodIdsFuture: Future<Set<int>>.value(repository.favouriteFoodIds),
+    restrictionIdsByFoodFuture: Future<Map<int, List<int>>>.value(
+      repository.restrictionIdsByFood.map(
+        (int id, Set<int> values) =>
+            MapEntry<int, List<int>>(id, values.toList()),
+      ),
+    ),
+    latitude: latitude,
+    longitude: longitude,
+    distanceOrigin: distanceOrigin,
+    rebuildWholeQueue: rebuildWholeQueue,
+    south: south,
+    west: west,
+    north: north,
+    east: east,
+  );
 }
 
 class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
@@ -281,9 +357,6 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
   Set<int> favouriteFoodIds = <int>{};
 
   @override
-  Future<String?> currentTouristId() async => 'tourist-1';
-
-  @override
   Future<List<Region>> malaysiaRegions() async => <Region>[
     const Region(
       code: 'TST',
@@ -300,9 +373,6 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
       places: <RegionPlace>[],
     ),
   ];
-
-  @override
-  Future<List<LocalFood>> getLocalFoods() async => foods;
 
   @override
   Future<List<FoodOccurrence>> foodOccurrences() async =>
@@ -353,26 +423,6 @@ class _FakeDiscoveryRepository extends DiscoveryRepositoryFacade {
   Future<Map<String, List<OpeningHour>>> openingHoursByPlace({
     Set<String>? placeKeys,
   }) async => hoursByPlace;
-
-  @override
-  Future<List<FoodPreference>> foodPreferencesForTourist(
-    String touristId,
-  ) async => preferences;
-
-  @override
-  Future<Set<int>> favouriteFoodIdsForTourist(String touristId) async =>
-      favouriteFoodIds;
-
-  @override
-  Future<List<DietaryRestriction>> dietaryRestrictionsForTourist(
-    String touristId,
-  ) async => const <DietaryRestriction>[
-    DietaryRestriction(id: 7, name: 'Test restriction'),
-  ];
-
-  @override
-  Future<Map<int, Set<int>>> dietaryRestrictionIdsByFood() async =>
-      restrictionIdsByFood;
 
   @override
   Future<SwipeSession?> getSwipeSession({

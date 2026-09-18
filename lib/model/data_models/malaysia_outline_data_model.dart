@@ -1,5 +1,4 @@
 import '../../core/json_model.dart';
-import '../../domain_model/region.dart';
 
 /// The coastline of Malaysia as three closed rings - one per landmass.
 ///
@@ -55,14 +54,6 @@ class MalaysiaOutlineDataModel implements JsonModel {
     'name': name,
     'ring': ring,
   };
-
-  /// Data model -> domain model. Called by `MapRepository`, nowhere else.
-  CountryOutline toDomain() => CountryOutline(
-    name: name,
-    ring: ring
-        .map((List<double> point) => GeoPoint(point[0], point[1]))
-        .toList(growable: false),
-  );
 
   static const List<MalaysiaOutlineDataModel> catalogue =
       <MalaysiaOutlineDataModel>[

@@ -1,10 +1,7 @@
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
-
 import '../../app/config/env.dart';
 import '../../domain_model/address_suggestion.dart';
 import '../../domain_model/tourist_location.dart';
+import '../../external/geocoding/nominatim_client.dart';
 
 /// OpenStreetMap geocoding through the public Nominatim service - the two
 /// directions the Add-New-Landmark form needs:
@@ -38,12 +35,7 @@ import '../../domain_model/tourist_location.dart';
 class GeocodingRepository {
   GeocodingRepository();
 
-  static const Duration _timeout = Duration(seconds: 8);
-
-  /// Nominatim's policy allows at most one request per second; 1100 ms leaves
-  /// a margin.
-  static const int _minRequestGapMs = 1100;
-  static DateTime? _lastRequestAt;
+  final NominatimClient _client = NominatimClient();
 
   /// How many results a search asks for. The logic layer re-sorts them by
   /// distance anyway; the request already walks outwards from the anchor, so
@@ -60,13 +52,6 @@ class GeocodingRepository {
   /// and the `varchar(150)` column behind `submitted_landmark.address` - a
   /// composed address is trimmed (whole trailing parts dropped first) to fit.
   static const int maxComposedAddressLength = 150;
-
-  /// Nominatim requires an identifying User-Agent.
-  static const Map<String, String> _headers = <String, String>{
-    'User-Agent': 'rasa-route/1.0 (com.rasaroute.app)',
-    'Accept': 'application/json',
-    'Accept-Language': 'en',
-  };
 
   static const int _cacheLimit = 25;
 
@@ -96,7 +81,7 @@ class GeocodingRepository {
 
     final Uri? uri = _searchUri(trimmed, around);
     if (uri == null) return null;
-    final dynamic decoded = await _getJson(uri);
+    final dynamic decoded = await _client.getJson(uri);
     if (decoded is! List) return null;
 
     final List<AddressSuggestion> results = <AddressSuggestion>[];
@@ -138,7 +123,7 @@ class GeocodingRepository {
 
     final Uri? uri = _reverseUri(location);
     if (uri == null) return null;
-    final dynamic decoded = await _getJson(uri);
+    final dynamic decoded = await _client.getJson(uri);
     if (decoded is! Map) return null;
 
     final String address = composeAddress(Map<String, dynamic>.from(decoded));
@@ -315,39 +300,6 @@ class GeocodingRepository {
     final Uri? uri = Uri.tryParse(Env.osmNominatimUrl.trim());
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) return null;
     return uri;
-  }
-
-  /// GETs [uri] (rate-limited) and decodes the JSON body - `null` on any
-  /// failure, including non-2xx responses and malformed bodies.
-  Future<dynamic> _getJson(Uri uri) async {
-    try {
-      await _respectRateLimit();
-      final http.Response response = await http
-          .get(uri, headers: _headers)
-          .timeout(_timeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        return null;
-      }
-      return jsonDecode(utf8.decode(response.bodyBytes));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Waits out the remainder of the one-request-per-second window, then
-  /// stamps the request time. Static, so it covers every instance.
-  Future<void> _respectRateLimit() async {
-    final DateTime now = DateTime.now();
-    final DateTime? last = _lastRequestAt;
-    if (last != null) {
-      final int elapsedMs = now.difference(last).inMilliseconds;
-      if (elapsedMs < _minRequestGapMs) {
-        await Future<void>.delayed(
-          Duration(milliseconds: _minRequestGapMs - elapsedMs),
-        );
-      }
-    }
-    _lastRequestAt = DateTime.now();
   }
 
   static String _spotKey(TouristLocation location) =>

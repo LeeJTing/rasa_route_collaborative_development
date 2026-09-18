@@ -3,23 +3,12 @@ import 'dart:math' as math;
 import 'package:meta/meta.dart' show protected;
 
 import '../core/base_view_model.dart';
-import '../domain_model/matches_recommendation_tab.dart';
 import '../domain_model/matches_recommendation.dart';
 import '../domain_model/restaurant.dart';
 import '../domain_model/swipe_session.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
 import 'current_location_facade.dart';
-
-enum MatchesRestaurantSort { distance, price, preference, rating }
-
-/// What the Submitted Landmarks tab can order its cards by. `preference`
-/// mirrors the restaurant tab's own chip: the landmark serving the MOST
-/// dishes leads (its `dishes` length - the landmark equivalent of the
-/// restaurant's matching menu items). The chip used to be missing from the
-/// landmark tab (user request, 2026-09-14).
-enum MatchesLandmarkSort { distance, price, preference, name }
-
-enum MatchesSortDirection { ascending, descending }
+import 'presentation_models/matches_recommendation_state.dart';
 
 /// Presentation state for the state-scoped Matches Recommendation page.
 ///

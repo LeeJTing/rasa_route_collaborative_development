@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/routing/app_routes.dart';
+import '../../app/routing/map_selection_handoff.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
-import '../../domain_model/matches_recommendation_tab.dart';
 import '../../domain_model/matches_recommendation.dart';
-import '../../view_models/dashboard_view_model.dart' show MapSelectionHandoff;
 import '../../view_models/matches_recommendation_view_model.dart';
+import '../../view_models/presentation_models/matches_recommendation_state.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/enlarged_image_dialog.dart';
 import 'widgets/matched_food_recommendation_group.dart';

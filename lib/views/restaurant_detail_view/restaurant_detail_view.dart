@@ -4,12 +4,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/routing/app_navigator.dart';
 import '../../app/routing/app_routes.dart';
+import '../../app/routing/report_place_handoff.dart';
 import '../../app/theme/app_dimensions.dart';
 import '../../core/view_state.dart';
 import '../../domain_model/report_category.dart';
 import '../../domain_model/restaurant.dart';
 import '../../domain_model/tourist_location.dart';
-import '../../view_models/report_place_view_model.dart';
 import '../../view_models/restaurant_detail_view_model.dart';
 import '../common_widgets/app_top_bar.dart';
 import '../common_widgets/enlarged_image_dialog.dart';

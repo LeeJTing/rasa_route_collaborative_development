@@ -5,15 +5,8 @@ import '../../domain_model/opening_hour.dart';
 import '../../domain_model/report_category.dart';
 import '../../domain_model/report_claim.dart';
 import '../../domain_model/report_outcome.dart';
-import '../../domain_model/restaurant_item.dart';
-import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
-import '../repositories/auth_repository.dart';
-import '../repositories/geocoding_repository.dart';
-import '../repositories/map_repository.dart';
-import '../repositories/report_repository.dart';
-import '../repositories/restaurant_repository.dart';
-import '../repositories/submitted_landmark_repository.dart';
+import '../repositories/report_repository_facade.dart';
 import 'landmark_submission_logic.dart';
 import 'report_moderation_rules.dart';
 
@@ -22,10 +15,8 @@ import 'report_moderation_rules.dart';
 /// tourists make the IDENTICAL claim, auto-applies the fix.
 ///
 /// This logic spans BOTH place kinds (the same categories, thresholds and
-/// auto-apply actions exist for restaurants and landmarks), so it holds the
-/// submitted-landmark repo AND the catalogue restaurant repo alongside the
-/// shared `report` repo, `auth` and `map` (documented cross-place exception,
-/// like `MapExplorationLogic`).
+/// auto-apply actions exist for restaurants and landmarks) through one
+/// report-shaped repository facade.
 ///
 /// Flow per claim (see `ReportModerationRules` for the pure decisions):
 ///   1. resolve the signed-in tourist (reporting is signed-in-only);
@@ -37,37 +28,10 @@ import 'report_moderation_rules.dart';
 class ReportModerationLogic {
   ReportModerationLogic();
 
-  // Test seam: each repository is behind a `@protected create*()` factory so a
-  // subclass can inject a fake (the same DI convention ViewModels use), rather
-  // than constructing real network-backed repositories.
   @protected
-  ReportRepository createReportRepository() => ReportRepository();
+  ReportRepositoryFacade createRepositoryFacade() => ReportRepositoryFacade();
 
-  @protected
-  RestaurantRepository createRestaurantRepository() => RestaurantRepository();
-
-  @protected
-  SubmittedLandmarkRepository createLandmarkRepository() =>
-      SubmittedLandmarkRepository();
-
-  @protected
-  AuthRepository createAuthRepository() => AuthRepository();
-
-  @protected
-  MapRepository createMapRepository() => MapRepository();
-
-  /// The address field's geocoder - the SAME OpenStreetMap/Nominatim
-  /// repository the Add-Landmark form searches through, so a corrected
-  /// address is composed and worded identically on both screens.
-  @protected
-  GeocodingRepository createGeocodingRepository() => GeocodingRepository();
-
-  late final ReportRepository report = createReportRepository();
-  late final RestaurantRepository restaurant = createRestaurantRepository();
-  late final SubmittedLandmarkRepository landmark = createLandmarkRepository();
-  late final AuthRepository auth = createAuthRepository();
-  late final MapRepository map = createMapRepository();
-  late final GeocodingRepository geocoding = createGeocodingRepository();
+  late final ReportRepositoryFacade repository = createRepositoryFacade();
 
   /// Live address suggestions for the report page's address field -
   /// measured from [around] and sorted nearest first, exactly like the
@@ -77,16 +41,23 @@ class ReportModerationLogic {
   Future<List<AddressSuggestion>?> searchAddresses({
     required String query,
     required TouristLocation around,
-  }) => LandmarkSubmissionLogic.searchAddressesWith(
-    geocoding,
-    query: query,
-    around: around,
-  );
+  }) async {
+    final String trimmed = query.trim();
+    if (trimmed.length < LandmarkSubmissionLogic.minAddressSearchLength) {
+      return const <AddressSuggestion>[];
+    }
+    final List<AddressSuggestion>? results = await repository.searchAddresses(
+      query: trimmed,
+      around: around,
+    );
+    if (results == null) return null;
+    return LandmarkSubmissionLogic.sortSuggestionsByDistance(results, around);
+  }
 
   /// The composed OSM address of one point - what the address field fills in
   /// when the report page's pin moves. Never throws.
   Future<String?> reverseGeocodeAddress(TouristLocation location) =>
-      geocoding.reverseGeocodeAddress(location);
+      repository.reverseGeocodeAddress(location);
 
   /// How a suggestion's distance is labelled ("350 m", "1.2 km") - the same
   /// rule the Add-Landmark form uses.
@@ -97,37 +68,7 @@ class ReportModerationLogic {
   Future<List<ReportableMenuItem>> reportableItemsFor({
     required ReportPlaceKind placeKind,
     required int placeId,
-  }) async {
-    if (placeKind == ReportPlaceKind.restaurant) {
-      final List<RestaurantItem> items = await restaurant.getReportableItems(
-        placeId,
-      );
-      return <ReportableMenuItem>[
-        for (final RestaurantItem item in items)
-          ReportableMenuItem(
-            itemKind: ReportItemKind.restaurantItem,
-            id: item.id,
-            name: item.foodName,
-            price: item.price,
-            isRemoved: item.isRemoved,
-          ),
-      ];
-    }
-    final List<LandmarkItem> items = await landmark.getReportableItems(placeId);
-    return <ReportableMenuItem>[
-      for (final LandmarkItem item in items)
-        ReportableMenuItem(
-          itemKind: ReportItemKind.landmarkItem,
-          id: item.id,
-          // The variant the tourist captured, else the dictionary dish - a
-          // report names the dish as the place lists it (see
-          // `LandmarkItem.displayName`).
-          name: item.displayName,
-          price: item.price,
-          isRemoved: item.isRemoved,
-        ),
-    ];
-  }
+  }) => repository.reportableItemsFor(placeKind: placeKind, placeId: placeId);
 
   /// Submits [claims] against the place. Returns an aggregate [ReportSubmitOutcome].
   ///
@@ -143,7 +84,7 @@ class ReportModerationLogic {
       return const ReportSubmitOutcome();
     }
     final String? resolvedTouristId =
-        touristId ?? await auth.currentTouristId();
+        touristId ?? await repository.currentTouristId();
     if (resolvedTouristId == null || resolvedTouristId.isEmpty) {
       return const ReportSubmitOutcome(requiresSignIn: true);
     }
@@ -155,7 +96,7 @@ class ReportModerationLogic {
     bool wroteAnything = false;
 
     for (final ReportClaim claim in claims) {
-      final bool duplicate = await report.alreadyReported(
+      final bool duplicate = await repository.alreadyReported(
         claim: claim,
         touristId: resolvedTouristId,
       );
@@ -163,7 +104,7 @@ class ReportModerationLogic {
         duplicateCount++;
         continue;
       }
-      await report.insertClaim(claim: claim, touristId: resolvedTouristId);
+      await repository.insertClaim(claim: claim, touristId: resolvedTouristId);
       wroteAnything = true;
       submittedCount++;
 
@@ -175,8 +116,8 @@ class ReportModerationLogic {
       final bool temporaryClosure =
           claim.category == ReportCategory.closedTemporarily;
       final int count = temporaryClosure
-          ? await report.countIssue(claim)
-          : await report.countIdentical(claim);
+          ? await repository.countIssue(claim)
+          : await repository.countIdentical(claim);
       if (!ReportModerationRules.reachesThreshold(claim.category, count)) {
         continue;
       }
@@ -186,7 +127,7 @@ class ReportModerationLogic {
         result = await _applyClosedTemporarily(claim);
         // Every claim contributed to crossing the threshold - clear the
         // whole issue so the next report starts a fresh count.
-        await report.deleteIssue(claim);
+        await repository.deleteIssue(claim);
       } else {
         result = await _applyFix(claim);
         // The fix matched this claim's identical group - clear those rows so
@@ -194,7 +135,7 @@ class ReportModerationLogic {
         // that was HELD BACK (the pins do not agree on the spot yet) keeps
         // its rows, so each further valid report re-runs the consensus check.
         if (!result.heldBack) {
-          await report.deleteIdentical(claim);
+          await repository.deleteIdentical(claim);
         }
       }
       if (result.label != null) applied.add(result.label!);
@@ -204,7 +145,7 @@ class ReportModerationLogic {
     if (wroteAnything && placeHiddenNow) {
       // Frozen/removed places are no longer 'available', so cached map pins
       // must go - the next read (after the UI leaves the page) has no pin.
-      map.clearCache();
+      repository.clearMapCache();
     }
 
     return ReportSubmitOutcome(
@@ -255,15 +196,12 @@ class ReportModerationLogic {
           closesAt: p.status == DayStatus.open ? p.closesAt : null,
         ),
     ];
-    if (claim.placeKind == ReportPlaceKind.restaurant) {
-      await restaurant.replaceRestaurantOpeningHourDay(
-        claim.placeId,
-        day,
-        rows,
-      );
-    } else {
-      await landmark.replaceLandmarkOpeningHourDay(claim.placeId, day, rows);
-    }
+    await repository.replaceOpeningHourDay(
+      placeKind: claim.placeKind,
+      placeId: claim.placeId,
+      day: day,
+      rows: rows,
+    );
     return _ApplyResult(label: '${_dayLabel(day)} hours updated');
   }
 
@@ -274,13 +212,15 @@ class ReportModerationLogic {
       claim.payload.replaceFirst('price:', ''),
     );
     if (price == null) return const _ApplyResult();
-    if (claim.itemKind == ReportItemKind.restaurantItem) {
-      await restaurant.updateRestaurantItemPrice(itemId, price);
-    } else if (claim.itemKind == ReportItemKind.landmarkItem) {
-      await landmark.updateLandmarkItemPrice(itemId, price);
-    } else {
+    final ReportItemKind? itemKind = claim.itemKind;
+    if (itemKind == null) {
       return const _ApplyResult();
     }
+    await repository.updateItemPrice(
+      itemKind: itemKind,
+      itemId: itemId,
+      price: price,
+    );
     return const _ApplyResult(label: 'Price updated');
   }
 
@@ -288,14 +228,21 @@ class ReportModerationLogic {
     final int? itemId = claim.itemId;
     if (itemId == null) return const _ApplyResult();
     if (claim.itemKind == ReportItemKind.restaurantItem) {
-      await restaurant.softRemoveRestaurantItem(itemId);
+      await repository.softRemoveItem(
+        itemKind: ReportItemKind.restaurantItem,
+        itemId: itemId,
+      );
       // Price/not-exist claims about this item are moot now - clear them.
-      await report.deleteIssue(claim);
-      final int remaining = await restaurant.countVisibleRestaurantItems(
-        claim.placeId,
+      await repository.deleteIssue(claim);
+      final int remaining = await repository.countVisibleItems(
+        placeKind: ReportPlaceKind.restaurant,
+        placeId: claim.placeId,
       );
       if (remaining == 0) {
-        await restaurant.removeRestaurant(claim.placeId);
+        await repository.removePlace(
+          placeKind: ReportPlaceKind.restaurant,
+          placeId: claim.placeId,
+        );
         return const _ApplyResult(
           label: 'Item removed; restaurant hidden (no items left)',
           hidPlace: true,
@@ -304,13 +251,20 @@ class ReportModerationLogic {
       return const _ApplyResult(label: 'Item removed from menu');
     }
     if (claim.itemKind == ReportItemKind.landmarkItem) {
-      await landmark.softRemoveLandmarkItem(itemId);
-      await report.deleteIssue(claim);
-      final int remaining = await landmark.countVisibleLandmarkItems(
-        claim.placeId,
+      await repository.softRemoveItem(
+        itemKind: ReportItemKind.landmarkItem,
+        itemId: itemId,
+      );
+      await repository.deleteIssue(claim);
+      final int remaining = await repository.countVisibleItems(
+        placeKind: ReportPlaceKind.landmark,
+        placeId: claim.placeId,
       );
       if (remaining == 0) {
-        await landmark.removeLandmark(claim.placeId);
+        await repository.removePlace(
+          placeKind: ReportPlaceKind.landmark,
+          placeId: claim.placeId,
+        );
         return const _ApplyResult(
           label: 'Item removed; landmark hidden (no items left)',
           hidPlace: true,
@@ -336,40 +290,33 @@ class ReportModerationLogic {
   Future<_ApplyResult> _applyAddress(ReportClaim claim) async {
     final String address = claim.payload.replaceFirst('address:', '').trim();
     if (address.isEmpty) return const _ApplyResult();
-    final List<TouristLocation> pins = await report.locationsForIssue(claim);
+    final List<TouristLocation> pins = await repository.locationsForIssue(
+      claim,
+    );
     final TouristLocation? agreed = ReportModerationRules.consensusLocation(
       pins,
     );
     if (agreed == null) return const _ApplyResult(heldBack: true);
     final double latitude = agreed.latitude;
     final double longitude = agreed.longitude;
-    if (claim.placeKind == ReportPlaceKind.restaurant) {
-      await restaurant.updateRestaurantAddress(
-        claim.placeId,
-        address,
-        latitude: latitude,
-        longitude: longitude,
-      );
-    } else {
-      await landmark.updateLandmarkAddress(
-        claim.placeId,
-        address,
-        latitude: latitude,
-        longitude: longitude,
-      );
-    }
+    await repository.updateAddress(
+      placeKind: claim.placeKind,
+      placeId: claim.placeId,
+      address: address,
+      latitude: latitude,
+      longitude: longitude,
+    );
     // A moved pin is new map data, so the map caches are dropped the same way
     // a freeze drops them.
-    map.clearCache();
+    repository.clearMapCache();
     return const _ApplyResult(label: 'Address updated');
   }
 
   Future<_ApplyResult> _applyClosedPermanently(ReportClaim claim) async {
-    if (claim.placeKind == ReportPlaceKind.restaurant) {
-      await restaurant.freezeRestaurant(claim.placeId);
-    } else {
-      await landmark.freezeLandmark(claim.placeId);
-    }
+    await repository.freezePlace(
+      placeKind: claim.placeKind,
+      placeId: claim.placeId,
+    );
     return const _ApplyResult(
       label: 'Place hidden (closed permanently)',
       hidPlace: true,
@@ -382,20 +329,16 @@ class ReportModerationLogic {
     // reports of the same closure vote together and the most-voted date wins
     // (ties -> the later date). The date is stored verbatim; one already in
     // the past just means the place reads as open again immediately.
-    final List<ClosureClaim> issueClaims = await report.closureClaimsForIssue(
-      claim,
-    );
+    final List<ClosureClaim> issueClaims = await repository
+        .closureClaimsForIssue(claim);
     final DateTime? closedUntil = ReportModerationRules.resolveClosureUntil(
       issueClaims,
     );
-    if (claim.placeKind == ReportPlaceKind.restaurant) {
-      await restaurant.freezeRestaurant(
-        claim.placeId,
-        closedUntil: closedUntil,
-      );
-    } else {
-      await landmark.freezeLandmark(claim.placeId, closedUntil: closedUntil);
-    }
+    await repository.freezePlace(
+      placeKind: claim.placeKind,
+      placeId: claim.placeId,
+      closedUntil: closedUntil,
+    );
     return const _ApplyResult(
       label: 'Place hidden (closed temporarily)',
       hidPlace: true,

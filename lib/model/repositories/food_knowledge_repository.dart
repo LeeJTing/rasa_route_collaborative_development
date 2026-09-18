@@ -71,6 +71,125 @@ class FoodKnowledgeRepository {
     _cachedFoodsAt = null;
   }
 
+  static final RegExp _bulkPackPattern = RegExp(
+    r'(?:'
+    r'(\d+)\s*\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set|pcs?|pieces?)\b'
+    r'|\b(botol|biji|pek|paket|pak|kotak|tin|karton|dozen|lusin|bungkus|set|pcs?|pieces?)\b\s*(\d+)'
+    r')',
+    caseSensitive: false,
+  );
+
+  static bool _isBulkPack(String itemName) {
+    final RegExpMatch? match = _bulkPackPattern.firstMatch(itemName);
+    if (match == null) return false;
+    final String? count = match.group(1) ?? match.group(4);
+    final int? parsed = count == null ? null : int.tryParse(count);
+    return parsed != null && parsed > 1;
+  }
+
+  Future<Map<int, ({double min, double max})>> foodPriceRanges(
+    Set<int> localFoodIds,
+  ) async {
+    if (localFoodIds.isEmpty) {
+      return const <int, ({double min, double max})>{};
+    }
+    try {
+      final List<Map<String, dynamic>> rows = await api.selectAll(
+        APIManager.tableRestaurantItem,
+        columns: 'local_food_id, restaurant_item_name, restaurant_item_price',
+        inFilter: <String, List<Object?>>{
+          'local_food_id': localFoodIds.cast<Object?>().toList(),
+        },
+      );
+      final Map<int, double> minByFood = <int, double>{};
+      final Map<int, double> maxByFood = <int, double>{};
+      for (final Map<String, dynamic> row in rows) {
+        final int? foodId = JsonReader.asIntOrNull(row['local_food_id']);
+        final double? price = JsonReader.asDoubleOrNull(
+          row['restaurant_item_price'],
+        );
+        final String itemName = JsonReader.asString(
+          row['restaurant_item_name'],
+        );
+        if (foodId == null ||
+            price == null ||
+            price <= 0 ||
+            _isBulkPack(itemName)) {
+          continue;
+        }
+        final double currentMin = minByFood[foodId] ?? price;
+        final double currentMax = maxByFood[foodId] ?? price;
+        minByFood[foodId] = price < currentMin ? price : currentMin;
+        maxByFood[foodId] = price > currentMax ? price : currentMax;
+      }
+      return <int, ({double min, double max})>{
+        for (final MapEntry<int, double> entry in minByFood.entries)
+          entry.key: (
+            min: entry.value,
+            max: maxByFood[entry.key] ?? entry.value,
+          ),
+      };
+    } catch (error, stackTrace) {
+      developer.log(
+        'Restaurant price range query failed.',
+        name: 'FoodKnowledgeRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load restaurant prices. Check your connection and try again.',
+      );
+    }
+  }
+
+  Future<Map<int, List<({String name, double price})>>> foodMenuItems(
+    Set<int> localFoodIds,
+  ) async {
+    if (localFoodIds.isEmpty) {
+      return const <int, List<({String name, double price})>>{};
+    }
+    try {
+      final List<Map<String, dynamic>> rows = await api.selectAll(
+        APIManager.tableRestaurantItem,
+        columns: 'local_food_id, restaurant_item_name, restaurant_item_price',
+        inFilter: <String, List<Object?>>{
+          'local_food_id': localFoodIds.cast<Object?>().toList(),
+        },
+      );
+      final Map<int, List<({String name, double price})>> byFood =
+          <int, List<({String name, double price})>>{};
+      for (final Map<String, dynamic> row in rows) {
+        final int? foodId = JsonReader.asIntOrNull(row['local_food_id']);
+        final double? price = JsonReader.asDoubleOrNull(
+          row['restaurant_item_price'],
+        );
+        final String name = JsonReader.asString(
+          row['restaurant_item_name'],
+        ).trim();
+        if (foodId == null || price == null || price <= 0 || name.isEmpty) {
+          continue;
+        }
+        byFood.putIfAbsent(foodId, () => <({String name, double price})>[]).add(
+          (name: name, price: price),
+        );
+      }
+      for (final List<({String name, double price})> entries in byFood.values) {
+        entries.sort((a, b) => a.price.compareTo(b.price));
+      }
+      return byFood;
+    } catch (error, stackTrace) {
+      developer.log(
+        'Restaurant menu listing query failed.',
+        name: 'FoodKnowledgeRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      throw Exception(
+        'Unable to load restaurant prices. Check your connection and try again.',
+      );
+    }
+  }
+
   static const String _selectColumns = '''
     local_food_id,
     food_name,

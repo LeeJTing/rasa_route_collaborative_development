@@ -6,11 +6,9 @@ import 'package:rasa_route_collaborative_development/domain_model/restaurant_ite
 import 'package:rasa_route_collaborative_development/domain_model/submitted_landmark.dart';
 import 'package:rasa_route_collaborative_development/domain_model/tourist_location.dart';
 import 'package:rasa_route_collaborative_development/model/business_logic/report_moderation_logic.dart';
-import 'package:rasa_route_collaborative_development/model/repositories/auth_repository.dart';
-import 'package:rasa_route_collaborative_development/model/repositories/map_repository.dart';
 import 'package:rasa_route_collaborative_development/model/repositories/report_repository.dart';
-import 'package:rasa_route_collaborative_development/model/repositories/restaurant_repository.dart';
-import 'package:rasa_route_collaborative_development/model/repositories/submitted_landmark_repository.dart';
+import 'package:rasa_route_collaborative_development/model/repositories/report_feature_repositories.dart';
+import 'package:rasa_route_collaborative_development/model/repositories/report_repository_facade.dart';
 
 void main() {
   group('submitClaims - sign-in', () {
@@ -536,15 +534,26 @@ ReportModerationLogic _build(
   _FakeLandmarkRepository? landmark,
   String? touristId = 't1',
 }) => _TestReportModerationLogic(
-  report,
-  restaurant ?? _FakeRestaurantRepository(),
-  landmark ?? _FakeLandmarkRepository(),
-  _FakeAuthRepository(touristId),
-  _FakeMapRepository(),
+  _FakeReportRepositoryFacade(
+    report,
+    restaurant ?? _FakeRestaurantRepository(),
+    landmark ?? _FakeLandmarkRepository(),
+    _FakeAuthRepository(touristId),
+    _FakeMapRepository(),
+  ),
 );
 
 class _TestReportModerationLogic extends ReportModerationLogic {
-  _TestReportModerationLogic(
+  _TestReportModerationLogic(this.fakeFacade);
+
+  final ReportRepositoryFacade fakeFacade;
+
+  @override
+  ReportRepositoryFacade createRepositoryFacade() => fakeFacade;
+}
+
+class _FakeReportRepositoryFacade extends ReportRepositoryFacade {
+  _FakeReportRepositoryFacade(
     this.fakeReport,
     this.fakeRestaurant,
     this.fakeLandmark,
@@ -562,16 +571,16 @@ class _TestReportModerationLogic extends ReportModerationLogic {
   ReportRepository createReportRepository() => fakeReport;
 
   @override
-  RestaurantRepository createRestaurantRepository() => fakeRestaurant;
+  ReportRestaurantRepository createRestaurantRepository() => fakeRestaurant;
 
   @override
-  SubmittedLandmarkRepository createLandmarkRepository() => fakeLandmark;
+  ReportLandmarkRepository createLandmarkRepository() => fakeLandmark;
 
   @override
-  AuthRepository createAuthRepository() => fakeAuth;
+  ReportIdentityRepository createAuthRepository() => fakeAuth;
 
   @override
-  MapRepository createMapRepository() => fakeMap;
+  ReportMapRepository createMapRepository() => fakeMap;
 }
 
 class _FakeReportRepository extends ReportRepository {
@@ -623,7 +632,7 @@ class _FakeReportRepository extends ReportRepository {
   }
 }
 
-class _FakeRestaurantRepository extends RestaurantRepository {
+class _FakeRestaurantRepository extends ReportRestaurantRepository {
   List<RestaurantItem> reportable = const <RestaurantItem>[];
   String? updatedAddress;
   double? updatedAddressLatitude;
@@ -636,21 +645,21 @@ class _FakeRestaurantRepository extends RestaurantRepository {
   final List<List<OpeningHour>> replacedRows = <List<OpeningHour>>[];
 
   @override
-  Future<List<RestaurantItem>> getReportableItems(int restaurantId) async =>
+  Future<List<RestaurantItem>> reportableItems(int restaurantId) async =>
       reportable;
 
   @override
-  Future<void> updateRestaurantItemPrice(int itemId, double price) async {
+  Future<void> updateItemPrice(int itemId, double price) async {
     updatedPriceItemId = itemId;
     updatedPrice = price;
   }
 
   @override
-  Future<void> updateRestaurantAddress(
+  Future<void> updateAddress(
     int restaurantId,
     String address, {
-    double? latitude,
-    double? longitude,
+    required double latitude,
+    required double longitude,
   }) async {
     updatedAddress = address;
     updatedAddressLatitude = latitude;
@@ -658,10 +667,7 @@ class _FakeRestaurantRepository extends RestaurantRepository {
   }
 
   @override
-  Future<void> freezeRestaurant(
-    int restaurantId, {
-    DateTime? closedUntil,
-  }) async {
+  Future<void> freezePlace(int restaurantId, {DateTime? closedUntil}) async {
     if (closedUntil == null) {
       frozenWithoutUntil.add(restaurantId);
     } else {
@@ -670,7 +676,7 @@ class _FakeRestaurantRepository extends RestaurantRepository {
   }
 
   @override
-  Future<void> replaceRestaurantOpeningHourDay(
+  Future<void> replaceOpeningHourDay(
     int restaurantId,
     Weekday day,
     List<OpeningHour> rows,
@@ -680,7 +686,7 @@ class _FakeRestaurantRepository extends RestaurantRepository {
   }
 }
 
-class _FakeLandmarkRepository extends SubmittedLandmarkRepository {
+class _FakeLandmarkRepository extends ReportLandmarkRepository {
   List<LandmarkItem> reportable = const <LandmarkItem>[];
   List<int> removedItemIds = <int>[];
   List<int> removedLandmarks = <int>[];
@@ -691,30 +697,30 @@ class _FakeLandmarkRepository extends SubmittedLandmarkRepository {
   final List<(int, DateTime?)> frozenWithUntil = <(int, DateTime?)>[];
 
   @override
-  Future<List<LandmarkItem>> getReportableItems(int landmarkId) async =>
+  Future<List<LandmarkItem>> reportableItems(int landmarkId) async =>
       reportable;
 
   @override
-  Future<void> updateLandmarkItemPrice(int itemId, double price) async {
+  Future<void> updateItemPrice(int itemId, double price) async {
     updatedPriceItemId = itemId;
     updatedPrice = price;
   }
 
   @override
-  Future<void> softRemoveLandmarkItem(int itemId) async {
+  Future<void> softRemoveItem(int itemId) async {
     removedItemIds.add(itemId);
   }
 
   @override
-  Future<int> countVisibleLandmarkItems(int landmarkId) async => visibleCount;
+  Future<int> countVisibleItems(int landmarkId) async => visibleCount;
 
   @override
-  Future<void> removeLandmark(int landmarkId) async {
+  Future<void> removePlace(int landmarkId) async {
     removedLandmarks.add(landmarkId);
   }
 
   @override
-  Future<void> freezeLandmark(int landmarkId, {DateTime? closedUntil}) async {
+  Future<void> freezePlace(int landmarkId, {DateTime? closedUntil}) async {
     if (closedUntil == null) {
       frozenWithoutUntil.add(landmarkId);
     } else {
@@ -723,7 +729,7 @@ class _FakeLandmarkRepository extends SubmittedLandmarkRepository {
   }
 }
 
-class _FakeAuthRepository extends AuthRepository {
+class _FakeAuthRepository extends ReportIdentityRepository {
   _FakeAuthRepository(this.result);
 
   final String? result;
@@ -732,7 +738,7 @@ class _FakeAuthRepository extends AuthRepository {
   Future<String?> currentTouristId() async => result;
 }
 
-class _FakeMapRepository extends MapRepository {
+class _FakeMapRepository extends ReportMapRepository {
   int clearCount = 0;
 
   @override

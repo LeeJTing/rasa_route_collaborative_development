@@ -1,5 +1,4 @@
 import '../../core/json_model.dart';
-import '../../domain_model/region.dart';
 
 /// The 13 states and 3 federal territories of Malaysia (REQ102_1).
 ///
@@ -64,21 +63,6 @@ class MalaysiaRegionDataModel implements JsonModel {
         .map((MalaysiaPlaceDataModel p) => p.toJson())
         .toList(growable: false),
   };
-
-  /// Data model -> domain model. Called by `MapRepository`, nowhere else.
-  Region toDomain() => Region(
-    code: code,
-    name: name,
-    centreLatitude: centreLatitude,
-    centreLongitude: centreLongitude,
-    defaultZoom: defaultZoom,
-    boundary: boundary
-        .map((List<double> point) => GeoPoint(point[0], point[1]))
-        .toList(growable: false),
-    places: places
-        .map((MalaysiaPlaceDataModel place) => place.toDomain(name))
-        .toList(growable: false),
-  );
 
   // ===========================================================================
   // The catalogue (REQ102_1)
@@ -561,11 +545,4 @@ class MalaysiaPlaceDataModel implements JsonModel {
     'latitude': latitude,
     'longitude': longitude,
   };
-
-  RegionPlace toDomain(String regionName) => RegionPlace(
-    name: name,
-    regionName: regionName,
-    latitude: latitude,
-    longitude: longitude,
-  );
 }

@@ -16,7 +16,6 @@ import '../../domain_model/stored_place_details.dart';
 import '../../domain_model/submitted_landmark.dart';
 import '../../domain_model/tourist_location.dart';
 import '../data_models/signboard_script_check_response.dart';
-import '../repositories/geocoding_repository.dart';
 import '../repositories/landmark_repository_facade.dart';
 import 'dietary_warning.dart';
 import 'food_name_matcher.dart';
@@ -52,7 +51,7 @@ class LandmarkSubmissionLogic {
   /// tourist can edit the field afterwards.
   /// Errors: A2 (timeout), A7 (no text), A19 (incomplete frame)
   Future<String> analyzeSignboard(List<int> imageBytes) async {
-    final response = await repository.recognition.analyzeSignboard(imageBytes);
+    final response = await repository.analyzeSignboard(imageBytes);
     if (response.signboardImageStatus != 'complete') {
       throw Exception(
         'Signboard not fully in frame. Please ensure the entire signboard is visible.',
@@ -92,9 +91,7 @@ class LandmarkSubmissionLogic {
     if (chineseScriptStyleOf(name) == 'unknown') return name;
     final SignboardScriptCheckResponse painted;
     try {
-      painted = await repository.recognition.verifySignboardScript(
-        imageBytes: imageBytes,
-      );
+      painted = await repository.verifySignboardScript(imageBytes: imageBytes);
     } catch (_) {
       return name;
     }
@@ -154,7 +151,7 @@ class LandmarkSubmissionLogic {
     required List<int> imageBytes,
     required String typedName,
   }) async {
-    final response = await repository.recognition.verifySignboardName(
+    final response = await repository.verifySignboardName(
       imageBytes: imageBytes,
       typedName: typedName,
     );
@@ -376,7 +373,7 @@ class LandmarkSubmissionLogic {
   /// for why this validation lives here now, not in the ViewModel.
   /// Errors: A2 (timeout), A8 (not detected), A15 (incomplete frame)
   Future<void> analyzeStall(List<int> imageBytes) async {
-    final response = await repository.recognition.analyzeStall(imageBytes);
+    final response = await repository.analyzeStall(imageBytes);
     if (response.stallStatus != 'detected') {
       throw Exception(
         'Unable to verify this is a food stall. Please capture the stall image.',
@@ -392,21 +389,22 @@ class LandmarkSubmissionLogic {
   /// Checks whether a restaurant with this name already exists (A13).
   /// Case-insensitive; returns null when nothing matches.
   Future<Restaurant?> checkRestaurantExists(String name) =>
-      repository.restaurant.findByName(name);
+      repository.findRestaurantByName(name);
 
   /// The signed-in tourist's id, for `LandmarkItem.touristId`. Null if
   /// nobody is signed in / the session can't be resolved yet.
-  Future<String?> currentTouristId() => repository.auth.currentTouristId();
+  Future<String?> currentTouristId() => repository.currentTouristId();
 
   /// One submitted landmark (with its dishes and opening hours) for the
   /// detail screen - flat passthrough to the repository. Null when the id
   /// matches nothing.
   Future<SubmittedLandmark?> getSubmittedLandmarkById(int landmarkId) =>
-      repository.landmark.getSubmittedLandmarkById(landmarkId);
+      repository.submittedLandmarkById(landmarkId);
 
   Future<SubmittedLandmark?> getLandmarkPlaceDetail(int landmarkId) async {
-    final SubmittedLandmark? landmark = await repository.landmark
-        .getSubmittedLandmarkById(landmarkId);
+    final SubmittedLandmark? landmark = await repository.submittedLandmarkById(
+      landmarkId,
+    );
     if (landmark == null || landmark.items.isEmpty) return landmark;
     return _withDietaryWarnings(landmark);
   }
@@ -475,7 +473,7 @@ class LandmarkSubmissionLogic {
   /// why the contributor lives on `landmark_item`, not `submitted_landmark`).
   Future<List<SubmittedLandmark>> getSubmittedLandmarksByTourist(
     String touristId,
-  ) => repository.landmark.getSubmittedLandmarksByTourist(touristId);
+  ) => repository.submittedLandmarksByTourist(touristId);
 
   /// Uploads a captured photo - a food's photo, or the landmark's
   /// signboard/stall photo - to Supabase Storage and returns what the row
@@ -483,7 +481,7 @@ class LandmarkSubmissionLogic {
   /// The actual upload lives in the repository - this method just makes it
   /// reachable from the ViewModel through the one facade this class holds.
   Future<({String id, String url})> uploadImage(List<int> bytes) =>
-      repository.landmark.uploadImage(bytes);
+      repository.uploadLandmarkImage(bytes);
 
   /// Day names for validation messages.
   static const Map<Weekday, String> _dayNames = <Weekday, String>{
@@ -1049,7 +1047,7 @@ class LandmarkSubmissionLogic {
           .expand((List<OpeningHour> rows) => rows)
           .toList(growable: false),
     );
-    final int landmarkId = await repository.landmark.save(landmark);
+    final int landmarkId = await repository.saveLandmark(landmark);
 
     // The tourist standing here again confirms the place still exists - if an
     // OLDER submitted landmark of the same place is frozen/reported, clear it
@@ -1074,8 +1072,9 @@ class LandmarkSubmissionLogic {
     double? longitude,
   ) async {
     if (latitude == null || longitude == null) return null;
-    final List<Restaurant> candidates = await repository.restaurant
-        .findByNameList(name);
+    final List<Restaurant> candidates = await repository.restaurantsByName(
+      name,
+    );
     return nearestRestaurantWithinMetres(candidates, latitude, longitude);
   }
 
@@ -1089,8 +1088,9 @@ class LandmarkSubmissionLogic {
     double? longitude,
   ) async {
     if (latitude == null || longitude == null) return null;
-    final List<SubmittedLandmark> candidates = await repository.landmark
-        .findByName(name);
+    final List<SubmittedLandmark> candidates = await repository.landmarksByName(
+      name,
+    );
     return nearestLandmarkWithinMetres(candidates, latitude, longitude);
   }
 
@@ -1167,8 +1167,7 @@ class LandmarkSubmissionLogic {
       // The lookup above returns a light row (id + coordinates only) - the
       // stored DETAILS need the full read.
       final SubmittedLandmark stored =
-          await repository.landmark.getSubmittedLandmarkById(nearby.id) ??
-          nearby;
+          await repository.submittedLandmarkById(nearby.id) ?? nearby;
       _collectChangedContactFields(
         fields,
         phone: phone,
@@ -1259,8 +1258,7 @@ class LandmarkSubmissionLogic {
       // The by-name lookup returns a light row (id + coordinates only) - the
       // stored DETAILS need the full read, exactly like [mergeOverwriteReport].
       final SubmittedLandmark stored =
-          await repository.landmark.getSubmittedLandmarkById(nearby.id) ??
-          nearby;
+          await repository.submittedLandmarkById(nearby.id) ?? nearby;
       return StoredPlaceDetails(
         name: stored.name,
         isRestaurant: false,
@@ -1384,7 +1382,7 @@ class LandmarkSubmissionLogic {
     required Map<Weekday, List<OpeningHour>> operatingHours,
   }) async {
     try {
-      await repository.landmark.updateContactFields(
+      await repository.updateLandmarkContactFields(
         landmark.id,
         phone: phone,
         website: website == null ? null : sanitiseWebsiteForSave(website),
@@ -1396,7 +1394,7 @@ class LandmarkSubmissionLogic {
     final String trimmedAddress = address?.trim() ?? '';
     if (trimmedAddress.isNotEmpty) {
       try {
-        await repository.landmark.updateLandmarkAddress(
+        await repository.updateLandmarkAddress(
           landmark.id,
           trimmedAddress,
           latitude: latitude,
@@ -1407,10 +1405,7 @@ class LandmarkSubmissionLogic {
       }
     }
     try {
-      await repository.landmark.updateOpeningHoursOnMerge(
-        landmark.id,
-        operatingHours,
-      );
+      await repository.updateLandmarkOpeningHours(landmark.id, operatingHours);
     } catch (_) {
       // Ignored - the merge itself succeeded.
     }
@@ -1431,7 +1426,7 @@ class LandmarkSubmissionLogic {
     required Map<Weekday, List<OpeningHour>> operatingHours,
   }) async {
     try {
-      await repository.restaurant.updateRestaurantContactFields(
+      await repository.updateRestaurantContactFields(
         restaurant.id,
         phone: phone,
         website: website == null ? null : sanitiseWebsiteForSave(website),
@@ -1442,7 +1437,7 @@ class LandmarkSubmissionLogic {
     final String trimmedAddress = address?.trim() ?? '';
     if (trimmedAddress.isNotEmpty) {
       try {
-        await repository.restaurant.updateRestaurantAddress(
+        await repository.updateRestaurantAddress(
           restaurant.id,
           trimmedAddress,
           latitude: latitude,
@@ -1463,7 +1458,7 @@ class LandmarkSubmissionLogic {
           .toList(growable: false);
       if (_daySignature(stored) == _daySignature(rows)) continue;
       try {
-        await repository.restaurant.replaceRestaurantOpeningHourDay(
+        await repository.replaceRestaurantOpeningHourDay(
           restaurant.id,
           entry.key,
           rows,
@@ -1677,12 +1672,11 @@ class LandmarkSubmissionLogic {
     final List<SimilarPlaceCandidate> found = <SimilarPlaceCandidate>[];
 
     try {
-      final List<Restaurant> restaurants = await repository.restaurant
-          .getRestaurantsNear(
-            latitude: latitude,
-            longitude: longitude,
-            maximumDistanceKm: maximumDistanceKm,
-          );
+      final List<Restaurant> restaurants = await repository.restaurantsNear(
+        latitude: latitude,
+        longitude: longitude,
+        maximumDistanceKm: maximumDistanceKm,
+      );
       for (final Restaurant restaurant in restaurants) {
         final String? image = restaurant.imageUrl;
         final double? lat = restaurant.latitude;
@@ -1710,12 +1704,11 @@ class LandmarkSubmissionLogic {
     }
 
     try {
-      final List<SubmittedLandmark> landmarks = await repository.landmark
-          .findNearby(
-            latitude: latitude,
-            longitude: longitude,
-            maximumDistanceKm: maximumDistanceKm,
-          );
+      final List<SubmittedLandmark> landmarks = await repository.landmarksNear(
+        latitude: latitude,
+        longitude: longitude,
+        maximumDistanceKm: maximumDistanceKm,
+      );
       for (final SubmittedLandmark landmark in landmarks) {
         final String? image = landmark.imageUrl;
         final double? lat = landmark.latitude;
@@ -1762,10 +1755,10 @@ class LandmarkSubmissionLogic {
   }) async {
     final String? url = candidate.imageUrl;
     if (url == null || url.isEmpty || imageBytes.isEmpty) return false;
-    final List<int>? stored = await repository.links.fetchImageBytes(url);
+    final List<int>? stored = await repository.fetchImageBytes(url);
     if (stored == null || stored.isEmpty) return false;
     try {
-      final response = await repository.recognition.comparePlacePhotos(
+      final response = await repository.comparePlacePhotos(
         imageBytes: imageBytes,
         otherImageBytes: stored,
       );
@@ -1794,8 +1787,8 @@ class LandmarkSubmissionLogic {
         <({String dish, String variant, int localFoodId})>[];
     try {
       if (candidate.isRestaurant) {
-        final List<RestaurantItem> items = await repository.restaurant
-            .getReportableItems(candidate.id);
+        final List<RestaurantItem> items = await repository
+            .restaurantReportableItems(candidate.id);
         for (final RestaurantItem item in items) {
           if (item.isRemoved) continue;
           // `restaurant_item` carries no variant column - a menu row is the
@@ -1807,8 +1800,8 @@ class LandmarkSubmissionLogic {
           ));
         }
       } else {
-        final SubmittedLandmark? landmark = await repository.landmark
-            .getSubmittedLandmarkById(candidate.id);
+        final SubmittedLandmark? landmark = await repository
+            .submittedLandmarkById(candidate.id);
         for (final LandmarkItem item
             in landmark?.items ?? const <LandmarkItem>[]) {
           if (item.isRemoved) continue;
@@ -1857,19 +1850,18 @@ class LandmarkSubmissionLogic {
   }) async {
     try {
       if (matchedRestaurant != null) {
-        await repository.restaurant.resetRestaurantModeration(
-          matchedRestaurant.id,
-        );
+        await repository.resetRestaurantModeration(matchedRestaurant.id);
       }
       if (latitude == null || longitude == null) return;
-      final List<SubmittedLandmark> sameName = await repository.landmark
-          .findByName(name);
+      final List<SubmittedLandmark> sameName = await repository.landmarksByName(
+        name,
+      );
       for (final SubmittedLandmark older in sameName) {
         final double? lat = older.latitude;
         final double? lon = older.longitude;
         if (lat == null || lon == null) continue;
         if (_distanceMetres(latitude, longitude, lat, lon) > 100) continue;
-        await repository.landmark.clearReportsAndReactivate(older.id);
+        await repository.clearLandmarkReportsAndReactivate(older.id);
       }
     } catch (_) {
       // Ignored - the submission itself already succeeded.
@@ -1927,8 +1919,8 @@ class LandmarkSubmissionLogic {
     final Set<String> existingNames = <String>{};
     final Set<int> existingFoodIds = <int>{};
     try {
-      final List<RestaurantItem> existingItems = await repository.restaurant
-          .getRestaurantItemsByRestaurantIds(<int>[restaurantId]);
+      final List<RestaurantItem> existingItems = await repository
+          .restaurantItemsForIds(<int>[restaurantId]);
       for (final RestaurantItem item in existingItems) {
         if (item.localFoodId > 0) existingFoodIds.add(item.localFoodId);
         existingNames.add(item.foodName.trim().toLowerCase());
@@ -1952,7 +1944,7 @@ class LandmarkSubmissionLogic {
         continue;
       }
       try {
-        await repository.restaurant.addRestaurantItem(
+        await repository.addRestaurantItem(
           restaurantId: restaurantId,
           localFoodId: localFoodId,
           name: entry.food.name,
@@ -1993,8 +1985,9 @@ class LandmarkSubmissionLogic {
     final List<({String dish, int localFoodId, String variant})> listed =
         <({String dish, int localFoodId, String variant})>[];
     try {
-      final SubmittedLandmark? current = await repository.landmark
-          .getSubmittedLandmarkById(landmarkId);
+      final SubmittedLandmark? current = await repository.submittedLandmarkById(
+        landmarkId,
+      );
       if (current != null) {
         for (final LandmarkItem item in current.items) {
           listed.add((
@@ -2053,7 +2046,7 @@ class LandmarkSubmissionLogic {
       ));
     }
     if (toAdd.isEmpty) return (added: added, existing: existing);
-    await repository.landmark.addItems(landmarkId, toAdd);
+    await repository.addLandmarkItems(landmarkId, toAdd);
     for (final LandmarkItem item in toAdd) {
       added.add(dishLabel(item.dish, item.variant));
     }
@@ -2077,7 +2070,7 @@ class LandmarkSubmissionLogic {
   ) async {
     for (final MapEntry<String, int> entry in foodIds.entries) {
       try {
-        await repository.landmark.linkItemToFood(
+        await repository.linkLandmarkItemToFood(
           landmarkId,
           entry.key,
           entry.value,
@@ -2515,7 +2508,7 @@ class LandmarkSubmissionLogic {
   /// from the client for form validation; a production deployment should
   /// run the equivalent check server-side (SSRF).
   Future<bool> isWebsiteReachable(String url) =>
-      repository.links.isWebsiteReachable(url);
+      repository.isWebsiteReachable(url);
 
   // ===========================================================================
   // Address search (OpenStreetMap / Nominatim) - Add-Landmark address field
@@ -2537,25 +2530,12 @@ class LandmarkSubmissionLogic {
   Future<List<AddressSuggestion>?> searchAddresses({
     required String query,
     required TouristLocation around,
-  }) => searchAddressesWith(repository.geocoding, query: query, around: around);
-
-  /// [searchAddresses] against a geocoder the CALLER owns.
-  ///
-  /// The Add-Landmark form searches through its own [GeocodingRepository];
-  /// the report page searches through its logic class's own - both get the
-  /// same query rules, distance measuring and nearest-first ordering from
-  /// here, so the two screens can never disagree about what an address looks
-  /// like or how close it is.
-  static Future<List<AddressSuggestion>?> searchAddressesWith(
-    GeocodingRepository geocoding, {
-    required String query,
-    required TouristLocation around,
   }) async {
     final String trimmed = query.trim();
     if (trimmed.length < minAddressSearchLength) {
       return const <AddressSuggestion>[];
     }
-    final List<AddressSuggestion>? results = await geocoding.searchAddresses(
+    final List<AddressSuggestion>? results = await repository.searchAddresses(
       query: trimmed,
       around: around,
     );
@@ -2599,7 +2579,7 @@ class LandmarkSubmissionLogic {
   /// OpenStreetMap has no usable address there. Never throws (the repository
   /// is best-effort), so a map interaction can never break the form.
   Future<String?> reverseGeocodeAddress(TouristLocation location) =>
-      repository.geocoding.reverseGeocodeAddress(location);
+      repository.reverseGeocodeAddress(location);
 
   /// How the form shows a suggestion's distance: metres below 1 km
   /// ("350 m"), one decimal below 10 km ("1.2 km"), whole kilometres above
@@ -2633,20 +2613,20 @@ class LandmarkSubmissionLogic {
   // to demo the 50 m same-restaurant rule.
 
   /// Whether this build can mock the OS GPS (Android, non-web).
-  bool get mockGpsSupported => repository.location.mockSupported;
+  bool get mockGpsSupported => repository.mockLocationSupported;
 
   /// Whether a mock is live right now.
-  bool get mockGpsActive => repository.location.mockActive;
+  bool get mockGpsActive => repository.mockLocationActive;
 
   /// Teleports the OS GPS to [latitude]/[longitude]. Returns an error
   /// message, or null on success.
   Future<String?> setMockGps({
     required double latitude,
     required double longitude,
-  }) => repository.location.setMockLocation(latitude, longitude);
+  }) => repository.setMockLocation(latitude, longitude);
 
   /// Stops mocking and resumes real GPS fixes.
-  Future<void> stopMockGps() => repository.location.stopMockLocation();
+  Future<void> stopMockGps() => repository.stopMockLocation();
 
   // =========================================================================
   // Continuing an unfinished submission

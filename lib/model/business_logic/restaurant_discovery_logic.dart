@@ -33,28 +33,46 @@ class RestaurantDiscoveryLogic {
   @protected
   DateTime currentTime() => DateTime.now();
 
-  late final DiscoveryRepositoryFacade repository = createRepository();
+  @protected
+  Future<List<DietaryRestriction>> testDietaryRestrictions() => Future.error(
+    StateError('Dietary context must be supplied by DiscoveryLogicFacade.'),
+  );
 
+  @protected
+  Future<Map<int, List<int>>> testRestrictionIdsByFood() => Future.error(
+    StateError('Dietary context must be supplied by DiscoveryLogicFacade.'),
+  );
+
+  late final DiscoveryRepositoryFacade repository = createRepository();
   Future<Restaurant?> findById(
     int restaurantId, {
+    Future<List<DietaryRestriction>>? restrictionsFuture,
+    Future<Map<int, List<int>>>? restrictionIdsByFoodFuture,
     TouristLocation origin = TouristLocation.unknown,
   }) async {
     final Restaurant? restaurant = await repository.getRestaurantById(
       restaurantId,
     );
     if (restaurant == null) return null;
-    final Restaurant annotated = await _withDietaryWarnings(restaurant);
+    final Restaurant annotated = await _withDietaryWarnings(
+      restaurant,
+      restrictionsFuture: restrictionsFuture ?? testDietaryRestrictions(),
+      restrictionIdsByFoodFuture:
+          restrictionIdsByFoodFuture ?? testRestrictionIdsByFood(),
+    );
     return _measure(<Restaurant>[annotated], origin).single;
   }
 
-
-  Future<Restaurant> _withDietaryWarnings(Restaurant restaurant) async {
+  Future<Restaurant> _withDietaryWarnings(
+    Restaurant restaurant, {
+    required Future<List<DietaryRestriction>> restrictionsFuture,
+    required Future<Map<int, List<int>>> restrictionIdsByFoodFuture,
+  }) async {
     if (restaurant.items.isEmpty) return restaurant;
-    final List<DietaryRestriction> restrictions = await repository
-        .getCurrentDietaryRestrictions();
+    final List<DietaryRestriction> restrictions = await restrictionsFuture;
     if (restrictions.isEmpty) return restaurant;
-    final Map<int, List<int>> restrictionIdsByFood = await repository
-        .getRestrictionIdsByFood();
+    final Map<int, List<int>> restrictionIdsByFood =
+        await restrictionIdsByFoodFuture;
     final Map<int, String> labelsById = <int, String>{
       for (final DietaryRestriction restriction in restrictions)
         restriction.id: DietaryWarning.label(restriction.name),
@@ -91,6 +109,8 @@ class RestaurantDiscoveryLogic {
   }
 
   Future<List<Restaurant>> nearby({
+    Future<List<DietaryRestriction>>? restrictionsFuture,
+    Future<Map<int, List<int>>>? restrictionIdsByFoodFuture,
     required TouristLocation location,
     required double radiusKm,
     required int limit,
@@ -111,7 +131,12 @@ class RestaurantDiscoveryLogic {
       _availableSummaries(allMeasured),
       radiusKm: radiusKm,
     );
-    final List<Restaurant> eligible = await _eligibleRestaurants(candidates);
+    final List<Restaurant> eligible = await _eligibleRestaurants(
+      candidates,
+      restrictionsFuture: restrictionsFuture ?? testDietaryRestrictions(),
+      restrictionIdsByFoodFuture:
+          restrictionIdsByFoodFuture ?? testRestrictionIdsByFood(),
+    );
     return _hydrateSelected(eligible.take(limit).toList(growable: false));
   }
 
@@ -206,6 +231,8 @@ class RestaurantDiscoveryLogic {
   /// it does not just re-filter restaurants already found for a previous
   /// type.
   Future<List<Restaurant>> nearbyWithAutomaticExpansion({
+    Future<List<DietaryRestriction>>? restrictionsFuture,
+    Future<Map<int, List<int>>>? restrictionIdsByFoodFuture,
     required TouristLocation location,
     String? foodType,
   }) async {
@@ -225,6 +252,9 @@ class RestaurantDiscoveryLogic {
         _availableSummaries(allMeasured),
         radiusKm: _quickModeMaximumRadiusKm,
       ),
+      restrictionsFuture: restrictionsFuture ?? testDietaryRestrictions(),
+      restrictionIdsByFoodFuture:
+          restrictionIdsByFoodFuture ?? testRestrictionIdsByFood(),
       foodType: foodType,
     );
     // Confirmed open first, then the places whose hours are simply unknown.
@@ -270,6 +300,8 @@ class RestaurantDiscoveryLogic {
   /// restaurants while the radius, closed-place and dietary rules stay equal.
   Future<List<SubmittedLandmarkRecommendation>>
   nearbyLandmarksWithAutomaticExpansion({
+    Future<List<DietaryRestriction>>? restrictionsFuture,
+    Future<Map<int, List<int>>>? restrictionIdsByFoodFuture,
     required TouristLocation location,
     String? foodType,
   }) async {
@@ -278,8 +310,8 @@ class RestaurantDiscoveryLogic {
     final List<Object> gathered = await Future.wait(<Future<Object>>[
       repository.foodOccurrences(),
       repository.openingHoursByPlace(),
-      repository.getCurrentDietaryRestrictions(),
-      repository.getRestrictionIdsByFood(),
+      restrictionsFuture ?? testDietaryRestrictions(),
+      restrictionIdsByFoodFuture ?? testRestrictionIdsByFood(),
     ]);
     final List<FoodOccurrence> occurrences =
         gathered[0] as List<FoodOccurrence>;
@@ -527,6 +559,8 @@ class RestaurantDiscoveryLogic {
 
   Future<List<Restaurant>> _eligibleRestaurants(
     List<Restaurant> candidates, {
+    required Future<List<DietaryRestriction>> restrictionsFuture,
+    required Future<Map<int, List<int>>> restrictionIdsByFoodFuture,
     String? foodType,
   }) async {
     if (candidates.isEmpty) return const <Restaurant>[];
@@ -542,15 +576,14 @@ class RestaurantDiscoveryLogic {
           .add(item);
     }
 
-    final List<DietaryRestriction> restrictions = await repository
-        .getCurrentDietaryRestrictions();
+    final List<DietaryRestriction> restrictions = await restrictionsFuture;
     final Set<int> activeRestrictionIds = restrictions
         .map((DietaryRestriction restriction) => restriction.id)
         .toSet();
     final Map<int, List<int>> restrictionIdsByFood =
         activeRestrictionIds.isEmpty
         ? const <int, List<int>>{}
-        : await repository.getRestrictionIdsByFood();
+        : await restrictionIdsByFoodFuture;
 
     final String? normalizedFoodType = foodType?.trim().toLowerCase();
     final bool hasFoodTypeFilter =

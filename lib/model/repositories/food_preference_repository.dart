@@ -1,3 +1,5 @@
+import '../../core/json_model.dart';
+import '../../domain_model/food_preference.dart';
 import '../../shared_client/api_manager/api_manager.dart';
 import '../data_models/food_preference_data_model.dart';
 
@@ -25,6 +27,48 @@ class FoodPreferenceRepository {
             (row['preferred_taste'] as String).isNotEmpty)
           row['preferred_taste'] as String,
     }.toList(growable: false);
+  }
+
+  Future<List<FoodPreference>> currentTouristPreferences() async {
+    final String touristId = await api.resolveCurrentTouristId();
+    if (touristId.isEmpty) return const <FoodPreference>[];
+    final List<Map<String, dynamic>> rows = await api.selectAll(
+      APIManager.tablePersonalisedPreference,
+      columns:
+          'food_preference(food_preference_id, preferred_taste, preferred_categories)',
+      eq: <String, Object?>{'tourist_id': touristId},
+    );
+    return rows
+        .map((Map<String, dynamic> row) {
+          final Map<String, dynamic> embedded = JsonReader.asMap(
+            row['food_preference'],
+          );
+          if (embedded.isEmpty || embedded['food_preference_id'] == null) {
+            return null;
+          }
+          final FoodPreferenceDataModel data = FoodPreferenceDataModel.fromJson(
+            embedded,
+          );
+          final String? taste = data.preferredTaste?.trim();
+          if (taste != null && taste.isNotEmpty) {
+            return FoodPreference(
+              id: data.foodPreferenceId,
+              kind: FoodPreferenceKind.taste,
+              name: taste,
+            );
+          }
+          final String? category = data.preferredCategories?.trim();
+          if (category != null && category.isNotEmpty) {
+            return FoodPreference(
+              id: data.foodPreferenceId,
+              kind: FoodPreferenceKind.category,
+              name: category,
+            );
+          }
+          return null;
+        })
+        .whereType<FoodPreference>()
+        .toList(growable: false);
   }
 
   /// Taste and category name -> id lookups (lowercased), so a recognized

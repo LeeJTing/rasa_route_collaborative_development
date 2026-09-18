@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rasa_route_collaborative_development/views/opt_view/widgets/otp_code_field.dart';
+import 'package:rasa_route_collaborative_development/views/otp_view/widgets/otp_code_field.dart';
 
 /// `OtpCodeField` is drawn as six boxes but driven by ONE hidden text field, so
 /// it edits like a single input: digits fill left-to-right and backspace walks

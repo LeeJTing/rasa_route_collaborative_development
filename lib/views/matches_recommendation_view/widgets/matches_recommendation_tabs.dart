@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../domain_model/matches_recommendation_tab.dart';
+import '../../../view_models/presentation_models/matches_recommendation_state.dart';
 
 class MatchesRecommendationTabs extends StatelessWidget {
   const MatchesRecommendationTabs({

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:meta/meta.dart' show protected;
 
 import '../app/routing/app_navigator.dart';
+import '../app/routing/map_selection_handoff.dart';
 import '../app/routing/app_routes.dart';
 import '../core/base_view_model.dart';
 import '../domain_model/exploration_filter.dart';
@@ -17,35 +18,7 @@ import '../domain_model/swipe_session.dart';
 import '../domain_model/tourist_location.dart';
 import '../model/business_logic/discovery_logic_facade.dart';
 import 'current_location_facade.dart';
-
-/// Which of the two dashboard maps is showing (REQ102_12, REQ102_13).
-enum DashboardMapMode { heatmap, detailed }
-
-/// Temporary hand-off for the dashboard map -> landmark detail jump.
-///
-/// Routes pass no arguments (Developer Guideline, section 7.2 "Open
-/// decision") and a ViewModel takes no constructor parameters (Rule 1), so
-/// when the map's "View Landmark" button is tapped the dashboard stashes the
-/// tapped pin's `landmark_id` here right before pushing
-/// `AppRoutes.landmarkPlaceDetail`, and `LandmarkPlaceDetailView` reads-and-
-/// clears it in `initState` - the same pattern `LandmarkDraftHandoff` uses
-/// for the recognition flow.
-class MapSelectionHandoff {
-  factory MapSelectionHandoff() => _instance;
-
-  MapSelectionHandoff._();
-
-  static final MapSelectionHandoff _instance = MapSelectionHandoff._();
-
-  /// The `submitted_landmark.landmark_id` behind the tapped landmark pin.
-  int? pendingLandmarkId;
-
-  int? takeLandmarkId() {
-    final int? value = pendingLandmarkId;
-    pendingLandmarkId = null;
-    return value;
-  }
-}
+import 'presentation_models/dashboard_map_state.dart';
 
 /// ViewModel for `DashboardView` - REQ102, the Local Food Dashboard &
 /// Regional Exploration Module, following UC300.

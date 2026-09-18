@@ -39,9 +39,7 @@ class SearchHistoryRepository {
   Future<void> write(List<String> terms) => storage.writeJsonList(
     _key,
     terms
-        .map(
-          (String term) => RecentSearchDataModel(term: term).toJson(),
-        )
+        .map((String term) => RecentSearchDataModel(term: term).toJson())
         .toList(growable: false),
   );
 

@@ -32,6 +32,12 @@ class FoodDiscoveryLogic {
 
   /// Builds the real queue for the Malaysian state under the map centre.
   Future<SwipeModePreparation> prepareSwipeMode({
+    required Future<String?> touristIdFuture,
+    required Future<List<LocalFood>> foodsFuture,
+    required Future<List<FoodPreference>> preferencesFuture,
+    required Future<List<DietaryRestriction>> restrictionsFuture,
+    required Future<Set<int>> favouriteFoodIdsFuture,
+    required Future<Map<int, List<int>>> restrictionIdsByFoodFuture,
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
@@ -40,7 +46,7 @@ class FoodDiscoveryLogic {
     double? north,
     double? east,
   }) async {
-    final String touristId = await _repository.currentTouristId() ?? '';
+    final String touristId = await touristIdFuture ?? '';
     if (touristId.isEmpty) {
       throw Exception('Sign in to use Swipe Mode.');
     }
@@ -51,7 +57,7 @@ class FoodDiscoveryLogic {
       throw Exception('Move the map to a Malaysian state to use Swipe Mode.');
     }
 
-    final List<LocalFood> foods = await _repository.getLocalFoods();
+    final List<LocalFood> foods = await foodsFuture;
     final Map<int, LocalFood> foodsById = <int, LocalFood>{
       for (final LocalFood food in foods) food.id: food,
     };
@@ -133,7 +139,10 @@ class FoodDiscoveryLogic {
       );
     }
 
-    final List<FoodPreference> preferences = await _safePreferences(touristId);
+    final List<FoodPreference> preferences = await _safeFuture(
+      preferencesFuture,
+      const <FoodPreference>[],
+    );
     final Set<String> preferredTastes = preferences
         .where(
           (FoodPreference preference) =>
@@ -150,7 +159,10 @@ class FoodDiscoveryLogic {
         .map((FoodPreference preference) => _normalise(preference.name))
         .where((String value) => value.isNotEmpty)
         .toSet();
-    final Set<int> favouriteFoodIds = await _safeFavouriteFoodIds(touristId);
+    final Set<int> favouriteFoodIds = await _safeFuture(
+      favouriteFoodIdsFuture,
+      const <int>{},
+    );
     final Map<String, int> favouriteMainTasteCounts = <String, int>{};
     final Map<String, int> favouriteCategoryCounts = <String, int>{};
     for (final int foodId in favouriteFoodIds) {
@@ -174,11 +186,13 @@ class FoodDiscoveryLogic {
       }
     }
 
-    final Set<int> touristRestrictionIds = (await _safeRestrictions(
-      touristId,
+    final Set<int> touristRestrictionIds = (await _safeFuture(
+      restrictionsFuture,
+      const <DietaryRestriction>[],
     )).map((DietaryRestriction restriction) => restriction.id).toSet();
-    final Map<int, Set<int>> restrictionsByFood =
-        await _safeRestrictionIdsByFood();
+    final Map<int, Set<int>> restrictionsByFood = await _safeRestrictionIds(
+      restrictionIdsByFoodFuture,
+    );
     final Set<int> restrictedFoodIds = availableIds.where((int foodId) {
       final Set<int> foodRestrictions =
           restrictionsByFood[foodId] ?? const <int>{};
@@ -317,6 +331,12 @@ class FoodDiscoveryLogic {
   /// so a restriction warning can update immediately without making the
   /// visible card jump. Likes and dislikes remain part of the same session.
   Future<SwipeModePreparation> refreshAfterProfileChange({
+    required Future<String?> touristIdFuture,
+    required Future<List<LocalFood>> foodsFuture,
+    required Future<List<FoodPreference>> preferencesFuture,
+    required Future<List<DietaryRestriction>> restrictionsFuture,
+    required Future<Set<int>> favouriteFoodIdsFuture,
+    required Future<Map<int, List<int>>> restrictionIdsByFoodFuture,
     required double latitude,
     required double longitude,
     TouristLocation distanceOrigin = TouristLocation.unknown,
@@ -327,6 +347,12 @@ class FoodDiscoveryLogic {
     double? east,
   }) async {
     final SwipeModePreparation preparation = await prepareSwipeMode(
+      touristIdFuture: touristIdFuture,
+      foodsFuture: foodsFuture,
+      preferencesFuture: preferencesFuture,
+      restrictionsFuture: restrictionsFuture,
+      favouriteFoodIdsFuture: favouriteFoodIdsFuture,
+      restrictionIdsByFoodFuture: restrictionIdsByFoodFuture,
       latitude: latitude,
       longitude: longitude,
       distanceOrigin: distanceOrigin,
@@ -458,33 +484,23 @@ class FoodDiscoveryLogic {
     return updated;
   }
 
-  Future<List<FoodPreference>> _safePreferences(String touristId) async {
+  Future<T> _safeFuture<T>(Future<T> value, T fallback) async {
     try {
-      return await _repository.foodPreferencesForTourist(touristId);
+      return await value;
     } catch (_) {
-      return const <FoodPreference>[];
+      return fallback;
     }
   }
 
-  Future<List<DietaryRestriction>> _safeRestrictions(String touristId) async {
+  Future<Map<int, Set<int>>> _safeRestrictionIds(
+    Future<Map<int, List<int>>> value,
+  ) async {
     try {
-      return await _repository.dietaryRestrictionsForTourist(touristId);
-    } catch (_) {
-      return const <DietaryRestriction>[];
-    }
-  }
-
-  Future<Set<int>> _safeFavouriteFoodIds(String touristId) async {
-    try {
-      return await _repository.favouriteFoodIdsForTourist(touristId);
-    } catch (_) {
-      return const <int>{};
-    }
-  }
-
-  Future<Map<int, Set<int>>> _safeRestrictionIdsByFood() async {
-    try {
-      return await _repository.dietaryRestrictionIdsByFood();
+      final Map<int, List<int>> ids = await value;
+      return ids.map(
+        (int foodId, List<int> restrictionIds) =>
+            MapEntry<int, Set<int>>(foodId, restrictionIds.toSet()),
+      );
     } catch (_) {
       return const <int, Set<int>>{};
     }

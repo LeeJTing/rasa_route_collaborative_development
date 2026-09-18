@@ -12,6 +12,7 @@ import '../../domain_model/swipe_mode.dart';
 import '../../domain_model/swipe_session.dart';
 import '../../domain_model/tourist_location.dart';
 import 'food_discovery_logic.dart';
+import 'discovery_context_logic.dart';
 import 'map_exploration_logic.dart';
 import 'matches_recommendation_logic.dart';
 import 'restaurant_discovery_logic.dart';
@@ -38,6 +39,9 @@ class DiscoveryLogicFacade {
   late final FoodDiscoveryLogic foodDiscovery = createFoodDiscovery();
   late final MatchesRecommendationLogic matchesRecommendation =
       createMatchesRecommendation();
+  final DiscoveryFoodContextLogic _foodContext = DiscoveryFoodContextLogic();
+  final DiscoveryTouristContextLogic _touristContext =
+      DiscoveryTouristContextLogic();
   final MapExplorationLogic mapExploration = MapExplorationLogic();
 
   // ---------------------------------------------------------------------------
@@ -73,6 +77,12 @@ class DiscoveryLogicFacade {
     double? north,
     double? east,
   }) => foodDiscovery.prepareSwipeMode(
+    touristIdFuture: _touristContext.currentTouristId(),
+    foodsFuture: _foodContext.foods(),
+    preferencesFuture: _foodContext.preferences(),
+    restrictionsFuture: _foodContext.dietaryRestrictions(),
+    favouriteFoodIdsFuture: _foodContext.favouriteFoodIds(),
+    restrictionIdsByFoodFuture: _foodContext.restrictionIdsByFood(),
     latitude: latitude,
     longitude: longitude,
     distanceOrigin: distanceOrigin,
@@ -98,6 +108,12 @@ class DiscoveryLogicFacade {
     double? north,
     double? east,
   }) => foodDiscovery.refreshAfterProfileChange(
+    touristIdFuture: _touristContext.currentTouristId(),
+    foodsFuture: _foodContext.foods(),
+    preferencesFuture: _foodContext.preferences(),
+    restrictionsFuture: _foodContext.dietaryRestrictions(),
+    favouriteFoodIdsFuture: _foodContext.favouriteFoodIds(),
+    restrictionIdsByFoodFuture: _foodContext.restrictionIdsByFood(),
     latitude: latitude,
     longitude: longitude,
     distanceOrigin: distanceOrigin,
@@ -124,7 +140,13 @@ class DiscoveryLogicFacade {
 
   Future<MatchesRecommendationResult> getMatchesRecommendations(
     MatchesRecommendationRequest request,
-  ) => matchesRecommendation.recommendations(request);
+  ) => matchesRecommendation.recommendations(
+    request,
+    touristIdFuture: _touristContext.currentTouristId(),
+    foodsFuture: _foodContext.foods(),
+    restrictionsFuture: _foodContext.dietaryRestrictions(),
+    restrictionIdsByFoodFuture: _foodContext.restrictionIdsByFood(),
+  );
 
   Future<SwipeSession> removeMatchedFood(SwipeSession session, int foodId) =>
       matchesRecommendation.removeLike(session, foodId);
@@ -132,12 +154,19 @@ class DiscoveryLogicFacade {
   Future<Restaurant?> getRestaurantById(
     int restaurantId, {
     TouristLocation origin = TouristLocation.unknown,
-  }) => restaurantDiscovery.findById(restaurantId, origin: origin);
+  }) => restaurantDiscovery.findById(
+    restaurantId,
+    restrictionsFuture: _foodContext.dietaryRestrictions(),
+    restrictionIdsByFoodFuture: _foodContext.restrictionIdsByFood(),
+    origin: origin,
+  );
 
   Future<List<Restaurant>> getQuickModeRestaurants({
     required TouristLocation location,
     String? foodType,
   }) => restaurantDiscovery.nearbyWithAutomaticExpansion(
+    restrictionsFuture: _foodContext.dietaryRestrictions(),
+    restrictionIdsByFoodFuture: _foodContext.restrictionIdsByFood(),
     location: location,
     foodType: foodType,
   );
@@ -146,6 +175,8 @@ class DiscoveryLogicFacade {
     required TouristLocation location,
     String? foodType,
   }) => restaurantDiscovery.nearbyLandmarksWithAutomaticExpansion(
+    restrictionsFuture: _foodContext.dietaryRestrictions(),
+    restrictionIdsByFoodFuture: _foodContext.restrictionIdsByFood(),
     location: location,
     foodType: foodType,
   );
@@ -158,6 +189,8 @@ class DiscoveryLogicFacade {
     required double radiusKm,
     required int limit,
   }) => restaurantDiscovery.nearby(
+    restrictionsFuture: _foodContext.dietaryRestrictions(),
+    restrictionIdsByFoodFuture: _foodContext.restrictionIdsByFood(),
     location: location,
     radiusKm: radiusKm,
     limit: limit,
@@ -251,7 +284,11 @@ class DiscoveryLogicFacade {
   Future<FoodDistribution> foodDistribution({
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-  }) => mapExploration.distribution(filter: filter, localFoodId: localFoodId);
+  }) => mapExploration.distribution(
+    loadFoods: _foodContext.foods,
+    filter: filter,
+    localFoodId: localFoodId,
+  );
 
   /// REQ102_32 - restaurant and submitted-landmark pins for the detailed map.
   ///
@@ -278,6 +315,7 @@ class DiscoveryLogicFacade {
     int? limit,
     MapSearchSelection search = MapSearchSelection.none,
   }) => mapExploration.pins(
+    loadFoods: _foodContext.foods,
     filter: filter,
     localFoodId: localFoodId,
     south: south,
@@ -339,6 +377,7 @@ class DiscoveryLogicFacade {
     MapSearchSelection search = MapSearchSelection.none,
   }) => mapExploration.expandCluster(
     cluster,
+    loadFoods: _foodContext.foods,
     zoom: zoom,
     filter: filter,
     localFoodId: localFoodId,
@@ -354,7 +393,12 @@ class DiscoveryLogicFacade {
     MapPin pin, {
     ExplorationFilter filter = ExplorationFilter.none,
     int? localFoodId,
-  }) => mapExploration.pinDetail(pin, filter: filter, localFoodId: localFoodId);
+  }) => mapExploration.pinDetail(
+    pin,
+    loadFoods: _foodContext.foods,
+    filter: filter,
+    localFoodId: localFoodId,
+  );
 
   /// REQ102_41 - whether a badge stands for this place, on the same grid
   /// Postgres grouped by.
@@ -363,7 +407,7 @@ class DiscoveryLogicFacade {
 
   /// A8 - one keyword against locations and the local-food catalogue.
   Future<ExplorationSearchResults> searchExploration(String keyword) =>
-      mapExploration.search(keyword);
+      mapExploration.search(keyword, loadFoods: _foodContext.foods);
 
   /// REQ102_104 - the keywords this device searched for, most recent first.
   /// Local to the device; nothing here reaches Supabase.

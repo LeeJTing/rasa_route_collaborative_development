@@ -13,44 +13,6 @@ import '../model/business_logic/report_logic_facade.dart';
 import 'current_location_facade.dart';
 import 'update_restaurant_facade.dart';
 
-/// Singleton hand-off that carries which place the report page is about from
-/// the detail screen to `ReportPlaceView` - the same read-and-clear pattern
-/// `MapSelectionHandoff` / `LandmarkDraftHandoff` use (routes pass no
-/// arguments, ViewModels take no constructor parameters).
-class ReportPlaceHandoff {
-  factory ReportPlaceHandoff() => _instance;
-
-  ReportPlaceHandoff._();
-
-  static final ReportPlaceHandoff _instance = ReportPlaceHandoff._();
-
-  ReportPlaceKind? pendingKind;
-  int? pendingPlaceId;
-  String pendingName = '';
-
-  /// Where the app currently places the place - the report page's map opens
-  /// on this spot so the tourist sees the pin they are correcting.
-  /// `TouristLocation.unknown` when the caller had no coordinates.
-  TouristLocation pendingLocation = TouristLocation.unknown;
-
-  (ReportPlaceKind, int, String, TouristLocation)? take() {
-    final ReportPlaceKind? kind = pendingKind;
-    final int? placeId = pendingPlaceId;
-    if (kind == null || placeId == null) return null;
-    final (ReportPlaceKind, int, String, TouristLocation) value = (
-      kind,
-      placeId,
-      pendingName,
-      pendingLocation,
-    );
-    pendingKind = null;
-    pendingPlaceId = null;
-    pendingName = '';
-    pendingLocation = TouristLocation.unknown;
-    return value;
-  }
-}
-
 /// ViewModel for the full-screen report page (`ReportPlaceView`), shared by
 /// catalogue restaurants and submitted landmarks. The tourist picks a
 /// category, enters the correction, and the page submits one claim per

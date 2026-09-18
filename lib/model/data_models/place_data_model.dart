@@ -1,5 +1,4 @@
 import '../../core/json_model.dart';
-import '../../domain_model/map_place.dart';
 
 /// Wire shape of `public.place` - the searchable geography behind REQ102_19.
 ///
@@ -52,36 +51,5 @@ class PlaceDataModel implements JsonModel {
     'longitude': longitude,
     'zoom': zoom,
     'aliases': aliases,
-  };
-
-  /// Data model -> domain model. Called by `MapRepository`, nowhere else.
-  MapPlace toDomain() => MapPlace(
-    name: name,
-    kind: _kind(kind),
-    stateName: stateName,
-    latitude: latitude,
-    longitude: longitude,
-    zoom: zoom ?? _defaultZoom(_kind(kind)),
-    aliases: (aliases ?? '')
-        .split(',')
-        .map((String value) => value.trim())
-        .where((String value) => value.isNotEmpty)
-        .toList(growable: false),
-  );
-
-  static MapPlaceKind _kind(String value) => switch (value.toLowerCase()) {
-    'landmark' => MapPlaceKind.landmark,
-    'area' => MapPlaceKind.area,
-    'town' => MapPlaceKind.town,
-    _ => MapPlaceKind.city,
-  };
-
-  /// Used when a row leaves `zoom` null - a landmark wants a closer look than
-  /// a whole city.
-  static double _defaultZoom(MapPlaceKind kind) => switch (kind) {
-    MapPlaceKind.landmark => 16,
-    MapPlaceKind.area => 15,
-    MapPlaceKind.town => 13,
-    MapPlaceKind.city => 13,
   };
 }
