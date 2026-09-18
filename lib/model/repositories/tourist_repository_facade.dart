@@ -8,8 +8,8 @@ import 'auth_repository.dart';
 import 'tourist_profile_repository.dart';
 import 'tutorial_repository.dart';
 
-/// Everything about who the tourist is: session, profile, interactions and
-/// where they are standing.
+/// Everything about who the tourist is: authentication, profile preferences
+/// and guided-tour progress.
 ///
 /// REPOSITORY FACADE - a business-logic class holds ONE of these, not four
 /// separate repositories. It groups the repositories for one subject area and
